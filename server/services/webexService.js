@@ -100,22 +100,41 @@ class WebexService {
   }
 
   /**
+   * Email → Webex Person 查詢(MFA 使用,確認 user 真的有 Webex 帳號)
+   * 找到回 person 物件;查不到 / 失敗回 null。
+   * 不丟例外 — 呼叫端據 null 直接回 hard error 給使用者
+   */
+  async findPersonByEmail(email) {
+    if (!email) return null;
+    try {
+      const res = await this.client.get('/people', { params: { email } });
+      const items = res.data?.items || [];
+      return items[0] || null;
+    } catch (e) {
+      console.warn(`[Webex] findPersonByEmail ${email}: ${e.response?.status || e.message}`);
+      return null;
+    }
+  }
+
+  /**
    * DM 給指定使用者（by email）。Webex 自動建立 1-on-1 direct room，
-   * 不需預先 create。parentId 帶入可串 thread。
+   * 不需預先 create。parentId 帶入可串 thread。timeout 覆寫 client 預設 30s,
+   * MFA 流程要短(8s)避免使用者乾等。
    * @returns {string|null} message id（可存為 thread parent）
    */
-  async sendDirectMessage(toPersonEmail, markdown, { parentId } = {}) {
+  async sendDirectMessage(toPersonEmail, markdown, { parentId, timeout } = {}) {
     if (!toPersonEmail) return null;
+    const reqOpts = timeout ? { timeout } : undefined;
     try {
       const payload = { toPersonEmail, markdown };
       if (parentId) payload.parentId = parentId;
-      const res = await this.client.post('/messages', payload);
+      const res = await this.client.post('/messages', payload, reqOpts);
       return res.data?.id || null;
     } catch (e) {
       // parentId 指向對方看不到的 room → Webex 400；fallback 不帶 parentId 重送
       if (parentId && e.response?.status === 400) {
         try {
-          const res = await this.client.post('/messages', { toPersonEmail, markdown });
+          const res = await this.client.post('/messages', { toPersonEmail, markdown }, reqOpts);
           return res.data?.id || null;
         } catch (e2) {
           console.warn(`[Webex] sendDirectMessage ${toPersonEmail} retry failed: ${e2.response?.status || e2.message}`);

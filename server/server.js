@@ -71,6 +71,19 @@ app.use(express.urlencoded({ limit: '100mb', extended: true }));
 const { createAccessControl } = require('./middleware/accessControl');
 app.use(createAccessControl());
 
+// ── 安全聯動:外網開放(EXTERNAL_ACCESS_MODE=full)時必須啟用 MFA ──
+// 防 ops 失誤把外網打開但忘記開 MFA → 裸奔。緊急狀況改回 webhook_only 收回外網,
+// 而非關 MFA 留外網開放。
+{
+  const accessMode = (process.env.EXTERNAL_ACCESS_MODE || 'webhook_only').toLowerCase().trim();
+  const mfaEnabled = process.env.MFA_ENABLED === 'true';
+  if (accessMode === 'full' && !mfaEnabled) {
+    console.error('[FATAL] EXTERNAL_ACCESS_MODE=full 必須搭配 MFA_ENABLED=true,拒絕啟動');
+    process.exit(1);
+  }
+  console.log(`[Security] accessMode=${accessMode} | mfaEnabled=${mfaEnabled}`);
+}
+
 // Serve uploaded files statically
 const UPLOAD_DIR = process.env.UPLOAD_DIR
   ? path.resolve(process.env.UPLOAD_DIR)

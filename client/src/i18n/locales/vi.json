@@ -96,7 +96,24 @@
     "loginHintTitle": "Vui lòng đăng nhập bằng một trong các phương thức sau",
     "loginHint1": "Đăng nhập bằng tài khoản / mật khẩu AD",
     "loginHint2": "Đăng nhập Foxlink SSO bằng tài khoản / mật khẩu AD",
-    "loginHint3": "Không có tài khoản AD? Dùng tài khoản / mật khẩu đã đăng ký"
+    "loginHint3": "Không có tài khoản AD? Dùng tài khoản / mật khẩu đã đăng ký",
+    "mfa": {
+      "title": "Xác thực hai yếu tố",
+      "sentTo": "Mã đã gửi tới {{email}} qua Webex",
+      "codeLabel": "Mã 6 chữ số",
+      "verify": "Xác thực",
+      "verifying": "Đang xác thực...",
+      "resend": "Gửi lại",
+      "resending": "Đang gửi...",
+      "resendCooldown": "Có thể gửi lại sau {{n}}s",
+      "expiresIn": "Hết hạn sau {{time}}",
+      "expired": "Mã đã hết hạn, vui lòng đăng nhập lại",
+      "invalid": "Mã không đúng",
+      "invalidFormat": "Mã phải là 6 chữ số",
+      "attemptsLeft": "Còn {{n}} lần",
+      "back": "Quay lại đăng nhập",
+      "resendFailed": "Gửi lại thất bại"
+    }
   },
   "resetPassword": {
     "title": "Đặt lại mật khẩu",
@@ -281,6 +298,7 @@
       "tokens": "Thống kê Token",
       "cost": "Phân tích chi phí",
       "audit": "Nhật ký kiểm toán",
+      "authAudit": "Kiểm toán xác thực",
       "keywords": "Từ khóa nhạy cảm",
       "research": "Nhật ký nghiên cứu",
       "apiKeys": "Quản lý API Key",

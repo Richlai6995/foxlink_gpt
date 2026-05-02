@@ -96,7 +96,24 @@
     "loginHintTitle": "Please sign in using one of the following methods",
     "loginHint1": "AD account / password login",
     "loginHint2": "Foxlink SSO AD account / password login",
-    "loginHint3": "No AD account? Use your assigned account / password"
+    "loginHint3": "No AD account? Use your assigned account / password",
+    "mfa": {
+      "title": "Two-Factor Verification",
+      "sentTo": "Code sent to {{email}} via Webex",
+      "codeLabel": "6-digit code",
+      "verify": "Verify",
+      "verifying": "Verifying...",
+      "resend": "Resend",
+      "resending": "Sending...",
+      "resendCooldown": "Resend in {{n}}s",
+      "expiresIn": "Expires in {{time}}",
+      "expired": "Code expired, please log in again",
+      "invalid": "Invalid code",
+      "invalidFormat": "Code must be 6 digits",
+      "attemptsLeft": "{{n}} attempts left",
+      "back": "Back to login",
+      "resendFailed": "Failed to resend"
+    }
   },
   "resetPassword": {
     "title": "Reset Password",
@@ -281,6 +298,7 @@
       "tokens": "Token Usage",
       "cost": "Cost Analysis",
       "audit": "Audit Logs",
+      "authAudit": "Auth Audit",
       "keywords": "Sensitive Keywords",
       "research": "Research Logs",
       "apiKeys": "API Key Management",

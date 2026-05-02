@@ -4134,6 +4134,55 @@ async function runMigrations(db) {
       }
     } catch (e) { console.warn(`[Migration] whitelist ${t.table}:`, e.message); }
   }
+
+  // ── Webex MFA(外網登入二階段驗證)──────────────────────────────────────────
+  // users 上 webex_person_id 是 cache(避免每次 MFA 都呼一次 Webex /people lookup)
+  // webex_mfa_enabled 預設 1(全 user ON);admin 可在後台逐個關
+  await addCol('USERS', 'WEBEX_PERSON_ID',  'VARCHAR2(64)');
+  await addCol('USERS', 'WEBEX_MFA_ENABLED', 'NUMBER(1) DEFAULT 1');
+
+  // user_trusted_ips:過 MFA 的 (user_id, ip) 在 TTL 內可跳過 MFA。
+  // /32 嚴格匹配,改密碼 / reset 時整批清空
+  await createTable('USER_TRUSTED_IPS', `CREATE TABLE user_trusted_ips (
+    id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id     NUMBER NOT NULL,
+    ip          VARCHAR2(64) NOT NULL,
+    user_agent  VARCHAR2(512),
+    first_seen  TIMESTAMP DEFAULT SYSTIMESTAMP,
+    last_seen   TIMESTAMP DEFAULT SYSTIMESTAMP,
+    expires_at  TIMESTAMP NOT NULL,
+    CONSTRAINT user_trusted_ips_uk UNIQUE (user_id, ip)
+  )`);
+  for (const [name, ddl] of [
+    ['user_trusted_ips_uid_idx', 'CREATE INDEX user_trusted_ips_uid_idx ON user_trusted_ips(user_id, expires_at)'],
+  ]) {
+    try { await db.prepare(ddl).run(); console.log(`[Migration] ${name} created ✓`); }
+    catch (e) { if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn(`[Migration] ${name}:`, e.message); }
+  }
+
+  // auth_audit_logs:認證稽核;內外網全部 login / MFA 事件都寫一筆。永久保留
+  // 不和現有 audit_logs(LLM 對話審計)混表。
+  await createTable('AUTH_AUDIT_LOGS', `CREATE TABLE auth_audit_logs (
+    id           NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id      NUMBER,
+    username     VARCHAR2(64),
+    event_type   VARCHAR2(64) NOT NULL,
+    ip           VARCHAR2(64),
+    user_agent   VARCHAR2(512),
+    challenge_id VARCHAR2(64),
+    success      NUMBER(1),
+    error_msg    VARCHAR2(512),
+    metadata     CLOB,
+    created_at   TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+  for (const [name, ddl] of [
+    ['auth_audit_user_idx',  'CREATE INDEX auth_audit_user_idx  ON auth_audit_logs(user_id, created_at)'],
+    ['auth_audit_ip_idx',    'CREATE INDEX auth_audit_ip_idx    ON auth_audit_logs(ip, created_at)'],
+    ['auth_audit_event_idx', 'CREATE INDEX auth_audit_event_idx ON auth_audit_logs(event_type, created_at)'],
+  ]) {
+    try { await db.prepare(ddl).run(); console.log(`[Migration] ${name} created ✓`); }
+    catch (e) { if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn(`[Migration] ${name}:`, e.message); }
+  }
 }
 
 // ─── Default DB Source migration ───────────────────────────────────────────────

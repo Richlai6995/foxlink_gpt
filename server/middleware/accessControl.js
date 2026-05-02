@@ -136,4 +136,19 @@ function createAccessControl() {
   };
 }
 
-module.exports = { createAccessControl, getClientIp, isInCIDR };
+/**
+ * 給 auth route 共用的內網判斷。讀同一個 INTERNAL_NETWORKS env,
+ * 跟 access control middleware 結果一致(避免 MFA 跟 access control 標準分歧)。
+ */
+let _cachedNets = null;
+function _getNets() {
+  if (_cachedNets) return _cachedNets;
+  _cachedNets = (process.env.INTERNAL_NETWORKS || '10.0.0.0/8,172.16.0.0/12,192.168.0.0/16')
+    .split(',').map(s => s.trim()).filter(Boolean);
+  return _cachedNets;
+}
+function isRequestInternal(req) {
+  return isInternal(getClientIp(req), _getNets());
+}
+
+module.exports = { createAccessControl, getClientIp, isInCIDR, isInternal, isRequestInternal };

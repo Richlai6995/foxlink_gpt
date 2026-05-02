@@ -28,10 +28,17 @@ export interface ImpersonationStatus {
   started_at: string
 }
 
+// MFA(外網登入二階段驗證):login 可能直接回 session,也可能回需 MFA
+export type LoginResult =
+  | { kind: 'session' }
+  | { kind: 'mfa'; challengeId: string; maskedEmail: string }
+
 interface AuthContextType {
   user: User | null
   token: string | null
-  login: (username: string, password: string) => Promise<void>
+  login: (username: string, password: string) => Promise<LoginResult>
+  verifyMfa: (challengeId: string, code: string) => Promise<void>
+  resendMfa: (challengeId: string) => Promise<void>
   loginWithSsoToken: (ssoToken: string) => Promise<void>
   logout: () => Promise<void>
   isAuthenticated: boolean
@@ -122,45 +129,55 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => window.removeEventListener('storage', onStorage)
   }, [])
 
-  const login = useCallback(async (username: string, password: string) => {
-    const res = await api.post('/auth/login', { username, password })
-    const { token: t, user: u } = res.data
+  // MFA 通過後實際寫入 token + user 並套用偏好設定(login / verifyMfa / loginWithSsoToken 共用)
+  const finalizeSession = useCallback((t: string, u: any) => {
     localStorage.setItem('token', t)
     localStorage.setItem('user', JSON.stringify(u))
     setToken(t)
     setUser(u)
-    // Ensure current i18n language is persisted (even if user never switched on login page)
     const currentLang = i18n.language || 'zh-TW'
     if (!localStorage.getItem('preferred_language')) {
       localStorage.setItem('preferred_language', currentLang)
     }
     applyLanguage(u)
     applyUserTheme(u, setTheme)
-    // Sync login page language choice to server profile
     const localPref = localStorage.getItem('preferred_language')
     if (localPref && localPref !== (u?.resolved_language || u?.preferred_language)) {
       api.put('/auth/language', { language_code: localPref }).catch(() => {})
     }
+  }, [setTheme])
+
+  const login = useCallback(async (username: string, password: string): Promise<LoginResult> => {
+    const res = await api.post('/auth/login', { username, password })
+    // 外網需要 MFA → server 回 { require_2fa: true, challenge_id, masked_email }
+    if (res.data?.require_2fa) {
+      return {
+        kind: 'mfa',
+        challengeId: res.data.challenge_id,
+        maskedEmail: res.data.masked_email || '',
+      }
+    }
+    // 內網 / IP 已信任 → 直接拿到 token
+    const { token: t, user: u } = res.data
+    finalizeSession(t, u)
+    return { kind: 'session' }
+  }, [finalizeSession])
+
+  const verifyMfa = useCallback(async (challengeId: string, code: string) => {
+    const res = await api.post('/auth/2fa/verify', { challenge_id: challengeId, code })
+    const { token: t, user: u } = res.data
+    finalizeSession(t, u)
+  }, [finalizeSession])
+
+  const resendMfa = useCallback(async (challengeId: string) => {
+    await api.post('/auth/2fa/resend', { challenge_id: challengeId })
   }, [])
 
   const loginWithSsoToken = useCallback(async (ssoToken: string) => {
     const res = await api.get(`/auth/sso/user?token=${ssoToken}`)
     const { token: t, user: u } = res.data
-    localStorage.setItem('token', t)
-    localStorage.setItem('user', JSON.stringify(u))
-    setToken(t)
-    setUser(u)
-    const currentLang = i18n.language || 'zh-TW'
-    if (!localStorage.getItem('preferred_language')) {
-      localStorage.setItem('preferred_language', currentLang)
-    }
-    applyLanguage(u)
-    applyUserTheme(u, setTheme)
-    const localPref = localStorage.getItem('preferred_language')
-    if (localPref && localPref !== (u?.resolved_language || u?.preferred_language)) {
-      api.put('/auth/language', { language_code: localPref }).catch(() => {})
-    }
-  }, [])
+    finalizeSession(t, u)
+  }, [finalizeSession])
 
   const logout = useCallback(async () => {
     try { await api.post('/auth/logout') } catch (_) {}
@@ -236,6 +253,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         token,
         login,
+        verifyMfa,
+        resendMfa,
         loginWithSsoToken,
         logout,
         isAuthenticated: !!token && !!user,

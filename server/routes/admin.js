@@ -592,6 +592,67 @@ router.get('/audit-logs', async (req, res) => {
   }
 });
 
+// GET /api/admin/auth-audit-logs — 認證稽核 log(MFA / 內外網登入紀錄)
+router.get('/auth-audit-logs', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { startDate, endDate, eventType, ip, userSearch, success, scope } = req.query;
+
+    let sql = `
+      SELECT al.id, al.user_id, al.username, al.event_type, al.ip,
+             al.user_agent, al.challenge_id, al.success, al.error_msg,
+             al.metadata, al.created_at,
+             u.name AS user_name, u.email AS user_email, u.employee_id
+      FROM auth_audit_logs al
+      LEFT JOIN users u ON al.user_id = u.id
+      WHERE 1=1
+    `;
+    const params = [];
+    if (startDate) { sql += ` AND TRUNC(al.created_at) >= TO_DATE(?, 'YYYY-MM-DD')`; params.push(startDate); }
+    if (endDate)   { sql += ` AND TRUNC(al.created_at) <= TO_DATE(?, 'YYYY-MM-DD')`; params.push(endDate); }
+    if (eventType) { sql += ' AND al.event_type = ?'; params.push(eventType); }
+    if (ip)        { sql += ' AND al.ip = ?'; params.push(ip); }
+    if (success === '1') sql += ' AND al.success = 1';
+    if (success === '0') sql += ' AND al.success = 0';
+    // scope: 'external' 只看外網事件、'mfa' 只看 MFA 流程、'failure' 只看失敗
+    if (scope === 'external') {
+      sql += ` AND al.event_type LIKE 'login_success_external%' `
+           + `OR al.event_type LIKE 'mfa_%' OR al.event_type LIKE 'login_failed_%' OR al.event_type LIKE 'trusted_ip_%'`;
+    } else if (scope === 'mfa') {
+      sql += " AND al.event_type LIKE 'mfa_%'";
+    } else if (scope === 'failure') {
+      sql += ' AND al.success = 0';
+    }
+    if (userSearch) {
+      const kw = `%${userSearch.trim()}%`;
+      sql += ` AND (LOWER(al.username) LIKE LOWER(?) OR LOWER(u.name) LIKE LOWER(?) `
+           + `OR LOWER(u.email) LIKE LOWER(?) OR LOWER(u.employee_id) LIKE LOWER(?))`;
+      params.push(kw, kw, kw, kw);
+    }
+    sql += ' ORDER BY al.created_at DESC FETCH FIRST 500 ROWS ONLY';
+
+    const rows = await db.prepare(sql).all(...params);
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/admin/auth-audit-logs/event-types — 抓近 90 天內出現過的 event_type(用於前端 filter dropdown)
+router.get('/auth-audit-logs/event-types', async (_req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const rows = await db.prepare(
+      `SELECT DISTINCT event_type FROM auth_audit_logs
+       WHERE created_at > SYSTIMESTAMP - INTERVAL '90' DAY
+       ORDER BY event_type`
+    ).all();
+    res.json(rows.map(r => r.event_type || r.EVENT_TYPE));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/admin/webex-auth-logs
 router.get('/webex-auth-logs', async (req, res) => {
   try {

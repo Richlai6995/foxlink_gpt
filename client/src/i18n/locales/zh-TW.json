@@ -96,7 +96,24 @@
     "loginHintTitle": "請用以下方法登入",
     "loginHint1": "AD 帳號 / 密碼登入",
     "loginHint2": "Foxlink SSO AD 帳號 / 密碼登入",
-    "loginHint3": "無 AD 帳號請使用申請的帳號 / 密碼登入"
+    "loginHint3": "無 AD 帳號請使用申請的帳號 / 密碼登入",
+    "mfa": {
+      "title": "二階段驗證",
+      "sentTo": "驗證碼已寄到 {{email}} 的 Webex",
+      "codeLabel": "6 位數驗證碼",
+      "verify": "驗證",
+      "verifying": "驗證中...",
+      "resend": "重新發送",
+      "resending": "發送中...",
+      "resendCooldown": "{{n}} 秒後可重發",
+      "expiresIn": "剩 {{time}} 過期",
+      "expired": "驗證碼已過期,請重新登入",
+      "invalid": "驗證碼錯誤",
+      "invalidFormat": "驗證碼需為 6 位數字",
+      "attemptsLeft": "剩 {{n}} 次",
+      "back": "返回登入",
+      "resendFailed": "重新發送失敗"
+    }
   },
   "resetPassword": {
     "title": "重設密碼",
@@ -281,6 +298,7 @@
       "tokens": "Token 統計",
       "cost": "費用統計及分析",
       "audit": "稽核日誌",
+      "authAudit": "認證稽核",
       "keywords": "敏感詞彙",
       "research": "深度研究紀錄",
       "apiKeys": "API 金鑰管理",

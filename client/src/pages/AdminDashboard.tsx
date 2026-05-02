@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import UserManagement from '../components/admin/UserManagement'
 import TokenUsagePanel from '../components/admin/TokenUsage'
 import AuditLogs from '../components/admin/AuditLogs'
+import AuthAuditLogsPanel from '../components/admin/AuthAuditLogsPanel'
 import SensitiveKeywords from '../components/admin/SensitiveKeywords'
 import DbMaintenance from '../components/admin/DbMaintenance'
 import MailSettingsPanel from '../components/admin/MailSettings'
@@ -43,7 +44,7 @@ import FeedbackCategoryManager from '../components/feedback/admin/FeedbackCatego
 import FeedbackSLAConfig from '../components/feedback/admin/FeedbackSLAConfig'
 import FeedbackStatsPanel from '../components/feedback/FeedbackStatsPanel'
 import VoiceInputSettingsPanel from '../components/admin/VoiceInputSettings'
-type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'kb-retrieval' | 'kb-debug' | 'kb-synonyms' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'chart-adoption' | 'data-permissions' | 'monitor' | 'db-sources' | 'pipeline-whitelist' | 'alert-rules' | 'pm-bom' | 'pm-settings' | 'pm-health' | 'pm-erp-sync' | 'webex-logs' | 'help-translation' | 'special-manuals' | 'factory-translations' | 'training' | 'feedback' | 'voice-input'
+type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'auth-audit' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'kb-retrieval' | 'kb-debug' | 'kb-synonyms' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'chart-adoption' | 'data-permissions' | 'monitor' | 'db-sources' | 'pipeline-whitelist' | 'alert-rules' | 'pm-bom' | 'pm-settings' | 'pm-health' | 'pm-erp-sync' | 'webex-logs' | 'help-translation' | 'special-manuals' | 'factory-translations' | 'training' | 'feedback' | 'voice-input'
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('users')
@@ -57,6 +58,7 @@ export default function AdminDashboard() {
     { id: 'data-permissions', label: t('admin.tabs.dataPermissions'), icon: <Lock size={16} className="text-amber-700" /> },
     // ─ 稽核與安全 ─
     { id: 'audit', label: t('admin.tabs.audit'), icon: <Shield size={16} className="text-amber-500" /> },
+    { id: 'auth-audit', label: t('admin.tabs.authAudit', '認證稽核'), icon: <Lock size={16} className="text-amber-600" /> },
     { id: 'keywords', label: t('admin.tabs.keywords'), icon: <AlertTriangle size={16} className="text-red-500" /> },
     // ─ 用量與費用 ─
     { id: 'tokens', label: t('admin.tabs.tokens'), icon: <BarChart3 size={16} className="text-emerald-500" /> },
@@ -144,6 +146,7 @@ export default function AdminDashboard() {
           {activeTab === 'roles' && <RoleManagement />}
           {activeTab === 'tokens' && <TokenUsagePanel />}
           {activeTab === 'audit' && <AuditLogs />}
+          {activeTab === 'auth-audit' && <AuthAuditLogsPanel />}
           {activeTab === 'webex-logs' && <WebexLogsPanel />}
           {activeTab === 'keywords' && <SensitiveKeywords />}
           {activeTab === 'db' && <DbMaintenance />}

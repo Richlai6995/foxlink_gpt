@@ -44,6 +44,9 @@ function detectLangFromHeader(acceptLanguage) {
 
 const redis = require('../services/redisClient');
 const { buildSessionPayload } = require('../services/sessionBuilder');
+const mfa = require('../services/webexMfaService');
+const { logAuthEventAsync } = require('../services/authAuditLog');
+const { isRequestInternal, getClientIp } = require('../middleware/accessControl');
 
 // ── SSO / OIDC Config ──────────────────────────────────────────────
 // Runtime check (not cached at module load) so env changes take effect after restart
@@ -341,13 +344,8 @@ router.get('/sso/callback', async (req, res) => {
       }
     }
 
-    // 3. Create session (same as local/LDAP login)
-    const sessionToken = uuidv4();
-    const ssoSessionPayload = await buildSessionPayload(db, dbUser.id);
-    await redis.setSession(sessionToken, ssoSessionPayload, dbUser.role === 'admin');
-
-    // Redirect to frontend with token
-    res.redirect(`${baseUrl}/login?sso_token=${sessionToken}`);
+    // 3. MFA gate(內網直接 redirect token,外網走 OTP DM 流程)
+    return await proceedOrChallenge({ req, res, user: dbUser, source: 'sso', mode: 'redirect' });
   } catch (e) {
     console.error('[SSO] callback error:', e);
     res.redirect(`${baseUrl}/login?sso_error=${encodeURIComponent('SSO 登入處理失敗: ' + e.message)}`);
@@ -436,7 +434,7 @@ router.post('/login', async (req, res) => {
                 syncOrgToUsers(db, [String(ldapUser.employeeId)], 'login').catch(() => { });
               } catch (e) { /* ERP not configured */ }
             }
-            return await createSession(res, dbUser);
+            return await proceedOrChallenge({ req, res, user: dbUser, source: 'ldap', mode: 'json' });
           } else {
             // First LDAP login — resolve role from org bindings, fallback to default role
             let resolvedRoleId = null;
@@ -488,7 +486,7 @@ router.post('/login', async (req, res) => {
                 syncOrgToUsers(db, [String(ldapUser.employeeId)], 'login').catch(() => { });
               } catch (e) { /* ERP not configured */ }
             }
-            return await createSession(res, newUser);
+            return await proceedOrChallenge({ req, res, user: newUser, source: 'ldap-firstlogin', mode: 'json' });
           }
         }
       } catch (ldapErr) {
@@ -498,25 +496,184 @@ router.post('/login', async (req, res) => {
 
     // Local DB fallback (case-insensitive username)
     const user = await db.prepare('SELECT * FROM users WHERE UPPER(username) = UPPER(?) AND password = ?').get(username, password);
+    const auditCtx = { ip: getClientIp(req), user_agent: (req.headers['user-agent'] || '').slice(0, 512) };
     if (!user) {
+      logAuthEventAsync(db, {
+        username, event_type: 'login_failed_credentials',
+        ...auditCtx, success: 0, error_msg: 'invalid credentials',
+      });
       return res.status(401).json({ error: '帳號或密碼錯誤' });
     }
     if (user.role !== 'admin' && user.status !== 'active') {
+      logAuthEventAsync(db, {
+        user_id: user.id, username: user.username,
+        event_type: 'login_failed_account_disabled',
+        ...auditCtx, success: 0, error_msg: 'status != active',
+      });
       return res.status(403).json({ error: '帳號失效，請聯絡系統管理員' });
     }
     const now = new Date();
     if (user.start_date && new Date(user.start_date) > now) {
+      logAuthEventAsync(db, {
+        user_id: user.id, username: user.username,
+        event_type: 'login_failed_account_disabled',
+        ...auditCtx, success: 0, error_msg: 'start_date in future',
+      });
       return res.status(403).json({ error: '帳號尚未生效' });
     }
     if (user.end_date && new Date(user.end_date) < now) {
+      logAuthEventAsync(db, {
+        user_id: user.id, username: user.username,
+        event_type: 'login_failed_account_disabled',
+        ...auditCtx, success: 0, error_msg: 'end_date passed',
+      });
       return res.status(403).json({ error: '帳號已過期' });
     }
-    return await createSession(res, user);
+    return await proceedOrChallenge({ req, res, user, source: 'local', mode: 'json' });
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
+
+// ── MFA gate ──────────────────────────────────────────────────────────
+// 三條 login path(LDAP / SSO / local)都先呼這個,內網 / trusted IP / 關閉 MFA
+// 直接通過,否則建 challenge → 回前端 OTP 輸入畫面
+const proceedOrChallenge = async ({ req, res, user, source, mode }) => {
+  const ip = getClientIp(req);
+  const ua = (req.headers['user-agent'] || '').slice(0, 512);
+  const internal = isRequestInternal(req);
+  const baseUrl = process.env.APP_BASE_URL || '';
+  const db = require('../database-oracle').db;
+  const c = mfa.cfg();
+
+  const redirectError = (msg) =>
+    res.redirect(`${baseUrl}/login?sso_error=${encodeURIComponent(msg)}`);
+
+  // 1. 內網 / MFA 全域關閉 → 直接登入
+  if (internal || !c.enabled) {
+    logAuthEventAsync(db, {
+      user_id: user.id, username: user.username,
+      event_type: internal ? 'login_success_internal' : 'login_success_external_mfa_disabled',
+      ip, user_agent: ua, success: 1, metadata: { source },
+    });
+    return mode === 'redirect'
+      ? createSessionAndRedirect(res, user)
+      : createSession(res, user);
+  }
+
+  // 2. 外網 — 沒 email 拒絕(政策:外網必須有 email 走 Webex MFA)
+  if (!user.email) {
+    logAuthEventAsync(db, {
+      user_id: user.id, username: user.username,
+      event_type: 'login_failed_no_email',
+      ip, user_agent: ua, success: 0, error_msg: 'no email for external login',
+      metadata: { source },
+    });
+    const msg = '此帳號未設定 Email,請從公司內網登入或聯絡管理員';
+    return mode === 'redirect' ? redirectError(msg) : res.status(403).json({ error: msg });
+  }
+
+  // 3. 外網 — admin 對該 user 關了 MFA(逃生門,正常情況不會走到)
+  if (user.webex_mfa_enabled === 0) {
+    logAuthEventAsync(db, {
+      user_id: user.id, username: user.username,
+      event_type: 'login_success_external_mfa_disabled',
+      ip, user_agent: ua, success: 1, metadata: { source, reason: 'user_mfa_disabled' },
+    });
+    return mode === 'redirect'
+      ? createSessionAndRedirect(res, user)
+      : createSession(res, user);
+  }
+
+  // 4. 外網 — IP 已通過 MFA 信任(/32 嚴格)→ 跳過 MFA
+  if (await mfa.isTrustedIp(db, user.id, ip)) {
+    await mfa.touchTrustedIp(db, user.id, ip);
+    logAuthEventAsync(db, {
+      user_id: user.id, username: user.username,
+      event_type: 'login_success_external_skip_mfa',
+      ip, user_agent: ua, success: 1, metadata: { source },
+    });
+    return mode === 'redirect'
+      ? createSessionAndRedirect(res, user)
+      : createSession(res, user);
+  }
+
+  // 5. 確認 Webex 有此 email 對應 person(LDAP/SSO email ≠ Webex email 時擋下,不發 DM)
+  const personId = await mfa.ensureWebexPerson(db, user);
+  if (!personId) {
+    logAuthEventAsync(db, {
+      user_id: user.id, username: user.username,
+      event_type: 'mfa_webex_person_not_found',
+      ip, user_agent: ua, success: 0, error_msg: 'webex person lookup failed',
+      metadata: { source, email: user.email },
+    });
+    const msg = '無法在 Webex 找到此 Email 對應帳號,請聯絡資訊部檢查';
+    return mode === 'redirect' ? redirectError(msg) : res.status(403).json({ error: msg });
+  }
+
+  // 6. 建 challenge
+  const challenge = await mfa.createChallenge({
+    userId: user.id, email: user.email, ip, userAgent: ua,
+  });
+  if (challenge.rateLimited) {
+    logAuthEventAsync(db, {
+      user_id: user.id, username: user.username,
+      event_type: 'mfa_rate_limited',
+      ip, user_agent: ua, success: 0, error_msg: 'rate limit exceeded',
+      metadata: { source },
+    });
+    const msg = '驗證碼發送過於頻繁,請稍後再試';
+    return mode === 'redirect' ? redirectError(msg) : res.status(429).json({ error: msg });
+  }
+
+  // 7. 發 DM(失敗 hard error,不放行)
+  try {
+    const lang = user.preferred_language || 'zh-TW';
+    await mfa.sendOtpDM({ email: user.email, otp: challenge.otp, ip, lang });
+    logAuthEventAsync(db, {
+      user_id: user.id, username: user.username,
+      event_type: 'mfa_challenge_created',
+      ip, user_agent: ua, challenge_id: challenge.challengeId, success: 1,
+      metadata: { source },
+    });
+  } catch (e) {
+    logAuthEventAsync(db, {
+      user_id: user.id, username: user.username,
+      event_type: 'mfa_dm_failed',
+      ip, user_agent: ua, challenge_id: challenge.challengeId, success: 0,
+      error_msg: e.message, metadata: { source },
+    });
+    console.error(`[MFA] DM failed user=${user.id} email=${user.email}: ${e.message}`);
+    const msg = `驗證碼發送失敗,請聯絡管理員(代碼:${challenge.incidentId})`;
+    return mode === 'redirect' ? redirectError(msg) : res.status(500).json({
+      error: msg, incident_id: challenge.incidentId,
+    });
+  }
+
+  // 8. DM 成功 → 通知前端進 OTP 輸入步驟
+  if (mode === 'redirect') {
+    const params = new URLSearchParams({
+      mfa_challenge: challenge.challengeId,
+      masked_email: challenge.masked,
+    });
+    return res.redirect(`${baseUrl}/login?${params}`);
+  }
+  return res.json({
+    require_2fa: true,
+    challenge_id: challenge.challengeId,
+    masked_email: challenge.masked,
+  });
+};
+
+const createSessionAndRedirect = async (res, user) => {
+  const db = require('../database-oracle').db;
+  const sessionToken = uuidv4();
+  const payload = await buildSessionPayload(db, user.id);
+  await redis.setSession(sessionToken, payload, user.role === 'admin');
+  const baseUrl = process.env.APP_BASE_URL || '';
+  res.redirect(`${baseUrl}/login?sso_token=${sessionToken}`);
+};
 
 const createSession = async (res, user) => {
   const db = require('../database-oracle').db;
@@ -554,6 +711,128 @@ const createSession = async (res, user) => {
     : (user.training_permission || rolePerms?.training_permission || 'none');
   res.json({ token, user: userWithoutPassword });
 };
+
+// POST /api/auth/2fa/verify — 拿 challenge_id + 6 位 OTP 換 session token
+router.post('/2fa/verify', async (req, res) => {
+  const { challenge_id, code } = req.body || {};
+  const ip = getClientIp(req);
+  const ua = (req.headers['user-agent'] || '').slice(0, 512);
+  const db = require('../database-oracle').db;
+
+  if (!mfa.isValidChallengeId(challenge_id) || !mfa.isValidOtpFormat(code)) {
+    return res.status(400).json({ error: '參數格式錯誤' });
+  }
+
+  const result = await mfa.verifyChallenge(challenge_id, code);
+  if (!result.ok) {
+    if (result.reason === 'too_many') {
+      logAuthEventAsync(db, {
+        event_type: 'mfa_verify_too_many',
+        ip, user_agent: ua, challenge_id, success: 0,
+        error_msg: 'max attempts reached',
+      });
+      return res.status(429).json({ error: '錯誤次數過多,請重新登入', expired: true });
+    }
+    if (result.reason === 'not_found') {
+      return res.status(400).json({ error: '驗證碼已過期,請重新登入', expired: true });
+    }
+    if (result.reason === 'invalid_format') {
+      return res.status(400).json({ error: '驗證碼格式錯誤' });
+    }
+    // wrong_code
+    logAuthEventAsync(db, {
+      event_type: 'mfa_verify_failed',
+      ip, user_agent: ua, challenge_id, success: 0,
+      error_msg: 'wrong code',
+      metadata: { attempts_left: result.attemptsLeft },
+    });
+    return res.status(401).json({
+      error: '驗證碼錯誤',
+      attempts_left: result.attemptsLeft,
+    });
+  }
+
+  // 通過 — 取最新 user 資料,寫 trusted IP,createSession
+  try {
+    const user = await db.prepare('SELECT * FROM users WHERE id=?').get(result.userId);
+    if (!user) {
+      return res.status(404).json({ error: '使用者不存在' });
+    }
+    if (user.role !== 'admin' && user.status !== 'active') {
+      return res.status(403).json({ error: '帳號失效' });
+    }
+    await mfa.addTrustedIp(db, user.id, ip, ua);
+    logAuthEventAsync(db, {
+      user_id: user.id, username: user.username,
+      event_type: 'mfa_trusted_ip_added',
+      ip, user_agent: ua, challenge_id, success: 1,
+    });
+    logAuthEventAsync(db, {
+      user_id: user.id, username: user.username,
+      event_type: 'login_success_external_mfa',
+      ip, user_agent: ua, challenge_id, success: 1,
+    });
+    return await createSession(res, user);
+  } catch (e) {
+    console.error('[MFA] verify createSession error:', e);
+    return res.status(500).json({ error: '登入處理失敗' });
+  }
+});
+
+// POST /api/auth/2fa/resend — 60s cooldown 內重發,**重產 OTP 覆蓋舊碼**
+router.post('/2fa/resend', async (req, res) => {
+  const { challenge_id } = req.body || {};
+  const ip = getClientIp(req);
+  const ua = (req.headers['user-agent'] || '').slice(0, 512);
+  const db = require('../database-oracle').db;
+
+  if (!mfa.isValidChallengeId(challenge_id)) {
+    return res.status(400).json({ error: '參數格式錯誤' });
+  }
+
+  const r = await mfa.regenerateChallengeOtp(challenge_id);
+  if (!r.ok) {
+    if (r.reason === 'cooldown') {
+      return res.status(429).json({ error: '請稍候再試', retry_in_sec: r.retryInSec });
+    }
+    if (r.reason === 'rate_limited') {
+      return res.status(429).json({ error: '驗證碼發送過於頻繁,請稍後再試' });
+    }
+    if (r.reason === 'not_found') {
+      return res.status(400).json({ error: '驗證碼已過期,請重新登入', expired: true });
+    }
+    return res.status(400).json({ error: '參數錯誤' });
+  }
+
+  // 撈 user 拿 email + lang,送 DM
+  try {
+    const user = await db.prepare('SELECT * FROM users WHERE id=?').get(r.userId);
+    if (!user || !user.email) {
+      return res.status(400).json({ error: '使用者狀態異常,請重新登入', expired: true });
+    }
+    const lang = user.preferred_language || 'zh-TW';
+    await mfa.sendOtpDM({ email: user.email, otp: r.otp, ip: r.ip, lang });
+    logAuthEventAsync(db, {
+      user_id: user.id, username: user.username,
+      event_type: 'mfa_resend',
+      ip, user_agent: ua, challenge_id, success: 1,
+    });
+    return res.json({ ok: true });
+  } catch (e) {
+    logAuthEventAsync(db, {
+      user_id: r.userId,
+      event_type: 'mfa_dm_failed',
+      ip, user_agent: ua, challenge_id, success: 0,
+      error_msg: e.message, metadata: { phase: 'resend' },
+    });
+    console.error(`[MFA] resend DM failed challenge=${challenge_id}: ${e.message}`);
+    const incident = mfa.shortIncidentId(challenge_id);
+    return res.status(500).json({
+      error: `驗證碼發送失敗,請聯絡管理員(代碼:${incident})`,
+      incident_id: incident,
+    });
+  }
+});
 
 // POST /api/auth/forgot-password  (manual accounts only)
 router.post('/forgot-password', async (req, res) => {
@@ -628,6 +907,17 @@ router.post('/reset-password', async (req, res) => {
     await db.prepare(`UPDATE users SET password=? WHERE id=?`).run(password, record.user_id);
     await db.prepare(`UPDATE password_reset_tokens SET used=1 WHERE id=?`).run(record.id);
 
+    // 密碼變更必清 trusted IPs(防舊密碼洩漏 + IP 已被信任的情況)
+    const revoked = await mfa.revokeAllTrustedIps(db, record.user_id);
+    if (revoked > 0) {
+      logAuthEventAsync(db, {
+        user_id: record.user_id,
+        event_type: 'trusted_ip_revoked_password_change',
+        ip: getClientIp(req), user_agent: (req.headers['user-agent'] || '').slice(0, 512),
+        success: 1, metadata: { phase: 'reset', revoked_count: revoked },
+      });
+    }
+
     res.json({ message: '密碼已成功重置，請重新登入' });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -656,6 +946,16 @@ router.post('/change-password', async (req, res) => {
       return res.status(400).json({ error: '舊密碼錯誤' });
     }
     await db.prepare(`UPDATE users SET password=? WHERE id=?`).run(new_password, user.id);
+    // 密碼變更必清 trusted IPs(同 reset-password)
+    const revoked = await mfa.revokeAllTrustedIps(db, user.id);
+    if (revoked > 0) {
+      logAuthEventAsync(db, {
+        user_id: user.id, username: user.username,
+        event_type: 'trusted_ip_revoked_password_change',
+        ip: getClientIp(req), user_agent: (req.headers['user-agent'] || '').slice(0, 512),
+        success: 1, metadata: { phase: 'change', revoked_count: revoked },
+      });
+    }
     res.json({ message: '密碼已成功更新' });
   } catch (e) {
     res.status(500).json({ error: e.message });
