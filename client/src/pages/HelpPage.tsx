@@ -6160,26 +6160,52 @@ cd ~/foxlink_gpt && git pull
           <NoteBox>LLM_KEY_SECRET 對應 LLM 模型管理中各 Provider 的 API Key 加密儲存。若更換此金鑰，已儲存的 API Key 將無法解密，需重新輸入。</NoteBox>
         </SubSection>
 
-        <SubSection title="AI 模型（Gemini）">
+        <SubSection title="AI 模型（Gemini）— 模型 ID 與基本設定">
           <Table
-            headers={['參數', '用途', '說明']}
+            headers={['參數', '用途', '說明 / 可用值']}
             rows={[
-              ['GEMINI_API_KEY', 'Google Gemini API 金鑰', '必填；K8s 以 Secret 注入。用於預設 Gemini 對話模型及 Embedding/OCR 功能'],
-              ['GEMINI_MODEL_PRO', '初始 Pro 模型 ID（首次啟動寫入 DB）', 'gemini-3-pro-preview；啟動後可在後台「LLM 模型管理」修改，ENV 僅作為初始值'],
-              ['GEMINI_MODEL_FLASH', '初始 Flash 模型 ID（首次啟動寫入 DB）', 'gemini-3-flash-preview；同上，啟動後可覆寫'],
+              ['GEMINI_API_KEY', 'Google Gemini API 金鑰(Studio)', '必填(若 Provider 含 studio);K8s 以 Secret 注入'],
+              ['GEMINI_MODEL_PRO', '初始 Pro 模型 ID(首次啟動寫入 DB)', 'gemini-3.1-pro-preview / gemini-3-pro-preview / gemini-2.5-pro 等'],
+              ['GEMINI_MODEL_FLASH', '初始 Flash 模型 ID(首次啟動寫入 DB)', 'gemini-3-flash-preview / gemini-2.5-flash 等'],
             ]}
           />
-          <TipBox>GEMINI_MODEL_PRO / FLASH 只在資料庫對應記錄不存在時才有效。若已在後台修改過 LLM 模型設定，重啟不會覆蓋。</TipBox>
+          <TipBox>GEMINI_MODEL_PRO / FLASH 只在資料庫對應記錄不存在時才有效。若已在後台「LLM 模型管理」修改過,重啟不會覆蓋。</TipBox>
         </SubSection>
 
-        <SubSection title="檔案儲存">
+        <SubSection title="Gemini Provider 拆分(Studio vs Vertex)">
+          <Para>
+            生成 / Embedding 可分別走 Studio 或 Vertex AI。生產環境建議 <strong>generate=vertex + embed=vertex</strong>:
+            速度快、避開 Studio 的 RPM/RPD 配額;系統會自動偵測 inlineData 大檔(圖片/音訊 &gt;4MB)時降級 Studio。
+          </Para>
           <Table
-            headers={['參數', '用途', '本機開發', 'K8s/Docker']}
+            headers={['參數', '用途', '可用值 / 預設']}
             rows={[
-              ['UPLOAD_DIR', '用戶上傳檔案、生成檔案、KB 索引的根目錄', './uploads（相對 server/）', '/app/uploads（掛載 PVC pvc-flgpt-upload）'],
+              ['GEMINI_GENERATE_PROVIDER', '對話 / Vision / Transcribe 走哪個 Provider', 'studio | vertex(預設 studio,留空 fallback 到 GEMINI_PROVIDER)'],
+              ['GEMINI_EMBED_PROVIDER', 'KB Embedding 走哪個 Provider', 'studio | vertex(預設 vertex,避 Studio 配額上限)'],
+              ['GEMINI_PROVIDER', 'legacy 單一開關(兩個細項未設時的 fallback)', 'studio | vertex(留空 = studio)'],
+              ['GEMINI_SDK', 'SDK 選擇(2026-04-21 後預設 new)', 'new(@google/genai,支援 Vertex global / Gemini 3.x preview)| old(legacy,@google-cloud/vertexai)'],
+              ['GCP_PROJECT_ID', 'Vertex 必填:GCP 專案 ID', '例:gen-lang-client-xxxx'],
+              ['GCP_LOCATION', 'Vertex region', 'global(Gemini 3.x 必須,需 GEMINI_SDK=new)/ us-central1 / asia-east1'],
+              ['GOOGLE_APPLICATION_CREDENTIALS', 'GCP Service Account 金鑰路徑', './certs/vertex-ai-sa.json(K8s 用 ConfigMap / Secret 掛入)'],
             ]}
           />
-          <NoteBox>K8s 必須掛載 PVC，否則 pod 重啟後所有上傳檔案消失。uploads/ 目錄下有 generated/、kb/、sessions/ 等子目錄由系統自動建立。</NoteBox>
+          <NoteBox>
+            <strong>切 GEMINI_SDK=new 時必須一起設 GCP_LOCATION=global</strong>:舊 SDK 打 global 會回 HTML 炸掉。
+            如果保留 old SDK 又要跑 Gemini 3.x,系統會透過 alias map 自動降級到 2.5。詳見 <code>docs/gemini-sdk-migration-plan.md</code>。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="檔案儲存 + 上傳檔案數量限制">
+          <Table
+            headers={['參數', '用途', '預設 / 範例']}
+            rows={[
+              ['UPLOAD_DIR', '用戶上傳檔案、生成檔案、KB 索引的根目錄', '本機:./uploads(相對 server/);K8s:/app/uploads(掛載 PVC)'],
+              ['CHAT_MAX_FILES_PER_MESSAGE', '對話單一訊息可附加的檔案數上限', '10(對應 multer maxCount)'],
+              ['FEEDBACK_MAX_FILES', '問題反饋單張工單可附加的檔案數上限', '10'],
+              ['RESEARCH_MAX_FILES', '深度研究單次任務可附加的全域檔案數上限', '10'],
+            ]}
+          />
+          <NoteBox>K8s 必須掛載 PVC,否則 pod 重啟後所有上傳檔案消失。uploads/ 目錄下有 generated/、kb/、sessions/ 等子目錄由系統自動建立。檔案大小另有 multer + admin 後台「使用者管理」中各 user 的 text/audio/image 上限控制。</NoteBox>
         </SubSection>
 
         <SubSection title="Email 通知（SMTP）">
@@ -6194,6 +6220,28 @@ cd ~/foxlink_gpt && git pull
               ['FROM_ADDRESS', '寄件人 Email 地址', '例：fl_support@foxlink.com.tw'],
             ]}
           />
+        </SubSection>
+
+        <SubSection title="Webex Bot(對話 / 通知 / MFA DM)">
+          <Para>
+            Webex Bot 同時擔任三個角色:① 1-on-1 / Space 內 chat 對話;② Feedback / PM 等系統通知;
+            ③ 外網登入 MFA 的 OTP DM 通道。所有設定共用同一個 Bot Token。
+          </Para>
+          <Table
+            headers={['參數', '用途', '說明 / 可用值']}
+            rows={[
+              ['WEBEX_BOT_TOKEN', 'Webex Bot 存取金鑰', '必填(若有用 Webex);K8s 以 Secret 注入。在 developer.webex.com 建立 bot 後取得'],
+              ['WEBEX_MODE', '訊息接收模式', 'webhook(推薦,正式環境用)/ websocket(舊模式)/ polling(離線備援,效能差)'],
+              ['WEBEX_PUBLIC_URL', 'Webex 回呼系統的對外 URL(webhook 模式必填)', '例:https://flgpt.foxlink.com.tw:8443;Webex 會打 /api/webex/webhook'],
+              ['WEBEX_WEBHOOK_PATH', 'webhook callback 路徑(覆寫預設)', '預設 /api/webex/webhook,通常不用改'],
+              ['WEBEX_WEBHOOK_SECRET', 'webhook 簽章驗證密鑰(HMAC-SHA1)', '建議設定,Webex 建立 webhook 時填同樣字串,系統會驗證 X-Spark-Signature'],
+              ['WEBEX_POLLING_ENABLED', 'polling 模式專用,是否啟用主動拉取訊息', 'false(預設,正式環境不用);true 表 polling 模式才有作用'],
+            ]}
+          />
+          <TipBox>
+            完整 Webex Bot 整合請見 <code>docs/webex-bot-spec.md</code> + <code>docs/webex-webhook-firewall-setup.md</code>。
+            外網開放後使用者收到 MFA OTP / 異常登入通知都是透過這個 Bot DM。
+          </TipBox>
         </SubSection>
 
         <SubSection title="Oracle 用戶端（本機開發）">
@@ -6230,6 +6278,21 @@ cd ~/foxlink_gpt && git pull
           />
         </SubSection>
 
+        <SubSection title="ERP Tools 模組(LLM tool-calling on ERP FUNCTION/PROCEDURE)">
+          <Para>控制 ERP Tools 註冊白名單、autocomplete LOV 上限、結果快取等。對應 admin 後台「ERP 工具管理」頁面。</Para>
+          <Table
+            headers={['參數', '用途', '預設 / 範例']}
+            rows={[
+              ['ERP_ALLOWED_SCHEMAS', '可註冊為 ERP Tool 的 Oracle schema 白名單(逗號分隔)', '留空或 * = 不限制;例:APPS,XXFL'],
+              ['ERP_TOOL_LOV_MAX_ROWS', 'autocomplete List-of-Values SQL 最大回傳列數', '500(防爆 UI;查詢時 LOV 超過會切斷)'],
+              ['ERP_TOOL_RESULT_CACHE_TTL', '完整結果 Redis 快取 TTL(秒)', '1800(30 分鐘)'],
+              ['ERP_TOOL_METADATA_CHECK_CRON', 'metadata drift 背景檢查 cron', '0 * * * *(每小時)'],
+              ['ERP_TOOL_DEFAULT_TIMEOUT_SEC', '執行 PROCEDURE / FUNCTION 預設超時(秒)', '30'],
+            ]}
+          />
+          <NoteBox>詳細設計見 <code>docs/erp-tools-design.md</code>。修改 ERP_TOOL_RESULT_CACHE_TTL 不影響已快取的結果(到 TTL 為止)。</NoteBox>
+        </SubSection>
+
         <SubSection title="系統資料庫（Cortex 主庫 Oracle 23 AI）">
           <Table
             headers={['參數', '用途', '本機開發', 'K8s/Docker']}
@@ -6260,9 +6323,7 @@ cd ~/foxlink_gpt && git pull
             rows={[
               ['KB_EMBEDDING_MODEL', 'Embedding 向量化模型 ID', 'gemini-embedding-001', '對應後台「向量預設模型設定」中 model_role=embedding 的模型'],
               ['KB_OCR_MODEL', 'OCR 圖文辨識模型 ID', 'gemini-3-flash-preview', '用於 PDF 掃描版 OCR，建議用 Flash（速度快）'],
-              ['KB_PDF_OCR_CONCURRENCY', 'PDF per-page OCR 並發數', '20', 'auto / force 模式下每頁 OCR 的並發數'],
-              ['KB_IMG_OCR_CONCURRENCY', 'DOCX/PPTX/XLSX 嵌入圖 OCR 並發數', '20', ''],
-              ['KB_EMBED_CONCURRENCY', 'Chunk embedding 並發數', '20', '每個文件切塊後向量化的並發數'],
+              ['KB_PDF_OCR_MAX_MB', 'PDF 觸發 OCR 的單檔大小上限(MB)', '18', '超過此大小直接拒絕 OCR(防 OOM);純文字 PDF 仍可索引'],
               ['KB_EMBEDDING_DIMS', 'Embedding 向量維度', '768', '需與 Embedding 模型輸出維度一致；改動後需重建所有 KB 索引'],
               ['KB_RERANK_MODEL', 'Rerank 重排序模型 ID', 'gemini-2.5-flash', '混合檢索的第二階段重排序，建議 Flash 系列'],
               ['KB_RERANK_TOP_K_FETCH', 'Rerank 前取回候選數', '10', '向量/全文檢索各取 10 筆後送 Rerank'],
@@ -6334,9 +6395,14 @@ cd ~/foxlink_gpt && git pull
             headers={['參數', '用途', '本機開發', 'K8s/Docker']}
             rows={[
               ['REDIS_URL', 'Redis 連線 URL；K8s 多 replica 共享 session 必填', '留空或不設定（自動 fallback 到 in-memory Map）', 'redis://redis:6379（cluster 內部 Redis Service）'],
-              ['SESSION_TTL_SECONDS', 'Session Token 存活時間（秒）', '28800（8 小時）', '同；可依需求調整'],
+              ['SESSION_TTL_SECONDS', '一般使用者 Session 存活時間(秒)', '28800（8 小時）', '同'],
+              ['ADMIN_SESSION_TTL_SECONDS', 'Admin Session 存活時間(秒)— 2026-05 從 30 天縮到 8 小時', '28800', '28800;緊急延長例:172800(2 天)'],
             ]}
           />
+          <TipBox>
+            <strong>2026-05 安全強化:</strong>過去 admin token TTL = 30 天,token 一旦被竊有最大爆炸半徑。
+            縮到 8 小時 + admin 帳號限內網登入 + 改密碼自動踢所有 sessions = 完整防線。
+          </TipBox>
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 space-y-1">
             <div className="flex items-center gap-2">
               <AlertTriangle size={15} className="text-red-500" />
@@ -6348,6 +6414,133 @@ cd ~/foxlink_gpt && git pull
               正式環境<strong>必須</strong>部署 Redis 並設定 REDIS_URL。
             </p>
           </div>
+        </SubSection>
+
+        <SubSection title="外網存取控制(EXTERNAL_ACCESS_MODE)">
+          <Para>
+            控制「外網 IP」(不在 INTERNAL_NETWORKS 範圍內的請求)能不能進系統。完整安全強化說明請參考
+            <strong>「外網存取與 MFA」</strong>章節 + <code>docs/external-access-security.md</code>。
+          </Para>
+          <Table
+            headers={['參數', '用途', '可用值 / 預設']}
+            rows={[
+              ['EXTERNAL_ACCESS_MODE', '外網存取主開關', 'internal_only(全擋,維護用) | webhook_only(預設,只放 webhook) | full(全開,需配合 MFA)'],
+              ['INTERNAL_NETWORKS', '內網 CIDR(逗號分隔),內網 IP 跳過 access control / MFA', '預設 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16;正崴實際:加 193.11.0.0/21'],
+              ['EXTERNAL_ALLOWED_PATHS', 'webhook_only 模式下放行的路徑', '預設 /api/webex/webhook(逗號分隔可加多個)'],
+              ['INTERNAL_ONLY_PATHS', '永遠只給內網的路徑前綴(即使 mode=full)', '預設 /uploads,/api/v1'],
+              ['EXTERNAL_LOGIN_RATE_LIMIT', 'mode=full 時 /api/auth/login 的每分鐘 per-IP 上限', '10(超過回 429)'],
+              ['TRUST_PROXY', 'Express trust proxy 跳數', '1(K8s nginx-ingress 1 跳);多層 LB / CDN 改數字,或填 loopback,linklocal,uniquelocal 白名單'],
+            ]}
+          />
+          <NoteBox>
+            <strong>啟動安全聯動:</strong>EXTERNAL_ACCESS_MODE=full 時系統強制要求 MFA_ENABLED=true,
+            否則 server.js 啟動會 process.exit(1) 拒絕跑(防 ops 失誤把外網打開但忘記開 MFA = 裸奔)。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="CORS">
+          <Table
+            headers={['參數', '用途', '預設 / 範例']}
+            rows={[
+              ['CORS_ALLOWED_ORIGINS', '允許的 origin(逗號分隔)', '留空 = 不限制(dev / 內部用);正式建議填 https://flgpt.foxlink.com.tw:8443;chrome-extension:// 一律允許'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="Webex MFA(外網登入二階段驗證)">
+          <Para>
+            外網開放後的二階段驗證,透過 Webex Bot DM 送 6 位 OTP 給使用者。
+            內網跳過,admin 角色一律拒絕外網。詳見「外網存取與 MFA」章節。
+          </Para>
+          <Table
+            headers={['參數', '用途', '預設 / 建議值']}
+            rows={[
+              ['MFA_ENABLED', 'MFA 主開關', 'false(預設,做完先關著);⚠️ 切 EXTERNAL_ACCESS_MODE=full 時必須改 true'],
+              ['MFA_TRUSTED_IP_TTL_DAYS', '同 user+IP 過 MFA 後免重認天數', '7;0=每次都重認;30=寬鬆但安全性下降'],
+              ['MFA_OTP_TTL_SECONDS', 'OTP 有效時間(秒)', '300(5 分鐘)'],
+              ['MFA_RESEND_COOLDOWN_SECONDS', '同一 challenge 重發 OTP 冷卻(秒)', '60'],
+              ['MFA_MAX_VERIFY_ATTEMPTS', '同 challenge 最多嘗試次數,超過刷掉', '5(不鎖帳號,只刷 challenge,防惡意鎖人)'],
+              ['MFA_DM_TIMEOUT_MS', 'Webex DM 發送超時(毫秒)', '8000(避免使用者乾等 axios 預設 30s)'],
+              ['MFA_RATE_LIMIT_PER_USER_PER_HOUR', '同 user 1 小時最多建幾個 challenge', '20(防 DM 騷擾)'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="認證失敗告警 + forgot-password 限流">
+          <Para>
+            登入失敗達閾值會主動寄信通知 admin,同 IP 達 IP 閾值同時自動加入 IP 黑名單。詳見「IP 黑名單」章節。
+          </Para>
+          <Table
+            headers={['參數', '用途', '預設 / 建議值']}
+            rows={[
+              ['AUTH_FAIL_ALERT_PER_USER', '同 user 1 小時失敗 N 次寄信通知 admin', '5;太低會被誤觸,太高發現太晚'],
+              ['AUTH_FAIL_ALERT_PER_IP', '同 IP 1 小時失敗 N 次寄信 + 自動加黑名單', '10'],
+              ['FORGOT_PASSWORD_RATE_LIMIT', 'forgot-password 同 IP / username 1 小時最多 N 次', '3(防 SMTP 濫用 + 信箱垃圾;限流時不洩漏細節仍回標準訊息)'],
+            ]}
+          />
+          <NoteBox>
+            告警信寄到 ADMIN_NOTIFY_EMAIL。同 user / IP 1 小時內不會重寄(防 mail bomb)。
+            自動黑名單規則由下方 ANTI_BOT_FAIL_BLOCK_HOURS 控制有效時間。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="Anti-bot 黑名單(自動 + 手動)">
+          <Table
+            headers={['參數', '用途', '預設 / 建議值']}
+            rows={[
+              ['ANTI_BOT_FAIL_BLOCK_HOURS', '同 IP 失敗達 AUTH_FAIL_ALERT_PER_IP 後自動加黑名單時數', '24(0=不自動加,只寄信)'],
+              ['ANTI_BOT_UA_BLOCK_DAYS', 'UA 命中已知滲透工具(sqlmap/nikto 等)自動加黑名單天數', '7'],
+            ]}
+          />
+          <NoteBox>
+            UA 黑名單規則 hardcoded 在 <code>server/services/ipBlacklist.js</code>:sqlmap / nikto / nmap /
+            masscan / dirbuster / gobuster / hydra / metasploit / burp / acunetix 等。
+            <strong>故意不擋</strong> curl / wget / python-requests(K8s probe / 內部腳本也用,誤殺風險高)。
+            如需擋具體 IP,在「IP 黑名單」UI 手動加。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="外網 per-IP Rate Limit(L7 anti-flood)">
+          <Para>
+            兩層 rate limit:app 層(本參數)+ ingress 層 limit-rps(在 k8s/ingress.yaml)。內網跳過。
+            SSE 路徑(chat / research / training streaming)排除,避免長連線被誤殺。
+          </Para>
+          <Table
+            headers={['參數', '用途', '預設 / 建議值']}
+            rows={[
+              ['EXTERNAL_RATE_LIMIT_PER_MIN', '單一外網 IP 每分鐘最多 request 數', '120;辦公室 NAT 出來會共用 quota,可調寬;真攻擊場景再調嚴'],
+              ['EXTERNAL_RATE_WINDOW_SEC', '時窗(秒)', '60(預設 1 分鐘 sliding)'],
+            ]}
+          />
+          <TipBox>
+            ingress 層 limit-rps 額外設定在 <code>k8s/ingress.yaml</code> annotation,前提是
+            nginx-ingress controller service 已設 <code>externalTrafficPolicy: Local</code>,
+            否則所有人共用 quota → 503。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="MCP User Identity(RS256 JWT)">
+          <Para>
+            MCP server 啟用 send_user_token 後,系統會簽 X-User-Token JWT 給 MCP server 驗使用者身份。
+            金鑰對首次部署需手動產生,公鑰可在 admin「MCP 伺服器」編輯 Modal 內下載給外部 MCP 團隊驗簽。
+          </Para>
+          <Table
+            headers={['參數', '用途', '預設']}
+            rows={[
+              ['MCP_JWT_PRIVATE_KEY_PATH', '簽發 JWT 的 RSA 私鑰 PEM 路徑', './certs/mcp-jwt-private.pem'],
+              ['MCP_JWT_PUBLIC_KEY_PATH', '對應的公鑰 PEM 路徑(供 admin UI 下載)', './certs/foxlink-gpt-public.pem'],
+            ]}
+          />
+          <div className="bg-slate-900 text-slate-100 rounded-xl p-4 text-xs font-mono leading-6 overflow-x-auto">
+            <pre>{`# 首次部署產生 key pair:
+cd server/certs
+openssl genrsa -out mcp-jwt-private.pem 2048
+openssl rsa -in mcp-jwt-private.pem -pubout -out foxlink-gpt-public.pem
+
+# 驗證簽出來的 token:
+node server/scripts/verify-mcp-token.js <token>`}</pre>
+          </div>
+          <NoteBox>詳細協定見 <code>docs/mcp-user-identity-auth.md</code>。MCP 伺服器若沒勾 send_user_token 不會簽發 token,header 不會帶。</NoteBox>
         </SubSection>
 
         <SubSection title="完整 .env 範本（本機開發）">
@@ -6363,13 +6556,24 @@ DEFAULT_ADMIN_ACCOUNT=ADMIN
 DEFAULT_ADMIN_PASSWORD=Foxlink123
 LLM_KEY_SECRET=                        # 留空=自動用 JWT_SECRET 衍生
 
-# ─── Gemini AI ─────────────────────────────────────────────────────
+# ─── Gemini AI(模型 ID)────────────────────────────────────────────
 GEMINI_API_KEY=AIzaSy...your_key...
-GEMINI_MODEL_PRO=gemini-3-pro-preview
+GEMINI_MODEL_PRO=gemini-3.1-pro-preview
 GEMINI_MODEL_FLASH=gemini-3-flash-preview
 
-# ─── 檔案儲存 ─────────────────────────────────────────────────────
+# ─── Gemini Provider 拆分 + Vertex AI ─────────────────────────────
+GEMINI_GENERATE_PROVIDER=vertex        # studio | vertex(預設 studio)
+GEMINI_EMBED_PROVIDER=vertex           # studio | vertex(預設 vertex)
+GEMINI_SDK=new                         # new(預設) | old(legacy fallback)
+GCP_PROJECT_ID=gen-lang-client-xxxxx
+GCP_LOCATION=global                    # 跑 Gemini 3.x preview 必須 global + new SDK
+GOOGLE_APPLICATION_CREDENTIALS=./certs/vertex-ai-sa.json
+
+# ─── 檔案儲存 + 上傳數量 ──────────────────────────────────────────
 UPLOAD_DIR=./uploads                   # 本機相對路徑
+CHAT_MAX_FILES_PER_MESSAGE=10
+FEEDBACK_MAX_FILES=10
+RESEARCH_MAX_FILES=10
 
 # ─── Email ────────────────────────────────────────────────────────
 ADMIN_NOTIFY_EMAIL=admin@your-domain.com
@@ -6378,6 +6582,14 @@ SMTP_PORT=25
 SMTP_USERNAME=
 SMTP_PASSWORD=
 FROM_ADDRESS=noreply@your-domain.com
+
+# ─── Webex Bot ────────────────────────────────────────────────────
+WEBEX_BOT_TOKEN=your_webex_bot_token
+WEBEX_MODE=webhook                     # webhook | websocket | polling
+WEBEX_PUBLIC_URL=https://your-domain.com
+WEBEX_WEBHOOK_PATH=/api/webex/webhook
+WEBEX_WEBHOOK_SECRET=your_hmac_secret
+WEBEX_POLLING_ENABLED=false
 
 # ─── Oracle Client ────────────────────────────────────────────────
 ORACLE_HOME=D:\\ORACLE_CLIENT_23\\instantclient_23_0
@@ -6389,6 +6601,13 @@ ERP_DB_PORT=1589
 ERP_DB_SERVICE_NAME=ebs_CUFOX
 ERP_DB_USER=apps
 ERP_DB_USER_PASSWORD=your_erp_password
+
+# ─── ERP Tools 模組 ───────────────────────────────────────────────
+ERP_ALLOWED_SCHEMAS=                   # 留空=不限制;例 APPS,XXFL
+ERP_TOOL_LOV_MAX_ROWS=500
+ERP_TOOL_RESULT_CACHE_TTL=1800         # 30 分鐘
+ERP_TOOL_METADATA_CHECK_CRON=0 * * * *
+ERP_TOOL_DEFAULT_TIMEOUT_SEC=30
 
 # ─── System DB (Oracle 23 AI) ─────────────────────────────────────
 SYSTEM_DB_HOST=10.8.93.70
@@ -6403,9 +6622,7 @@ DASHBOARD_ETL_MAX_ROWS=1000000
 # ─── Knowledge Base ───────────────────────────────────────────────
 KB_EMBEDDING_MODEL=gemini-embedding-001
 KB_OCR_MODEL=gemini-3-flash-preview
-KB_PDF_OCR_CONCURRENCY=20
-KB_IMG_OCR_CONCURRENCY=20
-KB_EMBED_CONCURRENCY=20
+KB_PDF_OCR_MAX_MB=18
 KB_EMBEDDING_DIMS=768
 KB_RERANK_MODEL=gemini-2.5-flash
 KB_RERANK_TOP_K_FETCH=10
@@ -6425,6 +6642,10 @@ API_RATE_LIMIT_PER_MIN=60
 MCP_SERVER_ENABLED=true
 API_CHAT_SESSION_TTL_HOURS=24
 
+# ─── MCP User Identity (RS256 JWT) ────────────────────────────────
+MCP_JWT_PRIVATE_KEY_PATH=./certs/mcp-jwt-private.pem
+MCP_JWT_PUBLIC_KEY_PATH=./certs/foxlink-gpt-public.pem
+
 # ─── LDAP（不用可整組移除）────────────────────────────────────────
 LDAP_URL=ldap://your-ldap-server:389
 LDAP_BASE_DN=DC=yourdomain,DC=local
@@ -6440,9 +6661,43 @@ LDAP_MANAGER_PASSWORD=your_ldap_password
 # ─── Skill Service ────────────────────────────────────────────────
 SKILL_SERVICE_KEY=your-skill-service-key
 
-# ─── Redis（本機開發可留空）──────────────────────────────────────
+# ─── Redis Session(K8s 多 replica 必填) ───────────────────────────
 # REDIS_URL=redis://localhost:6379
-SESSION_TTL_SECONDS=28800`}</CodeBlock>
+SESSION_TTL_SECONDS=28800              # 一般 user 8 小時
+ADMIN_SESSION_TTL_SECONDS=28800        # admin 8 小時(2026-05 從 30 天縮)
+
+# ─── 外網存取控制 ─────────────────────────────────────────────────
+EXTERNAL_ACCESS_MODE=webhook_only      # internal_only | webhook_only | full
+INTERNAL_NETWORKS=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+EXTERNAL_ALLOWED_PATHS=/api/webex/webhook
+INTERNAL_ONLY_PATHS=/uploads,/api/v1
+EXTERNAL_LOGIN_RATE_LIMIT=10
+TRUST_PROXY=1                          # K8s nginx-ingress 1 跳
+
+# ─── CORS ─────────────────────────────────────────────────────────
+CORS_ALLOWED_ORIGINS=                  # 留空=不限制(dev);正式填 https://flgpt.foxlink.com.tw:8443
+
+# ─── Webex MFA(外網開放後啟用)───────────────────────────────────
+MFA_ENABLED=false                      # ⚠️ EXTERNAL_ACCESS_MODE=full 時必須 true
+MFA_TRUSTED_IP_TTL_DAYS=7
+MFA_OTP_TTL_SECONDS=300
+MFA_RESEND_COOLDOWN_SECONDS=60
+MFA_MAX_VERIFY_ATTEMPTS=5
+MFA_DM_TIMEOUT_MS=8000
+MFA_RATE_LIMIT_PER_USER_PER_HOUR=20
+
+# ─── 認證失敗告警 + forgot-password 限流 ──────────────────────────
+AUTH_FAIL_ALERT_PER_USER=5
+AUTH_FAIL_ALERT_PER_IP=10
+FORGOT_PASSWORD_RATE_LIMIT=3
+
+# ─── Anti-bot 黑名單 ──────────────────────────────────────────────
+ANTI_BOT_FAIL_BLOCK_HOURS=24
+ANTI_BOT_UA_BLOCK_DAYS=7
+
+# ─── 外網 per-IP rate limit(L7 anti-flood)────────────────────────
+EXTERNAL_RATE_LIMIT_PER_MIN=120
+EXTERNAL_RATE_WINDOW_SEC=60`}</CodeBlock>
           <TipBox>複製此範本到 <code className="bg-blue-50 px-1 rounded text-xs">server/.env</code>，填入實際值後即可啟動本機開發環境。確保 .gitignore 包含 <code className="bg-blue-50 px-1 rounded text-xs">server/.env</code>。</TipBox>
         </SubSection>
       </Section>
