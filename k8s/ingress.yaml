@@ -24,9 +24,13 @@ metadata:
     # 併發連線優化
     nginx.ingress.kubernetes.io/upstream-keepalive-connections: "100"
     nginx.ingress.kubernetes.io/proxy-next-upstream-timeout: "5"
-    # ⚠️ 不要加 limit-connections! ingress 看到的 client IP 都是 K8s NAT 後的同一個 (10.244.x.x)，
-    # 全公司用戶會共用同一個 conn quota，瞬間爆 503。
-    # 若要做限流，改用 limit-rps (request rate)，或先設定 externalTrafficPolicy: Local 拿到真實 client IP。
+    # ── L7 Rate Limit(兜底防 DDoS,主要 rate limit 在 app 層 externalRateLimit middleware)──
+    # 前提:nginx-ingress controller 已設定 externalTrafficPolicy: Local,看到的是真實 client IP。
+    # 如果仍是 K8s NAT IP(10.244.x.x),這些設定會把全公司用戶塞同個 quota → 瞬間 503。
+    # 設值取得:單 IP 30 rps + 5x burst = 短時 150 req/s,正常使用者根本碰不到;但能擋 botnet flood。
+    nginx.ingress.kubernetes.io/limit-rps: "30"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "5"
+    nginx.ingress.kubernetes.io/limit-connections: "50"
 spec:
   ingressClassName: nginx
   tls:

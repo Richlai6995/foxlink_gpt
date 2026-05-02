@@ -138,6 +138,33 @@ module.exports = {
   },
 
   /**
+   * Atomic INCR + 第一次寫入時設 TTL(後續 INCR 不重設,避免計數永遠不過期)。
+   * 用於 sliding window rate limit:第一個 request 建立 1 + 設 60s TTL,
+   * 其餘 request 累加,60s 後整個窗口清空重來。
+   * @returns {number} 累加後的計數
+   */
+  async incrSharedValue(key, ttlSeconds) {
+    const s = getStore();
+    if (s instanceof MemoryStore) {
+      const now = Date.now();
+      const entry = s.store.get(key);
+      if (!entry || (entry.exp && now > entry.exp)) {
+        s.store.set(key, { val: '1', exp: now + ttlSeconds * 1000 });
+        return 1;
+      }
+      const n = (parseInt(entry.val, 10) || 0) + 1;
+      entry.val = String(n);
+      return n;
+    }
+    // ioredis: INCR 然後第一次設 EXPIRE
+    const n = await s.client.incr(key);
+    if (n === 1) {
+      try { await s.client.expire(key, ttlSeconds); } catch (_) {}
+    }
+    return n;
+  },
+
+  /**
    * Release a distributed lock.
    */
   async unlock(key) {
