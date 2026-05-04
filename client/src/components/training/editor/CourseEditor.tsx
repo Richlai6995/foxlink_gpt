@@ -1295,6 +1295,19 @@ export default function CourseEditor() {
                         </span>
                       </span>
                     </label>
+
+                    {/* Quiz sequential mode (章節制測驗) */}
+                    <label className="flex items-start gap-2 text-[11px] cursor-pointer select-none" style={{ color: 'var(--t-text)' }}>
+                      <input type="checkbox" checked={!!course.settings_json?.quiz_sequential}
+                        onChange={e => setCourse({ ...course, settings_json: { ...(course.settings_json || {}), quiz_sequential: e.target.checked } })}
+                        className="mt-0.5 rounded" />
+                      <span>
+                        <span className="font-medium">{t('training.quizSequential', '依序測驗章節')}</span>
+                        <span className="block text-[10px] mt-0.5" style={{ color: 'var(--t-text-dim)' }}>
+                          {t('training.quizSequentialHint', '勾選後,學員必須按章節順序測驗;否則可自由挑章節順序。')}
+                        </span>
+                      </span>
+                    </label>
                   </div>
                 );
               })()}

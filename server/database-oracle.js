@@ -338,6 +338,8 @@ async function runMigrations(db) {
   await addCol('FEEDBACK_TICKETS', 'IS_INTERNAL_LOG', 'NUMBER(1) DEFAULT 0');
   // Training: 章節制測驗 — 題目綁章節
   await addCol('QUIZ_QUESTIONS', 'LESSON_ID', 'NUMBER');
+  // Training: 章節 passed flag(score% >= course.pass_score 才算通過,failed 可重做)
+  await addCol('QUIZ_ATTEMPT_CHAPTERS', 'PASSED', 'NUMBER(1) DEFAULT 0');
 
   // 重命名 feedback KB
   try {
@@ -2552,6 +2554,7 @@ async function runMigrations(db) {
     status          VARCHAR2(20) DEFAULT 'in_progress',
     score           NUMBER DEFAULT 0,
     max_score       NUMBER DEFAULT 0,
+    passed          NUMBER(1) DEFAULT 0,
     elapsed_seconds NUMBER DEFAULT 0,
     time_budget_seconds NUMBER,
     answers_json    CLOB,
