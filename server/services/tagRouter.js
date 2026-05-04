@@ -12,6 +12,15 @@
 
 const MAX_DIRECT_CANDIDATES = 10;
 
+// 全 tag 比對 0 命中時,不要把全部工具丟給 description matcher。
+// 工具數一多會出問題:
+//   - Flash 對 50+ 工具描述判斷品質掉很快(雜訊干擾)
+//   - 即使最後 selected=0,還是會花 5-10s 在 description 比對(浪費 ttft)
+//   - 即使 selected 非 0,挑出來的工具常是 false positive,塞給 Gemini 引發
+//     MALFORMED_FUNCTION_CALL / UNEXPECTED_TOOL_CALL(model 被太大的 tool catalog 搞混)
+// 經驗值:tag 全沒命中通常代表使用者問的是一般性問題,純 chat 比硬撈工具好。
+const MAX_FALLBACK_TOOLS = 50;
+
 // ---------------------------------------------------------------------------
 // Lazy loaders (avoid circular requires)
 // ---------------------------------------------------------------------------
@@ -187,10 +196,10 @@ ${contextSection}
  * @param {string}  recentContext
  * @param {Array}   allTools   - [{id, name, description, tags: string[], type: 'mcp'|'dify'|'selfkb'|'skill'}]
  * @param {object}  [db]       - database instance (unused for now, reserved for future model resolution)
- * @returns {Promise<{ selected: Array, intentTags: string[], method: 'tag'|'tag+description'|'fallback' }>}
+ * @returns {Promise<{ selected: Array, intentTags: string[], method: 'tag'|'tag+description'|'fallback'|'fallback-skipped' }>}
  */
 async function autoRouteByTags(userMessage, recentContext, allTools, db) {
-  const result = { selected: [], intentTags: [], method: /** @type {'tag'|'tag+description'|'fallback'} */ ('fallback') };
+  const result = { selected: [], intentTags: [], method: /** @type {'tag'|'tag+description'|'fallback'|'fallback-skipped'} */ ('fallback') };
 
   if (!allTools?.length) return result;
 
@@ -220,6 +229,13 @@ async function autoRouteByTags(userMessage, recentContext, allTools, db) {
   }
 
   // Step 5: No TAG match → fallback to description-based on ALL tools
+  // 但若工具池過大,直接 degrade 為純 chat(見 MAX_FALLBACK_TOOLS 註解)
+  if (allTools.length > MAX_FALLBACK_TOOLS) {
+    console.log(`[TagRouter] No TAG match + ${allTools.length} > ${MAX_FALLBACK_TOOLS} tools → skip description fallback (degrade to pure chat)`);
+    result.selected = [];
+    result.method = 'fallback-skipped';
+    return result;
+  }
   console.log(`[TagRouter] No TAG match, falling back to description-based on all ${allTools.length} tools`);
   const fallbackResult = await filterByDescription(userMessage, allTools, recentContext);
   result.selected = fallbackResult;
