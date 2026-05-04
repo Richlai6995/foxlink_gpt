@@ -1456,9 +1456,9 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
         }
 
         combinedUserText += `\n\n[Excel: ${originalName}]\n` +
-          `(此檔案已完整保存,可用 excel_query 工具跑 SQL 取得精確結果。\n` +
-          ` 以下僅為前 30 列預覽,**完整資料須透過 excel_query 查詢**,\n` +
-          ` 任何彙總/排序/Top N/篩選都必須呼叫 excel_query,不要從預覽推估。)\n` +
+          `(此檔案已完整保存。以下僅為前 30 列預覽。\n` +
+          ` 若 excel_query 工具可用,精確的彙總/排序/Top N/篩選請透過該工具查詢;\n` +
+          ` 若工具未提供,以預覽資料盡力分析並向使用者說明限制。)\n` +
           preview;
 
         fileMetas.push({
@@ -1975,6 +1975,7 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
     // ── Force-inject excel_query skill when session has xlsx attached ─────────
     // 不靠 TAG 路由(命中率 0),只要 session 有 xlsx 附檔就強制掛上,
     // 確保 LLM 能呼叫 excel_query 跑精確 SQL 而非自行估算數字。
+    let excelSkillInjected = false;
     if (sessionAttachedFiles.length > 0) {
       try {
         const existingIds = new Set(allSkillsToProcess.map(s => String(s.id || s.ID)));
@@ -1990,6 +1991,7 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
             allSkillsToProcess.push(xlsxSkill);
             console.log(`[Skill] Force-injected excel_query skill #${skId} (session has ${sessionAttachedFiles.length} xlsx)`);
           }
+          excelSkillInjected = true;
         } else {
           console.warn('[Skill] sessionAttachedFiles has xlsx but excel_query skill not running — install/start it via Code Runners admin UI');
         }
@@ -2027,6 +2029,9 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
     const skillSystemPrompts = [];
 
     // ── Excel attachment hint:強制 LLM 用 excel_query 而非估算 ─────────────
+    // ⚠️ 必須 gate 在 excelSkillInjected 上 — 若 skill runner 死掉但 prompt 還叫 LLM
+    // 「必須呼叫 excel_query」,Gemini 3 會試圖呼叫未 declared 的 tool → MALFORMED_FUNCTION_CALL
+    // / UNEXPECTED_TOOL_CALL 整個 stream 被攔截。
     if (sessionAttachedFiles.length > 0) {
       const fileList = sessionAttachedFiles.map(f => {
         const sheetInfo = (f.sheets || []).map(s =>
@@ -2035,20 +2040,33 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
         return `  - **${f.name}**\n${sheetInfo || '    (sheet 資訊不可用)'}`;
       }).join('\n');
 
-      skillSystemPrompts.push(
-        `# Excel 附件處理規則(本對話有 ${sessionAttachedFiles.length} 個 Excel 檔案)\n\n` +
-        `## 可用檔案\n${fileList}\n\n` +
-        `## 強制規則\n` +
-        `1. **任何**涉及 Excel 數值的彙總、排序、Top N、篩選、groupby、加總、平均、計數,**必須呼叫 excel_query 工具**,絕對禁止自行從預覽資料估算或推測。\n` +
-        `2. 預覽中只有前 30 列,你看到的不是完整資料,**直接從預覽推斷的答案幾乎一定是錯的**。\n` +
-        `3. 呼叫 excel_query 時:\n` +
-        `   - file_name 從上方檔案清單中選一個(完全比對檔名最佳)\n` +
-        `   - 主工作表別名永遠是 t,可直接 \`FROM t\`\n` +
-        `   - 欄位名含中文/空格/特殊字元時用雙引號,例如 \`"客戶專案代碼"\`\n` +
-        `   - SQL 是 DuckDB 方言,支援 GROUP BY、ORDER BY、LIMIT、CASE WHEN、聚合函數、視窗函數\n` +
-        `4. 拿到 SQL 結果後,用結果數字寫敘述,不要再修改數字。\n` +
-        `5. 若使用者問題模糊(例如「分析這個檔」),先呼叫 excel_query 跑 \`SELECT * FROM t LIMIT 5\` 看資料樣貌,再決定後續查詢。\n`
-      );
+      if (excelSkillInjected) {
+        skillSystemPrompts.push(
+          `# Excel 附件處理規則(本對話有 ${sessionAttachedFiles.length} 個 Excel 檔案)\n\n` +
+          `## 可用檔案\n${fileList}\n\n` +
+          `## 強制規則\n` +
+          `1. **任何**涉及 Excel 數值的彙總、排序、Top N、篩選、groupby、加總、平均、計數,**必須呼叫 excel_query 工具**,絕對禁止自行從預覽資料估算或推測。\n` +
+          `2. 預覽中只有前 30 列,你看到的不是完整資料,**直接從預覽推斷的答案幾乎一定是錯的**。\n` +
+          `3. 呼叫 excel_query 時:\n` +
+          `   - file_name 從上方檔案清單中選一個(完全比對檔名最佳)\n` +
+          `   - 主工作表別名永遠是 t,可直接 \`FROM t\`\n` +
+          `   - 欄位名含中文/空格/特殊字元時用雙引號,例如 \`"客戶專案代碼"\`\n` +
+          `   - SQL 是 DuckDB 方言,支援 GROUP BY、ORDER BY、LIMIT、CASE WHEN、聚合函數、視窗函數\n` +
+          `4. 拿到 SQL 結果後,用結果數字寫敘述,不要再修改數字。\n` +
+          `5. 若使用者問題模糊(例如「分析這個檔」),先呼叫 excel_query 跑 \`SELECT * FROM t LIMIT 5\` 看資料樣貌,再決定後續查詢。\n`
+        );
+      } else {
+        // Skill runner 死了 — 不能叫 LLM 呼叫不存在的工具。誠實告知限制。
+        skillSystemPrompts.push(
+          `# Excel 附件處理(降級模式 — excel_query 工具暫時無法使用)\n\n` +
+          `## 可用檔案\n${fileList}\n\n` +
+          `## 規則\n` +
+          `1. **excel_query 工具目前未啟動**,你只能看到每個 sheet 的前 30 列預覽,無法執行精確 SQL。\n` +
+          `2. 若使用者問題只需從預覽就能回答(看欄位、看前幾筆樣本),正常回。\n` +
+          `3. 若使用者問題涉及 Top N、彙總、排序、整檔加總/計數等,**必須在回覆開頭明確告知**:「Excel 查詢工具暫時無法使用,以下答案僅基於前 30 列預覽,可能不完整,請聯絡管理員啟動 excel_query 後再試。」然後才以預覽資料盡力回答。\n` +
+          `4. 絕對不要假裝呼叫 excel_query,也不要捏造看似精確的數字。\n`
+        );
+      }
     }
     // Track skills that have output_template_id (for post-AI-output file generation)
     let skillOutputTemplateIds = null;

@@ -355,9 +355,9 @@ function _resolveThinkingBudget(apiModel, reasoningEffort, explicitBudget) {
   return undefined;
 }
 
-async function streamChat(apiModel, history, userParts, onChunk, extraSystemInstruction = '', disableSearch = false, genConfig = null) {
+async function streamChat(apiModel, history, userParts, onChunk, extraSystemInstruction = '', disableSearch = false, genConfig = null, _retryDepth = 0) {
   // apiModel is the resolved API model string (e.g. 'gemini-3-pro-preview')
-  console.log(`[Gemini] streamChat model=${apiModel} history=${history.length} userParts=${userParts.length} genConfig=${JSON.stringify(genConfig)}`);
+  console.log(`[Gemini] streamChat model=${apiModel} history=${history.length} userParts=${userParts.length} genConfig=${JSON.stringify(genConfig)}${_retryDepth ? ` retry=${_retryDepth}` : ''}`);
 
   // Disable Google Search grounding when inline file data is present
   // (Gemini API does not allow mixing googleSearch tool with inlineData parts)
@@ -437,6 +437,32 @@ async function streamChat(apiModel, history, userParts, onChunk, extraSystemInst
           onChunk(msg);
         } else {
           const notice = '\n\n[⚠️ 回應被引用保護機制攔截,以上為部分內容]';
+          fullText += notice;
+          onChunk(notice);
+        }
+        finishedEarly = true;
+        break;
+      }
+      if (fr === 'MALFORMED_FUNCTION_CALL') {
+        // Gemini 3 在 tool call args 生壞時(JSON 截斷 / 型別不對 / nested schema 太複雜)
+        // 會丟整個 stream 並回 MALFORMED_FUNCTION_CALL。常見誘因:
+        //   1) prompt 強制要求 call 某 tool 但 tools[] 沒掛該 tool(skill runner 死掉時最常見)
+        //   2) tool schema 太複雜 / nested 太深(MCP 上來的 schema)
+        //   3) 多 tool catalogs 同時出現,模型混淆
+        // 容錯策略:
+        //   a) 還沒 fullText 且未重試過 → 重跑一次(non-deterministic,常常第二次就過)
+        //   b) 已重試 / 有 partial → 接受 partial 或回提示,不炸 request
+        console.warn(`[Gemini] MALFORMED_FUNCTION_CALL — fullLen=${fullText.length} retryDepth=${_retryDepth}`);
+        if (!fullText && _retryDepth === 0) {
+          console.warn(`[Gemini] MALFORMED_FUNCTION_CALL — retrying once`);
+          return await streamChat(apiModel, history, userParts, onChunk, extraSystemInstruction, disableSearch, genConfig, 1);
+        }
+        if (!fullText) {
+          const msg = '抱歉,模型生成的工具呼叫格式錯誤(可能是工具未啟動或 schema 過於複雜)。請換個問法、減少附檔、或聯絡管理員確認相關工具狀態。';
+          fullText = msg;
+          onChunk(msg);
+        } else {
+          const notice = '\n\n[⚠️ 後續工具呼叫格式錯誤,以上為部分內容]';
           fullText += notice;
           onChunk(notice);
         }
