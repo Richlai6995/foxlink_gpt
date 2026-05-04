@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronUp, X, Search } from 'lucide-react'
+import { ChevronDown, ChevronUp, X, Search, Loader2 } from 'lucide-react'
 
 interface Item {
   value: string
@@ -178,7 +178,9 @@ export default function ErpLovCombobox({
     <div ref={containerRef} className={`relative ${className || ''}`}>
       <div className="border-2 border-sky-400 rounded bg-white shadow-md">
         <div className="px-2 py-1 border-b border-slate-200 flex items-center gap-2">
-          <Search size={13} className="text-slate-400 shrink-0" />
+          {onSearch && loading
+            ? <Loader2 size={13} className="text-sky-500 shrink-0 animate-spin" />
+            : <Search size={13} className="text-slate-400 shrink-0" />}
           <input
             ref={searchRef}
             type="text"
@@ -201,7 +203,7 @@ export default function ErpLovCombobox({
         <div className="px-2 py-0.5 text-[10px] text-slate-500 border-b border-slate-200 bg-slate-50 flex justify-between">
           <span>
             {onSearch
-              ? `${items.length} 筆${query ? ` · 搜尋「${query}」` : ''}${loading ? ' · 載入中…' : ''}`
+              ? `${items.length} 筆${query ? ` · 搜尋「${query}」` : ''}`
               : `${filtered.length} / ${items.length} 筆${query ? ` · 搜尋「${query}」` : ''}`}
             {selected && ` · 已選:${selected.label || selected.value}`}
           </span>
