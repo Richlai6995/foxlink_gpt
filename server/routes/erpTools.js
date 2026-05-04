@@ -771,6 +771,7 @@ router.post('/:id/lov/:paramName', async (req, res) => {
     if (!p.lov_config) return res.json({ items: [], type: 'none' });
     const result = await lovResolver.resolveLov(p.lov_config, req.user, {
       search: req.body?.search || req.query?.search,
+      exact_value: req.body?.exact_value || req.query?.exact_value,
       limit: Number(req.body?.limit || req.query?.limit) || undefined,
       paramInputs: (req.body && typeof req.body.paramInputs === 'object') ? req.body.paramInputs : {},
     });

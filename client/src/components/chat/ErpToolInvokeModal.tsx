@@ -126,23 +126,24 @@ export default function ErpToolInvokeModal({ tool, sessionId, onClose, onDone }:
       if (p.lov_config.type === 'static') continue
       const deps = depMap[p.name] || []
       if (deps.length === 0 || deps.every(d => init[d] !== undefined && init[d] !== '')) {
-        // 若預設值對應的選項可能不在預載前 N 筆裡(如工號),用 init 值當 search 預先撈一次
-        // 確保 Combobox 找得到 selected.label
+        // 若預設值對應的選項可能不在預載前 N 筆裡(如工號),用 exact_value 確保那筆一定撈得到
+        // 不用 search(LIKE '%5484%' 會撈到一堆不相關的),exact match by value 才精準
         const initVal = init[p.name]
-        const search = initVal && String(initVal).trim() ? String(initVal).trim() : undefined
-        loadLov(p.name, init, search)
+        const exact = initVal && String(initVal).trim() ? String(initVal).trim() : undefined
+        loadLov(p.name, init, undefined, exact)
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tool, user?.id])
 
-  const loadLov = async (paramName: string, inputsSnapshot?: Record<string, any>, search?: string) => {
+  const loadLov = async (paramName: string, inputsSnapshot?: Record<string, any>, search?: string, exactValue?: string) => {
     const snapshot = inputsSnapshot || inputs
     setLovLoading(s => ({ ...s, [paramName]: true }))
     try {
       const res = await api.post(`/erp-tools/${tool.id}/lov/${paramName}`, {
         paramInputs: snapshot,
         search: search || undefined,
+        exact_value: exactValue || undefined,
       })
       if (res.data.missing_deps && res.data.missing_deps.length > 0) {
         setLovCache(s => ({ ...s, [paramName]: { items: [], missing: res.data.missing_deps } }))

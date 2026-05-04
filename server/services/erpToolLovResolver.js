@@ -104,14 +104,30 @@ async function resolveLov(lovConfig, userCtx, options = {}) {
     }
     const limit = Math.min(options.limit || MAX_ROWS, MAX_ROWS);
     // search 推到 outer WHERE,讓 ROWNUM 限制是「過濾後」再截,而非「先撈 N 筆才 filter」
+    // bind name 必須字母開頭(Oracle identifier 規則),不能用 __lov_q
     const q = (options.search || '').trim();
+    const exact = (options.exact_value || '').toString().trim();
     let wrapped;
-    if (q) {
-      binds.__lov_q = `%${q.toLowerCase()}%`;
+    if (q && exact) {
+      // 兼具 search LIKE + exact value match(init 時帶 user 工號當 exact,確保 selected 一定撈得到)
+      binds.lov_q_search = `%${q.toLowerCase()}%`;
+      binds.lov_q_exact = exact;
       wrapped = `SELECT * FROM (
         SELECT LOV_SUB.*, ROWNUM RN FROM (${sql}) LOV_SUB
-        WHERE LOWER(${vCol}) LIKE :__lov_q OR LOWER(${lCol}) LIKE :__lov_q
+        WHERE LOWER(${vCol}) LIKE :lov_q_search OR LOWER(${lCol}) LIKE :lov_q_search OR ${vCol} = :lov_q_exact
       ) WHERE RN <= ${limit}`;
+    } else if (q) {
+      binds.lov_q_search = `%${q.toLowerCase()}%`;
+      wrapped = `SELECT * FROM (
+        SELECT LOV_SUB.*, ROWNUM RN FROM (${sql}) LOV_SUB
+        WHERE LOWER(${vCol}) LIKE :lov_q_search OR LOWER(${lCol}) LIKE :lov_q_search
+      ) WHERE RN <= ${limit}`;
+    } else if (exact) {
+      // 只有 exact (init load,沒 search):取前 N 筆 + 確保 exact value 在內
+      binds.lov_q_exact = exact;
+      wrapped = `SELECT * FROM (
+        SELECT LOV_SUB.*, ROWNUM RN FROM (${sql}) LOV_SUB
+      ) WHERE RN <= ${limit} OR ${vCol} = :lov_q_exact`;
     } else {
       wrapped = `SELECT * FROM (${sql}) LOV_SUB WHERE ROWNUM <= ${limit}`;
     }
