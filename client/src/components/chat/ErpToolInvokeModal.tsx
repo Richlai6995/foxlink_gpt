@@ -4,10 +4,12 @@ import type { TFunction } from 'i18next'
 import { X, Play, ShieldAlert, AlertTriangle, CheckCircle, Eye, Sparkles, MessageSquare, Table2, FileJson, Languages, Copy, Maximize2, BarChart3 } from 'lucide-react'
 import api from '../../lib/api'
 import type { ErpTool } from '../admin/ErpToolsPanel'
+import type { User } from '../../types'
+import { useAuth } from '../../context/AuthContext'
 import ErpLovCombobox from './ErpLovCombobox'
 import ErpToolChartTab from './ErpToolChartTab'
 
-function resolvePresetClient(preset: string): string {
+function resolvePresetClient(preset: string, user: User | null): string {
   const now = new Date()
   const pad = (n: number) => String(n).padStart(2, '0')
   const ds = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
@@ -24,6 +26,13 @@ function resolvePresetClient(preset: string): string {
     case 'current_year': return String(now.getFullYear())
     case 'current_month': return String(now.getMonth() + 1)
     case 'current_day': return String(now.getDate())
+    case 'system_user_id': return user?.id != null ? String(user.id) : ''
+    case 'system_user_employee_id': return user?.employee_id || ''
+    case 'system_user_name': return user?.name || ''
+    case 'system_user_email': return user?.email || ''
+    case 'system_user_dept': return (user as any)?.dept_code || ''
+    case 'system_user_factory': return (user as any)?.factory_code || ''
+    case 'system_user_profit_center': return (user as any)?.profit_center || ''
     default: return ''
   }
 }
@@ -68,6 +77,7 @@ function buildDependencyMap(params: any[]): Record<string, string[]> {
 
 export default function ErpToolInvokeModal({ tool, sessionId, onClose, onDone }: Props) {
   const { i18n, t } = useTranslation()
+  const { user } = useAuth()
   const targetLang = i18n.language?.toLowerCase().startsWith('en') ? 'en'
     : i18n.language?.toLowerCase().startsWith('vi') ? 'vi'
     : null
@@ -105,7 +115,7 @@ export default function ErpToolInvokeModal({ tool, sessionId, onClose, onDone }:
     const init: Record<string, any> = {}
     for (const p of tool.params) {
       const cfg = (p as any).default_config
-      if (cfg?.mode === 'preset') init[p.name] = resolvePresetClient(cfg.preset)
+      if (cfg?.mode === 'preset') init[p.name] = resolvePresetClient(cfg.preset, user)
       else if (cfg?.mode === 'fixed' && cfg.fixed_value != null) init[p.name] = cfg.fixed_value
       else if (p.default_value != null) init[p.name] = p.default_value
     }
@@ -116,23 +126,40 @@ export default function ErpToolInvokeModal({ tool, sessionId, onClose, onDone }:
       if (p.lov_config.type === 'static') continue
       const deps = depMap[p.name] || []
       if (deps.length === 0 || deps.every(d => init[d] !== undefined && init[d] !== '')) {
-        loadLov(p.name, init)
+        // 若預設值對應的選項可能不在預載前 N 筆裡(如工號),用 init 值當 search 預先撈一次
+        // 確保 Combobox 找得到 selected.label
+        const initVal = init[p.name]
+        const search = initVal && String(initVal).trim() ? String(initVal).trim() : undefined
+        loadLov(p.name, init, search)
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tool])
+  }, [tool, user?.id])
 
-  const loadLov = async (paramName: string, inputsSnapshot?: Record<string, any>) => {
+  const loadLov = async (paramName: string, inputsSnapshot?: Record<string, any>, search?: string) => {
     const snapshot = inputsSnapshot || inputs
     setLovLoading(s => ({ ...s, [paramName]: true }))
     try {
       const res = await api.post(`/erp-tools/${tool.id}/lov/${paramName}`, {
         paramInputs: snapshot,
+        search: search || undefined,
       })
       if (res.data.missing_deps && res.data.missing_deps.length > 0) {
         setLovCache(s => ({ ...s, [paramName]: { items: [], missing: res.data.missing_deps } }))
       } else {
-        setLovCache(s => ({ ...s, [paramName]: { items: res.data.items || [] } }))
+        // server-side search 模式:每次 search 結果可能不同;若這次有預設值對應 item,
+        // 與先前快取的 selected item merge,避免 selected 顯示為空
+        setLovCache(s => {
+          const prev = s[paramName]?.items || []
+          const next = res.data.items || []
+          const currentValue = snapshot[paramName]
+          // selected 不在新結果裡 → 從 prev 撈出來補回(保留顯示 label)
+          if (currentValue && !next.find((it: any) => String(it.value) === String(currentValue))) {
+            const fromPrev = prev.find(it => String(it.value) === String(currentValue))
+            if (fromPrev) next.unshift(fromPrev)
+          }
+          return { ...s, [paramName]: { items: next } }
+        })
         if (res.data.type === 'system' && res.data.system_value != null) {
           setInputs(s => ({ ...s, [paramName]: res.data.system_value }))
         }
@@ -327,6 +354,8 @@ export default function ErpToolInvokeModal({ tool, sessionId, onClose, onDone }:
                         value={inputs[p.name] ?? ''}
                         onChange={v => onInputChange(p.name, v)}
                         placeholder={`-- ${t('erpInvoke.selectPlaceholder', '請選擇')} (${lov.items.length}) --`}
+                        onSearch={p.lov_config.type === 'static' ? undefined : (q => loadLov(p.name, undefined, q))}
+                        loading={lovLoading[p.name]}
                       />
                     ) : p.lov_config?.type ? (
                       <div className="flex gap-1">

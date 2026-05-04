@@ -15,6 +15,10 @@ interface Props {
   /** 顯示總數上限提示(>= MAX 時顯示 "結果已截斷") */
   maxHint?: number
   className?: string
+  /** server-side search:提供時 query 改用 server,client 不再 in-memory filter */
+  onSearch?: (query: string) => void
+  /** server-side search 載入中 */
+  loading?: boolean
 }
 
 /**
@@ -25,7 +29,7 @@ interface Props {
  * - 子字串比對 label 與 value,不分大小寫
  */
 export default function ErpLovCombobox({
-  items, value, onChange, placeholder, disabled, maxHint = 500, className,
+  items, value, onChange, placeholder, disabled, maxHint = 500, className, onSearch, loading,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -33,21 +37,47 @@ export default function ErpLovCombobox({
   const containerRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const debounceRef = useRef<number | null>(null)
+  const lastSearchedRef = useRef<string | null>(null)
 
   const selected = useMemo(
     () => items.find(i => String(i.value) === String(value)) || null,
     [items, value]
   )
-  const displayLabel = selected ? (selected.label || selected.value) : ''
+  // server-side search:不在 items 找到 selected 時 fallback 顯示原始 value(避免顯示為空)
+  const displayLabel = selected
+    ? (selected.label || selected.value)
+    : (value ? String(value) : '')
 
+  // server-side search 模式:items 直接是 server 回的結果,不再做 client filter
   const filtered = useMemo(() => {
+    if (onSearch) return items
     const q = query.trim().toLowerCase()
     if (!q) return items
     return items.filter(i =>
       String(i.label || '').toLowerCase().includes(q) ||
       String(i.value || '').toLowerCase().includes(q)
     )
-  }, [items, query])
+  }, [items, query, onSearch])
+
+  // server-side search:debounce 300ms;首次掛載 query='' 不觸發(避免覆蓋外面已預載的結果)
+  useEffect(() => {
+    if (!onSearch) return
+    const q = query.trim()
+    if (lastSearchedRef.current === null && q === '') {
+      lastSearchedRef.current = ''
+      return
+    }
+    if (debounceRef.current) window.clearTimeout(debounceRef.current)
+    debounceRef.current = window.setTimeout(() => {
+      lastSearchedRef.current = q
+      onSearch(q)
+    }, 300)
+    return () => {
+      if (debounceRef.current) window.clearTimeout(debounceRef.current)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, onSearch])
 
   // 點外面關閉
   useEffect(() => {
@@ -111,7 +141,8 @@ export default function ErpLovCombobox({
   }
 
   if (!open) {
-    // 未開:單行顯示
+    // 未開:單行顯示(selected 不在 items 時 fallback 顯示 raw value)
+    const hasValue = !!value
     return (
       <div ref={containerRef} className={`relative ${className || ''}`}>
         <button
@@ -120,8 +151,8 @@ export default function ErpLovCombobox({
           onClick={() => !disabled && setOpen(true)}
           className="w-full border border-slate-300 rounded px-2 py-1 text-sm bg-white hover:border-slate-400 focus:border-sky-400 focus:outline-none disabled:bg-slate-100 disabled:text-slate-500 flex items-center justify-between text-left"
         >
-          <span className={selected ? 'truncate pr-1' : 'text-slate-400'}>
-            {selected ? (selected.label || selected.value) : (placeholder || '-- 請選擇 --')}
+          <span className={hasValue ? 'truncate pr-1' : 'text-slate-400'}>
+            {hasValue ? displayLabel : (placeholder || '-- 請選擇 --')}
           </span>
           <div className="flex items-center gap-0.5 shrink-0">
             {value && !disabled && (
@@ -169,12 +200,16 @@ export default function ErpLovCombobox({
         </div>
         <div className="px-2 py-0.5 text-[10px] text-slate-500 border-b border-slate-200 bg-slate-50 flex justify-between">
           <span>
-            {filtered.length} / {items.length} 筆
-            {query && ` · 搜尋「${query}」`}
+            {onSearch
+              ? `${items.length} 筆${query ? ` · 搜尋「${query}」` : ''}${loading ? ' · 載入中…' : ''}`
+              : `${filtered.length} / ${items.length} 筆${query ? ` · 搜尋「${query}」` : ''}`}
             {selected && ` · 已選:${selected.label || selected.value}`}
           </span>
-          {items.length >= maxHint && (
+          {!onSearch && items.length >= maxHint && (
             <span className="text-amber-600">結果已截斷,請輸入更精確的搜尋</span>
+          )}
+          {onSearch && items.length >= maxHint && (
+            <span className="text-amber-600">仍有更多結果,請輸入更精確的關鍵字</span>
           )}
         </div>
         <div

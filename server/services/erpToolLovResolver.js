@@ -11,7 +11,7 @@
 const erpDb = require('./erpDb');
 const { resolveSystemParam } = require('./apiConnectorService');
 
-const MAX_ROWS = parseInt(process.env.ERP_TOOL_LOV_MAX_ROWS || '500', 10);
+const MAX_ROWS = parseInt(process.env.ERP_TOOL_LOV_MAX_ROWS || '5000', 10);
 const FORBIDDEN_KW = /\b(UPDATE|DELETE|INSERT|DROP|TRUNCATE|ALTER|GRANT|REVOKE|EXEC|EXECUTE|BEGIN|CALL|MERGE)\b/i;
 
 function validateLovSql(sql) {
@@ -96,24 +96,32 @@ async function resolveLov(lovConfig, userCtx, options = {}) {
     if (missingDeps.length > 0) {
       return { items: [], type: 'sql', missing_deps: missingDeps };
     }
-    const limit = Math.min(options.limit || MAX_ROWS, MAX_ROWS);
-    const wrapped = `SELECT * FROM (${sql}) LOV_SUB WHERE ROWNUM <= ${limit}`;
-    const result = await erpDb.execute(wrapped, binds);
-    const rows = result?.rows || [];
     const vCol = (lovConfig.value_col || 'V').toUpperCase();
     const lCol = (lovConfig.label_col || 'L').toUpperCase();
+    // 拼到 outer SQL 當 identifier,白名單避免 injection(雖然來源是 admin,但保險)
+    if (!/^[A-Z0-9_]+$/.test(vCol) || !/^[A-Z0-9_]+$/.test(lCol)) {
+      throw new Error('value_col / label_col 只允許英數與底線');
+    }
+    const limit = Math.min(options.limit || MAX_ROWS, MAX_ROWS);
+    // search 推到 outer WHERE,讓 ROWNUM 限制是「過濾後」再截,而非「先撈 N 筆才 filter」
+    const q = (options.search || '').trim();
+    let wrapped;
+    if (q) {
+      binds.__lov_q = `%${q.toLowerCase()}%`;
+      wrapped = `SELECT * FROM (
+        SELECT LOV_SUB.*, ROWNUM RN FROM (${sql}) LOV_SUB
+        WHERE LOWER(${vCol}) LIKE :__lov_q OR LOWER(${lCol}) LIKE :__lov_q
+      ) WHERE RN <= ${limit}`;
+    } else {
+      wrapped = `SELECT * FROM (${sql}) LOV_SUB WHERE ROWNUM <= ${limit}`;
+    }
+    const result = await erpDb.execute(wrapped, binds);
+    const rows = result?.rows || [];
     const items = rows.map(r => ({
       value: r[vCol] ?? r[vCol.toLowerCase()] ?? '',
       label: r[lCol] ?? r[lCol.toLowerCase()] ?? '',
     })).filter(i => i.value !== '' && i.value !== null);
-
-    const q = (options.search || '').trim().toLowerCase();
-    const filtered = q
-      ? items.filter(i =>
-          String(i.label).toLowerCase().includes(q) ||
-          String(i.value).toLowerCase().includes(q))
-      : items;
-    return { items: filtered, type: 'sql' };
+    return { items, type: 'sql' };
   }
 
   if (lovConfig.type === 'erp_tool') {
