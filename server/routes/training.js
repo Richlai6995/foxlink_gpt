@@ -1772,7 +1772,7 @@ router.get('/courses/:id/questions', loadCoursePermission, async (req, res) => {
 
 router.post('/courses/:id/questions', loadCoursePermission, requirePermission('owner', 'admin', 'develop'), async (req, res) => {
   try {
-    const { question_type, question_json, answer_json, scoring_json, points, explanation, sort_order } = req.body;
+    const { question_type, question_json, answer_json, scoring_json, points, explanation, sort_order, lesson_id } = req.body;
     const qStr = typeof question_json === 'string' ? question_json : JSON.stringify(question_json);
     const aStr = typeof answer_json === 'string' ? answer_json : JSON.stringify(answer_json);
     const sStr = scoring_json ? (typeof scoring_json === 'string' ? scoring_json : JSON.stringify(scoring_json)) : null;
@@ -1784,9 +1784,9 @@ router.post('/courses/:id/questions', loadCoursePermission, requirePermission('o
     }
 
     const result = await db.prepare(`
-      INSERT INTO quiz_questions (course_id, question_type, question_json, answer_json, scoring_json, points, explanation, sort_order)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(req.courseId, question_type, qStr, aStr, sStr, points || 10, explanation || null, order);
+      INSERT INTO quiz_questions (course_id, question_type, question_json, answer_json, scoring_json, points, explanation, sort_order, lesson_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(req.courseId, question_type, qStr, aStr, sStr, points || 10, explanation || null, order, lesson_id || null);
     res.json({ id: result.lastInsertRowid });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1801,16 +1801,16 @@ router.put('/questions/:qid', async (req, res) => {
     if (!perm.access || !['owner', 'admin', 'develop'].includes(perm.permission))
       return res.status(403).json({ error: '權限不足' });
 
-    const { question_type, question_json, answer_json, scoring_json, points, explanation, sort_order } = req.body;
+    const { question_type, question_json, answer_json, scoring_json, points, explanation, sort_order, lesson_id } = req.body;
     const qStr = typeof question_json === 'string' ? question_json : JSON.stringify(question_json);
     const aStr = typeof answer_json === 'string' ? answer_json : JSON.stringify(answer_json);
     const sStr = scoring_json ? (typeof scoring_json === 'string' ? scoring_json : JSON.stringify(scoring_json)) : null;
 
     await db.prepare(`
       UPDATE quiz_questions SET question_type=?, question_json=?, answer_json=?,
-             scoring_json=?, points=?, explanation=?, sort_order=?, updated_at=SYSTIMESTAMP
+             scoring_json=?, points=?, explanation=?, sort_order=?, lesson_id=?, updated_at=SYSTIMESTAMP
       WHERE id=?
-    `).run(question_type, qStr, aStr, sStr, points, explanation, sort_order, req.params.qid);
+    `).run(question_type, qStr, aStr, sStr, points, explanation, sort_order, lesson_id || null, req.params.qid);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -2207,6 +2207,471 @@ router.post('/courses/:id/quiz/submit', loadCoursePermission, async (req, res) =
     res.json({ score: totalScore, total_points: totalPoints, passed: !!passed, details: detailedAnswers });
   } catch (e) {
     console.error('[Training] quiz submit:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Quiz: 章節制(可暫停 / 共用總時間 pool / 章節各自計分)
+// ─────────────────────────────────────────────────────────────────────────────
+// 設計約束:
+//   • 單章內 timer 不可暫停(server 以 started_at 為準,離開頁面 timer 仍走)
+//   • 章節之間可隨時暫停 — 重 login 也行
+//   • 完成的章節不能重做
+//   • 總時間 pool 共用:每章可用時間 = 課程 time_limit - 已花 elapsed
+//   • 全章節完成 → 結算 attempt 總分 vs course.pass_score
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// helper: 取目前未結算的 attempt(沒有就回 null)
+async function _getActiveAttempt(courseId, userId) {
+  return await db.prepare(`
+    SELECT * FROM quiz_attempts
+    WHERE course_id=? AND user_id=? AND completed_at IS NULL
+    ORDER BY id DESC FETCH FIRST 1 ROWS ONLY
+  `).get(courseId, userId);
+}
+
+// helper: 算 attempt 已用秒數(完成章節 elapsed 之和 + 進行中章節即時 NOW-started_at)
+async function _computeUsedSeconds(attemptId) {
+  const completed = await db.prepare(`
+    SELECT NVL(SUM(elapsed_seconds), 0) AS total
+    FROM quiz_attempt_chapters
+    WHERE attempt_id=? AND status IN ('completed', 'timeout')
+  `).get(attemptId);
+  const inProgress = await db.prepare(`
+    SELECT NVL(SUM(EXTRACT(DAY FROM (SYSTIMESTAMP - started_at)) * 86400
+              + EXTRACT(HOUR FROM (SYSTIMESTAMP - started_at)) * 3600
+              + EXTRACT(MINUTE FROM (SYSTIMESTAMP - started_at)) * 60
+              + EXTRACT(SECOND FROM (SYSTIMESTAMP - started_at))), 0) AS total
+    FROM quiz_attempt_chapters
+    WHERE attempt_id=? AND status='in_progress'
+  `).get(attemptId);
+  return Math.floor(Number(completed?.total || 0) + Number(inProgress?.total || 0));
+}
+
+// helper: attempt 整體結算
+async function _finalizeAttempt(attemptId, courseId, userId) {
+  const sums = await db.prepare(`
+    SELECT NVL(SUM(score), 0) AS s, NVL(SUM(max_score), 0) AS m
+    FROM quiz_attempt_chapters WHERE attempt_id=?
+  `).get(attemptId);
+  const course = await db.prepare('SELECT pass_score FROM courses WHERE id=?').get(courseId);
+  const passScore = course?.pass_score || 60;
+  const score = Number(sums?.s || 0);
+  const totalPoints = Number(sums?.m || 0);
+  const percent = totalPoints > 0 ? (score / totalPoints) * 100 : 0;
+  const passed = percent >= passScore ? 1 : 0;
+
+  // 收集 per-chapter 答題詳情合併進 answers_json
+  const chapters = await db.prepare(`
+    SELECT lesson_id, score, max_score, answers_json, elapsed_seconds, status
+    FROM quiz_attempt_chapters WHERE attempt_id=? ORDER BY id
+  `).all(attemptId);
+  const chapterSummary = chapters.map(c => ({
+    lesson_id: c.lesson_id,
+    score: c.score,
+    max_score: c.max_score,
+    elapsed_seconds: c.elapsed_seconds,
+    status: c.status,
+    answers: c.answers_json ? JSON.parse(c.answers_json) : []
+  }));
+
+  await db.prepare(`
+    UPDATE quiz_attempts SET score=?, total_points=?, passed=?,
+           answers_json=?, completed_at=SYSTIMESTAMP
+    WHERE id=?
+  `).run(score, totalPoints, passed, JSON.stringify(chapterSummary), attemptId);
+
+  // 同步 user_course_progress
+  if (passed) {
+    const existing = await db.prepare(
+      'SELECT id FROM user_course_progress WHERE user_id=? AND course_id=? AND lesson_id IS NULL'
+    ).get(userId, courseId);
+    if (existing) {
+      await db.prepare(`UPDATE user_course_progress SET status='completed', completed_at=SYSTIMESTAMP WHERE id=?`)
+        .run(existing.id);
+    } else {
+      await db.prepare(`
+        INSERT INTO user_course_progress (user_id, course_id, status, completed_at)
+        VALUES (?, ?, 'completed', SYSTIMESTAMP)
+      `).run(userId, courseId);
+    }
+  }
+  return { score, total_points: totalPoints, passed: !!passed };
+}
+
+// helper: 把所有「進行中且超時」的章節 auto-submit(分數依當前 answers_json,通常 = 0)
+async function _autoTimeoutChapters(attemptId) {
+  const rows = await db.prepare(`
+    SELECT id, time_budget_seconds,
+           EXTRACT(DAY FROM (SYSTIMESTAMP - started_at)) * 86400
+           + EXTRACT(HOUR FROM (SYSTIMESTAMP - started_at)) * 3600
+           + EXTRACT(MINUTE FROM (SYSTIMESTAMP - started_at)) * 60
+           + EXTRACT(SECOND FROM (SYSTIMESTAMP - started_at)) AS elapsed_now
+    FROM quiz_attempt_chapters
+    WHERE attempt_id=? AND status='in_progress'
+  `).all(attemptId);
+  for (const r of rows) {
+    const elapsedNow = Math.floor(Number(r.elapsed_now || 0));
+    if (r.time_budget_seconds != null && elapsedNow >= r.time_budget_seconds) {
+      await db.prepare(`
+        UPDATE quiz_attempt_chapters SET status='timeout',
+               elapsed_seconds=?, completed_at=SYSTIMESTAMP
+        WHERE id=?
+      `).run(r.time_budget_seconds, r.id);
+    }
+  }
+}
+
+// helper: 取章節題目列表(含未分類的 lesson_id IS NULL)
+async function _getChapterQuestions(courseId, lessonIdParam) {
+  if (lessonIdParam === 0 || lessonIdParam == null) {
+    return await db.prepare(`
+      SELECT * FROM quiz_questions WHERE course_id=? AND lesson_id IS NULL ORDER BY sort_order, id
+    `).all(courseId);
+  }
+  return await db.prepare(`
+    SELECT * FROM quiz_questions WHERE course_id=? AND lesson_id=? ORDER BY sort_order, id
+  `).all(courseId, lessonIdParam);
+}
+
+// GET /api/training/courses/:id/quiz/overview — 章節列表 + 進度 + 剩餘時間
+router.get('/courses/:id/quiz/overview', loadCoursePermission, async (req, res) => {
+  try {
+    const course = await db.prepare(
+      'SELECT id, title, time_limit_minutes, pass_score, max_attempts FROM courses WHERE id=?'
+    ).get(req.courseId);
+    if (!course) return res.status(404).json({ error: 'course not found' });
+
+    const totalSeconds = (course.time_limit_minutes || 0) * 60;
+
+    // 章節清單:有題的 lessons + 未分類(lesson_id NULL)
+    const lessons = await db.prepare(`
+      SELECT cl.id, cl.title, cl.sort_order
+      FROM course_lessons cl
+      WHERE cl.course_id=? AND EXISTS (
+        SELECT 1 FROM quiz_questions q WHERE q.course_id=cl.course_id AND q.lesson_id=cl.id
+      )
+      ORDER BY cl.sort_order, cl.id
+    `).all(req.courseId);
+    const unassignedCount = await db.prepare(
+      'SELECT COUNT(*) AS cnt, NVL(SUM(points), 0) AS pts FROM quiz_questions WHERE course_id=? AND lesson_id IS NULL'
+    ).get(req.courseId);
+
+    let attempt = await _getActiveAttempt(req.courseId, req.user.id);
+    if (attempt) {
+      await _autoTimeoutChapters(attempt.id);
+      // 如果 timeout 後超出總時間,把所有未完成都壓成 timeout 並結算
+      const usedAfter = await _computeUsedSeconds(attempt.id);
+      if (usedAfter >= totalSeconds && totalSeconds > 0) {
+        await db.prepare(`
+          UPDATE quiz_attempt_chapters SET status='timeout', completed_at=SYSTIMESTAMP
+          WHERE attempt_id=? AND status='in_progress'
+        `).run(attempt.id);
+        const anyChapter = await db.prepare(
+          'SELECT COUNT(*) AS c FROM quiz_attempt_chapters WHERE attempt_id=?'
+        ).get(attempt.id);
+        if (Number(anyChapter?.c || 0) > 0) {
+          await _finalizeAttempt(attempt.id, req.courseId, req.user.id);
+          attempt = await db.prepare('SELECT * FROM quiz_attempts WHERE id=?').get(attempt.id);
+        }
+      }
+    }
+
+    const usedSeconds = attempt ? await _computeUsedSeconds(attempt.id) : 0;
+    const remainingSeconds = Math.max(0, totalSeconds - usedSeconds);
+
+    // chapter rows
+    const chapterRows = attempt ? await db.prepare(
+      'SELECT * FROM quiz_attempt_chapters WHERE attempt_id=? ORDER BY id'
+    ).all(attempt.id) : [];
+    const byLesson = new Map();
+    for (const c of chapterRows) byLesson.set(c.lesson_id ?? 0, c);
+
+    const buildChapter = async (lesson_id, title) => {
+      const stat = await db.prepare(
+        lesson_id == null
+          ? 'SELECT COUNT(*) AS cnt, NVL(SUM(points), 0) AS pts FROM quiz_questions WHERE course_id=? AND lesson_id IS NULL'
+          : 'SELECT COUNT(*) AS cnt, NVL(SUM(points), 0) AS pts FROM quiz_questions WHERE course_id=? AND lesson_id=?'
+      ).get(...(lesson_id == null ? [req.courseId] : [req.courseId, lesson_id]));
+      const row = byLesson.get(lesson_id ?? 0);
+      return {
+        lesson_id: lesson_id ?? null,
+        title,
+        question_count: Number(stat?.cnt || 0),
+        max_score: Number(stat?.pts || 0),
+        status: row?.status || 'not_started',
+        score: row?.score ?? null,
+        elapsed_seconds: row?.elapsed_seconds ?? null,
+        completed_at: row?.completed_at ?? null
+      };
+    };
+
+    const chapters = [];
+    for (const l of lessons) chapters.push(await buildChapter(l.id, l.title));
+    if (Number(unassignedCount?.cnt || 0) > 0) {
+      chapters.push(await buildChapter(null, '未分類章節'));
+    }
+
+    // attempt count for max_attempts UI
+    const attemptCount = await db.prepare(
+      'SELECT COUNT(*) AS cnt FROM quiz_attempts WHERE course_id=? AND user_id=?'
+    ).get(req.courseId, req.user.id);
+
+    res.json({
+      course: {
+        id: course.id,
+        title: course.title,
+        time_limit_minutes: course.time_limit_minutes,
+        pass_score: course.pass_score,
+        max_attempts: course.max_attempts
+      },
+      attempt: attempt ? {
+        id: attempt.id,
+        attempt_number: attempt.attempt_number,
+        completed_at: attempt.completed_at,
+        score: attempt.score,
+        total_points: attempt.total_points,
+        passed: !!attempt.passed
+      } : null,
+      total_seconds: totalSeconds,
+      used_seconds: usedSeconds,
+      remaining_seconds: remainingSeconds,
+      chapters,
+      total_attempts: Number(attemptCount?.cnt || 0)
+    });
+  } catch (e) {
+    console.error('[Training] quiz overview:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/training/courses/:id/quiz/chapter/:lessonId/start
+//   lessonId = 0 → 未分類章節
+router.post('/courses/:id/quiz/chapter/:lessonId/start', loadCoursePermission, async (req, res) => {
+  try {
+    const lessonIdParam = Number(req.params.lessonId);
+    const lessonId = lessonIdParam === 0 ? null : lessonIdParam;
+    const course = await db.prepare(
+      'SELECT id, time_limit_minutes, max_attempts FROM courses WHERE id=?'
+    ).get(req.courseId);
+    if (!course) return res.status(404).json({ error: 'course not found' });
+
+    // 取或建 attempt
+    let attempt = await _getActiveAttempt(req.courseId, req.user.id);
+    if (!attempt) {
+      const cnt = await db.prepare(
+        'SELECT COUNT(*) AS cnt FROM quiz_attempts WHERE course_id=? AND user_id=?'
+      ).get(req.courseId, req.user.id);
+      const attemptNum = (Number(cnt?.cnt || 0)) + 1;
+      if (course.max_attempts && attemptNum > course.max_attempts) {
+        return res.status(400).json({ error: `已達最大測驗次數 (${course.max_attempts})` });
+      }
+      const ins = await db.prepare(`
+        INSERT INTO quiz_attempts (course_id, user_id, attempt_number) VALUES (?, ?, ?)
+      `).run(req.courseId, req.user.id, attemptNum);
+      attempt = await db.prepare('SELECT * FROM quiz_attempts WHERE id=?').get(ins.lastInsertRowid);
+    }
+
+    // 自動 timeout 過期章節
+    await _autoTimeoutChapters(attempt.id);
+
+    // 已有此章節 row?
+    const existing = await db.prepare(`
+      SELECT * FROM quiz_attempt_chapters
+      WHERE attempt_id=? AND NVL(lesson_id, 0) = ?
+    `).get(attempt.id, lessonIdParam);
+
+    if (existing && (existing.status === 'completed' || existing.status === 'timeout')) {
+      return res.status(400).json({ error: '此章節已完成,不可重做' });
+    }
+
+    // 阻擋同時開多個章節
+    const otherInProgress = await db.prepare(`
+      SELECT id, lesson_id FROM quiz_attempt_chapters
+      WHERE attempt_id=? AND status='in_progress' AND NVL(lesson_id, 0) <> ?
+    `).get(attempt.id, lessonIdParam);
+    if (otherInProgress) {
+      return res.status(400).json({
+        error: '已有其他章節進行中,請先完成該章節',
+        in_progress_lesson_id: otherInProgress.lesson_id
+      });
+    }
+
+    const totalSeconds = (course.time_limit_minutes || 0) * 60;
+    const usedSeconds = await _computeUsedSeconds(attempt.id);
+    const remaining = Math.max(0, totalSeconds - usedSeconds);
+    if (totalSeconds > 0 && remaining <= 0) {
+      return res.status(400).json({ error: '總測驗時間已用完' });
+    }
+
+    let chapterRow = existing;
+    if (!chapterRow) {
+      const ins = await db.prepare(`
+        INSERT INTO quiz_attempt_chapters
+          (attempt_id, course_id, user_id, lesson_id, status, time_budget_seconds, started_at)
+        VALUES (?, ?, ?, ?, 'in_progress', ?, SYSTIMESTAMP)
+      `).run(attempt.id, req.courseId, req.user.id, lessonId, totalSeconds > 0 ? remaining : null);
+      chapterRow = await db.prepare('SELECT * FROM quiz_attempt_chapters WHERE id=?').get(ins.lastInsertRowid);
+    }
+
+    // 取題目
+    const questions = await _getChapterQuestions(req.courseId, lessonIdParam);
+
+    // 算章節 time_budget(就用 chapter row 的 time_budget_seconds,如果為 NULL 表示不限時)
+    const timeBudget = chapterRow.time_budget_seconds;
+    let chapterRemaining = null;
+    if (timeBudget != null) {
+      const usedNow = await _computeUsedSeconds(attempt.id);
+      // chapter 開始時已預留的 budget 是 totalSeconds - (used_at_start);
+      // chapter 已過秒數 = NOW - started_at;chapter 剩餘 = budget - (NOW - started_at)
+      const elapsedNow = await db.prepare(`
+        SELECT EXTRACT(DAY FROM (SYSTIMESTAMP - started_at)) * 86400
+             + EXTRACT(HOUR FROM (SYSTIMESTAMP - started_at)) * 3600
+             + EXTRACT(MINUTE FROM (SYSTIMESTAMP - started_at)) * 60
+             + EXTRACT(SECOND FROM (SYSTIMESTAMP - started_at)) AS e
+        FROM quiz_attempt_chapters WHERE id=?
+      `).get(chapterRow.id);
+      chapterRemaining = Math.max(0, Math.floor(timeBudget - Number(elapsedNow?.e || 0)));
+      void usedNow;
+    }
+
+    res.json({
+      attempt_id: attempt.id,
+      chapter_id: chapterRow.id,
+      lesson_id: chapterRow.lesson_id,
+      time_budget_seconds: chapterRow.time_budget_seconds,
+      chapter_remaining_seconds: chapterRemaining,
+      total_remaining_seconds: chapterRemaining,  // 共用 pool 下兩者一致
+      questions: questions.map(q => ({
+        id: q.id,
+        question_type: q.question_type,
+        question_json: q.question_json,
+        scoring_json: q.scoring_json,
+        points: q.points,
+        explanation: q.explanation,
+        sort_order: q.sort_order,
+        lesson_id: q.lesson_id,
+        // 不回 answer_json
+      }))
+    });
+  } catch (e) {
+    console.error('[Training] quiz chapter start:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/training/courses/:id/quiz/chapter/:lessonId/submit
+router.post('/courses/:id/quiz/chapter/:lessonId/submit', loadCoursePermission, async (req, res) => {
+  try {
+    const lessonIdParam = Number(req.params.lessonId);
+    const { answers } = req.body || {};
+    const attempt = await _getActiveAttempt(req.courseId, req.user.id);
+    if (!attempt) return res.status(400).json({ error: '無進行中的測驗' });
+
+    const chapter = await db.prepare(`
+      SELECT * FROM quiz_attempt_chapters
+      WHERE attempt_id=? AND NVL(lesson_id, 0) = ?
+    `).get(attempt.id, lessonIdParam);
+    if (!chapter) return res.status(400).json({ error: '此章節未開始' });
+    if (chapter.status !== 'in_progress') return res.status(400).json({ error: '此章節已結束' });
+
+    // 算 elapsed:capped at time_budget
+    const e = await db.prepare(`
+      SELECT EXTRACT(DAY FROM (SYSTIMESTAMP - started_at)) * 86400
+           + EXTRACT(HOUR FROM (SYSTIMESTAMP - started_at)) * 3600
+           + EXTRACT(MINUTE FROM (SYSTIMESTAMP - started_at)) * 60
+           + EXTRACT(SECOND FROM (SYSTIMESTAMP - started_at)) AS s
+      FROM quiz_attempt_chapters WHERE id=?
+    `).get(chapter.id);
+    let elapsed = Math.floor(Number(e?.s || 0));
+    let timedOut = false;
+    if (chapter.time_budget_seconds != null && elapsed > chapter.time_budget_seconds) {
+      elapsed = chapter.time_budget_seconds;
+      timedOut = true;
+    }
+
+    // 評分
+    const questions = await _getChapterQuestions(req.courseId, lessonIdParam);
+    let score = 0, maxScore = 0;
+    const detailed = [];
+    for (const q of questions) {
+      const correctAnswer = JSON.parse(q.answer_json);
+      const scoringRule = q.scoring_json ? JSON.parse(q.scoring_json) : { mode: 'exact' };
+      const userAnswer = answers?.[q.id];
+      maxScore += q.points;
+      let earned = 0;
+      if (userAnswer !== undefined && userAnswer !== null) {
+        earned = scoreQuestion(q.question_type, correctAnswer, userAnswer, scoringRule, q.points);
+      }
+      score += earned;
+      detailed.push({
+        question_id: q.id,
+        user_answer: userAnswer ?? null,
+        earned,
+        max: q.points,
+        correct: earned >= q.points
+      });
+    }
+
+    await db.prepare(`
+      UPDATE quiz_attempt_chapters
+      SET status=?, score=?, max_score=?, elapsed_seconds=?, answers_json=?, completed_at=SYSTIMESTAMP
+      WHERE id=?
+    `).run(timedOut ? 'timeout' : 'completed', score, maxScore, elapsed,
+           JSON.stringify(detailed), chapter.id);
+
+    // 若所有章節都已 completed/timeout → 結算 attempt
+    const totalChaptersStmt = await db.prepare(`
+      SELECT COUNT(*) AS total,
+             SUM(CASE WHEN status IN ('completed','timeout') THEN 1 ELSE 0 END) AS done
+      FROM quiz_attempt_chapters WHERE attempt_id=?
+    `).get(attempt.id);
+
+    // 也要檢查:課程裡所有有題的 lesson 是否都建了 row(不然就還沒做完)
+    const courseChapterCount = await db.prepare(`
+      SELECT (
+        (SELECT COUNT(*) FROM course_lessons cl
+          WHERE cl.course_id=? AND EXISTS (
+            SELECT 1 FROM quiz_questions q WHERE q.course_id=cl.course_id AND q.lesson_id=cl.id
+          ))
+        + CASE WHEN EXISTS (SELECT 1 FROM quiz_questions WHERE course_id=? AND lesson_id IS NULL) THEN 1 ELSE 0 END
+      ) AS total FROM dual
+    `).get(req.courseId, req.courseId);
+
+    let finalized = false;
+    let finalResult = null;
+    const allChaptersDone = Number(totalChaptersStmt?.done || 0) === Number(totalChaptersStmt?.total || 0);
+    const coveredAllChapters = Number(totalChaptersStmt?.total || 0) >= Number(courseChapterCount?.total || 0);
+
+    if (allChaptersDone && coveredAllChapters) {
+      finalResult = await _finalizeAttempt(attempt.id, req.courseId, req.user.id);
+      finalized = true;
+    }
+
+    res.json({
+      score, max_score: maxScore, elapsed_seconds: elapsed, timed_out: timedOut,
+      details: detailed,
+      finalized,
+      final: finalResult
+    });
+  } catch (e) {
+    console.error('[Training] quiz chapter submit:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /api/training/courses/:id/questions/assign-lesson — admin 批次指定章節
+router.put('/courses/:id/questions/assign-lesson', loadCoursePermission, requirePermission('owner', 'admin', 'develop'), async (req, res) => {
+  try {
+    const { assignments } = req.body; // [{ id, lesson_id }]
+    if (!Array.isArray(assignments)) return res.status(400).json({ error: 'assignments array required' });
+    for (const a of assignments) {
+      await db.prepare('UPDATE quiz_questions SET lesson_id=? WHERE id=? AND course_id=?')
+        .run(a.lesson_id || null, a.id, req.courseId);
+    }
+    res.json({ ok: true, count: assignments.length });
+  } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });

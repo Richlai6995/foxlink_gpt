@@ -10,6 +10,7 @@ import RecordingPanel from './RecordingPanel'
 import InteractionReport from '../InteractionReport'
 import CoverCropModal from './CoverCropModal'
 import CourseShareTab from './CourseShareTab'
+import QuizManagementTab from './QuizManagementTab'
 
 interface Course {
   id?: number
@@ -817,12 +818,9 @@ export default function CourseEditor() {
           </div>
         )}
 
-        {/* Quiz Tab Placeholder */}
-        {activeTab === 'quiz' && !isNew && (
-          <div className="text-center text-slate-500 py-20">
-            <FileText size={48} className="mx-auto mb-3 opacity-50" />
-            <p className="text-sm">{t('training.quizManagement')}</p>
-          </div>
+        {/* Quiz Tab */}
+        {activeTab === 'quiz' && !isNew && id && (
+          <QuizManagementTab courseId={Number(id)} lessons={lessons} />
         )}
 
         {/* Translate Tab */}

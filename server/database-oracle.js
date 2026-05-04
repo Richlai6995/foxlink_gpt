@@ -336,6 +336,8 @@ async function runMigrations(db) {
   await addCol('USERS', 'IS_ERP_ADMIN', 'NUMBER(1) DEFAULT 0');
   // 資訊內部紀錄：admin 用工單紀錄電話/系統外 Q&A,不發通知、不進統計
   await addCol('FEEDBACK_TICKETS', 'IS_INTERNAL_LOG', 'NUMBER(1) DEFAULT 0');
+  // Training: 章節制測驗 — 題目綁章節
+  await addCol('QUIZ_QUESTIONS', 'LESSON_ID', 'NUMBER');
 
   // 重命名 feedback KB
   try {
@@ -2536,6 +2538,34 @@ async function runMigrations(db) {
     reviewed_by     NUMBER,
     reviewed_at     TIMESTAMP
   )`);
+
+  // ── Training Platform: 章節制測驗(每章獨立計分,共用總時間 pool)──────────────
+  // 設計:user 分章節做題,each chapter 提交即計分;全章節完成才結算 attempt 總分。
+  // Timer 由 server 為準(started_at)— 單章內離開 timer 仍走,章節之間可暫停。
+  // lesson_id 可 NULL → 表示「未分類章節」,以函數索引 NVL(lesson_id,0) 維持唯一。
+  await createTable('QUIZ_ATTEMPT_CHAPTERS', `CREATE TABLE quiz_attempt_chapters (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    attempt_id      NUMBER NOT NULL,
+    course_id       NUMBER NOT NULL,
+    user_id         NUMBER NOT NULL,
+    lesson_id       NUMBER,
+    status          VARCHAR2(20) DEFAULT 'in_progress',
+    score           NUMBER DEFAULT 0,
+    max_score       NUMBER DEFAULT 0,
+    elapsed_seconds NUMBER DEFAULT 0,
+    time_budget_seconds NUMBER,
+    answers_json    CLOB,
+    started_at      TIMESTAMP DEFAULT SYSTIMESTAMP,
+    completed_at    TIMESTAMP
+  )`);
+  try {
+    await db.prepare(`
+      CREATE UNIQUE INDEX uq_quiz_attempt_chapter ON quiz_attempt_chapters (attempt_id, NVL(lesson_id, 0))
+    `).run();
+    console.log('[Migration] uq_quiz_attempt_chapter unique index created ✓');
+  } catch (e) {
+    if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn('[Migration] uq_quiz_attempt_chapter:', e.message);
+  }
 
   // ── Training Platform: 測驗主題 ─────────────────────────────────────────────
   await createTable('EXAM_TOPICS', `CREATE TABLE exam_topics (
