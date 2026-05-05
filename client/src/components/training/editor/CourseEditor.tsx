@@ -1199,7 +1199,7 @@ export default function CourseEditor() {
 
                 return (
                   <div className="space-y-4">
-                    <div className="grid grid-cols-4 gap-4">
+                    <div className="grid grid-cols-5 gap-4">
                       <div>
                         <label className="text-[10px] block mb-0.5" style={{ color: 'var(--t-text-dim)' }}>{t('training.totalScore')}</label>
                         <input type="number" min={10} max={1000} value={exam.total_score || 100}
@@ -1231,6 +1231,21 @@ export default function CourseEditor() {
                             className="rounded" />
                           {t('training.enableTimeLimit')}
                         </label>
+                      </div>
+                      <div>
+                        <label className="text-[10px] block mb-0.5" style={{ color: 'var(--t-text-dim)' }}>
+                          {t('training.maxAttempts', '最多測驗次數')}
+                        </label>
+                        <input type="number" min={0} max={100}
+                          value={course.max_attempts ?? 0}
+                          onChange={e => {
+                            const v = Number(e.target.value)
+                            setCourse({ ...course, max_attempts: v <= 0 ? null : v })
+                          }}
+                          placeholder={t('training.maxAttemptsUnlimited', '0 = 無上限')}
+                          title={t('training.maxAttemptsHint', '0 或留空 = 無上限。每次「重新測驗」會佔用一次。')}
+                          className="w-full border rounded px-2 py-1.5 text-xs"
+                          style={{ backgroundColor: 'var(--t-bg-input)', borderColor: 'var(--t-border)', color: 'var(--t-text)' }} />
                       </div>
                     </div>
 
