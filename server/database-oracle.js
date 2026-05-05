@@ -342,8 +342,19 @@ async function runMigrations(db) {
   await addCol('QUIZ_ATTEMPT_CHAPTERS', 'PASSED', 'NUMBER(1) DEFAULT 0');
   // Training: attempt 雙模式 — 'questions'(quiz_questions 題庫)/ 'slides'(slide 內互動 block)
   // session_id:slide 模式用,串 interaction_results 聚合 per-lesson 分數
-  await addCol('QUIZ_ATTEMPTS', 'MODE', `VARCHAR2(20) DEFAULT 'questions'`);
+  // ⚠️ 用 attempt_mode 而非 mode — Oracle 對 MODE 在 column 列表上下文偶有 ORA-00936 解析錯誤
+  await addCol('QUIZ_ATTEMPTS', 'ATTEMPT_MODE', `VARCHAR2(20) DEFAULT 'questions'`);
   await addCol('QUIZ_ATTEMPTS', 'SESSION_ID', 'VARCHAR2(36)');
+  // 若舊 MODE 欄位有資料(初版 schema),複製到 attempt_mode
+  try {
+    const oldExists = await db.columnExists('QUIZ_ATTEMPTS', 'MODE');
+    if (oldExists) {
+      await db.prepare(`UPDATE quiz_attempts SET attempt_mode = "MODE" WHERE attempt_mode IS NULL OR attempt_mode = 'questions'`).run();
+      console.log('[Migration] copied quiz_attempts.MODE → attempt_mode');
+    }
+  } catch (e) {
+    console.warn('[Migration] quiz_attempts.MODE → attempt_mode copy:', e.message);
+  }
 
   // 重命名 feedback KB
   try {
@@ -2543,7 +2554,7 @@ async function runMigrations(db) {
     review_status   VARCHAR2(20) DEFAULT 'auto',
     reviewed_by     NUMBER,
     reviewed_at     TIMESTAMP,
-    mode            VARCHAR2(20) DEFAULT 'questions',
+    attempt_mode    VARCHAR2(20) DEFAULT 'questions',
     session_id      VARCHAR2(36)
   )`);
 

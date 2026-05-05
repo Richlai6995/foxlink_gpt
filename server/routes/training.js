@@ -2227,7 +2227,7 @@ async function _getActiveAttempt(courseId, userId, mode = 'questions') {
   return await db.prepare(`
     SELECT * FROM quiz_attempts
     WHERE course_id=? AND user_id=? AND completed_at IS NULL
-      AND NVL(mode, 'questions') = ?
+      AND NVL(attempt_mode, 'questions') = ?
     ORDER BY id DESC FETCH FIRST 1 ROWS ONLY
   `).get(courseId, userId, mode);
 }
@@ -2875,7 +2875,7 @@ async function _restartAttempt(courseId, userId, mode = 'questions') {
 
   // 檢查 max_attempts(完成的 attempt 數 + 1)
   const cnt = await db.prepare(
-    `SELECT COUNT(*) AS cnt FROM quiz_attempts WHERE course_id=? AND user_id=? AND NVL(mode,'questions')=?`
+    `SELECT COUNT(*) AS cnt FROM quiz_attempts WHERE course_id=? AND user_id=? AND NVL(attempt_mode,'questions')=?`
   ).get(courseId, userId, mode);
   const attemptNum = (Number(cnt?.cnt || 0)) + 1;
   if (course?.max_attempts && attemptNum > course.max_attempts) {
@@ -2886,7 +2886,7 @@ async function _restartAttempt(courseId, userId, mode = 'questions') {
   let newSessionId = null;
   if (mode === 'slides') newSessionId = require('crypto').randomUUID();
   const ins = await db.prepare(`
-    INSERT INTO quiz_attempts (course_id, user_id, attempt_number, mode, session_id)
+    INSERT INTO quiz_attempts (course_id, user_id, attempt_number, attempt_mode, session_id)
     VALUES (?, ?, ?, ?, ?)
   `).run(courseId, userId, attemptNum, mode, newSessionId);
   return { attempt_id: ins.lastInsertRowid, attempt_number: attemptNum };
@@ -2985,7 +2985,7 @@ router.get('/courses/:id/exam/overview', loadCoursePermission, async (req, res) 
     });
 
     const attemptCount = await db.prepare(
-      `SELECT COUNT(*) AS cnt FROM quiz_attempts WHERE course_id=? AND user_id=? AND NVL(mode,'questions')='slides'`
+      `SELECT COUNT(*) AS cnt FROM quiz_attempts WHERE course_id=? AND user_id=? AND NVL(attempt_mode,'questions')='slides'`
     ).get(req.courseId, req.user.id);
 
     const inProgressLesson = chapters.find(c => c.status === 'in_progress');
@@ -3037,7 +3037,7 @@ router.post('/courses/:id/exam/chapter/:lessonId/start', loadCoursePermission, a
     let attempt = await _getActiveAttempt(req.courseId, req.user.id, 'slides');
     if (!attempt) {
       const cnt = await db.prepare(
-        `SELECT COUNT(*) AS cnt FROM quiz_attempts WHERE course_id=? AND user_id=? AND NVL(mode,'questions')='slides'`
+        `SELECT COUNT(*) AS cnt FROM quiz_attempts WHERE course_id=? AND user_id=? AND NVL(attempt_mode,'questions')='slides'`
       ).get(req.courseId, req.user.id);
       const attemptNum = (Number(cnt?.cnt || 0)) + 1;
       if (course.max_attempts && attemptNum > course.max_attempts) {
@@ -3046,7 +3046,7 @@ router.post('/courses/:id/exam/chapter/:lessonId/start', loadCoursePermission, a
       // session_id 用 UUID-like(讓 interaction_results 串得起來)
       const newSessionId = require('crypto').randomUUID();
       const ins = await db.prepare(`
-        INSERT INTO quiz_attempts (course_id, user_id, attempt_number, mode, session_id)
+        INSERT INTO quiz_attempts (course_id, user_id, attempt_number, attempt_mode, session_id)
         VALUES (?, ?, ?, 'slides', ?)
       `).run(req.courseId, req.user.id, attemptNum, newSessionId);
       attempt = await db.prepare('SELECT * FROM quiz_attempts WHERE id=?').get(ins.lastInsertRowid);
