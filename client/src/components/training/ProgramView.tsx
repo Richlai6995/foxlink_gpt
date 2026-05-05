@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
-import { ArrowLeft, BookOpen, Calendar, CheckCircle2, Clock, Play, BarChart3, Lock } from 'lucide-react'
+import { ArrowLeft, BookOpen, Calendar, CheckCircle2, Clock, Play, BarChart3, Lock, RotateCcw } from 'lucide-react'
 import ProgramScorePanel from './ProgramScorePanel'
 
 interface Assignment {
@@ -203,6 +203,21 @@ export default function ProgramView() {
                 <button onClick={() => navigate(`/training/classroom/course/${a.course_id}/learn?mode=test&program_id=${program.id}&assignment_id=${a.id}`)}
                   className="flex items-center gap-1.5 bg-orange-500 hover:bg-orange-400 text-white px-4 py-2 rounded-lg text-xs font-medium transition">
                   <Play size={13} /> {t('training.scoring.practiceExam')}
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!confirm(t('training.examRestartConfirm', '確定整輪重新測驗?目前所有章節成績(包含已通過的)將被清除,並佔用一次測驗機會。'))) return
+                    try {
+                      await api.post(`/training/courses/${a.course_id}/exam/restart`)
+                    } catch (e: any) {
+                      alert(e?.response?.data?.error || t('training.examRestartFailed', '重新測驗失敗'))
+                      return
+                    }
+                    navigate(`/training/classroom/course/${a.course_id}/learn?mode=test&program_id=${program.id}&assignment_id=${a.id}`)
+                  }}
+                  title={t('training.examRestartAll', '重新測驗(整輪重來)')}
+                  className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white px-3 py-2 rounded-lg text-xs font-medium transition">
+                  <RotateCcw size={13} /> {t('training.examRestartAll', '重新測驗(整輪重來)')}
                 </button>
               </div>
             </div>
