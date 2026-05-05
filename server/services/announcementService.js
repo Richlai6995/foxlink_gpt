@@ -10,7 +10,11 @@ const { getGenerativeModel, extractText } = require('./geminiClient');
 const { decryptKey } = require('./llmKeyService');
 
 const VALID_LEVELS = ['info', 'notice', 'warning', 'critical'];
-const VALID_STATUS = ['active', 'archived'];
+// status:
+//   draft    = 草稿,只 admin 看得到,user 端完全不顯示。允許在這狀態下編輯+翻譯
+//   active   = 已發布,user 端可見
+//   archived = 已下架,user 端不顯示但保留歷史
+const VALID_STATUS = ['draft', 'active', 'archived'];
 const VALID_GRANTEE_TYPES = ['user', 'role', 'factory', 'department', 'cost_center', 'division', 'org_group'];
 const VALID_LANGS = ['zh-TW', 'en', 'vi'];
 
@@ -264,7 +268,8 @@ async function getById(db, id) {
  */
 async function create(db, createdBy, payload) {
   const level = VALID_LEVELS.includes(payload.level) ? payload.level : 'notice';
-  const status = VALID_STATUS.includes(payload.status) ? payload.status : 'active';
+  // 預設 draft 草稿,須由 admin 明確按「發布」才會 active
+  const status = VALID_STATUS.includes(payload.status) ? payload.status : 'draft';
   const dismissible = level === 'critical' && Number(payload.dismissible) === 0 ? 0 : 1;
   const audienceMode = payload.audience_mode === 'targeted' ? 'targeted' : 'all';
   const effectiveFrom = payload.effective_from ? new Date(payload.effective_from) : new Date();
@@ -412,6 +417,27 @@ async function archive(db, id) {
   await db.prepare(`UPDATE announcements SET status='archived', updated_at=SYSTIMESTAMP WHERE id=?`).run(id);
 }
 
+/**
+ * 發布:draft → active(供 admin 完成翻譯後正式上架)
+ * 已 active / archived 的呼叫不會出錯,但沒實際變化
+ */
+async function publish(db, id) {
+  await db.prepare(`
+    UPDATE announcements SET status='active', updated_at=SYSTIMESTAMP
+    WHERE id=? AND status='draft'
+  `).run(id);
+}
+
+/**
+ * 退回草稿:active → draft(發現翻譯沒翻好、想暫時下架修正)
+ */
+async function unpublish(db, id) {
+  await db.prepare(`
+    UPDATE announcements SET status='draft', updated_at=SYSTIMESTAMP
+    WHERE id=? AND status='active'
+  `).run(id);
+}
+
 async function remove(db, id) {
   // ON DELETE CASCADE 會清掉 translations / audiences;dismissals 沒有 FK,手動清
   await db.prepare(`DELETE FROM user_announcement_dismissals WHERE announcement_id=?`).run(id);
@@ -527,6 +553,8 @@ module.exports = {
   create,
   update,
   archive,
+  publish,
+  unpublish,
   remove,
   translateOne,
   upsertTranslation,

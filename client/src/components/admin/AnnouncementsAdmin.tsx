@@ -1,9 +1,9 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Megaphone, Plus, Edit, Archive, Trash2, Languages, X, Search, Filter, RotateCcw } from 'lucide-react'
+import { Megaphone, Plus, Edit, Archive, Trash2, Languages, X, Search, Filter, RotateCcw, Send, FileEdit } from 'lucide-react'
 import api from '../../lib/api'
 
 type Level = 'info' | 'notice' | 'warning' | 'critical'
-type Status = 'active' | 'archived'
+type Status = 'draft' | 'active' | 'archived'
 type GranteeType = 'user' | 'role' | 'factory' | 'department' | 'cost_center' | 'division' | 'org_group'
 type Lang = 'zh-TW' | 'en' | 'vi'
 
@@ -133,6 +133,14 @@ export default function AnnouncementsAdmin() {
     } catch (e: any) { alert('下架失敗: ' + (e?.response?.data?.error || e.message)) }
   }
 
+  const handlePublish = async (id: number) => {
+    if (!confirm('確定要發布這則草稿公告嗎?\n\n發布後使用者端立即看到。如果尚未翻譯 en/vi,使用者切到該語言會看到 zh-TW 原文。')) return
+    try {
+      await api.post(`/announcements/admin/${id}/publish`)
+      await load()
+    } catch (e: any) { alert('發布失敗: ' + (e?.response?.data?.error || e.message)) }
+  }
+
   /** 永久刪除 — 走兩段確認,使用者要打字驗證 ID,避免手滑誤刪 */
   const handleDelete = async (a: AnnouncementListItem) => {
     const title = a.title_zh || `公告 #${a.id}`
@@ -216,8 +224,9 @@ export default function AnnouncementsAdmin() {
             className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white"
           >
             <option value="active">上架中</option>
+            <option value="draft">草稿(尚未發布)</option>
             <option value="archived">已下架</option>
-            <option value="all">全部(含已下架)</option>
+            <option value="all">全部</option>
           </select>
 
           {/* 等級 */}
@@ -310,7 +319,7 @@ export default function AnnouncementsAdmin() {
             {!loading && list.map(a => {
               const expired = a.effective_to && new Date(a.effective_to) < new Date()
               return (
-                <tr key={a.id} className={`border-t border-slate-100 hover:bg-slate-50 ${a.status === 'archived' ? 'opacity-60' : ''}`}>
+                <tr key={a.id} className={`border-t border-slate-100 hover:bg-slate-50 ${a.status === 'archived' ? 'opacity-60' : a.status === 'draft' ? 'bg-amber-50/30' : ''}`}>
                   <td className="px-3 py-2">
                     <span className="inline-flex items-center gap-1.5">
                       <span className={`w-2 h-2 rounded-full ${levelDot(a.level)}`} />
@@ -319,9 +328,13 @@ export default function AnnouncementsAdmin() {
                   </td>
                   <td className="px-3 py-2 text-slate-800 max-w-md truncate">{a.title_zh || '(未設定 zh-TW 標題)'}</td>
                   <td className="px-3 py-2">
-                    {a.status === 'active' ? (
+                    {a.status === 'active' && (
                       <span className="inline-flex items-center text-xs px-2 py-0.5 rounded bg-green-50 text-green-700 border border-green-200">上架中</span>
-                    ) : (
+                    )}
+                    {a.status === 'draft' && (
+                      <span className="inline-flex items-center text-xs px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">草稿</span>
+                    )}
+                    {a.status === 'archived' && (
                       <span className="inline-flex items-center text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">已下架</span>
                     )}
                     {expired && a.status === 'active' && (
@@ -348,6 +361,11 @@ export default function AnnouncementsAdmin() {
                       <button onClick={() => openEdit(a.id)} className="p-1.5 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded" title={a.status === 'archived' ? '檢視 / 內容回查' : '編輯 / 翻譯'}>
                         <Edit size={14} />
                       </button>
+                      {a.status === 'draft' && (
+                        <button onClick={() => handlePublish(a.id)} className="p-1.5 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded" title="發布(從草稿上架)">
+                          <Send size={14} />
+                        </button>
+                      )}
                       {a.status === 'active' && (
                         <button onClick={() => handleArchive(a.id)} className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded" title="下架(保留歷史)">
                           <Archive size={14} />
@@ -412,17 +430,39 @@ function AnnouncementEditor({
   const [bodyVi, setBodyVi]   = useState(vi?.body || '')
 
   const [activeLang, setActiveLang] = useState<Lang>('zh-TW')
-  const [saving, setSaving] = useState(false)
+  const [saving, setSaving] = useState<null | 'draft' | 'publish'>(null)
   const [translating, setTranslating] = useState<Lang | null>(null)
 
-  const handleSave = async () => {
+  // 編輯既有公告時的當前狀態(會用來決定按鈕文字)
+  // - 新增:isNew=true,固定走 draft / publish 兩動作
+  // - 編輯 draft:儲存草稿變動 / 發布
+  // - 編輯 active:儲存變更(維持 active) / 退回草稿
+  // - 編輯 archived:只能儲存變更(維持 archived)
+  const currentStatus: Status | null = isNew ? null : initial!.status
+
+  /**
+   * @param mode 'draft' = 儲存草稿(user 端不可見) / 'publish' = 儲存並發布上架 / 'asis' = 維持當前 status
+   */
+  const handleSave = async (mode: 'draft' | 'publish' | 'asis') => {
     if (!titleZh.trim()) { alert('請填寫繁體中文標題'); return }
-    setSaving(true)
+    setSaving(mode === 'publish' ? 'publish' : 'draft')
     try {
+      // 決定送出的 status:
+      //   - new + draft → 'draft'
+      //   - new + publish → 直接 'active'
+      //   - edit + draft → 'draft'(active 退回草稿)
+      //   - edit + publish → 'active'(草稿發布)
+      //   - edit + asis → 不送 status,由後端維持
+      let statusToSend: Status | undefined
+      if (mode === 'draft') statusToSend = 'draft'
+      else if (mode === 'publish') statusToSend = 'active'
+      else statusToSend = undefined
+
       let id: number
       if (isNew) {
         const { data } = await api.post('/announcements/admin', {
           level, dismissible: dismissible ? 1 : 0,
+          status: statusToSend || 'draft',
           effective_from: effectiveFrom ? new Date(effectiveFrom).toISOString() : null,
           effective_to:   effectiveTo   ? new Date(effectiveTo).toISOString()   : null,
           audience_mode: audienceMode,
@@ -432,7 +472,7 @@ function AnnouncementEditor({
         id = data.id
       } else {
         id = initial!.id
-        await api.put(`/announcements/admin/${id}`, {
+        const payload: any = {
           level, dismissible: dismissible ? 1 : 0,
           effective_from: effectiveFrom ? new Date(effectiveFrom).toISOString() : null,
           effective_to:   effectiveTo   ? new Date(effectiveTo).toISOString()   : null,
@@ -440,7 +480,9 @@ function AnnouncementEditor({
           audiences: audienceMode === 'targeted' ? audiences : [],
           title: titleZh, body: bodyZh,
           bumpRevision,
-        })
+        }
+        if (statusToSend) payload.status = statusToSend
+        await api.put(`/announcements/admin/${id}`, payload)
       }
       // 個別存 en / vi 翻譯(只在內容非空時寫入)
       if (titleEn || bodyEn) {
@@ -453,7 +495,7 @@ function AnnouncementEditor({
     } catch (e: any) {
       alert('儲存失敗: ' + (e?.response?.data?.error || e.message))
     } finally {
-      setSaving(false)
+      setSaving(null)
     }
   }
 
@@ -614,16 +656,73 @@ function AnnouncementEditor({
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="px-5 py-3 border-t border-slate-200 flex items-center justify-end gap-2">
-          <button onClick={onClose} className="text-sm px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg">取消</button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="text-sm px-4 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg disabled:opacity-50"
-          >
-            {saving ? '儲存中…' : (isNew ? '建立並儲存' : '儲存變更')}
-          </button>
+        {/* Footer — 拆「儲存草稿」/「儲存並發布」兩個動作,讓 admin 可先存稿翻譯再上架 */}
+        <div className="px-5 py-3 border-t border-slate-200 flex items-center gap-2">
+          {!isNew && currentStatus && (
+            <span className="text-xs text-slate-500">
+              當前狀態:
+              {currentStatus === 'draft'    && <span className="ml-1 text-slate-700 font-medium">草稿(user 端看不到)</span>}
+              {currentStatus === 'active'   && <span className="ml-1 text-green-700 font-medium">已發布</span>}
+              {currentStatus === 'archived' && <span className="ml-1 text-slate-500 font-medium">已下架</span>}
+            </span>
+          )}
+          <div className="ml-auto flex items-center gap-2">
+            <button onClick={onClose} className="text-sm px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg">取消</button>
+
+            {/* 新增 / 編輯草稿 → 兩個按鈕並列 */}
+            {(isNew || currentStatus === 'draft') && (
+              <>
+                <button
+                  onClick={() => handleSave('draft')}
+                  disabled={!!saving}
+                  className="text-sm px-3 py-1.5 border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg disabled:opacity-50 inline-flex items-center gap-1.5"
+                  title="儲存為草稿,user 端不會顯示。可繼續編輯與翻譯"
+                >
+                  <FileEdit size={13} /> {saving === 'draft' ? '儲存中…' : '儲存草稿'}
+                </button>
+                <button
+                  onClick={() => handleSave('publish')}
+                  disabled={!!saving}
+                  className="text-sm px-4 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg disabled:opacity-50 inline-flex items-center gap-1.5"
+                  title="儲存並立即發布,user 端馬上看到"
+                >
+                  <Send size={13} /> {saving === 'publish' ? '發布中…' : (isNew ? '儲存並發布' : '發布')}
+                </button>
+              </>
+            )}
+
+            {/* 編輯 active 公告 → 維持 active 儲存 + 可退回草稿 */}
+            {currentStatus === 'active' && (
+              <>
+                <button
+                  onClick={() => handleSave('draft')}
+                  disabled={!!saving}
+                  className="text-sm px-3 py-1.5 border border-amber-300 text-amber-700 hover:bg-amber-50 rounded-lg disabled:opacity-50 inline-flex items-center gap-1.5"
+                  title="退回草稿,user 端立即看不到。修正後再重新發布"
+                >
+                  <FileEdit size={13} /> 退回草稿
+                </button>
+                <button
+                  onClick={() => handleSave('asis')}
+                  disabled={!!saving}
+                  className="text-sm px-4 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg disabled:opacity-50"
+                >
+                  {saving ? '儲存中…' : '儲存變更'}
+                </button>
+              </>
+            )}
+
+            {/* 編輯 archived 公告 → 只能儲存(歷史保留) */}
+            {currentStatus === 'archived' && (
+              <button
+                onClick={() => handleSave('asis')}
+                disabled={!!saving}
+                className="text-sm px-4 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg disabled:opacity-50"
+              >
+                {saving ? '儲存中…' : '儲存變更'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

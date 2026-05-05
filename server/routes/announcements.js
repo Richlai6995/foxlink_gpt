@@ -135,6 +135,30 @@ router.post('/admin/:id/archive', verifyToken, verifyAdmin, async (req, res) => 
   }
 });
 
+router.post('/admin/:id/publish', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const { db } = require('../database-oracle');
+    const id = Number(req.params.id);
+    await svc.publish(db, id);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[announcements][admin] publish error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/admin/:id/unpublish', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const { db } = require('../database-oracle');
+    const id = Number(req.params.id);
+    await svc.unpublish(db, id);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[announcements][admin] unpublish error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.put('/admin/:id/translations/:lang', verifyToken, verifyAdmin, async (req, res) => {
   try {
     const { db } = require('../database-oracle');
