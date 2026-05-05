@@ -458,6 +458,18 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
     } finally { setFinalizing(false) }
   }
 
+  // ─── Restart whole attempt ───
+  const restartExam = async () => {
+    if (!confirm(t('training.examRestartConfirm', '確定整輪重新測驗?目前所有章節成績(包含已通過的)將被清除,並佔用一次測驗機會。'))) return
+    setFinalizing(true)
+    try {
+      await api.post(`/training/courses/${courseId}/exam/restart`)
+      await loadExamOverview()
+    } catch (e: any) {
+      alert(e?.response?.data?.error || t('training.examRestartFailed', '重新測驗失敗'))
+    } finally { setFinalizing(false) }
+  }
+
   // Notes
   const saveNote = async () => {
     if (!currentSlide || !noteText.trim()) return
@@ -610,12 +622,23 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
               </button>
             )}
 
-            {ov.can_finalize && (
-              <button onClick={finalizeExam} disabled={finalizing}
-                className="w-full px-4 py-2 rounded-lg text-xs transition flex items-center justify-center gap-2"
-                style={{ color: 'var(--t-text-muted)', border: '1px solid var(--t-border)' }}>
-                <Flag size={12} /> {finalizing ? t('training.quizFinalizing', '結算中...') : t('training.quizFinalizeNow', '結束測驗,馬上結算')}
-              </button>
+            {(ov.can_finalize || ov.attempt) && (
+              <div className="flex gap-2">
+                {ov.can_finalize && (
+                  <button onClick={finalizeExam} disabled={finalizing}
+                    className="flex-1 px-4 py-2 rounded-lg text-xs transition flex items-center justify-center gap-2"
+                    style={{ color: 'var(--t-text-muted)', border: '1px solid var(--t-border)' }}>
+                    <Flag size={12} /> {finalizing ? t('training.quizFinalizing', '結算中...') : t('training.quizFinalizeNow', '結束測驗,馬上結算')}
+                  </button>
+                )}
+                {ov.attempt && (
+                  <button onClick={restartExam} disabled={finalizing}
+                    className="flex-1 px-4 py-2 rounded-lg text-xs transition flex items-center justify-center gap-2 text-amber-300"
+                    style={{ border: '1px solid rgba(217,119,6,0.5)' }}>
+                    <RotateCcw size={12} /> {t('training.examRestartAll', '重新測驗(整輪重來)')}
+                  </button>
+                )}
+              </div>
             )}
           </div>
 
@@ -784,11 +807,15 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
           <div className="text-xs" style={{ color: 'var(--t-text-dim)' }}>
             ({t('training.quizPassScore', '及格標準')}: {examOverview.course.pass_score})
           </div>
-          <div className="flex gap-3 justify-center pt-4">
+          <div className="flex gap-3 justify-center pt-4 flex-wrap">
             <button onClick={onClose}
               className="px-4 py-2 text-sm rounded-lg transition"
               style={{ color: 'var(--t-text-dim)', border: '1px solid var(--t-border)' }}>
               {t('training.backToCourse', '返回課程')}
+            </button>
+            <button onClick={restartExam} disabled={finalizing}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition bg-amber-600 hover:bg-amber-500 text-white disabled:opacity-40">
+              <RotateCcw size={14} /> {t('training.examRestartAll', '重新測驗(整輪重來)')}
             </button>
           </div>
         </div>

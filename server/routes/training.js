@@ -2333,17 +2333,30 @@ function _computeNextSuggested(chapterList, rowsByLessonKey) {
 }
 
 // helper: attempt 整體結算
-async function _finalizeAttempt(attemptId, courseId, userId) {
+//   passed = 必須「全部課程章節都有 row 且 row.passed=1」
+//     (避免「只做 1 章節滿分就 finalize → percent=100% → 假通過」漏洞)
+async function _finalizeAttempt(attemptId, courseId, userId, mode = 'questions') {
   const sums = await db.prepare(`
     SELECT NVL(SUM(score), 0) AS s, NVL(SUM(max_score), 0) AS m
     FROM quiz_attempt_chapters WHERE attempt_id=?
   `).get(attemptId);
-  const course = await db.prepare('SELECT pass_score FROM courses WHERE id=?').get(courseId);
-  const passScore = course?.pass_score || 60;
   const score = Number(sums?.s || 0);
   const totalPoints = Number(sums?.m || 0);
-  const percent = totalPoints > 0 ? (score / totalPoints) * 100 : 0;
-  const passed = percent >= passScore ? 1 : 0;
+
+  // 取課程章節清單(對應 mode)算「全章節都 passed」
+  const courseChapterList = mode === 'slides'
+    ? await _getSlideExamChapterList(courseId)
+    : await _getCourseChapterList(courseId);
+  const allRows = await db.prepare(
+    'SELECT lesson_id, passed FROM quiz_attempt_chapters WHERE attempt_id=?'
+  ).all(attemptId);
+  const byLesson = new Map();
+  for (const r of allRows) byLesson.set(r.lesson_id ?? 0, r);
+  const allChaptersPassed = courseChapterList.length > 0 && courseChapterList.every(ch => {
+    const row = byLesson.get(ch.lesson_id ?? 0);
+    return row && row.passed === 1;
+  });
+  const passed = allChaptersPassed ? 1 : 0;
 
   // 收集 per-chapter 答題詳情合併進 answers_json
   const chapters = await db.prepare(`
@@ -2834,6 +2847,63 @@ router.post('/courses/:id/quiz/finalize', loadCoursePermission, async (req, res)
   }
 });
 
+// helper:重新測驗 — abandon 當前 attempt + 開新 attempt
+//   abandon 不算 _finalizeAttempt(避免「partial passed」的 score 被誤算成正式成績)
+//   直接標 completed_at + score=0 + passed=0,review_status='abandoned'
+async function _restartAttempt(courseId, userId, mode = 'questions') {
+  const course = await db.prepare(
+    'SELECT max_attempts FROM courses WHERE id=?'
+  ).get(courseId);
+
+  // Abandon 當前未結算 attempt(若有)
+  const active = await _getActiveAttempt(courseId, userId, mode);
+  if (active) {
+    await db.prepare(`
+      UPDATE quiz_attempts
+      SET completed_at=SYSTIMESTAMP, score=0, total_points=0, passed=0,
+          review_status='abandoned'
+      WHERE id=?
+    `).run(active.id);
+    // 同時把該 attempt 的 in_progress chapter 標 timeout(已扣的 elapsed 不還,作為「放棄」代價)
+    await db.prepare(`
+      UPDATE quiz_attempt_chapters
+      SET status='timeout', completed_at=SYSTIMESTAMP,
+          elapsed_seconds=COALESCE(time_budget_seconds, elapsed_seconds)
+      WHERE attempt_id=? AND status='in_progress'
+    `).run(active.id);
+  }
+
+  // 檢查 max_attempts(完成的 attempt 數 + 1)
+  const cnt = await db.prepare(
+    `SELECT COUNT(*) AS cnt FROM quiz_attempts WHERE course_id=? AND user_id=? AND NVL(mode,'questions')=?`
+  ).get(courseId, userId, mode);
+  const attemptNum = (Number(cnt?.cnt || 0)) + 1;
+  if (course?.max_attempts && attemptNum > course.max_attempts) {
+    return { error: `已達最大測驗次數 (${course.max_attempts})`, status: 400 };
+  }
+
+  // 開新 attempt
+  let newSessionId = null;
+  if (mode === 'slides') newSessionId = require('crypto').randomUUID();
+  const ins = await db.prepare(`
+    INSERT INTO quiz_attempts (course_id, user_id, attempt_number, mode, session_id)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(courseId, userId, attemptNum, mode, newSessionId);
+  return { attempt_id: ins.lastInsertRowid, attempt_number: attemptNum };
+}
+
+// POST /api/training/courses/:id/quiz/restart — 整輪重來(questions 模式)
+router.post('/courses/:id/quiz/restart', loadCoursePermission, async (req, res) => {
+  try {
+    const result = await _restartAttempt(req.courseId, req.user.id, 'questions');
+    if (result.error) return res.status(result.status || 400).json({ error: result.error });
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    console.error('[Training] quiz restart:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Slide Exam:章節制(CoursePlayer 互動 slide 模式 — 跟 /quiz/* 同模型,但 mode='slides')
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2868,7 +2938,7 @@ router.get('/courses/:id/exam/overview', loadCoursePermission, async (req, res) 
           'SELECT COUNT(*) AS c FROM quiz_attempt_chapters WHERE attempt_id=?'
         ).get(attempt.id);
         if (Number(anyChapter?.c || 0) > 0) {
-          await _finalizeAttempt(attempt.id, req.courseId, req.user.id);
+          await _finalizeAttempt(attempt.id, req.courseId, req.user.id, 'slides');
           attempt = await db.prepare('SELECT * FROM quiz_attempts WHERE id=?').get(attempt.id);
         }
       }
@@ -3162,7 +3232,7 @@ router.post('/courses/:id/exam/chapter/:lessonId/submit', loadCoursePermission, 
     let finalized = false;
     let finalResult = null;
     if (allChaptersPassed && courseChapterList.length > 0) {
-      finalResult = await _finalizeAttempt(attempt.id, req.courseId, req.user.id);
+      finalResult = await _finalizeAttempt(attempt.id, req.courseId, req.user.id, 'slides');
       finalized = true;
     }
 
@@ -3208,10 +3278,22 @@ router.post('/courses/:id/exam/finalize', loadCoursePermission, async (req, res)
       return res.status(400).json({ error: '尚未開始任何章節' });
     }
 
-    const finalResult = await _finalizeAttempt(attempt.id, req.courseId, req.user.id);
+    const finalResult = await _finalizeAttempt(attempt.id, req.courseId, req.user.id, 'slides');
     res.json({ finalized: true, final: finalResult });
   } catch (e) {
     console.error('[Training] exam finalize:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/training/courses/:id/exam/restart — 整輪重來(slides 模式)
+router.post('/courses/:id/exam/restart', loadCoursePermission, async (req, res) => {
+  try {
+    const result = await _restartAttempt(req.courseId, req.user.id, 'slides');
+    if (result.error) return res.status(result.status || 400).json({ error: result.error });
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    console.error('[Training] exam restart:', e.message);
     res.status(500).json({ error: e.message });
   }
 });

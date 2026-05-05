@@ -163,6 +163,17 @@ export default function QuizPage() {
     } finally { setFinalizing(false) }
   }
 
+  const restartAttempt = async () => {
+    if (!confirm(t('training.quizRestartConfirm', '確定整輪重新測驗?目前所有章節成績(包含已通過的)將被清除,並佔用一次測驗機會。'))) return
+    setFinalizing(true)
+    try {
+      await api.post(`/training/courses/${id}/quiz/restart`)
+      await loadOverview()
+    } catch (e: any) {
+      alert(e.response?.data?.error || t('training.quizRestartFailed', '重新測驗失敗'))
+    } finally { setFinalizing(false) }
+  }
+
   const setAnswer = (qId: number, value: any) => setAnswers(prev => ({ ...prev, [qId]: value }))
 
   if (loading) {
@@ -445,12 +456,22 @@ export default function QuizPage() {
             </button>
           )}
 
-          {/* Finalize button — 至少 1 章做過,還沒 finalize */}
-          {!finalized && ov.can_finalize && (
-            <button onClick={finalizeAttempt} disabled={finalizing}
-              className="w-full border border-slate-600 hover:bg-slate-700 px-4 py-2 rounded-lg text-xs transition flex items-center justify-center gap-2 text-slate-300">
-              <Flag size={12} /> {finalizing ? t('training.quizFinalizing', '結算中...') : t('training.quizFinalizeNow', '結束測驗,馬上結算')}
-            </button>
+          {/* Finalize / Restart row */}
+          {!finalized && (ov.can_finalize || ov.attempt) && (
+            <div className="flex gap-2">
+              {ov.can_finalize && (
+                <button onClick={finalizeAttempt} disabled={finalizing}
+                  className="flex-1 border border-slate-600 hover:bg-slate-700 px-4 py-2 rounded-lg text-xs transition flex items-center justify-center gap-2 text-slate-300">
+                  <Flag size={12} /> {finalizing ? t('training.quizFinalizing', '結算中...') : t('training.quizFinalizeNow', '結束測驗,馬上結算')}
+                </button>
+              )}
+              {ov.attempt && (
+                <button onClick={restartAttempt} disabled={finalizing}
+                  className="flex-1 border border-amber-600/50 hover:bg-amber-600/10 px-4 py-2 rounded-lg text-xs transition flex items-center justify-center gap-2 text-amber-300">
+                  <RotateCcw size={12} /> {t('training.quizRestartAll', '重新測驗(整輪重來)')}
+                </button>
+              )}
+            </div>
           )}
 
           {finalized && ov.attempt && (
@@ -464,10 +485,16 @@ export default function QuizPage() {
                     {ov.attempt.passed ? t('training.quizPassed', '✓ 通過') : t('training.quizFailed', '✗ 未通過')}
                   </div>
                 </div>
-                <button onClick={() => navigate(`/training/course/${id}`)}
-                  className="text-xs px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600">
-                  {t('training.backToCourse', '返回課程')}
-                </button>
+                <div className="flex gap-2">
+                  <button onClick={restartAttempt} disabled={finalizing}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white flex items-center gap-1.5 disabled:opacity-40">
+                    <RotateCcw size={11} /> {t('training.quizRestartAll', '重新測驗(整輪重來)')}
+                  </button>
+                  <button onClick={() => navigate(`/training/course/${id}`)}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600">
+                    {t('training.backToCourse', '返回課程')}
+                  </button>
+                </div>
               </div>
             </div>
           )}
