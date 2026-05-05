@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
-import { ArrowLeft, ChevronLeft, ChevronRight, Volume2, VolumeX, BookmarkPlus, MessageSquare, X, List, Clock, RotateCcw, ChevronDown, ChevronRight as ChevronR } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, Volume2, VolumeX, BookmarkPlus, MessageSquare, X, List, Clock, RotateCcw, ChevronDown, ChevronRight as ChevronR, Play, CheckCircle2, XCircle, Lock, Flag, AlertTriangle, ListOrdered } from 'lucide-react'
 import SlideRenderer from './SlideRenderer'
 
 interface Slide {
@@ -104,7 +104,8 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
   const [programExamConfig, setProgramExamConfig] = useState<any>(null)
 
   // ─── Exam state ───
-  const [examPhase, setExamPhase] = useState<'idle' | 'start' | 'running' | 'result'>('idle')
+  // chapter_overview: 章節列表 / running: 跑章節題目 / chapter_result: 該章節剛結束 / final_result: 全 attempt 結算
+  const [examPhase, setExamPhase] = useState<'idle' | 'chapter_overview' | 'running' | 'chapter_result' | 'final_result'>('idle')
   const [examTimeLeft, setExamTimeLeft] = useState(0)
   const [examStartTime, setExamStartTime] = useState(0)
   const [examResults, setExamResults] = useState<SlideResult[]>([])
@@ -115,6 +116,18 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
   const interactiveIndices = useMemo(() =>
     allSlides.map((s, i) => hasScorableBlock(s) ? i : -1).filter(i => i >= 0)
   , [allSlides])
+
+  // ─── Chapter mode state ───
+  const [examOverview, setExamOverview] = useState<any>(null)
+  const [currentChapterLessonId, setCurrentChapterLessonId] = useState<number | null>(null)
+  const [chapterResultData, setChapterResultData] = useState<any>(null)  // { score, max_score, passed, finalized, final, next_suggested_lesson_id }
+  const [finalizing, setFinalizing] = useState(false)
+
+  // Chapter-scoped interactive indices (only slides of current chapter)
+  const chapterInteractiveIndices = useMemo(() => {
+    if (currentChapterLessonId == null) return interactiveIndices
+    return interactiveIndices.filter(i => allSlides[i]?.lesson_id === currentChapterLessonId)
+  }, [interactiveIndices, allSlides, currentChapterLessonId])
 
   const lang = langProp || i18n.language
 
@@ -288,7 +301,7 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
 
   // Keyboard nav (learn mode only)
   useEffect(() => {
-    if (examPhase === 'running' || examPhase === 'result') return
+    if (examPhase === 'running' || examPhase === 'chapter_result' || examPhase === 'final_result') return
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); goNext() }
       if (e.key === 'ArrowLeft') { e.preventDefault(); goPrev() }
@@ -297,16 +310,15 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
     return () => window.removeEventListener('keydown', handler)
   }, [currentIdx, allSlides.length, examPhase])
 
-  // ─── Exam timer ───
+  // ─── Exam timer (per-chapter) ───
   useEffect(() => {
-    if (examPhase === 'running' && examTimeLimitEnabled) {
+    if (examPhase === 'running' && examTimeLimitEnabled && currentChapterLessonId != null) {
       examTimerRef.current = setInterval(() => {
         setExamTimeLeft(prev => {
           if (prev <= 1) {
             clearInterval(examTimerRef.current!)
-            if (examOvertimeAction === 'auto_submit') {
-              finishExam()
-            }
+            // 章節 timer 到 → auto submit 章節(不論 examOvertimeAction,章節制下一定 auto)
+            finishChapter(true)
             return 0
           }
           return prev - 1
@@ -314,76 +326,136 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
       }, 1000)
       return () => { if (examTimerRef.current) clearInterval(examTimerRef.current) }
     }
-  }, [examPhase, examTimeLimitEnabled])
+  }, [examPhase, examTimeLimitEnabled, currentChapterLessonId])
 
-  // Switch to test mode → show start screen
+  // Switch to test mode → load chapter overview
   useEffect(() => {
     if (playerMode === 'test' && examPhase === 'idle' && allSlides.length > 0) {
-      setExamPhase('start')
+      loadExamOverview()
     }
     if (playerMode === 'learn') {
       setExamPhase('idle')
+      setCurrentChapterLessonId(null)
+      setChapterResultData(null)
       if (examTimerRef.current) clearInterval(examTimerRef.current)
     }
   }, [playerMode, allSlides.length])
 
-  // ─── Start exam ───
-  const startExam = () => {
-    setExamResults([])
-    examResultsRef.current = []
-    setExamStartTime(Date.now())
-    setExamTimeLeft(examTimeLimit * 60)
-    setExamPhase('running')
-    // Jump to first interactive slide
-    if (interactiveIndices.length > 0) {
-      setCurrentIdx(interactiveIndices[0])
+  // ─── Load chapter overview ───
+  const loadExamOverview = async () => {
+    try {
+      const res = await api.get(`/training/courses/${courseId}/exam/overview`)
+      setExamOverview(res.data)
+      // 已 finalize → 直接進 final_result
+      if (res.data?.attempt?.completed_at) {
+        setExamPhase('final_result')
+      } else {
+        setExamPhase('chapter_overview')
+      }
+    } catch (e: any) {
+      console.error('[CoursePlayer] exam overview:', e?.response?.data?.error || e?.message)
+      // Fallback:overview 失敗(例如沒有任何 interactive 章節)→ 直接 idle
+      setExamPhase('idle')
     }
   }
 
-  // ─── Finish exam ───
-  const finishExam = useCallback(() => {
+  // ─── Start a chapter ───
+  const startChapterExam = async (lessonId: number) => {
+    try {
+      const res = await api.post(`/training/courses/${courseId}/exam/chapter/${lessonId}/start`)
+      const data = res.data
+      setExamResults([])
+      examResultsRef.current = []
+      setChapterResultData(null)
+      setCurrentChapterLessonId(lessonId)
+      // Server-side timer:用 chapter_remaining_seconds 顯示倒數
+      const initialLeft = data.chapter_remaining_seconds ?? data.time_budget_seconds ?? (examTimeLimit * 60)
+      setExamTimeLeft(initialLeft)
+      setExamStartTime(Date.now())
+      setExamPhase('running')
+      // Jump to first interactive slide of this lesson
+      const firstIdx = interactiveIndices.find(i => allSlides[i]?.lesson_id === lessonId)
+      if (firstIdx !== undefined) setCurrentIdx(firstIdx)
+    } catch (e: any) {
+      alert(e?.response?.data?.error || t('training.examChapterStartFailed', '無法開始章節'))
+      await loadExamOverview()
+    }
+  }
+
+  // ─── Finish chapter (called when chapter's last interactive slide done OR timer up) ───
+  const finishChapter = useCallback(async (auto = false) => {
     if (examTimerRef.current) clearInterval(examTimerRef.current)
     const results = [...examResultsRef.current]
-    setExamPhase('result')
     setExamResults(results)
 
-    // Submit lesson-level quiz results (aggregate by lesson_id)
-    const lessonScores = new Map<number, { score: number; max: number }>()
-    for (const r of results) {
-      const slide = allSlides[r.slideIndex]
-      if (!slide) continue
-      const lid = slide.lesson_id
-      const prev = lessonScores.get(lid) || { score: 0, max: 0 }
-      prev.score += r.weightedScore
-      prev.max += r.weightedMax
-      lessonScores.set(lid, prev)
+    if (currentChapterLessonId == null) {
+      console.warn('[CoursePlayer] finishChapter without currentChapterLessonId')
+      return
     }
-    // Also fill missing slides with 0
-    for (const idx of interactiveIndices) {
+
+    // Aggregate score for THIS chapter only(用 chapterInteractiveIndices)
+    let chapterScore = 0, chapterMax = 0
+    const chapterSlideResults: any[] = []
+    for (const idx of chapterInteractiveIndices) {
       const slide = allSlides[idx]
       if (!slide) continue
-      if (!results.find(r => r.slideIndex === idx)) {
-        const lid = slide.lesson_id
-        const prev = lessonScores.get(lid) || { score: 0, max: 0 }
-        prev.max += getSlideWeight(slide.id, interactiveIndices.length)
-        lessonScores.set(lid, prev)
+      const r = results.find(x => x.slideIndex === idx)
+      if (r) {
+        chapterScore += r.weightedScore
+        chapterMax += r.weightedMax
+        chapterSlideResults.push({
+          slide_id: slide.id,
+          score: r.weightedScore,
+          max: r.weightedMax,
+          block_type: r.blockType
+        })
+      } else {
+        // 未完成的 slide → max 計入,score=0
+        const w = getSlideWeight(slide.id, interactiveIndices.length)
+        chapterMax += w
+        chapterSlideResults.push({ slide_id: slide.id, score: 0, max: w, completed: false })
       }
     }
-    const source = skipAccessCheck ? 'help' : 'classroom'
-    lessonScores.forEach((val, lid) => {
-      api.post('/training/lesson-quiz-result', {
-        course_id: courseId, lesson_id: lid, session_id: sessionId,
-        score: val.score, max_score: val.max, source,
-      }).catch(e => console.error('[CoursePlayer] lesson-quiz-result:', e))
-    })
-  }, [allSlides, interactiveIndices, getSlideWeight, courseId, sessionId, skipAccessCheck])
 
-  // ─── Restart exam ───
-  const restartExam = () => {
+    try {
+      const res = await api.post(
+        `/training/courses/${courseId}/exam/chapter/${currentChapterLessonId}/submit`,
+        { score: chapterScore, max_score: chapterMax, slide_results: chapterSlideResults }
+      )
+      setChapterResultData(res.data)
+      if (res.data?.finalized) {
+        setExamPhase('final_result')
+      } else {
+        setExamPhase('chapter_result')
+      }
+      void auto
+    } catch (e: any) {
+      console.error('[CoursePlayer] exam chapter submit:', e)
+      alert(e?.response?.data?.error || t('training.examSubmitFailed', '提交失敗'))
+    }
+  }, [chapterInteractiveIndices, allSlides, currentChapterLessonId, getSlideWeight, interactiveIndices.length, courseId, t])
+
+  // ─── Back to chapter overview ───
+  const backToChapterOverview = async () => {
+    setCurrentChapterLessonId(null)
+    setChapterResultData(null)
     setExamResults([])
     examResultsRef.current = []
     setExpandedResult(null)
-    setExamPhase('start')
+    if (examTimerRef.current) { clearInterval(examTimerRef.current); examTimerRef.current = null }
+    await loadExamOverview()
+  }
+
+  // ─── Manual finalize ───
+  const finalizeExam = async () => {
+    if (!confirm(t('training.examFinalizeConfirm', '確定結束本次測驗?未做完的章節將以 0 分計算,且時間將被扣到上限。'))) return
+    setFinalizing(true)
+    try {
+      await api.post(`/training/courses/${courseId}/exam/finalize`)
+      await loadExamOverview()
+    } catch (e: any) {
+      alert(e?.response?.data?.error || t('training.examFinalizeFailed', '結算失敗'))
+    } finally { setFinalizing(false) }
   }
 
   // Notes
@@ -454,21 +526,21 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
         setScoreToast({ score: weightedScore, max: weight, label: `${t('training.examQuestion')} ${questionNum}` })
         setTimeout(() => setScoreToast(null), 3000)
 
-        // Auto-advance to next interactive slide after delay
+        // Auto-advance to next interactive slide of CURRENT CHAPTER
         setTimeout(() => {
-          const currentInteractiveIdx = interactiveIndices.indexOf(slideIdx)
-          if (currentInteractiveIdx < interactiveIndices.length - 1) {
-            setCurrentIdx(interactiveIndices[currentInteractiveIdx + 1])
+          const idxInChapter = chapterInteractiveIndices.indexOf(slideIdx)
+          if (idxInChapter >= 0 && idxInChapter < chapterInteractiveIndices.length - 1) {
+            setCurrentIdx(chapterInteractiveIndices[idxInChapter + 1])
           } else {
-            // All done
-            finishExam()
+            // 該章節最後一題 → 結束本章節(不結束整個 attempt)
+            finishChapter(false)
           }
         }, 2000)
       }
     } catch (e) {
       console.error('[CoursePlayer] interaction-result submit:', e)
     }
-  }, [playerMode, sessionId, examPhase, interactiveIndices, allSlides, getSlideWeight, finishExam, t])
+  }, [playerMode, sessionId, examPhase, interactiveIndices, chapterInteractiveIndices, allSlides, getSlideWeight, finishChapter, t])
 
   // Format seconds to mm:ss
   const fmtTime = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
@@ -478,163 +550,253 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
   }
 
   // ═══════════════════════════════════════════════════════════════════════════════
-  // Exam Start Screen
+  // Chapter Overview Screen — 章節列表 / 主按鈕 / 結束按鈕
   // ═══════════════════════════════════════════════════════════════════════════════
-  if (examPhase === 'start') {
+  if (examPhase === 'chapter_overview' && examOverview) {
+    const ov = examOverview
+    const isSequential = ov.course?.quiz_sequential
+    const inProgressChapter = ov.chapters.find((c: any) => c.status === 'in_progress')
+    const nextSuggested = ov.chapters.find((c: any) => c.lesson_id === ov.next_suggested_lesson_id)
+    const primaryAction = inProgressChapter ?? nextSuggested ?? null
+    const primaryLabel = inProgressChapter
+      ? t('training.examResumeChapterX', '繼續章節:{{title}}', { title: inProgressChapter.title })
+      : (nextSuggested ? t('training.examStartChapterX', '開始章節:{{title}}', { title: nextSuggested.title }) : '')
+
     return (
-      <div className="flex-1 flex items-center justify-center p-8">
-        <div className="max-w-md w-full rounded-2xl p-8 text-center" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
-          <div className="text-4xl mb-4">📝</div>
-          <h2 className="text-lg font-bold mb-1" style={{ color: 'var(--t-text)' }}>{examTopic?.title || course.title}</h2>
-          {examTopic && <p className="text-xs mb-2" style={{ color: 'var(--t-text-dim)' }}>{course.title}</p>}
-          <div className="space-y-2 mb-6 text-sm" style={{ color: 'var(--t-text-secondary)' }}>
-            <p>📊 {t('training.examTotalScore')}: <strong>{examTotalScore} {t('training.examPoints')}</strong></p>
-            <p>📋 {t('training.examQuestionCount')}: <strong>{interactiveIndices.length} {t('training.examQuestions')}</strong></p>
-            {examTimeLimitEnabled && (
-              <p>⏱ {t('training.examTimeLimit')}: <strong>{examTimeLimit} {t('training.examMinutes')}</strong></p>
+      <div className="flex-1 overflow-y-auto p-4 md:p-8">
+        <div className="max-w-3xl mx-auto space-y-4">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setPlayerMode('learn')} style={{ color: 'var(--t-text-muted)' }} className="hover:opacity-70">
+              <ArrowLeft size={20} />
+            </button>
+            <h1 className="text-xl font-semibold" style={{ color: 'var(--t-text)' }}>{course.title}</h1>
+            {isSequential && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 flex items-center gap-1">
+                <ListOrdered size={10} /> {t('training.quizSequentialBadge', '依序測驗')}
+              </span>
             )}
-            <p>✅ {t('training.examPassScore')}: <strong>{examPassScore} {t('training.examPoints')}</strong></p>
           </div>
-          <div className="text-xs mb-6 px-4 py-3 rounded-lg text-left space-y-1" style={{ backgroundColor: 'var(--t-bg-inset)', color: 'var(--t-text-dim)' }}>
-            <p>• {t('training.examHint1')}</p>
-            <p>• {t('training.examHint2')}</p>
-            {examTimeLimitEnabled && <p>• {examOvertimeAction === 'auto_submit' ? t('training.examHint3Auto') : t('training.examHint3Warn')}</p>}
-          </div>
-          <div className="flex gap-3 justify-center">
-            <button onClick={() => setPlayerMode('learn')} className="px-4 py-2 text-xs rounded-lg transition"
-              style={{ color: 'var(--t-text-dim)', border: '1px solid var(--t-border)' }}>
-              {t('training.backToLearn')}
-            </button>
-            <button onClick={startExam}
-              className="px-6 py-2 text-sm font-medium text-white rounded-lg transition bg-orange-500 hover:bg-orange-400">
-              ▶ {t('training.startExam')}
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  }
 
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // Exam Result Screen
-  // ═══════════════════════════════════════════════════════════════════════════════
-  if (examPhase === 'result') {
-    const totalWeighted = examResults.reduce((s, r) => s + r.weightedScore, 0)
-    const totalWeightedMax = examResults.reduce((s, r) => s + r.weightedMax, 0)
-    // Fill in missing slides (not completed = 0)
-    const allResultsMap = new Map(examResults.map(r => [r.slideIndex, r]))
-    const fullResults: SlideResult[] = interactiveIndices.map((idx, i) => {
-      const existing = allResultsMap.get(idx)
-      if (existing) return existing
-      return {
-        slideId: allSlides[idx].id, slideIndex: idx,
-        rawScore: 0, rawMax: 0, weightedScore: 0,
-        weightedMax: getSlideWeight(allSlides[idx].id, interactiveIndices.length),
-        completed: false, blockType: 'unknown'
-      }
-    })
-    const totalFinalMax = fullResults.reduce((s, r) => s + r.weightedMax, 0)
-    const passed = totalWeighted >= examPassScore
-    const elapsedSec = Math.round((Date.now() - examStartTime) / 1000)
-
-    return (
-      <div className="flex-1 overflow-y-auto p-6">
-        <div className="max-w-lg mx-auto">
-          {/* Summary */}
-          <div className="rounded-2xl p-6 text-center mb-6" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
-            <div className="text-5xl mb-2">{passed ? '🏆' : '📝'}</div>
-            <div className="text-3xl font-bold mb-1" style={{ color: passed ? '#22c55e' : '#ef4444' }}>
-              {totalWeighted} / {totalFinalMax}
+          <div className="rounded-xl p-5 space-y-3" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <div className="text-xs" style={{ color: 'var(--t-text-dim)' }}>{t('training.quizTotalTime', '總時間')}</div>
+                <div className="text-2xl font-mono font-bold" style={{ color: 'var(--t-text)' }}>
+                  {ov.course.time_limit_minutes ? fmtTime(ov.remaining_seconds) : '∞'}
+                  {ov.course.time_limit_minutes != null && (
+                    <span className="text-xs font-normal ml-2" style={{ color: 'var(--t-text-dim)' }}>
+                      / {ov.course.time_limit_minutes} {t('training.quizMinutes', '分')}
+                    </span>
+                  )}
+                </div>
+                <div className="text-xs mt-1" style={{ color: 'var(--t-text-dim)' }}>
+                  {t('training.quizTimeUsed', '已用 {{u}} 分', { u: Math.floor(ov.used_seconds / 60) })}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-xs" style={{ color: 'var(--t-text-dim)' }}>{t('training.quizPassScore', '及格標準')}</div>
+                <div className="text-lg font-semibold" style={{ color: 'var(--t-text)' }}>{ov.course.pass_score} {t('training.quizPointsUnit', '分')}</div>
+                <div className="text-xs mt-1" style={{ color: 'var(--t-text-dim)' }}>
+                  {t('training.quizAttempt', '第 {{n}} 次測驗', { n: (ov.attempt?.attempt_number || ov.total_attempts + 1) })}
+                </div>
+              </div>
             </div>
-            <div className="text-sm mb-3" style={{ color: 'var(--t-text-dim)' }}>
-              ⏱ {fmtTime(elapsedSec)} / {examTimeLimitEnabled ? fmtTime(examTimeLimit * 60) : '∞'}
-            </div>
-            <span className={`text-xs font-medium px-3 py-1 rounded-full ${passed ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-              {passed ? `✅ ${t('training.examPassed')}` : `❌ ${t('training.examFailed')}`}
-              {` (${t('training.examPassScore')}: ${examPassScore})`}
-            </span>
+
+            {primaryAction && (
+              <button onClick={() => startChapterExam(primaryAction.lesson_id)}
+                disabled={ov.course.time_limit_minutes != null && ov.remaining_seconds <= 0}
+                className="w-full bg-orange-500 hover:bg-orange-400 px-4 py-3 rounded-lg text-sm font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-white">
+                <Play size={16} /> {primaryLabel}
+              </button>
+            )}
+
+            {ov.can_finalize && (
+              <button onClick={finalizeExam} disabled={finalizing}
+                className="w-full px-4 py-2 rounded-lg text-xs transition flex items-center justify-center gap-2"
+                style={{ color: 'var(--t-text-muted)', border: '1px solid var(--t-border)' }}>
+                <Flag size={12} /> {finalizing ? t('training.quizFinalizing', '結算中...') : t('training.quizFinalizeNow', '結束測驗,馬上結算')}
+              </button>
+            )}
           </div>
 
-          {/* Per-slide results */}
           <div className="space-y-2">
-            {fullResults.map((r, i) => {
-              const pct = r.weightedMax > 0 ? Math.round((r.weightedScore / r.weightedMax) * 100) : 0
-              const isFull = pct === 100
-              const isZero = pct === 0
-              const isExpanded = expandedResult === i
+            <div className="flex items-center justify-between">
+              <div className="text-xs uppercase tracking-wide" style={{ color: 'var(--t-text-dim)' }}>{t('training.quizChapterList', '章節列表')}</div>
+              <div className="text-[10px]" style={{ color: 'var(--t-text-dim)' }}>{t('training.quizChapterHelp', '通過的章節會鎖住,未通過可重做')}</div>
+            </div>
+            {ov.chapters.map((c: any) => {
+              const isPassed = c.passed
+              const isFailed = (c.status === 'completed' || c.status === 'timeout') && !c.passed
+              const isInProg = c.status === 'in_progress'
+              const hasOther = inProgressChapter && inProgressChapter.lesson_id !== c.lesson_id
+              const sequentialLocked = c.is_sequential_locked && !isInProg && !isPassed && !isFailed
+              const lockedByOther = hasOther && !isPassed && !isFailed
+              const isSuggested = c.is_suggested && !isInProg
+              const percent = c.max_score && c.score != null ? Math.round((c.score / c.max_score) * 100) : null
 
               return (
-                <div key={i} className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--t-border)' }}>
-                  <button onClick={() => setExpandedResult(isExpanded ? null : i)}
-                    className="w-full flex items-center gap-3 px-4 py-3 text-left transition hover:opacity-90"
-                    style={{ backgroundColor: 'var(--t-bg-card)' }}>
-                    <span className="text-lg">{isFull ? '✅' : isZero ? '❌' : '⚠️'}</span>
-                    <span className="text-xs font-medium flex-1" style={{ color: 'var(--t-text)' }}>
-                      #{i + 1} {r.blockType && <span className="text-[10px] px-1 py-0.5 rounded bg-sky-500/15 text-sky-400 ml-1">{r.blockType}</span>}
-                    </span>
-                    <div className="w-24 h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--t-border)' }}>
-                      <div className="h-full rounded-full" style={{
-                        width: `${pct}%`,
-                        backgroundColor: isFull ? '#22c55e' : isZero ? '#ef4444' : '#f59e0b'
-                      }} />
-                    </div>
-                    <span className="text-sm font-bold min-w-[50px] text-right" style={{
-                      color: isFull ? '#22c55e' : isZero ? '#ef4444' : '#f59e0b'
-                    }}>
-                      {r.weightedScore}/{r.weightedMax}
-                    </span>
-                    {!isFull && <span style={{ color: 'var(--t-text-dim)' }}>{isExpanded ? <ChevronDown size={14} /> : <ChevronR size={14} />}</span>}
-                  </button>
-
-                  {/* Error analysis */}
-                  {isExpanded && !isFull && (
-                    <div className="px-4 pb-3 text-xs space-y-2" style={{ backgroundColor: 'var(--t-bg)', color: 'var(--t-text-secondary)' }}>
-                      {!r.completed && (
-                        <p className="text-red-400">⏱ {t('training.examNotCompleted')}</p>
+                <div key={c.lesson_id} className={`rounded-xl p-4 flex items-center gap-3 ${
+                  isInProg ? 'border-sky-500/50' :
+                  isPassed ? 'border-green-500/30' :
+                  isFailed ? 'border-amber-500/30' :
+                  isSuggested ? 'border-orange-500/30' : ''
+                }`} style={{ backgroundColor: 'var(--t-bg-card)', border: isInProg || isPassed || isFailed || isSuggested ? undefined : '1px solid var(--t-border)' }}>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      {isPassed ? <CheckCircle2 size={16} className="text-green-400 shrink-0" /> :
+                       isFailed ? <XCircle size={16} className="text-amber-400 shrink-0" /> :
+                       isInProg ? <Clock size={16} className="text-sky-400 shrink-0 animate-pulse" /> :
+                       (sequentialLocked || lockedByOther) ? <Lock size={16} className="shrink-0" style={{ color: 'var(--t-text-dim)' }} /> :
+                       <Play size={16} className="shrink-0" style={{ color: 'var(--t-text-muted)' }} />}
+                      <div className="text-sm font-medium truncate" style={{ color: 'var(--t-text)' }}>{c.title}</div>
+                      {isSuggested && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-300 shrink-0">
+                          {t('training.quizSuggestedBadge', '建議下一章')}
+                        </span>
                       )}
-                      {r.blockType === 'hotspot' && r.actionLog && (
+                    </div>
+                    <div className="text-xs mt-1 flex items-center gap-2 flex-wrap" style={{ color: 'var(--t-text-dim)' }}>
+                      <span>{c.interactive_count} {t('training.quizItems', '題')}</span>
+                      {(isPassed || isFailed) && c.score != null && (
                         <>
-                          <p>{t('training.examAnalysisSteps')}: {r.scoreBreakdown?.steps?.detail || '-'}</p>
-                          <p>{t('training.examAnalysisWrong')}: {r.scoreBreakdown?.efficiency?.detail || '-'}</p>
-                          <div className="mt-1 space-y-0.5">
-                            {(r.actionLog as any[]).filter(a => !a.correct).slice(0, 5).map((a, j) => (
-                              <p key={j} className="text-red-300">
-                                ❌ {t('training.examClickedAt')} ({a.click_coords?.x?.toFixed(0)}, {a.click_coords?.y?.toFixed(0)})
-                                {a.region_id ? ` → ${a.region_id}` : ` → ${t('training.examMissed')}`}
-                              </p>
-                            ))}
-                          </div>
+                          <span>·</span>
+                          <span className={isPassed ? 'text-green-400' : 'text-amber-400'}>
+                            {t('training.quizScored', '得分 {{s}}/{{m}} ({{p}}%)', { s: c.score, m: c.max_score, p: percent })}
+                          </span>
                         </>
                       )}
-                      {r.blockType === 'dragdrop' && r.scoreBreakdown && (
-                        <p>{t('training.examCorrectCount')}: {r.scoreBreakdown.correct_positions?.detail || r.scoreBreakdown.correct_matches?.detail || '-'}</p>
+                      {c.status === 'timeout' && (
+                        <span className="text-amber-400 flex items-center gap-1"><AlertTriangle size={10} /> {t('training.quizChapterTimedOut', '已超時')}</span>
                       )}
-                      {r.blockType === 'quiz_inline' && r.scoreBreakdown && (
-                        <p>{r.scoreBreakdown.correct ? `✅ ${t('training.answerCorrect')}` : `❌ ${t('training.answerWrong')}`}</p>
-                      )}
+                      {isInProg && <span className="text-sky-400">{t('training.quizChapterInProgress', '進行中(timer 持續扣)')}</span>}
                     </div>
-                  )}
+                  </div>
+                  <div>
+                    {isPassed ? (
+                      <button disabled className="text-xs px-3 py-1.5 rounded-lg bg-green-700/30 text-green-400 cursor-not-allowed">
+                        {t('training.quizChapterPassedShort', '已通過')}
+                      </button>
+                    ) : lockedByOther ? (
+                      <button disabled className="text-xs px-3 py-1.5 rounded-lg cursor-not-allowed" style={{ backgroundColor: 'var(--t-bg-inset)', color: 'var(--t-text-dim)' }}>
+                        {t('training.quizChapterLocked', '其他章節進行中')}
+                      </button>
+                    ) : sequentialLocked ? (
+                      <button disabled className="text-xs px-3 py-1.5 rounded-lg cursor-not-allowed" style={{ backgroundColor: 'var(--t-bg-inset)', color: 'var(--t-text-dim)' }}>
+                        {t('training.quizSequentialLocked', '依序鎖定')}
+                      </button>
+                    ) : (
+                      <button onClick={() => startChapterExam(c.lesson_id)}
+                        disabled={ov.course.time_limit_minutes != null && ov.remaining_seconds <= 0}
+                        className={`text-xs px-3 py-1.5 rounded-lg font-semibold disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 text-white ${
+                          isFailed ? 'bg-amber-600 hover:bg-amber-500' : 'bg-orange-500 hover:bg-orange-400'
+                        }`}>
+                        {isFailed && <RotateCcw size={11} />}
+                        {isFailed ? t('training.quizRetryChapter', '重做') :
+                         isInProg ? t('training.quizResumeChapter', '繼續') :
+                         t('training.quizStartChapter', '開始')}
+                      </button>
+                    )}
+                  </div>
                 </div>
               )
             })}
           </div>
 
-          {/* Actions */}
-          <div className="flex justify-center gap-3 mt-6">
-            <button onClick={restartExam}
-              className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg transition bg-orange-500 hover:bg-orange-400 text-white">
-              <RotateCcw size={13} /> {t('training.retakeExam')}
-            </button>
-            <button onClick={onClose}
-              className="px-4 py-2 text-xs rounded-lg transition"
+          {ov.course.time_limit_minutes != null && ov.remaining_seconds <= 0 && (
+            <div className="rounded-lg p-4 text-sm flex items-center gap-2" style={{ backgroundColor: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.4)', color: '#fca5a5' }}>
+              <AlertTriangle size={16} /> {t('training.quizTimeUp', '總測驗時間已用完')}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // Chapter Result Screen — 單章節剛結束
+  // ═══════════════════════════════════════════════════════════════════════════════
+  if (examPhase === 'chapter_result' && chapterResultData) {
+    const cr = chapterResultData
+    const passed = cr.passed
+    const percent = cr.max_score > 0 ? Math.round((cr.score / cr.max_score) * 100) : 0
+    const nextId = cr.next_suggested_lesson_id
+    const nextChapter = nextId != null ? examOverview?.chapters?.find((c: any) => c.lesson_id === nextId) : null
+
+    return (
+      <div className="flex-1 flex items-center justify-center p-8">
+        <div className="max-w-md w-full rounded-2xl p-8 text-center space-y-4" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
+          {passed ? (
+            <CheckCircle2 size={48} className="mx-auto text-green-400" />
+          ) : (
+            <XCircle size={48} className="mx-auto text-amber-400" />
+          )}
+          <div className="text-2xl font-bold" style={{ color: 'var(--t-text)' }}>{t('training.quizChapterDone', '章節完成')}</div>
+          <div className={`text-3xl font-bold ${passed ? 'text-green-400' : 'text-amber-400'}`}>
+            {cr.score} <span className="text-base" style={{ color: 'var(--t-text-dim)' }}>/ {cr.max_score}</span>
+          </div>
+          <div className="text-xs" style={{ color: 'var(--t-text-dim)' }}>{t('training.quizChapterAccuracy', '正確率 {{p}}%', { p: percent })}</div>
+          <div className={`text-xs font-semibold ${passed ? 'text-green-400' : 'text-amber-400'}`}>
+            {passed ? t('training.quizChapterPassed', '✓ 章節通過') : t('training.quizChapterFailed', '✗ 章節未通過,可重做')}
+          </div>
+          {cr.timed_out && (
+            <div className="text-xs text-amber-400 flex items-center justify-center gap-1">
+              <AlertTriangle size={12} /> {t('training.quizChapterTimedOut', '本章節已超時')}
+            </div>
+          )}
+          <div className="pt-3 space-y-2">
+            {nextChapter ? (
+              <button onClick={() => startChapterExam(nextChapter.lesson_id)}
+                className="w-full bg-orange-500 hover:bg-orange-400 px-6 py-2 rounded-lg text-sm font-semibold transition flex items-center justify-center gap-2 text-white">
+                <Play size={14} /> {t('training.quizGoNextChapter', '繼續下一章:{{title}}', { title: nextChapter.title })}
+              </button>
+            ) : (
+              <button onClick={backToChapterOverview}
+                className="w-full bg-orange-500 hover:bg-orange-400 px-6 py-2 rounded-lg text-sm font-semibold transition text-white">
+                {t('training.quizContinueOther', '回章節列表')}
+              </button>
+            )}
+            <button onClick={backToChapterOverview}
+              className="w-full px-4 py-2 rounded-lg text-xs transition"
               style={{ color: 'var(--t-text-dim)', border: '1px solid var(--t-border)' }}>
-              {t('training.backToCourse')}
+              {t('training.quizPickAnother', '我要選別章')}
             </button>
           </div>
         </div>
       </div>
     )
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // Final Result Screen — attempt 全結算
+  // ═══════════════════════════════════════════════════════════════════════════════
+  if (examPhase === 'final_result' && examOverview?.attempt?.completed_at) {
+    const a = examOverview.attempt
+    return (
+      <div className="flex-1 flex items-center justify-center p-8">
+        <div className="max-w-md w-full rounded-2xl p-8 text-center space-y-4" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
+          <div className="text-5xl mb-2">{a.passed ? '🏆' : '📝'}</div>
+          <div className={`text-3xl font-bold ${a.passed ? 'text-green-400' : 'text-red-400'}`}>
+            {a.score} <span className="text-base" style={{ color: 'var(--t-text-dim)' }}>/ {a.total_points}</span>
+          </div>
+          <div className={`text-lg font-semibold ${a.passed ? 'text-green-400' : 'text-red-400'}`}>
+            {a.passed ? t('training.quizPassed', '✓ 通過') : t('training.quizFailed', '✗ 未通過')}
+          </div>
+          <div className="text-xs" style={{ color: 'var(--t-text-dim)' }}>
+            ({t('training.quizPassScore', '及格標準')}: {examOverview.course.pass_score})
+          </div>
+          <div className="flex gap-3 justify-center pt-4">
+            <button onClick={onClose}
+              className="px-4 py-2 text-sm rounded-lg transition"
+              style={{ color: 'var(--t-text-dim)', border: '1px solid var(--t-border)' }}>
+              {t('training.backToCourse', '返回課程')}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // (Old per-attempt result screen removed — replaced by chapter_result + final_result above)
 
   // ═══════════════════════════════════════════════════════════════════════════════
   // Normal player / Exam running
@@ -845,7 +1007,7 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
             <div className="text-3xl mb-2">⏱</div>
             <p className="text-sm font-medium mb-4" style={{ color: 'var(--t-text)' }}>{t('training.examTimeUp')}</p>
             <div className="flex gap-3 justify-center">
-              <button onClick={finishExam}
+              <button onClick={() => finishChapter(false)}
                 className="px-4 py-2 text-xs font-medium text-white rounded-lg bg-red-500 hover:bg-red-400">
                 {t('training.examSubmitNow')}
               </button>

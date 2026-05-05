@@ -340,6 +340,10 @@ async function runMigrations(db) {
   await addCol('QUIZ_QUESTIONS', 'LESSON_ID', 'NUMBER');
   // Training: 章節 passed flag(score% >= course.pass_score 才算通過,failed 可重做)
   await addCol('QUIZ_ATTEMPT_CHAPTERS', 'PASSED', 'NUMBER(1) DEFAULT 0');
+  // Training: attempt 雙模式 — 'questions'(quiz_questions 題庫)/ 'slides'(slide 內互動 block)
+  // session_id:slide 模式用,串 interaction_results 聚合 per-lesson 分數
+  await addCol('QUIZ_ATTEMPTS', 'MODE', `VARCHAR2(20) DEFAULT 'questions'`);
+  await addCol('QUIZ_ATTEMPTS', 'SESSION_ID', 'VARCHAR2(36)');
 
   // 重命名 feedback KB
   try {
@@ -2538,7 +2542,9 @@ async function runMigrations(db) {
     completed_at    TIMESTAMP,
     review_status   VARCHAR2(20) DEFAULT 'auto',
     reviewed_by     NUMBER,
-    reviewed_at     TIMESTAMP
+    reviewed_at     TIMESTAMP,
+    mode            VARCHAR2(20) DEFAULT 'questions',
+    session_id      VARCHAR2(36)
   )`);
 
   // ── Training Platform: 章節制測驗(每章獨立計分,共用總時間 pool)──────────────

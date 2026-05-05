@@ -2222,13 +2222,14 @@ router.post('/courses/:id/quiz/submit', loadCoursePermission, async (req, res) =
 //   • 全章節完成 → 結算 attempt 總分 vs course.pass_score
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// helper: 取目前未結算的 attempt(沒有就回 null)
-async function _getActiveAttempt(courseId, userId) {
+// helper: 取目前未結算的 attempt(沒有就回 null);mode 可指定 'questions'(預設)/ 'slides'
+async function _getActiveAttempt(courseId, userId, mode = 'questions') {
   return await db.prepare(`
     SELECT * FROM quiz_attempts
     WHERE course_id=? AND user_id=? AND completed_at IS NULL
+      AND NVL(mode, 'questions') = ?
     ORDER BY id DESC FETCH FIRST 1 ROWS ONLY
-  `).get(courseId, userId);
+  `).get(courseId, userId, mode);
 }
 
 // helper: 算 attempt 已用秒數(完成章節 elapsed 之和 + 進行中章節即時 NOW-started_at)
@@ -2272,6 +2273,44 @@ async function _getCourseChapterList(courseId) {
   const list = lessons.map(l => ({ lesson_id: l.id, title: l.title }));
   if (Number(unassignedCount?.cnt || 0) > 0) list.push({ lesson_id: null, title: '未分類章節' });
   return list;
+}
+
+// helper: slide 模式章節清單 — 有「含 hotspot/dragdrop/quiz_inline 區塊」的 lessons
+//   max_score 統一給 100(章節間平均),frontend 會帶實際 weighted scores 上來
+async function _getSlideExamChapterList(courseId) {
+  const lessons = await db.prepare(`
+    SELECT cl.id, cl.title, cl.sort_order
+    FROM course_lessons cl
+    WHERE cl.course_id=?
+    ORDER BY cl.sort_order, cl.id
+  `).all(courseId);
+  const result = [];
+  for (const l of lessons) {
+    // 該 lesson 是否有可計分 slide(content_json 含 hotspot/dragdrop/quiz_inline)
+    const slides = await db.prepare(`
+      SELECT id, content_json FROM course_slides WHERE lesson_id=?
+    `).all(l.id);
+    let interactiveCount = 0;
+    const interactiveSlideIds = [];
+    for (const s of slides) {
+      try {
+        const blocks = JSON.parse(s.content_json || '[]');
+        if (blocks.some(b => ['hotspot', 'dragdrop', 'quiz_inline'].includes(b?.type))) {
+          interactiveCount++;
+          interactiveSlideIds.push(s.id);
+        }
+      } catch {}
+    }
+    if (interactiveCount > 0) {
+      result.push({
+        lesson_id: l.id,
+        title: l.title,
+        interactive_count: interactiveCount,
+        interactive_slide_ids: interactiveSlideIds
+      });
+    }
+  }
+  return result;
 }
 
 // helper: 算章節 passed(score / max_score % >= course.pass_score)
@@ -2791,6 +2830,388 @@ router.post('/courses/:id/quiz/finalize', loadCoursePermission, async (req, res)
     res.json({ finalized: true, final: finalResult });
   } catch (e) {
     console.error('[Training] quiz finalize:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Slide Exam:章節制(CoursePlayer 互動 slide 模式 — 跟 /quiz/* 同模型,但 mode='slides')
+// ─────────────────────────────────────────────────────────────────────────────
+//   • 章節清單 = 有可計分 slide 的 lessons(slide content_json 含 hotspot/dragdrop/quiz_inline)
+//   • frontend 跑完一章後 POST {score, max_score, slide_results} → server 寫 chapter row
+//   • 計分仍走既有 /interaction-result(寫 interaction_results)— exam endpoint 只寫聚合
+//   • 共用 quiz_attempts (mode='slides') / quiz_attempt_chapters,所有 helper / pass logic 都共用
+// ═══════════════════════════════════════════════════════════════════════════════
+
+router.get('/courses/:id/exam/overview', loadCoursePermission, async (req, res) => {
+  try {
+    const course = await db.prepare(
+      'SELECT id, title, time_limit_minutes, pass_score, max_attempts, settings_json FROM courses WHERE id=?'
+    ).get(req.courseId);
+    if (!course) return res.status(404).json({ error: 'course not found' });
+    const settings = _parseSettings(course);
+    const quizSequential = !!settings.quiz_sequential;
+
+    const totalSeconds = (course.time_limit_minutes || 0) * 60;
+    const chapterList = await _getSlideExamChapterList(req.courseId);
+
+    let attempt = await _getActiveAttempt(req.courseId, req.user.id, 'slides');
+    if (attempt) {
+      await _autoTimeoutChapters(attempt.id);
+      const usedAfter = await _computeUsedSeconds(attempt.id);
+      if (usedAfter >= totalSeconds && totalSeconds > 0) {
+        await db.prepare(`
+          UPDATE quiz_attempt_chapters SET status='timeout', completed_at=SYSTIMESTAMP
+          WHERE attempt_id=? AND status='in_progress'
+        `).run(attempt.id);
+        const anyChapter = await db.prepare(
+          'SELECT COUNT(*) AS c FROM quiz_attempt_chapters WHERE attempt_id=?'
+        ).get(attempt.id);
+        if (Number(anyChapter?.c || 0) > 0) {
+          await _finalizeAttempt(attempt.id, req.courseId, req.user.id);
+          attempt = await db.prepare('SELECT * FROM quiz_attempts WHERE id=?').get(attempt.id);
+        }
+      }
+    }
+
+    const usedSeconds = attempt ? await _computeUsedSeconds(attempt.id) : 0;
+    const remainingSeconds = Math.max(0, totalSeconds - usedSeconds);
+
+    const chapterRows = attempt ? await db.prepare(
+      'SELECT * FROM quiz_attempt_chapters WHERE attempt_id=? ORDER BY id'
+    ).all(attempt.id) : [];
+    const byLesson = new Map();
+    for (const c of chapterRows) byLesson.set(c.lesson_id ?? 0, c);
+
+    // next_suggested 算法跟 quiz 共用
+    const chapterListForNext = chapterList.map(c => ({ lesson_id: c.lesson_id, title: c.title }));
+    const nextSuggestedLessonId = _computeNextSuggested(chapterListForNext, byLesson);
+
+    const isLockedInSequential = (lessonId) => {
+      if (!quizSequential) return false;
+      if (nextSuggestedLessonId == null) return false;
+      const idxNext = chapterList.findIndex(c => (c.lesson_id ?? 0) === (nextSuggestedLessonId ?? 0));
+      const idxThis = chapterList.findIndex(c => (c.lesson_id ?? 0) === (lessonId ?? 0));
+      return idxThis > idxNext;
+    };
+
+    const chapters = chapterList.map(ch => {
+      const row = byLesson.get(ch.lesson_id ?? 0);
+      const passed = !!row?.passed;
+      return {
+        lesson_id: ch.lesson_id,
+        title: ch.title,
+        interactive_count: ch.interactive_count,
+        interactive_slide_ids: ch.interactive_slide_ids,
+        status: row?.status || 'not_started',
+        score: row?.score ?? null,
+        max_score: row?.max_score ?? null,
+        passed,
+        elapsed_seconds: row?.elapsed_seconds ?? null,
+        completed_at: row?.completed_at ?? null,
+        is_suggested: nextSuggestedLessonId != null && (ch.lesson_id ?? 0) === (nextSuggestedLessonId ?? 0),
+        is_sequential_locked: isLockedInSequential(ch.lesson_id)
+      };
+    });
+
+    const attemptCount = await db.prepare(
+      `SELECT COUNT(*) AS cnt FROM quiz_attempts WHERE course_id=? AND user_id=? AND NVL(mode,'questions')='slides'`
+    ).get(req.courseId, req.user.id);
+
+    const inProgressLesson = chapters.find(c => c.status === 'in_progress');
+
+    res.json({
+      course: {
+        id: course.id,
+        title: course.title,
+        time_limit_minutes: course.time_limit_minutes,
+        pass_score: course.pass_score,
+        max_attempts: course.max_attempts,
+        quiz_sequential: quizSequential
+      },
+      attempt: attempt ? {
+        id: attempt.id,
+        attempt_number: attempt.attempt_number,
+        completed_at: attempt.completed_at,
+        score: attempt.score,
+        total_points: attempt.total_points,
+        passed: !!attempt.passed,
+        session_id: attempt.session_id
+      } : null,
+      total_seconds: totalSeconds,
+      used_seconds: usedSeconds,
+      remaining_seconds: remainingSeconds,
+      chapters,
+      total_attempts: Number(attemptCount?.cnt || 0),
+      next_suggested_lesson_id: nextSuggestedLessonId,
+      in_progress_lesson_id: inProgressLesson?.lesson_id ?? null,
+      can_finalize: chapters.some(c => c.status === 'completed' || c.status === 'timeout') && !attempt?.completed_at
+    });
+  } catch (e) {
+    console.error('[Training] exam overview:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/training/courses/:id/exam/chapter/:lessonId/start
+router.post('/courses/:id/exam/chapter/:lessonId/start', loadCoursePermission, async (req, res) => {
+  try {
+    const lessonIdParam = Number(req.params.lessonId);
+    const course = await db.prepare(
+      'SELECT id, time_limit_minutes, max_attempts, settings_json, pass_score FROM courses WHERE id=?'
+    ).get(req.courseId);
+    if (!course) return res.status(404).json({ error: 'course not found' });
+    const settings = _parseSettings(course);
+    const quizSequential = !!settings.quiz_sequential;
+
+    let attempt = await _getActiveAttempt(req.courseId, req.user.id, 'slides');
+    if (!attempt) {
+      const cnt = await db.prepare(
+        `SELECT COUNT(*) AS cnt FROM quiz_attempts WHERE course_id=? AND user_id=? AND NVL(mode,'questions')='slides'`
+      ).get(req.courseId, req.user.id);
+      const attemptNum = (Number(cnt?.cnt || 0)) + 1;
+      if (course.max_attempts && attemptNum > course.max_attempts) {
+        return res.status(400).json({ error: `已達最大測驗次數 (${course.max_attempts})` });
+      }
+      // session_id 用 UUID-like(讓 interaction_results 串得起來)
+      const newSessionId = require('crypto').randomUUID();
+      const ins = await db.prepare(`
+        INSERT INTO quiz_attempts (course_id, user_id, attempt_number, mode, session_id)
+        VALUES (?, ?, ?, 'slides', ?)
+      `).run(req.courseId, req.user.id, attemptNum, newSessionId);
+      attempt = await db.prepare('SELECT * FROM quiz_attempts WHERE id=?').get(ins.lastInsertRowid);
+    }
+
+    await _autoTimeoutChapters(attempt.id);
+
+    if (quizSequential) {
+      const chapterList = await _getSlideExamChapterList(req.courseId);
+      const allRows = await db.prepare(
+        'SELECT * FROM quiz_attempt_chapters WHERE attempt_id=?'
+      ).all(attempt.id);
+      const byLesson = new Map();
+      for (const c of allRows) byLesson.set(c.lesson_id ?? 0, c);
+      const next = _computeNextSuggested(
+        chapterList.map(c => ({ lesson_id: c.lesson_id, title: c.title })), byLesson
+      );
+      if (next != null && (next ?? 0) !== lessonIdParam) {
+        return res.status(400).json({
+          error: '依序學習模式:必須先完成前面章節',
+          next_suggested_lesson_id: next
+        });
+      }
+    }
+
+    const existing = await db.prepare(`
+      SELECT * FROM quiz_attempt_chapters
+      WHERE attempt_id=? AND NVL(lesson_id, 0) = ?
+    `).get(attempt.id, lessonIdParam);
+
+    if (existing && existing.passed === 1) {
+      return res.status(400).json({ error: '此章節已通過,不可重做' });
+    }
+
+    const otherInProgress = await db.prepare(`
+      SELECT id, lesson_id FROM quiz_attempt_chapters
+      WHERE attempt_id=? AND status='in_progress' AND NVL(lesson_id, 0) <> ?
+    `).get(attempt.id, lessonIdParam);
+    if (otherInProgress) {
+      return res.status(400).json({
+        error: '已有其他章節進行中,請先完成該章節',
+        in_progress_lesson_id: otherInProgress.lesson_id
+      });
+    }
+
+    const totalSeconds = (course.time_limit_minutes || 0) * 60;
+    const usedSeconds = await _computeUsedSeconds(attempt.id);
+    const remaining = Math.max(0, totalSeconds - usedSeconds);
+    if (totalSeconds > 0 && remaining <= 0) {
+      return res.status(400).json({ error: '總測驗時間已用完' });
+    }
+
+    let chapterRow = existing;
+    if (!chapterRow) {
+      const ins = await db.prepare(`
+        INSERT INTO quiz_attempt_chapters
+          (attempt_id, course_id, user_id, lesson_id, status, time_budget_seconds, started_at)
+        VALUES (?, ?, ?, ?, 'in_progress', ?, SYSTIMESTAMP)
+      `).run(attempt.id, req.courseId, req.user.id, lessonIdParam, totalSeconds > 0 ? remaining : null);
+      chapterRow = await db.prepare('SELECT * FROM quiz_attempt_chapters WHERE id=?').get(ins.lastInsertRowid);
+    } else if (existing.status === 'completed' || existing.status === 'timeout') {
+      // Retry
+      await db.prepare(`
+        UPDATE quiz_attempt_chapters
+        SET status='in_progress',
+            score=0, max_score=0, passed=0,
+            answers_json=NULL,
+            time_budget_seconds=?,
+            started_at=SYSTIMESTAMP,
+            completed_at=NULL
+        WHERE id=?
+      `).run(totalSeconds > 0 ? remaining : null, existing.id);
+      chapterRow = await db.prepare('SELECT * FROM quiz_attempt_chapters WHERE id=?').get(existing.id);
+    }
+
+    // 算 chapter 剩餘秒數
+    let chapterRemaining = null;
+    if (chapterRow.time_budget_seconds != null) {
+      const elapsedNow = await db.prepare(`
+        SELECT EXTRACT(DAY FROM (SYSTIMESTAMP - started_at)) * 86400
+             + EXTRACT(HOUR FROM (SYSTIMESTAMP - started_at)) * 3600
+             + EXTRACT(MINUTE FROM (SYSTIMESTAMP - started_at)) * 60
+             + EXTRACT(SECOND FROM (SYSTIMESTAMP - started_at)) AS e
+        FROM quiz_attempt_chapters WHERE id=?
+      `).get(chapterRow.id);
+      chapterRemaining = Math.max(0, Math.floor(chapterRow.time_budget_seconds - Number(elapsedNow?.e || 0)));
+    }
+
+    res.json({
+      attempt_id: attempt.id,
+      session_id: attempt.session_id,
+      chapter_id: chapterRow.id,
+      lesson_id: chapterRow.lesson_id,
+      time_budget_seconds: chapterRow.time_budget_seconds,
+      chapter_remaining_seconds: chapterRemaining,
+      total_remaining_seconds: chapterRemaining
+    });
+  } catch (e) {
+    console.error('[Training] exam chapter start:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/training/courses/:id/exam/chapter/:lessonId/submit
+//   body: { score: number, max_score: number, slide_results?: any[] }
+router.post('/courses/:id/exam/chapter/:lessonId/submit', loadCoursePermission, async (req, res) => {
+  try {
+    const lessonIdParam = Number(req.params.lessonId);
+    const { score: rawScore, max_score: rawMax, slide_results } = req.body || {};
+    const course = await db.prepare('SELECT pass_score FROM courses WHERE id=?').get(req.courseId);
+    const attempt = await _getActiveAttempt(req.courseId, req.user.id, 'slides');
+    if (!attempt) return res.status(400).json({ error: '無進行中的測驗' });
+
+    const chapter = await db.prepare(`
+      SELECT * FROM quiz_attempt_chapters
+      WHERE attempt_id=? AND NVL(lesson_id, 0) = ?
+    `).get(attempt.id, lessonIdParam);
+    if (!chapter) return res.status(400).json({ error: '此章節未開始' });
+    if (chapter.status !== 'in_progress') return res.status(400).json({ error: '此章節已結束' });
+
+    const e = await db.prepare(`
+      SELECT EXTRACT(DAY FROM (SYSTIMESTAMP - started_at)) * 86400
+           + EXTRACT(HOUR FROM (SYSTIMESTAMP - started_at)) * 3600
+           + EXTRACT(MINUTE FROM (SYSTIMESTAMP - started_at)) * 60
+           + EXTRACT(SECOND FROM (SYSTIMESTAMP - started_at)) AS s
+      FROM quiz_attempt_chapters WHERE id=?
+    `).get(chapter.id);
+    let elapsed = Math.floor(Number(e?.s || 0));
+    let timedOut = false;
+    if (chapter.time_budget_seconds != null && elapsed > chapter.time_budget_seconds) {
+      elapsed = chapter.time_budget_seconds;
+      timedOut = true;
+    }
+
+    const score = Number(rawScore) || 0;
+    const maxScore = Number(rawMax) || 0;
+    const chapterPassed = _isChapterPassed(score, maxScore, course?.pass_score);
+
+    await db.prepare(`
+      UPDATE quiz_attempt_chapters
+      SET status=?, score=?, max_score=?, passed=?, elapsed_seconds=?, answers_json=?, completed_at=SYSTIMESTAMP
+      WHERE id=?
+    `).run(timedOut ? 'timeout' : 'completed', score, maxScore, chapterPassed, elapsed,
+           slide_results ? JSON.stringify(slide_results) : null, chapter.id);
+
+    // 同步寫 lesson_quiz_results — 兼容舊 lesson-completion-report
+    //   key: (user_id, course_id, lesson_id, session_id);用 attempt.session_id 當 session
+    //   每次 retry 同一章節會 UPDATE 同一 row(因為 session_id 相同)→ 取最後一次成績,符合「重做覆蓋」語意
+    if (chapter.lesson_id != null && attempt.session_id) {
+      try {
+        const existing = await db.prepare(
+          'SELECT id FROM lesson_quiz_results WHERE user_id=? AND course_id=? AND lesson_id=? AND session_id=?'
+        ).get(req.user.id, req.courseId, chapter.lesson_id, attempt.session_id);
+        if (existing) {
+          await db.prepare(`
+            UPDATE lesson_quiz_results SET score=?, max_score=?, passed=?, completed_at=SYSTIMESTAMP
+            WHERE id=?
+          `).run(score, maxScore, chapterPassed, existing.id);
+        } else {
+          await db.prepare(`
+            INSERT INTO lesson_quiz_results (user_id, course_id, lesson_id, source, session_id, score, max_score, passed)
+            VALUES (?, ?, ?, 'classroom', ?, ?, ?, ?)
+          `).run(req.user.id, req.courseId, chapter.lesson_id, attempt.session_id, score, maxScore, chapterPassed);
+        }
+      } catch (lqrErr) {
+        console.warn('[Training] exam submit lesson_quiz_results sync:', lqrErr.message);
+      }
+    }
+
+    // 自動結算:全章節都 passed
+    const courseChapterList = await _getSlideExamChapterList(req.courseId);
+    const allRows = await db.prepare(
+      'SELECT * FROM quiz_attempt_chapters WHERE attempt_id=?'
+    ).all(attempt.id);
+    const byLesson = new Map();
+    for (const c of allRows) byLesson.set(c.lesson_id ?? 0, c);
+
+    const allChaptersPassed = courseChapterList.every(ch => {
+      const row = byLesson.get(ch.lesson_id ?? 0);
+      return row && row.passed === 1;
+    });
+
+    let finalized = false;
+    let finalResult = null;
+    if (allChaptersPassed && courseChapterList.length > 0) {
+      finalResult = await _finalizeAttempt(attempt.id, req.courseId, req.user.id);
+      finalized = true;
+    }
+
+    const nextSuggested = finalized ? null : _computeNextSuggested(
+      courseChapterList.map(c => ({ lesson_id: c.lesson_id, title: c.title })), byLesson
+    );
+
+    res.json({
+      score, max_score: maxScore, elapsed_seconds: elapsed, timed_out: timedOut,
+      passed: !!chapterPassed,
+      finalized,
+      final: finalResult,
+      next_suggested_lesson_id: nextSuggested
+    });
+  } catch (e) {
+    console.error('[Training] exam chapter submit:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/training/courses/:id/exam/finalize — 用戶手動結束
+router.post('/courses/:id/exam/finalize', loadCoursePermission, async (req, res) => {
+  try {
+    const attempt = await _getActiveAttempt(req.courseId, req.user.id, 'slides');
+    if (!attempt) return res.status(400).json({ error: '無進行中的測驗' });
+
+    const inProg = await db.prepare(`
+      SELECT id FROM quiz_attempt_chapters WHERE attempt_id=? AND status='in_progress'
+    `).all(attempt.id);
+    if (inProg.length > 0) {
+      await db.prepare(`
+        UPDATE quiz_attempt_chapters
+        SET status='timeout', completed_at=SYSTIMESTAMP,
+            elapsed_seconds=COALESCE(time_budget_seconds, elapsed_seconds)
+        WHERE attempt_id=? AND status='in_progress'
+      `).run(attempt.id);
+    }
+
+    const anyDone = await db.prepare(`
+      SELECT COUNT(*) AS c FROM quiz_attempt_chapters WHERE attempt_id=?
+    `).get(attempt.id);
+    if (Number(anyDone?.c || 0) === 0) {
+      return res.status(400).json({ error: '尚未開始任何章節' });
+    }
+
+    const finalResult = await _finalizeAttempt(attempt.id, req.courseId, req.user.id);
+    res.json({ finalized: true, final: finalResult });
+  } catch (e) {
+    console.error('[Training] exam finalize:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
