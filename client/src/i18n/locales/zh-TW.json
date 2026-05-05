@@ -320,7 +320,8 @@
       "factoryLanguages": "廠區語言設定",
       "factoryTranslations": "廠區翻譯",
       "pipelineWhitelist": "Pipeline 可寫表",
-      "specialManuals": "特殊說明書管理"
+      "specialManuals": "特殊說明書管理",
+      "announcements": "系統公告"
     },
     "pipelineWhitelist": {
       "title": "Pipeline 可寫表管理",
@@ -3143,6 +3144,17 @@
       "enable": "啟用",
       "disable": "停用"
     }
+  },
+  "announcement": {
+    "bellTooltip": "公告",
+    "bellListTitle": "公告",
+    "bellUnreadCount": "{{count}} 則未讀",
+    "bellEmpty": "目前沒有公告",
+    "validUntil": "有效至 {{time}}",
+    "dismiss": "不再顯示",
+    "expand": "展開",
+    "collapse": "收合",
+    "next": "下一則"
   },
   "voice_input": {
     "start": "點擊開始錄音",

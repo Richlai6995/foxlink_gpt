@@ -182,6 +182,8 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
     console.log('[Route] /api/webex OK');
     app.use('/api/help', require('./routes/helpSections'));
     console.log('[Route] /api/help OK');
+    app.use('/api/announcements', require('./routes/announcements'));
+    console.log('[Route] /api/announcements OK');
     app.use('/api/training', require('./routes/training'));
     console.log('[Route] /api/training OK');
     app.use('/api/feedback', require('./routes/feedback'));

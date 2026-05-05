@@ -320,7 +320,8 @@
       "factoryLanguages": "Factory Language Settings",
       "factoryTranslations": "Factory Translations",
       "pipelineWhitelist": "Pipeline Writable Tables",
-      "specialManuals": "Special Manuals"
+      "specialManuals": "Special Manuals",
+      "announcements": "System Announcements"
     },
     "pipelineWhitelist": {
       "title": "Pipeline Writable Tables",
@@ -3143,6 +3144,17 @@
       "enable": "Enable",
       "disable": "Disable"
     }
+  },
+  "announcement": {
+    "bellTooltip": "Announcements",
+    "bellListTitle": "Announcements",
+    "bellUnreadCount": "{{count}} unread",
+    "bellEmpty": "No announcements at the moment",
+    "validUntil": "Valid until {{time}}",
+    "dismiss": "Don't show again",
+    "expand": "Expand",
+    "collapse": "Collapse",
+    "next": "Next"
   },
   "voice_input": {
     "start": "Click to start recording",

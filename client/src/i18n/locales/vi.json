@@ -320,7 +320,8 @@
       "factoryLanguages": "Cài đặt ngôn ngữ nhà máy",
       "factoryTranslations": "Bản dịch nhà máy",
       "pipelineWhitelist": "Bảng được Pipeline ghi",
-      "specialManuals": "Sổ tay đặc biệt"
+      "specialManuals": "Sổ tay đặc biệt",
+      "announcements": "Thông báo hệ thống"
     },
     "pipelineWhitelist": {
       "title": "Quản lý bảng được Pipeline ghi",
@@ -3143,6 +3144,17 @@
       "enable": "Bật",
       "disable": "Tắt"
     }
+  },
+  "announcement": {
+    "bellTooltip": "Thông báo",
+    "bellListTitle": "Thông báo",
+    "bellUnreadCount": "{{count}} chưa đọc",
+    "bellEmpty": "Hiện không có thông báo nào",
+    "validUntil": "Có hiệu lực đến {{time}}",
+    "dismiss": "Không hiển thị nữa",
+    "expand": "Mở rộng",
+    "collapse": "Thu gọn",
+    "next": "Tiếp theo"
   },
   "voice_input": {
     "start": "Nhấn để bắt đầu ghi âm",

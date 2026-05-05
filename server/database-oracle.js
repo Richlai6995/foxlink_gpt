@@ -4235,6 +4235,94 @@ async function runMigrations(db) {
     try { await db.prepare(ddl).run(); console.log(`[Migration] ${name} created ✓`); }
     catch (e) { if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn(`[Migration] ${name}:`, e.message); }
   }
+
+  // ── Announcements(全站公告)───────────────────────────────────────────────
+  // severity: info | notice | warning | critical(顯示策略由前端依 severity 分流)
+  //   ⚠ 不用 `level` 欄位名 — Oracle reserved word(CONNECT BY pseudocolumn)
+  //   service 對前端 API 仍以 'level' 暴露,內部 SELECT 用 severity AS level
+  // status: active | archived(archived 立即從 user 端消失,保留歷史)
+  // dismissible=0 → critical 級可關閉 user 端 X 按鈕(強制顯示)
+  // audience_mode='all' → 全員;'targeted' → 走 announcement_audiences 表
+  // revision:admin 改內容時若勾「重大修訂」+1,user dismiss 紀錄帶 revision,讓他重新看到
+  await createTable('ANNOUNCEMENTS', `CREATE TABLE announcements (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    severity        VARCHAR2(20) DEFAULT 'notice' NOT NULL,
+    status          VARCHAR2(20) DEFAULT 'active' NOT NULL,
+    effective_from  TIMESTAMP DEFAULT SYSTIMESTAMP,
+    effective_to    TIMESTAMP,
+    dismissible     NUMBER(1) DEFAULT 1,
+    audience_mode   VARCHAR2(20) DEFAULT 'all' NOT NULL,
+    revision        NUMBER DEFAULT 1 NOT NULL,
+    created_by      NUMBER,
+    created_at      TIMESTAMP DEFAULT SYSTIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // 對既有資料庫:若已建為 LEVEL 欄,RENAME 為 SEVERITY(用引號避 reserved word)
+  // 新建的 fresh install 已是 severity,這段是 idempotent
+  try {
+    const hasOldLevel = await db.columnExists('ANNOUNCEMENTS', 'LEVEL');
+    const hasSeverity = await db.columnExists('ANNOUNCEMENTS', 'SEVERITY');
+    if (hasOldLevel && !hasSeverity) {
+      await db.prepare('ALTER TABLE announcements RENAME COLUMN "LEVEL" TO severity').run();
+      console.log('[Migration] announcements.LEVEL → SEVERITY (Oracle reserved word fix)');
+    }
+  } catch (e) {
+    console.warn('[Migration] announcements LEVEL rename:', e.message);
+  }
+
+  // 翻譯表(zh-TW 為 source,en/vi 透過 admin LLM 翻譯)
+  await createTable('ANNOUNCEMENT_TRANSLATIONS', `CREATE TABLE announcement_translations (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    announcement_id NUMBER NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+    lang            VARCHAR2(10) NOT NULL,
+    title           VARCHAR2(500),
+    body            CLOB,
+    updated_at      TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uk_ann_trans UNIQUE (announcement_id, lang)
+  )`);
+
+  // 受眾表(audience_mode='targeted' 才使用,沿用 help_book_shares 的 grantee 模式)
+  // grantee_type: user | role | factory | department | cost_center | division | org_group
+  await createTable('ANNOUNCEMENT_AUDIENCES', `CREATE TABLE announcement_audiences (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    announcement_id NUMBER NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+    grantee_type    VARCHAR2(20) NOT NULL,
+    grantee_id      VARCHAR2(100) NOT NULL,
+    CONSTRAINT uk_ann_aud UNIQUE (announcement_id, grantee_type, grantee_id)
+  )`);
+
+  // user dismiss 紀錄(綁 revision,bump 時舊 dismiss 不再 match → 重新顯示)
+  // dismiss = 主動按 X,從鈴鐺/banner 永久移除
+  await createTable('USER_ANNOUNCEMENT_DISMISSALS', `CREATE TABLE user_announcement_dismissals (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id         NUMBER NOT NULL,
+    announcement_id NUMBER NOT NULL,
+    revision        NUMBER DEFAULT 1 NOT NULL,
+    dismissed_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uk_user_ann_dis UNIQUE (user_id, announcement_id, revision)
+  )`);
+
+  // user 已讀紀錄(打開鈴鐺自動標 read,只影響 badge 數,不從清單移除)
+  // 跟 dismissals 分開,讓 user 仍可在鈴鐺裡回看已讀公告
+  await createTable('USER_ANNOUNCEMENT_READS', `CREATE TABLE user_announcement_reads (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id         NUMBER NOT NULL,
+    announcement_id NUMBER NOT NULL,
+    revision        NUMBER DEFAULT 1 NOT NULL,
+    read_at         TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uk_user_ann_read UNIQUE (user_id, announcement_id, revision)
+  )`);
+
+  for (const [name, ddl] of [
+    ['ann_status_idx',     'CREATE INDEX ann_status_idx     ON announcements(status, effective_from, effective_to)'],
+    ['ann_aud_grantee_idx','CREATE INDEX ann_aud_grantee_idx ON announcement_audiences(grantee_type, grantee_id)'],
+    ['ann_dis_user_idx',   'CREATE INDEX ann_dis_user_idx   ON user_announcement_dismissals(user_id, announcement_id)'],
+    ['ann_read_user_idx',  'CREATE INDEX ann_read_user_idx  ON user_announcement_reads(user_id, announcement_id)'],
+  ]) {
+    try { await db.prepare(ddl).run(); console.log(`[Migration] ${name} created ✓`); }
+    catch (e) { if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn(`[Migration] ${name}:`, e.message); }
+  }
 }
 
 // ─── Default DB Source migration ───────────────────────────────────────────────

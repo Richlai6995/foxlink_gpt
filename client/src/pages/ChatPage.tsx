@@ -18,6 +18,8 @@ import { useAuth } from '../context/AuthContext'
 import { useAdminOverride } from '../context/AdminOverrideContext'
 import AdminOverridePopover from '../components/AdminOverridePopover'
 import TokenStatsModal from '../components/common/TokenStatsModal'
+import AnnouncementBanner from '../components/announcement/AnnouncementBanner'
+import AnnouncementBell from '../components/announcement/AnnouncementBell'
 
 function applyOrder<T extends { id: any }>(items: T[], order: (number | string)[]): T[] {
   const map = new Map(items.map(i => [String(i.id), i]))
@@ -1010,6 +1012,9 @@ export default function ChatPage() {
           </div>
         )}
 
+        {/* 全站公告 banner — critical/warning/notice 級顯示在 topbar 上方,info 級走鈴鐺 */}
+        <AnnouncementBanner />
+
         {/* Research completion banner */}
         {researchBanner.length > 0 && (
           <div className="bg-green-600 text-white px-4 py-2 flex items-center gap-3 text-sm">
@@ -1825,6 +1830,9 @@ export default function ChatPage() {
               )}
             </div>
           )}
+
+          {/* 公告鈴鐺 — Token 消耗按鈕前 */}
+          <AnnouncementBell />
 
           {/* Token 消耗趨勢按鈕 — 最右側 */}
           <button
