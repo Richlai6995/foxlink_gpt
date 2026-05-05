@@ -390,8 +390,8 @@ export default function AnnouncementsAdmin() {
       {editing && (
         <AnnouncementEditor
           initial={editing === 'new' ? null : editing}
-          onClose={() => setEditing(null)}
-          onSaved={() => { setEditing(null); load() }}
+          onClose={() => { setEditing(null); load() }}
+          onChanged={() => load()}
         />
       )}
     </div>
@@ -403,13 +403,13 @@ export default function AnnouncementsAdmin() {
 function AnnouncementEditor({
   initial,
   onClose,
-  onSaved,
+  onChanged,
 }: {
   initial: AnnouncementDetail | null
   onClose: () => void
-  onSaved: () => void
+  /** 通知父元件 reload list,但 modal 不關 */
+  onChanged: () => void
 }) {
-  const isNew = !initial
   const zh = initial?.translations.find(t => t.lang === 'zh-TW')
   const en = initial?.translations.find(t => t.lang === 'en')
   const vi = initial?.translations.find(t => t.lang === 'vi')
@@ -433,26 +433,36 @@ function AnnouncementEditor({
   const [saving, setSaving] = useState<null | 'draft' | 'publish'>(null)
   const [translating, setTranslating] = useState<Lang | null>(null)
 
+  // 「已儲存」狀態(初始來自 initial,儲存後更新)— 用來判斷後續 POST(create) 還是 PUT(update)
+  const [savedId, setSavedId] = useState<number | null>(initial?.id ?? null)
+  const [savedStatus, setSavedStatus] = useState<Status | null>(initial?.status ?? null)
+
+  // 自動翻譯進度 / 結果訊息(顯示在 footer 上方)
+  // null = 沒在翻;'en' / 'vi' = 正在翻該語
+  const [autoTranslating, setAutoTranslating] = useState<null | 'en' | 'vi'>(null)
+  const [translateMsg, setTranslateMsg] = useState<{ kind: 'success' | 'error' | 'info'; text: string } | null>(null)
+
+  const isNew = savedId === null
   // 編輯既有公告時的當前狀態(會用來決定按鈕文字)
-  // - 新增:isNew=true,固定走 draft / publish 兩動作
-  // - 編輯 draft:儲存草稿變動 / 發布
-  // - 編輯 active:儲存變更(維持 active) / 退回草稿
-  // - 編輯 archived:只能儲存變更(維持 archived)
-  const currentStatus: Status | null = isNew ? null : initial!.status
+  // - 新增/未存:固定走 draft / publish 兩動作
+  // - draft:儲存草稿變動 / 發布
+  // - active:儲存變更(維持 active) / 退回草稿
+  // - archived:只能儲存變更(維持 archived)
+  const currentStatus: Status | null = savedStatus
 
   /**
-   * @param mode 'draft' = 儲存草稿(user 端不可見) / 'publish' = 儲存並發布上架 / 'asis' = 維持當前 status
+   * @param mode 'draft' = 儲存草稿(user 端不可見)+ 自動翻 en/vi
+   *             'publish' = 儲存並發布上架 + 自動翻 en/vi
+   *             'asis' = 維持當前 status,單純儲存(不自動翻譯,modal 關閉)
+   *
+   * draft / publish 模式:儲存後 modal 不關,自動翻譯,翻完讓 admin 確認結果再手動關閉
+   * asis 模式:儲存後 modal 立即關閉(沿用舊行為,給只動 metadata 的編輯用)
    */
   const handleSave = async (mode: 'draft' | 'publish' | 'asis') => {
     if (!titleZh.trim()) { alert('請填寫繁體中文標題'); return }
     setSaving(mode === 'publish' ? 'publish' : 'draft')
+    setTranslateMsg(null)
     try {
-      // 決定送出的 status:
-      //   - new + draft → 'draft'
-      //   - new + publish → 直接 'active'
-      //   - edit + draft → 'draft'(active 退回草稿)
-      //   - edit + publish → 'active'(草稿發布)
-      //   - edit + asis → 不送 status,由後端維持
       let statusToSend: Status | undefined
       if (mode === 'draft') statusToSend = 'draft'
       else if (mode === 'publish') statusToSend = 'active'
@@ -470,8 +480,10 @@ function AnnouncementEditor({
           title: titleZh, body: bodyZh,
         })
         id = data.id
+        setSavedId(id)
+        setSavedStatus((statusToSend as Status) || 'draft')
       } else {
-        id = initial!.id
+        id = savedId!
         const payload: any = {
           level, dismissible: dismissible ? 1 : 0,
           effective_from: effectiveFrom ? new Date(effectiveFrom).toISOString() : null,
@@ -483,30 +495,79 @@ function AnnouncementEditor({
         }
         if (statusToSend) payload.status = statusToSend
         await api.put(`/announcements/admin/${id}`, payload)
+        if (statusToSend) setSavedStatus(statusToSend as Status)
       }
-      // 個別存 en / vi 翻譯(只在內容非空時寫入)
-      if (titleEn || bodyEn) {
-        await api.put(`/announcements/admin/${id}/translations/en`, { title: titleEn, body: bodyEn })
+
+      // 手動填的 en / vi 翻譯先寫入(若空白就不寫 — 後面自動翻譯會直接生成新內容)
+      if (mode === 'asis') {
+        if (titleEn || bodyEn) {
+          await api.put(`/announcements/admin/${id}/translations/en`, { title: titleEn, body: bodyEn })
+        }
+        if (titleVi || bodyVi) {
+          await api.put(`/announcements/admin/${id}/translations/vi`, { title: titleVi, body: bodyVi })
+        }
       }
-      if (titleVi || bodyVi) {
-        await api.put(`/announcements/admin/${id}/translations/vi`, { title: titleVi, body: bodyVi })
+
+      onChanged()  // 不關 modal,但讓父元件 reload list
+
+      // asis 模式:沿用「儲存後關閉」的舊行為
+      if (mode === 'asis') {
+        setSaving(null)
+        onClose()
+        return
       }
-      onSaved()
+
+      // draft / publish 模式:自動翻譯 en + vi,modal 維持開啟讓 admin 確認結果
+      setSaving(null)
+      setTranslateMsg({ kind: 'info', text: '草稿已儲存,正在自動翻譯…' })
+
+      const errors: string[] = []
+      // 翻 en
+      setAutoTranslating('en')
+      try {
+        const { data: enRes } = await api.post(`/announcements/admin/${id}/translate`, { lang: 'en' })
+        setTitleEn(enRes.title || '')
+        setBodyEn(enRes.body || '')
+      } catch (e: any) {
+        errors.push('英文翻譯失敗:' + (e?.response?.data?.error || e.message))
+      }
+      // 翻 vi
+      setAutoTranslating('vi')
+      try {
+        const { data: viRes } = await api.post(`/announcements/admin/${id}/translate`, { lang: 'vi' })
+        setTitleVi(viRes.title || '')
+        setBodyVi(viRes.body || '')
+      } catch (e: any) {
+        errors.push('越文翻譯失敗:' + (e?.response?.data?.error || e.message))
+      }
+      setAutoTranslating(null)
+      onChanged()  // 翻譯後再 reload 一次,讓列表的「已關閉」/翻譯狀態同步
+
+      if (errors.length === 0) {
+        setTranslateMsg({
+          kind: 'success',
+          text: mode === 'publish'
+            ? '✓ 已發布並完成翻譯,請切到 English / Tiếng Việt tab 確認結果'
+            : '✓ 草稿已儲存並完成翻譯,請切到 English / Tiếng Việt tab 確認後可再次按「發布」上架',
+        })
+      } else {
+        setTranslateMsg({ kind: 'error', text: errors.join(';可手動於該語言 tab 重試') })
+      }
     } catch (e: any) {
       alert('儲存失敗: ' + (e?.response?.data?.error || e.message))
-    } finally {
       setSaving(null)
+      setAutoTranslating(null)
     }
   }
 
   const handleTranslate = async (lang: 'en' | 'vi') => {
-    if (isNew) { alert('請先儲存才能翻譯'); return }
+    if (isNew || savedId === null) { alert('請先儲存草稿才能翻譯'); return }
     if (!titleZh.trim()) { alert('請先填寫繁體中文標題'); return }
     setTranslating(lang)
     try {
       // 先儲存當前 zh-TW
-      await api.put(`/announcements/admin/${initial!.id}`, { title: titleZh, body: bodyZh })
-      const { data } = await api.post(`/announcements/admin/${initial!.id}/translate`, { lang })
+      await api.put(`/announcements/admin/${savedId}`, { title: titleZh, body: bodyZh })
+      const { data } = await api.post(`/announcements/admin/${savedId}/translate`, { lang })
       if (lang === 'en') { setTitleEn(data.title); setBodyEn(data.body || '') }
       if (lang === 'vi') { setTitleVi(data.title); setBodyVi(data.body || '') }
     } catch (e: any) {
@@ -656,6 +717,31 @@ function AnnouncementEditor({
           </div>
         </div>
 
+        {/* 翻譯進度 / 結果訊息列 — 自動翻譯期間顯示 spinner,完成後顯示成功/錯誤訊息 */}
+        {(autoTranslating || translateMsg) && (
+          <div className={`px-5 py-2 border-t text-xs flex items-center gap-2 ${
+            autoTranslating ? 'bg-cyan-50 border-cyan-200 text-cyan-800' :
+            translateMsg?.kind === 'success' ? 'bg-green-50 border-green-200 text-green-800' :
+            translateMsg?.kind === 'error'   ? 'bg-red-50 border-red-200 text-red-800' :
+            'bg-slate-50 border-slate-200 text-slate-700'
+          }`}>
+            {autoTranslating && (
+              <>
+                <span className="inline-block w-3.5 h-3.5 border-2 border-cyan-600 border-t-transparent rounded-full animate-spin" />
+                <span>正在翻譯 {autoTranslating === 'en' ? 'English' : 'Tiếng Việt'} …</span>
+              </>
+            )}
+            {!autoTranslating && translateMsg && (
+              <span className="flex-1">{translateMsg.text}</span>
+            )}
+            {!autoTranslating && translateMsg && (
+              <button onClick={() => setTranslateMsg(null)} className="opacity-50 hover:opacity-100">
+                <X size={12} />
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Footer — 拆「儲存草稿」/「儲存並發布」兩個動作,讓 admin 可先存稿翻譯再上架 */}
         <div className="px-5 py-3 border-t border-slate-200 flex items-center gap-2">
           {!isNew && currentStatus && (
@@ -666,63 +752,70 @@ function AnnouncementEditor({
               {currentStatus === 'archived' && <span className="ml-1 text-slate-500 font-medium">已下架</span>}
             </span>
           )}
-          <div className="ml-auto flex items-center gap-2">
-            <button onClick={onClose} className="text-sm px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg">取消</button>
+          {(() => {
+            const busy = !!saving || !!autoTranslating
+            return (
+            <div className="ml-auto flex items-center gap-2">
+              <button onClick={onClose} disabled={busy} className="text-sm px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-50">
+                {translateMsg?.kind === 'success' ? '完成' : '取消'}
+              </button>
 
-            {/* 新增 / 編輯草稿 → 兩個按鈕並列 */}
-            {(isNew || currentStatus === 'draft') && (
-              <>
-                <button
-                  onClick={() => handleSave('draft')}
-                  disabled={!!saving}
-                  className="text-sm px-3 py-1.5 border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg disabled:opacity-50 inline-flex items-center gap-1.5"
-                  title="儲存為草稿,user 端不會顯示。可繼續編輯與翻譯"
-                >
-                  <FileEdit size={13} /> {saving === 'draft' ? '儲存中…' : '儲存草稿'}
-                </button>
-                <button
-                  onClick={() => handleSave('publish')}
-                  disabled={!!saving}
-                  className="text-sm px-4 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg disabled:opacity-50 inline-flex items-center gap-1.5"
-                  title="儲存並立即發布,user 端馬上看到"
-                >
-                  <Send size={13} /> {saving === 'publish' ? '發布中…' : (isNew ? '儲存並發布' : '發布')}
-                </button>
-              </>
-            )}
+              {/* 新增 / 編輯草稿 → 兩個按鈕並列 */}
+              {(isNew || currentStatus === 'draft') && (
+                <>
+                  <button
+                    onClick={() => handleSave('draft')}
+                    disabled={busy}
+                    className="text-sm px-3 py-1.5 border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg disabled:opacity-50 inline-flex items-center gap-1.5"
+                    title="儲存為草稿,user 端不會顯示。儲存後自動翻譯 en/vi"
+                  >
+                    <FileEdit size={13} /> {saving === 'draft' ? '儲存中…' : '儲存草稿(自動翻譯)'}
+                  </button>
+                  <button
+                    onClick={() => handleSave('publish')}
+                    disabled={busy}
+                    className="text-sm px-4 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg disabled:opacity-50 inline-flex items-center gap-1.5"
+                    title="儲存並立即發布,user 端馬上看到。儲存後自動翻譯 en/vi"
+                  >
+                    <Send size={13} /> {saving === 'publish' ? '發布中…' : (isNew ? '儲存並發布' : '發布')}
+                  </button>
+                </>
+              )}
 
-            {/* 編輯 active 公告 → 維持 active 儲存 + 可退回草稿 */}
-            {currentStatus === 'active' && (
-              <>
-                <button
-                  onClick={() => handleSave('draft')}
-                  disabled={!!saving}
-                  className="text-sm px-3 py-1.5 border border-amber-300 text-amber-700 hover:bg-amber-50 rounded-lg disabled:opacity-50 inline-flex items-center gap-1.5"
-                  title="退回草稿,user 端立即看不到。修正後再重新發布"
-                >
-                  <FileEdit size={13} /> 退回草稿
-                </button>
+              {/* 編輯 active 公告 → 維持 active 儲存 + 可退回草稿 */}
+              {currentStatus === 'active' && (
+                <>
+                  <button
+                    onClick={() => handleSave('draft')}
+                    disabled={busy}
+                    className="text-sm px-3 py-1.5 border border-amber-300 text-amber-700 hover:bg-amber-50 rounded-lg disabled:opacity-50 inline-flex items-center gap-1.5"
+                    title="退回草稿,user 端立即看不到。儲存後自動翻譯 en/vi"
+                  >
+                    <FileEdit size={13} /> 退回草稿
+                  </button>
+                  <button
+                    onClick={() => handleSave('asis')}
+                    disabled={busy}
+                    className="text-sm px-4 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg disabled:opacity-50"
+                  >
+                    {saving ? '儲存中…' : '儲存變更'}
+                  </button>
+                </>
+              )}
+
+              {/* 編輯 archived 公告 → 只能儲存(歷史保留) */}
+              {currentStatus === 'archived' && (
                 <button
                   onClick={() => handleSave('asis')}
-                  disabled={!!saving}
+                  disabled={busy}
                   className="text-sm px-4 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg disabled:opacity-50"
                 >
                   {saving ? '儲存中…' : '儲存變更'}
                 </button>
-              </>
-            )}
-
-            {/* 編輯 archived 公告 → 只能儲存(歷史保留) */}
-            {currentStatus === 'archived' && (
-              <button
-                onClick={() => handleSave('asis')}
-                disabled={!!saving}
-                className="text-sm px-4 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg disabled:opacity-50"
-              >
-                {saving ? '儲存中…' : '儲存變更'}
-              </button>
-            )}
-          </div>
+              )}
+            </div>
+            )
+          })()}
         </div>
       </div>
     </div>
