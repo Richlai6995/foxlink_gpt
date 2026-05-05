@@ -436,6 +436,11 @@ function AnnouncementEditor({
   // 「已儲存」狀態(初始來自 initial,儲存後更新)— 用來判斷後續 POST(create) 還是 PUT(update)
   const [savedId, setSavedId] = useState<number | null>(initial?.id ?? null)
   const [savedStatus, setSavedStatus] = useState<Status | null>(initial?.status ?? null)
+  // 記錄上次儲存的 zh-TW 內容,儲存時若跟現在一樣就跳過翻譯(避免重複燒 LLM)
+  const [lastSavedZh, setLastSavedZh] = useState({
+    title: zh?.title || '',
+    body:  zh?.body  || '',
+  })
 
   // 自動翻譯進度 / 結果訊息(顯示在 footer 上方)
   // null = 沒在翻;'en' / 'vi' = 正在翻該語
@@ -517,8 +522,22 @@ function AnnouncementEditor({
         return
       }
 
-      // draft / publish 模式:自動翻譯 en + vi,modal 維持開啟讓 admin 確認結果
+      // draft / publish 模式:**只在 zh-TW 內容變動時才自動翻譯**
+      // 避免 admin 第二次儲存(沒改 zh-TW)又燒 LLM 重翻一次
+      const zhChanged = titleZh !== lastSavedZh.title || bodyZh !== lastSavedZh.body
+      setLastSavedZh({ title: titleZh, body: bodyZh })  // 紀錄這次儲存的 zh-TW
       setSaving(null)
+
+      if (!zhChanged) {
+        setTranslateMsg({
+          kind: 'success',
+          text: mode === 'publish'
+            ? '✓ 已發布(zh-TW 未變動,沿用既有翻譯)'
+            : '✓ 草稿已儲存(zh-TW 未變動,沿用既有翻譯)',
+        })
+        return
+      }
+
       setTranslateMsg({ kind: 'info', text: '草稿已儲存,正在自動翻譯…' })
 
       const errors: string[] = []
