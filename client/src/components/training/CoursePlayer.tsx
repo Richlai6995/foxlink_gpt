@@ -328,9 +328,10 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
     }
   }, [examPhase, examTimeLimitEnabled, currentChapterLessonId])
 
-  // Switch to test mode → load chapter overview
+  // Switch to test mode → 立刻進章節列表 phase(避免 examOverview 還沒 fetch 完時 fallback 到 slide player)
   useEffect(() => {
     if (playerMode === 'test' && examPhase === 'idle' && allSlides.length > 0) {
+      setExamPhase('chapter_overview')   // 馬上切 phase,UI 顯示 loading 而非 slide
       loadExamOverview()
     }
     if (playerMode === 'learn') {
@@ -354,8 +355,9 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
       }
     } catch (e: any) {
       console.error('[CoursePlayer] exam overview:', e?.response?.data?.error || e?.message)
-      // Fallback:overview 失敗(例如沒有任何 interactive 章節)→ 直接 idle
-      setExamPhase('idle')
+      // Fallback:overview 失敗(沒任何 interactive 章節 / API 錯)
+      // 不掉回 idle(否則會渲染 slide player)— 留在 chapter_overview phase 顯示空狀態
+      setExamOverview({ chapters: [], course: { quiz_sequential: false }, total_seconds: 0, used_seconds: 0, remaining_seconds: 0, attempt: null, total_attempts: 0, can_finalize: false, next_suggested_lesson_id: null, in_progress_lesson_id: null })
     }
   }
 
@@ -564,7 +566,32 @@ export function CoursePlayerInner({ courseId, lessonId, lang: langProp, sessionI
   // ═══════════════════════════════════════════════════════════════════════════════
   // Chapter Overview Screen — 章節列表 / 主按鈕 / 結束按鈕
   // ═══════════════════════════════════════════════════════════════════════════════
-  if (examPhase === 'chapter_overview' && examOverview) {
+  if (examPhase === 'chapter_overview') {
+    // overview 還在載入 — 顯示 loading
+    if (!examOverview) {
+      return (
+        <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--t-text-dim)' }}>
+          {t('training.loading', '載入中...')}
+        </div>
+      )
+    }
+    // overview 載完但沒任何章節 — 課程沒互動 slide
+    if ((examOverview.chapters?.length || 0) === 0) {
+      return (
+        <div className="flex-1 flex items-center justify-center p-8">
+          <div className="max-w-md w-full rounded-2xl p-8 text-center space-y-4" style={{ backgroundColor: 'var(--t-bg-card)', border: '1px solid var(--t-border)' }}>
+            <div className="text-4xl mb-2">📭</div>
+            <div className="text-base font-semibold" style={{ color: 'var(--t-text)' }}>{t('training.examNoChapters', '此課程沒有可測驗的章節')}</div>
+            <div className="text-xs" style={{ color: 'var(--t-text-dim)' }}>{t('training.examNoChaptersHint', '需要 hotspot / 拖拉 / 選擇題之類的互動 slide 才會出現章節。')}</div>
+            <button onClick={() => setPlayerMode('learn')}
+              className="px-6 py-2 text-sm rounded-lg transition"
+              style={{ color: 'var(--t-text-dim)', border: '1px solid var(--t-border)' }}>
+              {t('training.backToLearn', '返回學習')}
+            </button>
+          </div>
+        </div>
+      )
+    }
     const ov = examOverview
     const isSequential = ov.course?.quiz_sequential
     const inProgressChapter = ov.chapters.find((c: any) => c.status === 'in_progress')

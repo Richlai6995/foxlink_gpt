@@ -2911,6 +2911,8 @@
     "quizAllChaptersPassed": "🎉 All chapters passed! Finalizing...",
     "quizChapterHelp": "Passed chapters are locked. Failed chapters can be retried.",
     "examChapterStartFailed": "Unable to start chapter",
+    "examNoChapters": "This course has no testable chapters",
+    "examNoChaptersHint": "Chapters appear only when slides contain interactive blocks (hotspot / drag-drop / quiz).",
     "examSubmitFailed": "Submission failed",
     "examFinalizeConfirm": "End this exam attempt? Unfinished chapters will be scored 0 and time capped at the limit.",
     "examFinalizeFailed": "Finalize failed",

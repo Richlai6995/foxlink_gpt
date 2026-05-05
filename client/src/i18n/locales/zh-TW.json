@@ -2911,6 +2911,8 @@
     "quizAllChaptersPassed": "🎉 所有章節都通過了!正在結算...",
     "quizChapterHelp": "通過的章節會鎖住,未通過可重做",
     "examChapterStartFailed": "無法開始章節",
+    "examNoChapters": "此課程沒有可測驗的章節",
+    "examNoChaptersHint": "需要 hotspot / 拖拉 / 選擇題之類的互動 slide 才會出現章節。",
     "examSubmitFailed": "提交失敗",
     "examFinalizeConfirm": "確定結束本次測驗?未做完的章節將以 0 分計算,且時間將被扣到上限。",
     "examFinalizeFailed": "結算失敗",

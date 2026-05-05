@@ -2911,6 +2911,8 @@
     "quizAllChaptersPassed": "🎉 Tất cả chương đã đạt! Đang tổng kết...",
     "quizChapterHelp": "Chương đã đạt sẽ bị khóa. Chương chưa đạt có thể làm lại.",
     "examChapterStartFailed": "Không thể bắt đầu chương",
+    "examNoChapters": "Khóa học này không có chương nào để kiểm tra",
+    "examNoChaptersHint": "Chương chỉ xuất hiện khi slide có các block tương tác (hotspot / kéo-thả / trắc nghiệm).",
     "examSubmitFailed": "Nộp thất bại",
     "examFinalizeConfirm": "Kết thúc lần thi này? Chương chưa hoàn thành sẽ tính 0 điểm và thời gian bị giới hạn.",
     "examFinalizeFailed": "Kết thúc thất bại",
