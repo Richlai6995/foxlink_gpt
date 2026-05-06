@@ -75,7 +75,13 @@
     "menu": {
       "settings": "Settings",
       "language": "Language",
-      "help": "Help"
+      "help": "Help",
+      "skillMarket": "Skills Market",
+      "templates": "Document Templates",
+      "myCharts": "My Charts",
+      "feedback": "Feedback",
+      "pureMode": "Pure chat mode",
+      "pureModeDesc": "Skip tools / KB / skills — go directly to the LLM"
     }
   },
   "common": {
@@ -2260,11 +2266,12 @@
     "unresolved": "Unresolved"
   },
   "tokenStats": {
-    "title": "My Token Usage Trend",
-    "button": "Usage Trend",
+    "title": "My Token Usage This Month",
+    "button": "This Month",
     "days": "{{n}} Days",
-    "totalCost": "Total Cost",
-    "totalTokens": "Total Tokens",
+    "thisMonthSuffix": "(this month)",
+    "totalCost": "Cost This Month",
+    "totalTokens": "Tokens This Month",
     "modelCount": "Models Used",
     "noData": "No token usage during this period",
     "date": "Date",
@@ -2273,7 +2280,8 @@
     "outputTokens": "Output Tokens",
     "cost": "Cost (USD)",
     "tabChart": "Chart",
-    "tabDetail": "Detail"
+    "tabDetail": "Detail",
+    "monthSpent": "This month"
   },
   "tpl": {
     "title": "Document Templates",

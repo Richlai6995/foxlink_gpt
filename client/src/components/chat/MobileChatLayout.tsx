@@ -9,14 +9,36 @@ import {
   Menu, Plus, Square, MessageSquare, Trash2, ChevronDown,
   LogOut, Globe, Sparkles, Settings, Paperclip, X,
   FileText, Image as ImageIcon, Music,
+  Zap, LayoutTemplate, BarChart3, MessageSquarePlus,
+  HelpCircle, Database,
 } from 'lucide-react'
 import { buildAcceptAttr } from '../../lib/uploadFileTypes'
+import ErpToolPicker from './ErpToolPicker'
+import ErpToolInvokeModal, { type ResultMode } from './ErpToolInvokeModal'
+import type { ErpTool } from '../admin/ErpToolsPanel'
 import api from '../../lib/api'
 import { copyText } from '../../lib/clipboard'
 import { useAuth } from '../../context/AuthContext'
 import { useStreamHealth } from '../../hooks/useStreamHealth'
+import { useAdminOverride } from '../../context/AdminOverrideContext'
 import i18n, { SUPPORTED_LANGUAGES, type LangCode } from '../../i18n'
 import type { ChatSession, ChatMessage, LlmModel, ModelType, GeneratedFile } from '../../types'
+import MicButton from '../MicButton'
+
+interface SkillItem {
+  id: number
+  name: string
+  name_zh?: string
+  name_en?: string
+  name_vi?: string
+  description?: string
+  desc_zh?: string
+  desc_en?: string
+  desc_vi?: string
+  icon?: string
+  type?: string
+  prompt_variables?: string
+}
 
 const ChatWindow = lazy(() => import('../ChatWindow'))
 
@@ -29,7 +51,20 @@ function localTitle(s: ChatSession, lang: string): string {
 export default function MobileChatLayout() {
   const { t } = useTranslation()
   const { user, logout } = useAuth()
+  const { overrideTools, isOverrideTool } = useAdminOverride()
   const navigate = useNavigate()
+
+  // 多語名稱 / 描述(對齊桌機 localName / localDesc)
+  const localName = (item: any): string => {
+    if (i18n.language === 'en') return item.name_en || item.name
+    if (i18n.language === 'vi') return item.name_vi || item.name
+    return item.name_zh || item.name
+  }
+  const localDesc = (item: any): string => {
+    if (i18n.language === 'en') return item.desc_en || item.description || ''
+    if (i18n.language === 'vi') return item.desc_vi || item.description || ''
+    return item.desc_zh || item.description || ''
+  }
 
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
@@ -46,6 +81,79 @@ export default function MobileChatLayout() {
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [showLang, setShowLang] = useState(false)
+  const [plusOpen, setPlusOpen] = useState(false)
+  const [erpPickerOpen, setErpPickerOpen] = useState(false)
+  const [erpInvoking, setErpInvoking] = useState<ErpTool | null>(null)
+  const [erpPendingContext, setErpPendingContext] = useState<string | null>(null)
+
+  // ── Tools picker(MCP / KB / DIFY / Skills 四 tab,checkbox 多選)
+  const [toolsOpen, setToolsOpen] = useState(false)
+  const [toolsTab, setToolsTab] = useState<'mcp' | 'kb' | 'dify' | 'skill'>('mcp')
+  const [allMcpServers, setAllMcpServers] = useState<any[]>([])
+  const [allSelfKbs, setAllSelfKbs] = useState<any[]>([])
+  const [allDifyKbs, setAllDifyKbs] = useState<any[]>([])
+  const [allSkills, setAllSkills] = useState<SkillItem[]>([])
+  const [selectedMcpIds, setSelectedMcpIds] = useState<Set<number>>(new Set())
+  const [selectedKbIds, setSelectedKbIds] = useState<Set<string>>(new Set())
+  const [selectedDifyIds, setSelectedDifyIds] = useState<Set<number>>(new Set())
+  // Skills 是 session-scoped — picked = 該 session 上已綁定;pending = 還沒 session 時暫存
+  const [pickedSkillIds, setPickedSkillIds] = useState<Set<number>>(new Set())
+  const [pendingSkillIds, setPendingSkillIds] = useState<Set<number>>(new Set())
+  const [skillSaving, setSkillSaving] = useState(false)
+  const totalToolsSelected = selectedMcpIds.size + selectedKbIds.size + selectedDifyIds.size + pickedSkillIds.size
+
+  // 對齊桌機:authorized + admin override(localStorage 預設好的測試模式工具)合併
+  const loadTools = useCallback(async () => {
+    try {
+      const [mcp, kb, dify, skills] = await Promise.all([
+        api.get('/mcp-servers/my').catch(() => ({ data: [] })),
+        api.get('/kb').catch(() => ({ data: [] })),
+        api.get('/dify-kb/my').catch(() => ({ data: [] })),
+        api.get('/skills').catch(() => ({ data: [] })),
+      ])
+
+      const mcpAuthorized = mcp.data || []
+      const mcpOverrides = overrideTools
+        .filter(t => t.type === 'mcp' && !mcpAuthorized.some((a: any) => String(a.id) === String(t.id)))
+        .map(t => ({ id: Number(t.id), name: t.name, name_zh: t.name_zh, name_en: t.name_en, name_vi: t.name_vi, description: t.description, desc_zh: t.desc_zh, desc_en: t.desc_en, desc_vi: t.desc_vi, _isOverride: true }))
+      setAllMcpServers([...mcpAuthorized, ...mcpOverrides])
+
+      const kbAuthorized = (kb.data || []).filter((k: any) => (k.chunk_count ?? 0) > 0)
+      const kbOverrides = overrideTools
+        .filter(t => t.type === 'kb' && !kbAuthorized.some((a: any) => String(a.id) === String(t.id)))
+        .map(t => ({ id: t.id, name: t.name, name_zh: t.name_zh, name_en: t.name_en, name_vi: t.name_vi, description: t.description, desc_zh: t.desc_zh, desc_en: t.desc_en, desc_vi: t.desc_vi, chunk_count: 1, _isOverride: true }))
+      setAllSelfKbs([...kbAuthorized, ...kbOverrides])
+
+      const difyAuthorized = dify.data || []
+      const difyOverrides = overrideTools
+        .filter(t => t.type === 'dify' && !difyAuthorized.some((a: any) => String(a.id) === String(t.id)))
+        .map(t => ({ id: Number(t.id), name: t.name, name_zh: t.name_zh, name_en: t.name_en, name_vi: t.name_vi, description: t.description, desc_zh: t.desc_zh, desc_en: t.desc_en, desc_vi: t.desc_vi, _isOverride: true }))
+      setAllDifyKbs([...difyAuthorized, ...difyOverrides])
+
+      // 過濾 erp_proc 代理(走獨立 ERP 按鈕)
+      const skillAuthorized = (skills.data || []).filter((s: any) => s.type !== 'erp_proc')
+      const skillOverrides = overrideTools
+        .filter(t => t.type === 'skill' && !skillAuthorized.some((a: any) => String(a.id) === String(t.id)))
+        .map(t => ({ id: Number(t.id), name: t.name, name_zh: t.name_zh, name_en: t.name_en, name_vi: t.name_vi, description: t.description, desc_zh: t.desc_zh, desc_en: t.desc_en, desc_vi: t.desc_vi, icon: t.icon || '🔧', type: t.skill_type || 'prompt', _isOverride: true }))
+      setAllSkills([...skillAuthorized, ...skillOverrides])
+    } catch {}
+  }, [overrideTools])
+  const openTools = useCallback(() => { void loadTools(); setToolsOpen(true) }, [loadTools])
+
+  // Pure mode toggle — 純對話(不引用任何工具),持久化到 localStorage 與桌機共用
+  const [pureMode, setPureMode] = useState<boolean>(
+    () => localStorage.getItem('chat:pureMode') === '1'
+  )
+
+  // 本月 token 消耗 — 顯示在 menu sheet
+  const [monthSpent, setMonthSpent] = useState<number | null>(null)
+  const togglePureMode = useCallback(() => {
+    setPureMode((prev) => {
+      const next = !prev
+      localStorage.setItem('chat:pureMode', next ? '1' : '0')
+      return next
+    })
+  }, [])
 
   const [inputText, setInputText] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -91,15 +199,38 @@ export default function MobileChatLayout() {
 
   useEffect(() => { loadSessions() }, [loadSessions])
 
+  // 載入 budget(本月消耗)— 開啟 menu 時抓最新
+  const loadMonthSpent = useCallback(() => {
+    api.get('/chat/budget').then((r) => {
+      const m = r.data?.monthly?.spent
+      if (typeof m === 'number') setMonthSpent(m)
+      else setMonthSpent(0)
+    }).catch(() => {})
+  }, [])
+  useEffect(() => { loadMonthSpent() }, [loadMonthSpent])
+  useEffect(() => { if (menuOpen) loadMonthSpent() }, [menuOpen, loadMonthSpent])
+
   // ── load messages when session changes(API 回 { session, messages, skills, ... })
   useEffect(() => {
-    if (!currentSessionId) { setMessages([]); return }
+    if (!currentSessionId) {
+      setMessages([])
+      setPickedSkillIds(pendingSkillIds) // 切回新對話時保留 pending skills
+      return
+    }
     api.get(`/chat/sessions/${currentSessionId}`).then((r) => {
       setMessages(r.data?.messages || [])
+      // 載入該 session 已綁定的 skills + tools 上次選擇
+      const skillIds = new Set<number>((r.data?.skills || []).map((s: any) => Number(s.id)))
+      setPickedSkillIds(skillIds)
+      // 從 used* 還原工具選擇(server 在 GET session 回傳 usedMcpIds 等)
+      if (Array.isArray(r.data?.usedMcpIds))  setSelectedMcpIds(new Set(r.data.usedMcpIds.map(Number)))
+      if (Array.isArray(r.data?.usedDifyIds)) setSelectedDifyIds(new Set(r.data.usedDifyIds.map(Number)))
+      if (Array.isArray(r.data?.usedKbIds))   setSelectedKbIds(new Set(r.data.usedKbIds.map(String)))
     }).catch((e) => {
       console.error('load session messages', e)
       setMessages([])
     })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSessionId])
 
   // ── new chat
@@ -162,6 +293,14 @@ export default function MobileChatLayout() {
         }
         setSessions((p) => [newSession, ...p])
         setCurrentSessionId(sessionId)
+        // 把 pending skills(新對話前已挑的)套用到剛建好的 session
+        if (pendingSkillIds.size > 0) {
+          try {
+            await api.put(`/chat/sessions/${sessionId}/skills`, { skill_ids: [...pendingSkillIds] })
+            setPickedSkillIds(new Set(pendingSkillIds))
+            setPendingSkillIds(new Set())
+          } catch {}
+        }
       } catch (e) {
         console.error('create session', e)
         return
@@ -188,16 +327,11 @@ export default function MobileChatLayout() {
     formData.append('model', model)
     // 多檔附件 — 走桌機相同的 multipart 路徑
     files.forEach((f) => formData.append('files', f))
-    // 預設不啟用任何工具(mobile v1 純對話)
-    formData.append('mcp_server_ids', '[]')
-    formData.append('dify_kb_ids', '[]')
-    formData.append('self_kb_ids', '[]')
-    formData.append('erp_tool_ids', '[]')
-    formData.append('hidden_mcp_ids', '[]')
-    formData.append('hidden_dify_ids', '[]')
-    formData.append('hidden_self_kb_ids', '[]')
-    formData.append('hidden_skill_ids', '[]')
-    formData.append('hidden_erp_ids', '[]')
+    // 工具選擇:有選才明確送(讓 server skip auto-discover);沒選就不送(server 自動依權限挑)
+    if (selectedMcpIds.size > 0) formData.append('mcp_server_ids', JSON.stringify([...selectedMcpIds]))
+    if (selectedDifyIds.size > 0) formData.append('dify_kb_ids', JSON.stringify([...selectedDifyIds]))
+    if (selectedKbIds.size > 0) formData.append('self_kb_ids', JSON.stringify([...selectedKbIds]))
+    if (pureMode) formData.append('pure_mode', 'true')
 
     const token = localStorage.getItem('token')
     let accText = ''
@@ -314,11 +448,48 @@ export default function MobileChatLayout() {
       setStreamingStatus('')
       abortRef.current = null
     }
-  }, [streaming, currentSessionId, model, loadSessions, noteChunk, clearStall, t])
+  }, [streaming, currentSessionId, model, loadSessions, noteChunk, clearStall, t, pureMode, selectedMcpIds, selectedDifyIds, selectedKbIds, pendingSkillIds])
 
   const handleStop = useCallback(() => {
     if (abortRef.current) abortRef.current()
   }, [])
+
+  // 切 skill checkbox(即時 toggle pickedSkillIds / pendingSkillIds)
+  const toggleSkill = useCallback((id: number) => {
+    if (currentSessionId) {
+      setPickedSkillIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+    } else {
+      // 沒 session 先暫存,送出第一則訊息後 apply
+      setPendingSkillIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+      setPickedSkillIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+    }
+  }, [currentSessionId])
+
+  // 完成工具選擇 — 若有 session,把 skill 列表 PUT 進去;沒 session 就讓 pendingSkillIds 在 send 時自動 apply
+  const confirmTools = useCallback(async () => {
+    if (currentSessionId) {
+      setSkillSaving(true)
+      try {
+        await api.put(`/chat/sessions/${currentSessionId}/skills`, { skill_ids: [...pickedSkillIds] })
+      } catch (e: any) {
+        alert(e.response?.data?.error || t('common.unknownError'))
+      } finally {
+        setSkillSaving(false)
+      }
+    }
+    setToolsOpen(false)
+  }, [currentSessionId, pickedSkillIds, t])
+
+  // 包一層 send,把 ERP pending context 拼到 message 前面
+  const handleSendWithErp = useCallback((text: string, files: File[] = []) => {
+    if (erpPendingContext) {
+      const combined = `${erpPendingContext}\n\n${text}`
+      setErpPendingContext(null)
+      void handleSend(combined, files)
+    } else {
+      void handleSend(text, files)
+    }
+  }, [erpPendingContext, handleSend])
 
   const handleResendAfterStall = useCallback(() => {
     const last = lastUserMessageRef.current
@@ -427,6 +598,17 @@ export default function MobileChatLayout() {
 
       {/* Input bar */}
       <div className="border-t border-slate-200 bg-white px-2 py-2 pb-safe">
+        {/* ERP context chip(ask_with 模式) */}
+        {erpPendingContext && (
+          <div className="mx-1 mb-1.5 px-3 py-1.5 bg-sky-50 border border-sky-200 rounded-lg text-xs text-sky-800 flex items-center gap-2">
+            <Database size={12} className="flex-shrink-0" />
+            <span className="flex-1 truncate">已附加 ERP 查詢結果,下一則訊息會帶上</span>
+            <button onClick={() => setErpPendingContext(null)} className="text-sky-500 flex-shrink-0">
+              <X size={12} />
+            </button>
+          </div>
+        )}
+
         {/* 附件預覽 chips */}
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-2 px-1">
@@ -458,13 +640,28 @@ export default function MobileChatLayout() {
             className="hidden"
           />
           <button
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => setPlusOpen(true)}
             disabled={streaming}
             aria-label={t('mobile.chat.attachFile')}
             className="w-11 h-11 flex items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40 flex-shrink-0"
           >
-            <Paperclip size={18} />
+            <Plus size={20} />
           </button>
+          <MicButton
+            source="chat"
+            disabled={streaming}
+            size={18}
+            className="w-11 h-11 flex items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40 flex-shrink-0"
+            onTranscript={(text) => {
+              if (!text) return
+              setInputText((prev) => {
+                const sep = prev && !prev.endsWith(' ') && !prev.endsWith('\n') ? ' ' : ''
+                return prev + sep + text
+              })
+              // 聚焦回 textarea 方便繼續編輯
+              setTimeout(() => inputRef.current?.focus(), 50)
+            }}
+          />
           <textarea
             ref={inputRef}
             value={inputText}
@@ -472,7 +669,7 @@ export default function MobileChatLayout() {
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault()
-                handleSend(inputText, attachments)
+                handleSendWithErp(inputText, attachments)
               }
             }}
             placeholder={t('mobile.chat.inputPlaceholder')}
@@ -490,8 +687,8 @@ export default function MobileChatLayout() {
             </button>
           ) : (
             <button
-              onClick={() => handleSend(inputText, attachments)}
-              disabled={!inputText.trim() && attachments.length === 0}
+              onClick={() => handleSendWithErp(inputText, attachments)}
+              disabled={!inputText.trim() && attachments.length === 0 && !erpPendingContext}
               aria-label={t('mobile.chat.send')}
               className="w-11 h-11 flex items-center justify-center rounded-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white flex-shrink-0"
             >
@@ -605,10 +802,75 @@ export default function MobileChatLayout() {
       <Drawer.Root open={menuOpen} onOpenChange={setMenuOpen}>
         <Drawer.Portal>
           <Drawer.Overlay className="fixed inset-0 bg-black/40 z-40" />
-          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl pb-safe">
+          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl pb-safe max-h-[80vh] flex flex-col">
             <Drawer.Title className="sr-only">{t('mobile.chat.menuLabel')}</Drawer.Title>
-            <div className="mx-auto w-10 h-1 rounded-full bg-slate-300 mt-2" />
-            <div className="p-2">
+            <div className="mx-auto w-10 h-1 rounded-full bg-slate-300 mt-2 flex-shrink-0" />
+            <div className="overflow-y-auto p-2">
+              {/* 本月 token 消耗 */}
+              <div className="px-3 py-2.5 rounded-lg bg-blue-50 border border-blue-100 flex items-center gap-3 mb-1.5">
+                <Sparkles size={16} className="text-blue-500" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs text-blue-700">{t('tokenStats.monthSpent')}</div>
+                  <div className="text-base font-semibold text-blue-900 font-mono">
+                    {monthSpent != null ? `$${monthSpent.toFixed(4)}` : '—'}
+                    <span className="text-[11px] text-blue-500 font-normal ml-1">USD</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Pure mode toggle */}
+              <button
+                onClick={() => { togglePureMode() }}
+                className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
+              >
+                <MessageSquare size={18} className={pureMode ? 'text-amber-600' : 'text-slate-500'} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-slate-800">{t('mobile.menu.pureMode')}</div>
+                  <div className="text-[11px] text-slate-500 truncate">{t('mobile.menu.pureModeDesc')}</div>
+                </div>
+                <span
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition ${pureMode ? 'bg-amber-500' : 'bg-slate-300'}`}
+                  aria-pressed={pureMode}
+                >
+                  <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${pureMode ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                </span>
+              </button>
+
+              <div className="my-1 h-px bg-slate-200" />
+
+              {/* Feature navigation */}
+              <button
+                onClick={() => { setMenuOpen(false); navigate('/skills') }}
+                className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
+              >
+                <Zap size={18} className="text-blue-500" />
+                <span className="flex-1 text-sm text-slate-800">{t('mobile.menu.skillMarket')}</span>
+              </button>
+              <button
+                onClick={() => { setMenuOpen(false); navigate('/templates') }}
+                className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
+              >
+                <LayoutTemplate size={18} className="text-violet-500" />
+                <span className="flex-1 text-sm text-slate-800">{t('mobile.menu.templates')}</span>
+              </button>
+              <button
+                onClick={() => { setMenuOpen(false); navigate('/my-charts') }}
+                className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
+              >
+                <BarChart3 size={18} className="text-emerald-500" />
+                <span className="flex-1 text-sm text-slate-800">{t('mobile.menu.myCharts')}</span>
+              </button>
+              <button
+                onClick={() => { setMenuOpen(false); navigate('/feedback') }}
+                className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
+              >
+                <MessageSquarePlus size={18} className="text-rose-500" />
+                <span className="flex-1 text-sm text-slate-800">{t('mobile.menu.feedback')}</span>
+              </button>
+
+              <div className="my-1 h-px bg-slate-200" />
+
+              {/* Settings */}
               <button
                 onClick={() => { setShowLang(true); setMenuOpen(false) }}
                 className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
@@ -623,10 +885,12 @@ export default function MobileChatLayout() {
                 onClick={() => { setMenuOpen(false); navigate('/help') }}
                 className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
               >
-                <Settings size={18} className="text-slate-500" />
+                <HelpCircle size={18} className="text-slate-500" />
                 <span className="flex-1 text-sm text-slate-800">{t('mobile.menu.help')}</span>
               </button>
+
               <div className="my-1 h-px bg-slate-200" />
+
               <button
                 onClick={() => { setMenuOpen(false); logout() }}
                 className="w-full px-3 py-3 rounded-lg hover:bg-red-50 active:bg-red-100 flex items-center gap-3 text-left"
@@ -676,6 +940,257 @@ export default function MobileChatLayout() {
         </Drawer.Portal>
       </Drawer.Root>
 
+      {/* ── Plus action sheet:上傳檔案 / ERP 工具 ── */}
+      <Drawer.Root open={plusOpen} onOpenChange={setPlusOpen}>
+        <Drawer.Portal>
+          <Drawer.Overlay className="fixed inset-0 bg-black/40 z-40" />
+          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl pb-safe">
+            <Drawer.Title className="sr-only">{t('mobile.chat.attachFile')}</Drawer.Title>
+            <div className="mx-auto w-10 h-1 rounded-full bg-slate-300 mt-2" />
+            <div className="p-2">
+              <button
+                onClick={() => { setPlusOpen(false); fileInputRef.current?.click() }}
+                className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
+              >
+                <Paperclip size={18} className="text-blue-500" />
+                <span className="flex-1 text-sm text-slate-800">{t('mobile.chat.attachFile')}</span>
+              </button>
+              <button
+                onClick={() => { setPlusOpen(false); openTools() }}
+                className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
+              >
+                <Zap size={18} className="text-cyan-500" />
+                <span className="flex-1 text-sm text-slate-800">工具(MCP / KB / API 連接器)</span>
+                {totalToolsSelected > 0 && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-700 font-medium">{totalToolsSelected}</span>
+                )}
+              </button>
+              <button
+                onClick={() => { setPlusOpen(false); setErpPickerOpen(true) }}
+                className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
+              >
+                <Database size={18} className="text-amber-500" />
+                <span className="flex-1 text-sm text-slate-800">ERP 工具</span>
+              </button>
+            </div>
+          </Drawer.Content>
+        </Drawer.Portal>
+      </Drawer.Root>
+
+      {/* ── Tools picker bottom sheet:MCP / KB / DIFY 三 tab ── */}
+      <Drawer.Root open={toolsOpen} onOpenChange={setToolsOpen}>
+        <Drawer.Portal>
+          <Drawer.Overlay className="fixed inset-0 bg-black/40 z-40" />
+          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl pb-safe max-h-[85vh] flex flex-col">
+            <Drawer.Title className="sr-only">工具選擇</Drawer.Title>
+            <div className="mx-auto w-10 h-1 rounded-full bg-slate-300 mt-2 flex-shrink-0" />
+
+            {/* Tabs(橫向 scroll 避擠)*/}
+            <div className="px-2 pt-3 pb-2 border-b border-slate-100 flex gap-1 flex-shrink-0 overflow-x-auto">
+              {[
+                { key: 'mcp' as const,   label: 'MCP',         count: selectedMcpIds.size,  badge: 'bg-cyan-100 text-cyan-700' },
+                { key: 'kb' as const,    label: '知識庫',       count: selectedKbIds.size,   badge: 'bg-blue-100 text-blue-700' },
+                { key: 'dify' as const,  label: 'API',         count: selectedDifyIds.size, badge: 'bg-amber-100 text-amber-700' },
+                { key: 'skill' as const, label: '技能',         count: pickedSkillIds.size,  badge: 'bg-purple-100 text-purple-700' },
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setToolsTab(tab.key)}
+                  className={`flex-1 min-w-[64px] px-2 py-2 rounded-lg text-sm font-medium transition flex items-center justify-center gap-1.5 whitespace-nowrap ${
+                    toolsTab === tab.key ? 'bg-slate-100 text-slate-800' : 'text-slate-500 active:bg-slate-50'
+                  }`}
+                >
+                  {tab.label}
+                  {tab.count > 0 && (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${tab.badge}`}>{tab.count}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* List */}
+            <div className="flex-1 overflow-y-auto p-2">
+              {toolsTab === 'mcp' && (
+                allMcpServers.length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-6">沒有可用 MCP</p>
+                ) : (
+                  allMcpServers.map((s: any) => {
+                    const picked = selectedMcpIds.has(s.id)
+                    return (
+                      <button
+                        key={s.id}
+                        onClick={() => setSelectedMcpIds(prev => { const n = new Set(prev); picked ? n.delete(s.id) : n.add(s.id); return n })}
+                        className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-lg text-left ${picked ? 'bg-cyan-50' : 'active:bg-slate-100'}`}
+                      >
+                        <span className={`mt-0.5 w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 ${picked ? 'bg-cyan-500 border-cyan-500' : 'border-slate-300'}`}>
+                          {picked && <span className="text-white text-xs leading-none">✓</span>}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm font-medium truncate ${picked ? 'text-cyan-800' : 'text-slate-800'}`}>
+                            {localName(s)}
+                            {isOverrideTool('mcp', s.id) && <span className="ml-1 text-[10px] text-orange-500">⚗</span>}
+                          </p>
+                          {localDesc(s) && <p className="text-xs text-slate-500 truncate">{localDesc(s)}</p>}
+                        </div>
+                      </button>
+                    )
+                  })
+                )
+              )}
+              {toolsTab === 'kb' && (
+                allSelfKbs.length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-6">沒有可用知識庫</p>
+                ) : (
+                  allSelfKbs.map((k: any) => {
+                    const id = String(k.id)
+                    const picked = selectedKbIds.has(id)
+                    return (
+                      <button
+                        key={id}
+                        onClick={() => setSelectedKbIds(prev => { const n = new Set(prev); picked ? n.delete(id) : n.add(id); return n })}
+                        className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-lg text-left ${picked ? 'bg-blue-50' : 'active:bg-slate-100'}`}
+                      >
+                        <span className={`mt-0.5 w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 ${picked ? 'bg-blue-500 border-blue-500' : 'border-slate-300'}`}>
+                          {picked && <span className="text-white text-xs leading-none">✓</span>}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm font-medium truncate ${picked ? 'text-blue-800' : 'text-slate-800'}`}>
+                            {localName(k)}
+                            {isOverrideTool('kb', id) && <span className="ml-1 text-[10px] text-orange-500">⚗</span>}
+                          </p>
+                          {localDesc(k) && <p className="text-xs text-slate-500 truncate">{localDesc(k)}</p>}
+                        </div>
+                      </button>
+                    )
+                  })
+                )
+              )}
+              {toolsTab === 'dify' && (
+                allDifyKbs.length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-6">沒有可用 API 連接器</p>
+                ) : (
+                  allDifyKbs.map((d: any) => {
+                    const picked = selectedDifyIds.has(d.id)
+                    return (
+                      <button
+                        key={d.id}
+                        onClick={() => setSelectedDifyIds(prev => { const n = new Set(prev); picked ? n.delete(d.id) : n.add(d.id); return n })}
+                        className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-lg text-left ${picked ? 'bg-amber-50' : 'active:bg-slate-100'}`}
+                      >
+                        <span className={`mt-0.5 w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 ${picked ? 'bg-amber-500 border-amber-500' : 'border-slate-300'}`}>
+                          {picked && <span className="text-white text-xs leading-none">✓</span>}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm font-medium truncate ${picked ? 'text-amber-800' : 'text-slate-800'}`}>
+                            {localName(d)}
+                            {isOverrideTool('dify', d.id) && <span className="ml-1 text-[10px] text-orange-500">⚗</span>}
+                          </p>
+                          {localDesc(d) && <p className="text-xs text-slate-500 truncate">{localDesc(d)}</p>}
+                        </div>
+                      </button>
+                    )
+                  })
+                )
+              )}
+              {toolsTab === 'skill' && (
+                allSkills.length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-6">沒有可用技能</p>
+                ) : (
+                  allSkills.map((s) => {
+                    const picked = pickedSkillIds.has(s.id)
+                    const hasVars = s.prompt_variables && s.prompt_variables !== '[]'
+                    return (
+                      <button
+                        key={s.id}
+                        onClick={() => toggleSkill(s.id)}
+                        className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-lg text-left ${picked ? 'bg-purple-50' : 'active:bg-slate-100'}`}
+                      >
+                        <span className={`mt-0.5 w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 ${picked ? 'bg-purple-500 border-purple-500' : 'border-slate-300'}`}>
+                          {picked && <span className="text-white text-xs leading-none">✓</span>}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm font-medium truncate ${picked ? 'text-purple-800' : 'text-slate-800'}`}>
+                            <span className="mr-1">{s.icon || '🔧'}</span>
+                            {localName(s)}
+                            {isOverrideTool('skill', s.id) && <span className="ml-1 text-[10px] text-orange-500">⚗</span>}
+                            {hasVars && <span className="ml-1 text-[10px] text-amber-600 font-medium">需參數</span>}
+                          </p>
+                          {localDesc(s) && <p className="text-xs text-slate-500 truncate">{localDesc(s)}</p>}
+                        </div>
+                      </button>
+                    )
+                  })
+                )
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="border-t border-slate-100 p-3 flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={() => {
+                  setSelectedMcpIds(new Set())
+                  setSelectedKbIds(new Set())
+                  setSelectedDifyIds(new Set())
+                  setPickedSkillIds(new Set())
+                  setPendingSkillIds(new Set())
+                }}
+                className="flex-1 py-2.5 text-sm text-slate-600 rounded-lg active:bg-slate-100"
+              >
+                清空
+              </button>
+              <button
+                onClick={confirmTools}
+                disabled={skillSaving}
+                className="flex-1 py-2.5 text-sm text-white bg-blue-600 rounded-lg active:bg-blue-700 disabled:opacity-50"
+              >
+                {skillSaving ? '儲存中…' : `完成${totalToolsSelected > 0 ? `(已選 ${totalToolsSelected})` : ''}`}
+              </button>
+            </div>
+          </Drawer.Content>
+        </Drawer.Portal>
+      </Drawer.Root>
+
+      {/* ERP 工具選擇 — 桌機 modal,在手機上 max-w-md 居中也 OK */}
+      {erpPickerOpen && (
+        <ErpToolPicker
+          onPick={(tool) => { setErpPickerOpen(false); setErpInvoking(tool) }}
+          onClose={() => setErpPickerOpen(false)}
+        />
+      )}
+
+      {/* ERP 工具參數填寫 + 執行 */}
+      {erpInvoking && (
+        <ErpToolInvokeModal
+          tool={erpInvoking}
+          sessionId={currentSessionId || null}
+          onClose={() => setErpInvoking(null)}
+          onDone={({ mode, tool, inputs, result, cache_key }: { mode: ResultMode; tool: ErpTool; inputs: Record<string, any>; result: any; cache_key: string | null }) => {
+            setErpInvoking(null)
+            const resultJson = '```json\n' + JSON.stringify(result, null, 2).slice(0, 8000) + '\n```'
+            const inputsJson = Object.keys(inputs || {}).length
+              ? '\n參數:\n```json\n' + JSON.stringify(inputs, null, 2) + '\n```'
+              : ''
+
+            if (mode === 'view') {
+              if (!currentSessionId) return
+              const content = `**ERP 工具結果:${tool.name}** (\`${tool.code}\`)${inputsJson}\n\n結果:\n${resultJson}${cache_key ? `\n\n_完整結果 key: \`${cache_key}\`_` : ''}`
+              setMessages((prev) => [...prev, {
+                id: Date.now(),
+                session_id: currentSessionId,
+                role: 'assistant',
+                content,
+                created_at: new Date().toISOString(),
+              } as ChatMessage])
+            } else if (mode === 'ai_explain') {
+              const msg = `我剛才呼叫了 ERP 工具「${tool.name}」(${tool.code})${inputsJson}\n\n結果:\n${resultJson}\n\n請用繁體中文解釋這份資料的含義。`
+              void handleSend(msg, [])
+            } else if (mode === 'ask_with') {
+              const ctx = `[參考資料] ERP 工具 ${tool.code} 的執行結果:${inputsJson}\n${resultJson}`
+              setErpPendingContext(ctx)
+            }
+          }}
+        />
+      )}
     </div>
   )
 }

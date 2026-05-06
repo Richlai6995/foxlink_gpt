@@ -75,7 +75,13 @@
     "menu": {
       "settings": "設定",
       "language": "語言",
-      "help": "說明"
+      "help": "說明",
+      "skillMarket": "技能市場",
+      "templates": "文件模板",
+      "myCharts": "我的圖庫",
+      "feedback": "問題反饋",
+      "pureMode": "純對話模式",
+      "pureModeDesc": "不引用工具/知識庫/技能,直接走 LLM"
     }
   },
   "common": {
@@ -2260,11 +2266,12 @@
     "unresolved": "未解除"
   },
   "tokenStats": {
-    "title": "我的 Token 消耗趨勢",
-    "button": "消耗趨勢",
+    "title": "我的本月 Token 消耗",
+    "button": "本月消耗",
     "days": "{{n}} 天",
-    "totalCost": "累計費用",
-    "totalTokens": "累計 Tokens",
+    "thisMonthSuffix": "(本月)",
+    "totalCost": "本月累計費用",
+    "totalTokens": "本月累計 Tokens",
     "modelCount": "使用模型數",
     "noData": "此期間無 Token 使用記錄",
     "date": "日期",
@@ -2273,7 +2280,8 @@
     "outputTokens": "輸出 Tokens",
     "cost": "費用 (USD)",
     "tabChart": "圖表",
-    "tabDetail": "明細"
+    "tabDetail": "明細",
+    "monthSpent": "本月消耗"
   },
   "tpl": {
     "title": "文件範本庫",

@@ -18,20 +18,50 @@ interface Props {
   onClose: () => void
 }
 
+// 月份 picker:'current' = 本月,'YYYY-MM' = 指定某月
+type RangeKey = 'current' | string
+function startOfMonth(d: Date): string { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01` }
+function monthLabel(d: Date): string { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
+
 export default function TokenStatsModal({ onClose }: Props) {
   const { t } = useTranslation()
   const [rows, setRows] = useState<Row[]>([])
-  const [days, setDays] = useState(30)
+  // 預設本月;月份 picker 提供本月 / 上月 / 上上月 / 上上上月 共 4 選
+  const [rangeKey, setRangeKey] = useState<RangeKey>('current')
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<'chart' | 'detail'>('chart')
 
+  // 計算 from 日期 — 本月走預設(server 自動 TRUNC(SYSDATE,'MM'));其他月份明確帶 from
+  const from = useMemo(() => {
+    if (rangeKey === 'current') return ''
+    const [y, m] = rangeKey.split('-').map(Number)
+    return startOfMonth(new Date(y, m - 1, 1))
+  }, [rangeKey])
+
   useEffect(() => {
     setLoading(true)
-    api.get(`/auth/token-stats?days=${days}`)
-      .then(({ data }) => setRows(data || []))
+    const qs = from ? `from=${from}` : ''
+    api.get(`/auth/token-stats${qs ? `?${qs}` : ''}`)
+      .then(({ data }) => {
+        let r = (data || []) as Row[]
+        // 若 picker 不是當月,需 client 端按月份過濾(server 給的是「from 之後」全部)
+        if (rangeKey !== 'current') {
+          const ym = rangeKey
+          r = r.filter(x => (x.usage_date || '').startsWith(ym))
+        }
+        setRows(r)
+      })
       .catch(() => setRows([]))
       .finally(() => setLoading(false))
-  }, [days])
+  }, [from, rangeKey])
+
+  const monthOptions = useMemo(() => {
+    const now = new Date()
+    return Array.from({ length: 4 }, (_, i) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      return { key: i === 0 ? 'current' : monthLabel(d), label: monthLabel(d) }
+    })
+  }, [])
 
   const { chartOption, totalCost, totalTokens } = useMemo(() => {
     // Collect all unique dates and model names
@@ -102,15 +132,15 @@ export default function TokenStatsModal({ onClose }: Props) {
           </div>
           <div className="flex items-center gap-2">
             <select
-              value={days}
-              onChange={e => setDays(Number(e.target.value))}
+              value={rangeKey}
+              onChange={e => setRangeKey(e.target.value)}
               className="text-xs border rounded px-2 py-1"
             >
-              <option value={7}>{t('tokenStats.days', { n: 7 })}</option>
-              <option value={14}>{t('tokenStats.days', { n: 14 })}</option>
-              <option value={30}>{t('tokenStats.days', { n: 30 })}</option>
-              <option value={60}>{t('tokenStats.days', { n: 60 })}</option>
-              <option value={90}>{t('tokenStats.days', { n: 90 })}</option>
+              {monthOptions.map(opt => (
+                <option key={opt.key} value={opt.key}>
+                  {opt.key === 'current' ? `${opt.label} ${t('tokenStats.thisMonthSuffix', '(本月)')}` : opt.label}
+                </option>
+              ))}
             </select>
             <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600">
               <X size={18} />

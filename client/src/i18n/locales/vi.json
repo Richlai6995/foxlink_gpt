@@ -75,7 +75,13 @@
     "menu": {
       "settings": "Cài đặt",
       "language": "Ngôn ngữ",
-      "help": "Trợ giúp"
+      "help": "Trợ giúp",
+      "skillMarket": "Chợ kỹ năng",
+      "templates": "Mẫu tài liệu",
+      "myCharts": "Biểu đồ của tôi",
+      "feedback": "Phản hồi",
+      "pureMode": "Chế độ chat thuần",
+      "pureModeDesc": "Bỏ qua công cụ / KB / kỹ năng — gọi LLM trực tiếp"
     }
   },
   "common": {
@@ -2260,11 +2266,12 @@
     "unresolved": "Chưa giải quyết"
   },
   "tokenStats": {
-    "title": "Xu hướng tiêu thụ Token",
-    "button": "Xu hướng",
+    "title": "Tiêu thụ Token tháng này",
+    "button": "Tháng này",
     "days": "{{n}} ngày",
-    "totalCost": "Tổng chi phí",
-    "totalTokens": "Tổng Tokens",
+    "thisMonthSuffix": "(tháng này)",
+    "totalCost": "Chi phí tháng này",
+    "totalTokens": "Tokens tháng này",
     "modelCount": "Số mô hình",
     "noData": "Không có dữ liệu Token trong khoảng thời gian này",
     "date": "Ngày",
@@ -2273,7 +2280,8 @@
     "outputTokens": "Tokens đầu ra",
     "cost": "Chi phí (USD)",
     "tabChart": "Biểu đồ",
-    "tabDetail": "Chi tiết"
+    "tabDetail": "Chi tiết",
+    "monthSpent": "Tháng này"
   },
   "tpl": {
     "title": "Thư viện mẫu tài liệu",

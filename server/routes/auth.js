@@ -1246,14 +1246,32 @@ router.post('/activity', async (req, res) => {
   res.json({ ok: true });
 });
 
-// GET /api/auth/token-stats — 使用者查看自己近 30 天各模型費用（無需 admin）
+// GET /api/auth/token-stats — 使用者查看自己 token 用量(無需 admin)
+// 預設「本月」(月初 → 今日);相容舊參數 days(>0 → 用近 N 天)、可帶 from=YYYY-MM-DD 自訂起點
 router.get('/token-stats', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1];
   const session = token ? await redis.getSession(token) : null;
   if (!session) return res.status(401).json({ error: 'Unauthorized' });
   try {
     const db = require('../database-oracle').db;
-    const days = Math.min(parseInt(req.query.days) || 30, 90);
+    const customFrom = (req.query.from || '').trim();
+    const daysParam = parseInt(req.query.days);
+    let where = 'tu.user_id = ?';
+    const params = [session.id];
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(customFrom)) {
+      // 自訂起始日
+      where += " AND tu.usage_date >= TO_DATE(?, 'YYYY-MM-DD')";
+      params.push(customFrom);
+    } else if (Number.isFinite(daysParam) && daysParam > 0) {
+      // 相容舊行為:近 N 天
+      where += ' AND tu.usage_date >= SYSDATE - ?';
+      params.push(Math.min(daysParam, 365));
+    } else {
+      // 預設:本月(月初到今日)
+      where += " AND tu.usage_date >= TRUNC(SYSDATE, 'MM')";
+    }
+
     const rows = await db.prepare(`
       SELECT TO_CHAR(usage_date,'YYYY-MM-DD') AS usage_date,
              tu.model,
@@ -1264,10 +1282,9 @@ router.get('/token-stats', async (req, res) => {
              COALESCE(tu.currency,'USD')  AS currency
       FROM token_usage tu
       LEFT JOIN llm_models lm ON LOWER(lm.key)=LOWER(tu.model) AND lm.is_active=1
-      WHERE tu.user_id = ?
-        AND tu.usage_date >= SYSDATE - ?
+      WHERE ${where}
       ORDER BY tu.usage_date ASC, tu.model ASC
-    `).all(session.id, days);
+    `).all(...params);
     res.json(rows);
   } catch (e) {
     res.status(500).json({ error: e.message });
