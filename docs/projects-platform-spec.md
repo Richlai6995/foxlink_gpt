@@ -4522,6 +4522,7 @@ CREATE TABLE admin_testing_sessions (
 - **業務主管投影片**:[projects-platform-slides.md](./projects-platform-slides.md) — 27 張 v2(對齊 OIBG flow + 多 channel + RACI + Multi-PM + Stage Gate)
 - **主管簡報完整版**:[projects-platform-executive-deck.md](./projects-platform-executive-deck.md) — 29 張 v2(架構 / 流程 / 功能 / 時程 / 效益)
 - **主管簡報 2 頁總結**:[projects-platform-executive-summary.md](./projects-platform-executive-summary.md) — 1 頁功能 + 1 頁流程 v2
+- **CIO 競品分析簡報**:[projects-platform-vs-market-cio.md](./projects-platform-vs-market-cio.md) — 22 張(市場分析 + Build vs Buy + 5 年 TCO + Vendor Lock-in + Q&A)
 
 ### 既有 Cortex 文件
 - 舊規格書:[quote-system-spec.md](./quote-system-spec.md)(v0.3.5)— 仍可作報價特化邏輯參考
