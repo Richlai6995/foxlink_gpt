@@ -32,7 +32,8 @@ client (外網)
 [6] Auth route:
       ├─ admin 帳號禁止外網
       ├─ 沒 email 拒絕
-      ├─ 已通過 MFA 的 trusted IP 跳過
+      ├─ Device cookie 對得上 → 跳過 MFA(主路徑,IP 變不影響)
+      ├─ 已通過 MFA 的 trusted IP 跳過(舊 fallback)
       └─ Webex DM OTP 驗證
   ↓
 正常 API
@@ -49,6 +50,7 @@ client (外網)
 | `414892c` | PR 3a | admin 限內網 / 改密碼踢 sessions / 失敗 alert / forgot rate / 異常登入 DM / admin TTL / helmet |
 | `d41609b` | PR 3b | IP 黑名單 + UA anti-bot |
 | `a03557e` | PR 3c | App + Ingress 兩層 per-IP rate limit |
+| `c3cc457` | PR 4  | **Device-bound MFA 信任** — IP 變不再強迫重 OTP(取代純 IP 嚴綁) |
 
 ---
 
@@ -64,6 +66,76 @@ client (外網)
 - nginx-ingress append 真實 client IP 在 XFF 右邊,偽造的 header 永遠在左邊不被信
 
 **環境前提:** K8s 架構 `client → nginx-ingress(1 跳) → pod`。多層 proxy / CDN 要調 `TRUST_PROXY` 數字。
+
+---
+
+### 3.1.5 Device-bound MFA 信任(PR 4)
+
+**動機:** 過去 PR 2 採「同 IP /32 嚴綁 7 天」對行動使用者很痛 ── 4G ↔ Wi-Fi 切換 / ISP 重撥 / 出差移動辦公,IP 一變立刻要重新 OTP。GitHub / Google / Microsoft 365 早就改成 device 為主、IP 變不重認,我們同步靠齊主流。
+
+**新邏輯(IP 不再硬綁,以 device 為識別)**:
+
+```
+  client 外網登入
+        ↓
+  ┌──────────────────────────────────────────┐
+  │ ① 帳密驗證通過                            │
+  │ ② 內網? → 直接登入                        │
+  │ ③ Device cookie 對得上 + 未過期 ── 是 ──→ 登入(不管 IP)
+  │           │                              │
+  │           └─ 否                          │
+  │ ④ Trusted IP fallback 對得上? ── 是 ──→ 登入(舊邏輯)
+  │           │                              │
+  │           └─ 否                          │
+  │ ⑤ 走完整 MFA 流程 → 通過後 issueDevice    │
+  │   + setDeviceCookie + 寫 trusted IP      │
+  └──────────────────────────────────────────┘
+```
+
+**Cookie 設計:**
+- name `flgpt_did`,value `<device_id>.<HMAC_SHA256(device_id, secret)>`
+- HttpOnly + Secure(生產 https)+ SameSite=Lax + 30 天 sliding TTL
+- Secret 來源:`DEVICE_COOKIE_SECRET` env(留空 = 自動由 JWT_SECRET 衍生)
+- 自帶 parser(從 `req.headers.cookie` 讀,不依賴 cookie-parser middleware)
+
+**DB schema:**
+- `user_trusted_devices`:`(user_id, device_id, device_label, fingerprint_hash, fingerprint_json, created_via_ip, last_seen_ip, user_agent, expires_at)`
+- 預留 `fingerprint_*` 欄位給 Phase B(browser fingerprint 漂移偵測)
+- UNIQUE `(user_id, device_id)`,改密碼 / reset 整批清空
+
+**安全考量:**
+- httpOnly + Secure + SameSite=Lax → JS 偷不到、跨站偷不到
+- HMAC 簽章防偽造
+- 改密碼 / reset 自動 `revokeAllForUser` + `clearDeviceCookie` + 踢 sessions(三重補救)
+- 新 IP 通過時繼續走「異常登入 DM 通知」邏輯,user 可即時反應
+- Phase B 計畫加 fingerprint 漂移判斷:cookie 偷到但裝錯 device → fingerprint 對不上 → 強制重 MFA
+
+**核心檔:**
+- [server/services/deviceTrust.js](../server/services/deviceTrust.js) — cookie 簽發 / 驗證 / sliding TTL / device label 推測 / CRUD
+- [server/routes/auth.js](../server/routes/auth.js) — `proceedOrChallenge` 加 device cookie 快路徑;`/2fa/verify` 通過時 `issueDevice` + `setDeviceCookie`;`/me/devices` GET/DELETE/revoke-all 自助 API
+- [server/routes/admin.js](../server/routes/admin.js) — `/admin/users/:id/trusted-devices` 看 / 強制清
+- [client/src/components/MyDevicesModal.tsx](../client/src/components/MyDevicesModal.tsx) — user 自助 UI(三語)
+- [client/src/components/Sidebar.tsx](../client/src/components/Sidebar.tsx) — 加 📱 按鈕觸發 modal
+
+**威脅對照:**
+
+| 攻擊 | 舊(IP 嚴綁) | 新(device-bound) |
+|---|---|---|
+| 攻擊者搶到密碼,從不同 IP | ✅ 擋 | ✅ 擋(沒 cookie) |
+| 攻擊者搶到密碼 + cookie | ❌ 通(若同 IP) | 🟡 通 + 新 IP DM 通知(Phase B 加 fp 後可擋) |
+| 攻擊者搶到密碼 + cookie + 同 IP(內鬼 / 同台 device) | ❌ 通 | ❌ 通(此層只能靠稽核) |
+| 員工換網路 / IP | 🔴 重 MFA(體驗差) | ✅ 直接登入 |
+| 員工換 device | ✅ 重 MFA | ✅ 重 MFA(合理) |
+| 員工 incognito / 清 cookie | 🔴 重 MFA | 🟡 重 MFA(合理) |
+| 改密碼 | ✅ 清 IP | ✅ 清 IP + 清 device + 踢 sessions(三重) |
+
+**Backward compatible:** env `MFA_DEVICE_TRUST_TTL_DAYS=0` 即關閉新機制純走舊 IP 邏輯;舊 `user_trusted_ips` 仍寫入 + 仍作 fallback,既有信任 IP 不受影響。
+
+**新增 Audit log event types:**
+- `login_success_external_skip_mfa_device` — device cookie 跳過 MFA 成功
+- `mfa_trusted_device_added` — MFA verify 通過後寫入 device
+- `device_revoked_user` — 使用者自助移除
+- `device_revoked_admin` — admin 強制清空
 
 ---
 
@@ -216,12 +288,17 @@ INTERNAL_NETWORKS=10.0.0.0/8,...       # 內網 CIDR(MFA + access control 共用
 
 # Webex MFA
 MFA_ENABLED=false                      # ⚠️ EXTERNAL_ACCESS_MODE=full 時必須 true 否則啟動失敗
-MFA_TRUSTED_IP_TTL_DAYS=7
+MFA_TRUSTED_IP_TTL_DAYS=7              # 舊 IP fallback(device cookie 不在時用)
 MFA_OTP_TTL_SECONDS=300
 MFA_RESEND_COOLDOWN_SECONDS=60
 MFA_MAX_VERIFY_ATTEMPTS=5
 MFA_DM_TIMEOUT_MS=8000
 MFA_RATE_LIMIT_PER_USER_PER_HOUR=20
+
+# Device-bound 信任(取代純 IP 嚴綁,UX 主力路徑)
+MFA_DEVICE_TRUST_TTL_DAYS=30           # 0 = 關閉新機制,純走 IP fallback
+DEVICE_COOKIE_SECRET=                  # 留空 = 自動由 JWT_SECRET 衍生 SHA256;改值會讓所有現有 cookie 失效
+DEVICE_COOKIE_SECURE=auto              # auto / true / false(預設 auto 看 req.protocol)
 
 # 認證失敗告警 + forgot rate
 AUTH_FAIL_ALERT_PER_USER=5
@@ -367,7 +444,7 @@ if (mode === 'full' && process.env.MFA_ENABLED !== 'true') {
 |---|---|---|
 | 改密碼後沒清掉 active sessions(舊架構就沒做)| 帳號被釣後攻擊者持有 token 仍可用 | PR 3a 已修(對自己這條) |
 | Admin 沒「強制下線單一 user」按鈕 | 緊急應變不便 | 後續加 admin endpoint + UI |
-| 沒「重置 trusted IPs」UI | admin 只能 SQL 改 | 後續加 |
+| ~~沒「重置 trusted IPs」UI~~ | ~~admin 只能 SQL 改~~ | ✅ PR 4 已加 device 維度的 admin API(`/admin/users/:id/trusted-devices`),trusted IP 仍只能 SQL 改 |
 | TOTP 備援(Webex 故障時) | 全公司外網登入掛 | 第二版,需 enrollment UX |
 | CSP | 阻 XSS / clickjacking | helmet 預設規則太嚴,需單獨評估前端兼容 |
 | 個資合規 | `auth_audit_logs` 永久保留 IP/email/UA | 看公司政策,可加 90 天後 hash IP |
@@ -383,6 +460,7 @@ if (mode === 'full' && process.env.MFA_ENABLED !== 'true') {
 - [server/middleware/accessControl.js](../server/middleware/accessControl.js) — IP 黑名單 + UA + access mode
 - [server/middleware/externalRateLimit.js](../server/middleware/externalRateLimit.js) — per-IP rate limit
 - [server/services/webexMfaService.js](../server/services/webexMfaService.js) — challenge / OTP / DM / trusted IP
+- [server/services/deviceTrust.js](../server/services/deviceTrust.js) — device cookie 簽發 / 驗證 / sliding TTL / CRUD(取代 IP 嚴綁)
 - [server/services/authAuditLog.js](../server/services/authAuditLog.js) — 認證稽核 logger
 - [server/services/authThrottle.js](../server/services/authThrottle.js) — 失敗告警 / forgot rate / 新 IP 判斷
 - [server/services/ipBlacklist.js](../server/services/ipBlacklist.js) — 黑名單 CRUD + UA 偵測
@@ -397,6 +475,7 @@ if (mode === 'full' && process.env.MFA_ENABLED !== 'true') {
 - [client/src/context/AuthContext.tsx](../client/src/context/AuthContext.tsx) — `verifyMfa` / `resendMfa`
 - [client/src/components/admin/AuthAuditLogsPanel.tsx](../client/src/components/admin/AuthAuditLogsPanel.tsx) — 認證稽核查詢
 - [client/src/components/admin/IpBlacklistPanel.tsx](../client/src/components/admin/IpBlacklistPanel.tsx) — IP 黑名單管理
+- [client/src/components/MyDevicesModal.tsx](../client/src/components/MyDevicesModal.tsx) — 使用者自助「我的信任裝置」(由 Sidebar 📱 按鈕觸發)
 
 **K8s:**
 - [k8s/ingress.yaml](../k8s/ingress.yaml) — whitelist + limit-rps
@@ -407,7 +486,8 @@ if (mode === 'full' && process.env.MFA_ENABLED !== 'true') {
 
 ## 10. 補丁邏輯 / 設計決策
 
-- **IP 信任 /32 嚴格而非 /24**:外網本來就要嚴,鄰居 NAT 共用風險不可接受
+- **Device-bound > IP-bound(PR 4 設計轉向)**:行動使用者一天 IP 變多次是常態,綁 IP 等於 7 天免 MFA 形同虛設、UX 痛點極大。改以 httpOnly + HMAC cookie 為主要識別,實際安全性反而升級(JS 偷不到,改密碼可瞬間清空所有 device)。靠齊 GitHub / Google / Microsoft 主流。
+- **IP 信任 /32 嚴格而非 /24**:仍保留作為 device cookie 的 fallback。外網本來就要嚴,鄰居 NAT 共用風險不可接受
 - **改密碼一律踢 trusted IPs + sessions**:標準做法,密碼洩漏後第一道補救
 - **MFA 不做帳號鎖定**:5 次失敗只刷 challenge,防止惡意鎖人
 - **不擋 curl/wget UA**:K8s probe 用 curl,內部腳本用 wget,誤殺風險高

@@ -1,7 +1,7 @@
 /**
  * Help page seed data — zh-TW (source of truth)
  * Auto-extracted from HelpPage.tsx
- * Generated: 2026-04-30
+ * Generated: 2026-05-06
  *
  * Block types: para, tip, note, table, steps, code, list, subsection, card_grid, comparison
  */
@@ -84,7 +84,7 @@ const userSections = [
     "sort_order": 2,
     "icon": "User",
     "icon_color": "text-indigo-500",
-    "last_modified": "2026-04-01",
+    "last_modified": "2026-05-06",
     "title": "登入與登出",
     "sidebar_label": "登入與登出",
     "blocks": [
@@ -186,11 +186,127 @@ const userSections = [
       },
       {
         "type": "subsection",
+        "title": "外網登入 — 二階段驗證(Webex MFA)",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "若您**從公司外網**(出差、家用、行動網路)連線 Cortex,系統會在帳密驗證通過後,**多走一道 Webex DM 驗證碼確認**。內網(辦公室 / 廠區)使用者完全無感,流程跟過去一致。"
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "輸入帳號密碼後,系統判斷您不在內網範圍"
+              },
+              {
+                "title": "Webex Bot 自動私訊您一個 6 位數驗證碼",
+                "desc": "5 分鐘內有效;同時告訴您「來源 IP」讓您確認是不是自己操作"
+              },
+              {
+                "title": "前端切換到驗證碼輸入畫面",
+                "desc": "可按「重新發送」(60 秒冷卻)"
+              },
+              {
+                "title": "輸入正確驗證碼即完成登入,系統會在您的瀏覽器發一個信任 cookie(30 天)"
+              },
+              {
+                "title": "同一台裝置 30 天內再登入直接通過,**不必重新驗證碼**(即使換網路 / IP 變動)"
+              }
+            ]
+          },
+          {
+            "type": "note",
+            "text": "**沒收到驗證碼怎麼辦?** 1) 確認 Webex App 開著且通知開啟 2) 檢查跟 Cortex Bot 的 1:1 對話 3) 若一直收不到,登入畫面會顯示「事件代碼」,把它告訴系統管理員可協助查詢"
+          },
+          {
+            "type": "tip",
+            "text": "**Admin 帳號(系統管理員)永遠不能從外網登入**,即使有信任裝置也不行。如果您是 admin 想從外面工作,請走 VPN 或內網連線。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "我的信任裝置(2026-05 新功能)",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "完成 Webex 驗證後,您的瀏覽器 / 手機會被登記為「信任裝置」,30 天內免重新驗證碼。**換網路 / 4G 切 Wi-Fi / ISP 重撥 / 出差移動辦公,IP 變動都不受影響**,只有換瀏覽器 / 清 cookie / 改密碼會視為新裝置。"
+          },
+          {
+            "type": "subsection",
+            "title": "進入「我的裝置」頁面",
+            "blocks": [
+              {
+                "type": "para",
+                "text": "在 Cortex 左下角狀態列點 **📱 圖示**(在「鑰匙」按鈕旁邊),即可看到自己所有信任裝置。"
+              },
+              {
+                "type": "list",
+                "items": [
+                  "「**目前使用中**」綠色標記:標示您現在這台裝置",
+                  "**裝置名稱**:系統自動推測(例:Chrome on Windows / Safari on iPhone)",
+                  "**最後使用時間 + IP**:用來判斷是否為自己操作",
+                  "**到期日**:30 天 sliding(每次成功使用刷新)"
+                ]
+              }
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "何時應該移除裝置",
+            "blocks": [
+              {
+                "type": "list",
+                "items": [
+                  "**裝置遺失或失竊** — 立即從清單移除該裝置",
+                  "**借給別人用過後** — 移除避免該裝置長期免驗證碼",
+                  "**換新手機 / 筆電前** — 移除舊裝置,新裝置首次登入會走完整 MFA",
+                  "**懷疑帳號被盜** — 點底部「移除所有裝置」一鍵清空,所有裝置(含這台)下次都需重走 MFA"
+                ]
+              }
+            ]
+          },
+          {
+            "type": "subsection",
+            "title": "改密碼會自動清空所有信任裝置",
+            "blocks": [
+              {
+                "type": "para",
+                "text": "當您「修改密碼」或透過 Email 連結「重設密碼」時,系統會**自動清空所有信任裝置 + 踢掉所有現有登入 session**(只保留當前這個改密碼的視窗)。下次外網登入無論哪台裝置都需重新走 Webex 驗證碼。"
+              },
+              {
+                "type": "tip",
+                "text": "這是密碼洩漏後的第一道補救:即使攻擊者拿到舊密碼 + 舊裝置 cookie,改密碼瞬間全部失效。"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "異常登入通知",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "當您**從新 IP 完成驗證碼**(系統判斷過去 30 天沒在這個 IP 看過您)時,Webex Bot 會主動私訊您「**新位置登入提醒**」,內含時間 / IP / 裝置資訊。"
+          },
+          {
+            "type": "note",
+            "text": "**若收到通知但不是自己操作** → 立即:1) 修改密碼 2) 進「我的裝置」清空所有信任裝置 3) 聯絡資訊安全。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
         "title": "登出系統",
         "blocks": [
           {
             "type": "para",
             "text": "點選左側邊欄最下方的登出圖示（向左箭頭），即可安全登出。登出後 Token 立即失效，確保帳號安全。"
+          },
+          {
+            "type": "tip",
+            "text": "**登出不會清掉信任裝置**。同一台裝置下次登入仍可在 30 天內免驗證碼。要徹底登出該裝置請用「我的裝置」頁面移除。"
           }
         ]
       }
