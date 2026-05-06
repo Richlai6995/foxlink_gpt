@@ -48,6 +48,10 @@ export function initPwa() {
     })
   }
 
+  // 第二層保險:每 5 分鐘 poll /api/version,版本變了就提示
+  // 不依賴 SW(SW 卡住時這條路仍能救回)
+  startVersionPolling()
+
   // 2. 攔截 beforeinstallprompt(Android Chrome / Edge)— iOS Safari 不會觸發
   window.addEventListener('beforeinstallprompt', (e: any) => {
     e.preventDefault()
@@ -76,15 +80,52 @@ export function onUpdateAvailable(fn: (needRefresh: boolean) => void): () => voi
 /** user 同意更新 → skipWaiting + reload */
 export async function applyUpdate() {
   if (!updateSWFn) {
-    window.location.reload()
+    // 沒 SW 就直接 hard reload(加 query 強制 bypass HTTP cache)
+    window.location.href = window.location.pathname + '?_nocache=' + Date.now()
     return
   }
   try {
     await updateSWFn(true)
   } catch {
-    // fallback:直接 reload
     window.location.reload()
   }
+}
+
+// ── 版本輪詢:不依賴 SW,每 5 分鐘問 server /api/version,版本變了就觸發 toast
+let knownVersion: string | null = null
+let pollTimerId: number | null = null
+function startVersionPolling() {
+  const POLL_INTERVAL_MS = 5 * 60 * 1000 // 5 分鐘
+  const check = async () => {
+    try {
+      const r = await fetch('/api/version', { cache: 'no-store', credentials: 'omit' })
+      if (!r.ok) return
+      const { version } = await r.json()
+      if (!version) return
+      if (knownVersion && knownVersion !== version) {
+        // 版本變了 → 通知 listener
+        needRefresh = true
+        for (const fn of updateListeners) fn(true)
+      }
+      knownVersion = version
+    } catch {
+      // network 失敗 silent
+    }
+  }
+  // 延遲 30s 第一次 check(避免阻擋首屏)+ 之後每 5min
+  setTimeout(() => {
+    void check()
+    pollTimerId = window.setInterval(check, POLL_INTERVAL_MS)
+  }, 30000)
+  // tab 從背景回前景時也立即 check 一次(常見場景:user 鎖屏一下午)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') void check()
+  })
+}
+
+/** 停止輪詢(測試用) */
+export function stopVersionPolling() {
+  if (pollTimerId) { clearInterval(pollTimerId); pollTimerId = null }
 }
 
 function notifyListeners() {

@@ -22,6 +22,11 @@ export default defineConfig({
         ],
         // 主 index chunk 約 2.8MB,單檔上限拉到 5MB
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        // 強制接管:新 SW 一裝好就 skipWaiting + 接管所有 client(避免 user 卡舊 cache)
+        skipWaiting: true,
+        clientsClaim: true,
+        // 清掉 Workbox 舊版本的 precache(避免堆疊)
+        cleanupOutdatedCaches: true,
         // /api/* 一律 NetworkOnly,絕不 cache(SSE / 上傳 / 對話內容)
         navigateFallbackDenylist: [/^\/api/, /^\/uploads/],
         runtimeCaching: [

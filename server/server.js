@@ -123,6 +123,17 @@ app.use('/uploads', express.static(UPLOAD_DIR, {
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
+// /api/version — server 啟動時抓 docker tag / git commit,client 用此偵測新版需重整
+// 邏輯:每次 docker build 啟動會有新時間戳,client 每 5 分鐘 poll 一次,版本變了就觸發 toast
+const APP_VERSION = process.env.APP_VERSION
+  || process.env.GIT_COMMIT
+  || process.env.HOSTNAME // K8s pod name 變了也算一個 signal
+  || String(Date.now()); // 最終 fallback:啟動時間(每次重啟都不同)
+app.get('/api/version', (req, res) => {
+  res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.json({ version: APP_VERSION, ts: new Date().toISOString() });
+});
+
 (async () => {
   try {
     await init();
