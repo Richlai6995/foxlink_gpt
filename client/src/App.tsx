@@ -22,6 +22,7 @@ import FeedbackToast from './components/feedback/FeedbackToast'
 import GlobalVoiceInput from './components/GlobalVoiceInput'
 import VoiceHotkeyHint from './components/VoiceHotkeyHint'
 import InstallPwaPrompt from './components/common/InstallPwaPrompt'
+import UpdateAvailableToast from './components/common/UpdateAvailableToast'
 import MobileUnsupportedScreen from './components/common/MobileUnsupportedScreen'
 import { useDeviceProfile } from './hooks/useDeviceProfile'
 import FeedbackPage from './pages/FeedbackPage'
@@ -127,6 +128,8 @@ function AppRoutes() {
     {isAuthenticated && !isMobile && <GlobalVoiceInput />}
     {isAuthenticated && !isMobile && <VoiceHotkeyHint />}
     {isAuthenticated && <InstallPwaPrompt />}
+    {/* SW 新版可用提示(login / chat 都顯示)*/}
+    <UpdateAvailableToast />
     </MicProvider>
     </AdminOverrideProvider>
   )

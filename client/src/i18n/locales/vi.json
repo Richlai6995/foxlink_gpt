@@ -22,6 +22,14 @@
       "desc": "Nền trắng pha vàng"
     }
   },
+  "pwa": {
+    "update": {
+      "title": "Phiên bản mới có sẵn",
+      "desc": "Bấm Cập nhật để tải tính năng mới nhất",
+      "action": "Cập nhật",
+      "applying": "Đang cập nhật…"
+    }
+  },
   "mobile": {
     "install": {
       "title": "Thêm vào màn hình chính",

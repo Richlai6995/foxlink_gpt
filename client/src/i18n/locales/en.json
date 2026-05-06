@@ -22,6 +22,14 @@
       "desc": "White base with yellow tint"
     }
   },
+  "pwa": {
+    "update": {
+      "title": "New version available",
+      "desc": "Tap Update to load the latest features",
+      "action": "Update",
+      "applying": "Updating…"
+    }
+  },
   "mobile": {
     "install": {
       "title": "Add to Home Screen",

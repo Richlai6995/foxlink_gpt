@@ -6,7 +6,8 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // 改 prompt:user 看到 toast 再點才更新,避免半路 reload
+      registerType: 'prompt',
       injectRegister: false, // 由 main.tsx 顯式註冊,可加 update toast
       workbox: {
         // app shell:JS / CSS / 字型 / 圖片

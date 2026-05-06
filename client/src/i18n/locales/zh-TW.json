@@ -22,6 +22,14 @@
       "desc": "白底黃色調"
     }
   },
+  "pwa": {
+    "update": {
+      "title": "新版本可用",
+      "desc": "點「更新」載入最新功能",
+      "action": "更新",
+      "applying": "更新中…"
+    }
+  },
   "mobile": {
     "install": {
       "title": "加到主畫面",
