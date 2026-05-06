@@ -162,12 +162,22 @@ function MessageBubble({
   const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
   const [hover, setHover] = useState(false)
+  // 觸控裝置 hover 不會觸發,改用 tap 切換 action bar 顯示
+  const [tapped, setTapped] = useState(false)
+  const showActions = hover || tapped
 
   const handleCopy = () => {
     const text = msg.role === 'assistant' ? markdownToPlainText(msg.content ?? '') : (msg.content ?? '')
     onCopy(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
+  }
+  // tap on bubble → toggle action bar(只在觸控裝置有效,桌機 hover 已 cover)
+  const handleBubbleTap = () => {
+    // 觸控判斷:沒有 hover 能力的裝置才響應
+    if (typeof window !== 'undefined' && window.matchMedia('(hover: none) and (pointer: coarse)').matches) {
+      setTapped((v) => !v)
+    }
   }
 
   if (msg.role === 'user') {
@@ -191,13 +201,17 @@ function MessageBubble({
               ))}
             </div>
           )}
-          <div data-chat-bubble="user" className="bg-blue-600 text-white px-4 py-3 rounded-2xl rounded-tr-sm text-sm leading-relaxed whitespace-pre-wrap break-words min-w-0 w-full">
+          <div
+            data-chat-bubble="user"
+            onClick={handleBubbleTap}
+            className="bg-blue-600 text-white px-4 py-3 rounded-2xl rounded-tr-sm text-sm leading-relaxed whitespace-pre-wrap break-words min-w-0 w-full cursor-pointer select-text"
+          >
             {msg.content ?? ''}
           </div>
-          {hover && (
+          {showActions && (
             <button
               onClick={handleCopy}
-              className="text-slate-400 hover:text-slate-600 transition text-xs flex items-center gap-1"
+              className="text-slate-400 hover:text-slate-600 transition text-xs flex items-center gap-1 py-1"
             >
               {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
               {copied ? t('common.copied') : t('common.copy')}
@@ -222,7 +236,11 @@ function MessageBubble({
         <Cpu size={14} className="text-white" />
       </div>
       <div className="flex-1 max-w-[85%]">
-        <div data-chat-bubble="assistant" className="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-5 py-4 shadow-sm overflow-hidden break-words">
+        <div
+          data-chat-bubble="assistant"
+          onClick={handleBubbleTap}
+          className="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-5 py-4 shadow-sm overflow-hidden break-words"
+        >
           {(msg.content ?? '').startsWith('__RESEARCH_JOB__:')
             ? <ResearchProgressCard jobId={(msg.content ?? '').slice('__RESEARCH_JOB__:'.length)} />
             : <>
@@ -251,11 +269,11 @@ function MessageBubble({
               </>
           }
         </div>
-        {hover && (
-          <div className="flex items-center gap-2 mt-1.5">
+        {showActions && (
+          <div className="flex flex-wrap items-center gap-3 mt-1.5">
             <button
               onClick={handleCopy}
-              className="text-slate-400 hover:text-slate-600 transition text-xs flex items-center gap-1"
+              className="text-slate-400 hover:text-slate-600 transition text-xs flex items-center gap-1 py-1"
             >
               {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
               {copied ? t('common.copied') : t('common.copy')}
@@ -263,7 +281,7 @@ function MessageBubble({
             {isLast && onRegenerate && (
               <button
                 onClick={onRegenerate}
-                className="text-slate-400 hover:text-slate-600 transition text-xs flex items-center gap-1"
+                className="text-slate-400 hover:text-slate-600 transition text-xs flex items-center gap-1 py-1"
               >
                 <RefreshCw size={12} />
                 {t('common.regenerate')}

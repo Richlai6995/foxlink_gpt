@@ -196,7 +196,7 @@ export default function Login() {
   const fmtSec = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
+    <div className="min-h-dvh bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4 pt-safe pb-safe">
       {/* Language switcher — top right */}
       <div className="absolute top-4 right-4 z-10">
         <button
@@ -223,13 +223,13 @@ export default function Login() {
       </div>
 
       <div className="w-full max-w-md">
-        {/* Logo */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-20 h-20 mb-4">
-            <img src="/favicon.png" alt="Cortex" className="w-20 h-20 object-contain drop-shadow-lg" />
+        {/* Logo — 手機略縮小 */}
+        <div className="text-center mb-6 sm:mb-8">
+          <div className="inline-flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 mb-3 sm:mb-4">
+            <img src="/favicon.png" alt="Cortex" className="w-16 h-16 sm:w-20 sm:h-20 object-contain drop-shadow-lg" />
           </div>
-          <h1 className="text-2xl font-bold text-white">Cortex</h1>
-          <p className="text-slate-400 text-sm mt-1">{t('login.title')}</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-white">Cortex</h1>
+          <p className="text-slate-400 text-xs sm:text-sm mt-1">{t('login.title')}</p>
         </div>
 
         {/* Login hint */}
@@ -243,7 +243,7 @@ export default function Login() {
         </div>
 
         {/* Card */}
-        <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-8 shadow-2xl">
+        <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-5 sm:p-8 shadow-2xl">
           {step === 'otp' ? (
             <form onSubmit={handleVerifyOtp} className="space-y-5">
               <div className="flex items-center gap-3 mb-1">
@@ -269,7 +269,7 @@ export default function Login() {
                   pattern="\d{6}"
                   value={otpCode}
                   onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
-                  className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white text-center text-2xl tracking-[0.6em] font-mono placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition"
+                  className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white text-center text-xl sm:text-2xl tracking-[0.4em] sm:tracking-[0.6em] font-mono placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition"
                   placeholder="------"
                   autoFocus
                   required

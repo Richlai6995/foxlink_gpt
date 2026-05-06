@@ -6,6 +6,7 @@ import type { LangCode } from '../i18n'
 import { clearAdminOverrideStorage } from './AdminOverrideContext'
 import { useTheme, DEFAULT_THEME } from './ThemeContext'
 import type { UITheme } from './ThemeContext'
+import { isMobileSync } from '../hooks/useDeviceProfile'
 
 const VALID_THEMES: UITheme[] = ['dark', 'dark-dimmed', 'light-blue', 'light-green', 'light-yellow']
 function applyUserTheme(u: any, setTheme: (t: UITheme) => void) {
@@ -145,6 +146,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (localPref && localPref !== (u?.resolved_language || u?.preferred_language)) {
       api.put('/auth/language', { language_code: localPref }).catch(() => {})
     }
+    // 一次性裝置 telemetry — silent fail
+    try {
+      api.post('/telemetry/device', {
+        profile: isMobileSync() ? 'mobile' : 'desktop',
+        ua: navigator.userAgent,
+        viewport: `${window.innerWidth}x${window.innerHeight}`,
+      }).catch(() => {})
+    } catch {}
   }, [setTheme])
 
   const login = useCallback(async (username: string, password: string): Promise<LoginResult> => {

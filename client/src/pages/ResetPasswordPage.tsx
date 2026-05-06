@@ -34,17 +34,17 @@ export default function ResetPasswordPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
+    <div className="min-h-dvh bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4 pt-safe pb-safe">
       <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-20 h-20 mb-4">
-            <img src="/favicon.png" alt="Cortex" className="w-20 h-20 object-contain drop-shadow-lg" />
+        <div className="text-center mb-6 sm:mb-8">
+          <div className="inline-flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 mb-3 sm:mb-4">
+            <img src="/favicon.png" alt="Cortex" className="w-16 h-16 sm:w-20 sm:h-20 object-contain drop-shadow-lg" />
           </div>
-          <h1 className="text-2xl font-bold text-white">Cortex</h1>
-          <p className="text-slate-400 text-sm mt-1">重設密碼</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-white">Cortex</h1>
+          <p className="text-slate-400 text-xs sm:text-sm mt-1">重設密碼</p>
         </div>
 
-        <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-8 shadow-2xl">
+        <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-5 sm:p-8 shadow-2xl">
           {!token ? (
             <div className="flex items-center gap-3 text-red-300">
               <AlertCircle size={20} />

@@ -14,6 +14,46 @@ body,
   padding: 0;
 }
 
+/* Mobile / PWA — additive only, 桌機行為 0 影響 */
+html,
+body {
+  overflow-x: hidden;
+}
+
+/* iOS 在 input/textarea 字體 < 16px 時會自動 zoom in;只在觸控裝置強制,桌機保留現有字體 */
+@media (hover: none) and (pointer: coarse) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+/* dvh utility — 取代 100vh,iOS Safari URL bar 抖動友善;不覆蓋既有 .h-screen */
+.h-dvh {
+  height: 100dvh;
+}
+.min-h-dvh {
+  min-height: 100dvh;
+}
+.max-h-dvh {
+  max-height: 100dvh;
+}
+
+/* Safe-area utilities(iPhone 瀏海 / 底邊),桌機 env() 為 0 不影響 */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+.pl-safe {
+  padding-left: env(safe-area-inset-left);
+}
+.pr-safe {
+  padding-right: env(safe-area-inset-right);
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;

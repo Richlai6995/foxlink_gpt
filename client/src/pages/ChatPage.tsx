@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Square, AlertTriangle, Share2, Copy, Check, X, Sparkles, Search, Plus, Plug, Zap, Database, CheckCircle, BarChart3, ChevronDown, RefreshCw, TrendingUp, GripVertical, Eye, EyeOff, FlaskConical, Settings, PanelLeft, MessageCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -16,6 +16,9 @@ import api from '../lib/api'
 import { copyText } from '../lib/clipboard'
 import { useAuth } from '../context/AuthContext'
 import { useAdminOverride } from '../context/AdminOverrideContext'
+import { useStreamHealth } from '../hooks/useStreamHealth'
+import { useDeviceProfile } from '../hooks/useDeviceProfile'
+const MobileChatLayout = lazy(() => import('../components/chat/MobileChatLayout'))
 import AdminOverridePopover from '../components/AdminOverridePopover'
 import TokenStatsModal from '../components/common/TokenStatsModal'
 import AnnouncementBanner from '../components/announcement/AnnouncementBanner'
@@ -31,7 +34,7 @@ function reorderArr<T>(arr: T[], from: number, to: number): T[] {
   const a = [...arr]; const [it] = a.splice(from, 1); a.splice(to, 0, it); return a
 }
 
-export default function ChatPage() {
+function ChatPageDesktop() {
   const { t, i18n } = useTranslation()
   const { user } = useAuth()
 
@@ -107,7 +110,21 @@ export default function ChatPage() {
   }, [])
   const abortRef = useRef<(() => void) | null>(null)
   const wasAbortedRef = useRef(false)
+  const wasStallAbortedRef = useRef(false)
+  const lastUserMessageRef = useRef<{ message: string; files: File[]; attachmentIds?: string[] } | null>(null)
   const messageInputRef = useRef<MessageInputHandle>(null)
+
+  // SSE cheap fix:visibilitychange + offline 偵測,串流斷線顯示重發 banner
+  const handleStreamAbort = useCallback(() => {
+    wasStallAbortedRef.current = true
+    if (abortRef.current) {
+      try { abortRef.current() } catch {}
+    }
+  }, [])
+  const { stallReason, noteChunk, clearStall } = useStreamHealth({
+    streaming,
+    onAbort: handleStreamAbort,
+  })
   const [isDraggingOver, setIsDraggingOver] = useState(false)
   const dragCounter = useRef(0)
   const dragSafetyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -685,6 +702,10 @@ export default function ChatPage() {
   const handleSend = useCallback(
     async (message: string, files: File[], attachmentIds?: string[]) => {
       if (streaming) return
+      // 記下最後一次使用者輸入,供 SSE 斷線重發
+      lastUserMessageRef.current = { message, files, attachmentIds }
+      wasStallAbortedRef.current = false
+      clearStall()
 
       // Create session if none
       let sessionId = currentSessionId
@@ -880,7 +901,12 @@ export default function ChatPage() {
             }
           }
 
-          xhr.onprogress = processDelta
+          xhr.onprogress = (ev) => {
+            // SSE health:每次有資料進來標記時間,避免 stall 偵測誤判
+            noteChunk()
+            processDelta()
+            void ev
+          }
           xhr.onload = () => {
             console.log('[SSE-DEBUG] xhr onload', { status: xhr.status, elapsed: Date.now() - fetchT0 })
             if (xhr.status < 200 || xhr.status >= 300) {
@@ -904,15 +930,18 @@ export default function ChatPage() {
         })
 
         // Add AI message to UI
+        const stalled = wasStallAbortedRef.current
         const aiMsg: ChatMessage = {
           id: Date.now() + 1,
           session_id: sessionId!,
           role: 'assistant',
           content: streamError
             ? `⚠️ ${streamError}`
-            : wasAbortedRef.current
-              ? stripGenerateBlocks(accText) + (accText ? '\n\n*（已由使用者中止）*' : '（已中止）')
-              : stripGenerateBlocks(accText),
+            : stalled
+              ? stripGenerateBlocks(accText) + (accText ? '\n\n*（連線中斷,可點上方 banner 重新發送）*' : '（連線中斷)')
+              : wasAbortedRef.current
+                ? stripGenerateBlocks(accText) + (accText ? '\n\n*（已由使用者中止）*' : '（已中止）')
+                : stripGenerateBlocks(accText),
           generated_files: generatedFiles.length > 0 ? generatedFiles : undefined,
           charts: charts.length > 0 ? charts : undefined,
           artifacts: artifacts.length > 0 ? artifacts : undefined,
@@ -926,8 +955,20 @@ export default function ChatPage() {
         loadSessions()
         loadBudget()
       } catch (e) {
-        if (wasAbortedRef.current) {
-          // 使用者主動中止（fetch 尚未開始就按停止）
+        if (wasStallAbortedRef.current) {
+          // 連線中斷(visibilitychange / offline)— 保留已收到的內容,banner 提示重發
+          const aiMsg: ChatMessage = {
+            id: Date.now() + 1,
+            session_id: sessionId!,
+            role: 'assistant',
+            content: accText
+              ? stripGenerateBlocks(accText) + '\n\n*（連線中斷,可點上方 banner 重新發送)*'
+              : '（連線中斷)',
+            created_at: new Date().toISOString(),
+          }
+          setMessages((prev) => [...prev, aiMsg])
+        } else if (wasAbortedRef.current) {
+          // 使用者主動中止(fetch 尚未開始就按停止)
           const aiMsg: ChatMessage = {
             id: Date.now() + 1,
             session_id: sessionId!,
@@ -958,8 +999,16 @@ export default function ChatPage() {
         abortRef.current = null
       }
     },
-    [streaming, currentSessionId, model, loadSessions, pendingSkillIds, selectedMcpIds, selectedDifyIds, selectedKbIds, selectedErpIds]
+    [streaming, currentSessionId, model, loadSessions, pendingSkillIds, selectedMcpIds, selectedDifyIds, selectedKbIds, selectedErpIds, noteChunk, clearStall, t]
   )
+
+  // SSE 重發 — 從 lastUserMessageRef 取上次輸入,重新呼叫 handleSend
+  const handleResendAfterStall = useCallback(() => {
+    const last = lastUserMessageRef.current
+    if (!last) { clearStall(); return }
+    clearStall()
+    void handleSend(last.message, last.files, last.attachmentIds)
+  }, [handleSend, clearStall])
 
   const handleCopy = useCallback((text: string) => {
     copyText(text).catch(() => { })
@@ -1040,6 +1089,31 @@ export default function ChatPage() {
             <AlertTriangle size={13} className="text-amber-500 flex-shrink-0" />
             <span className="flex-1">{budgetWarning}</span>
             <button onClick={() => setBudgetWarning(null)} className="text-amber-500 hover:text-amber-700"><X size={12} /></button>
+          </div>
+        )}
+
+        {/* SSE stall / network 中斷 banner — cheap fix(visibilitychange + offline) */}
+        {stallReason && lastUserMessageRef.current && (
+          <div className="bg-red-50 border-b border-red-200 px-4 py-2 flex items-center gap-3 text-xs text-red-800">
+            <AlertTriangle size={14} className="text-red-500 flex-shrink-0" />
+            <span className="flex-1">
+              {stallReason === 'offline'
+                ? '網路中斷,訊息送達後可能會中斷'
+                : '連線中斷或長時間沒有回應,可重新發送上次訊息'}
+            </span>
+            <button
+              onClick={handleResendAfterStall}
+              className="inline-flex items-center gap-1 text-white bg-red-600 hover:bg-red-700 rounded px-2.5 py-1 font-medium"
+            >
+              <RefreshCw size={12} /> 重發
+            </button>
+            <button
+              onClick={clearStall}
+              className="text-red-400 hover:text-red-600 p-0.5"
+              aria-label="關閉"
+            >
+              <X size={12} />
+            </button>
           </div>
         )}
 
@@ -2211,4 +2285,20 @@ export default function ChatPage() {
       )}
     </>
   )
+}
+
+// ─── Layout switch ───────────────────────────────────────────────────────────
+// 預設走桌機(ChatPageDesktop = 0 行為差異)。
+// 只有 UA 為手機 + localStorage.mobile_v1='1' 才會走 MobileChatLayout(PR-2 實作);
+// 開發者可加 ?mobile=1 強制 mobile。
+export default function ChatPage() {
+  const { isMobile } = useDeviceProfile()
+  if (isMobile) {
+    return (
+      <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-900 text-slate-400 text-sm">Loading…</div>}>
+        <MobileChatLayout />
+      </Suspense>
+    )
+  }
+  return <ChatPageDesktop />
 }
