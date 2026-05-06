@@ -210,11 +210,11 @@ export default function MobileChatLayout() {
   useEffect(() => { loadSessions() }, [loadSessions])
 
   // 載入 budget(本月消耗)— 開啟 menu 時抓最新
+  // 優先讀 monthly_spent(無上限也會回);fallback 到 monthly.spent(有設上限時)
   const loadMonthSpent = useCallback(() => {
     api.get('/chat/budget').then((r) => {
-      const m = r.data?.monthly?.spent
-      if (typeof m === 'number') setMonthSpent(m)
-      else setMonthSpent(0)
+      const v = r.data?.monthly_spent ?? r.data?.monthly?.spent
+      setMonthSpent(typeof v === 'number' ? v : 0)
     }).catch(() => {})
   }, [])
   useEffect(() => { loadMonthSpent() }, [loadMonthSpent])

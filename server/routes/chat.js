@@ -700,6 +700,10 @@ router.get('/budget', async (req, res) => {
       daily: limitD != null ? { limit: limitD, spent: spentD, remaining: Math.max(0, limitD - spentD), exceeded: spentD >= limitD } : null,
       weekly: limitW != null ? { limit: limitW, spent: spentW, remaining: Math.max(0, limitW - spentW), exceeded: spentW >= limitW } : null,
       monthly: limitM != null ? { limit: limitM, spent: spentM, remaining: Math.max(0, limitM - spentM), exceeded: spentM >= limitM } : null,
+      // 統一回傳本月實際消耗(無上限也回),供 mobile chip / 桌機顯示用
+      daily_spent: spentD,
+      weekly_spent: spentW,
+      monthly_spent: spentM,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
