@@ -10,7 +10,7 @@ import {
   LogOut, Globe, Sparkles, Settings, Paperclip, X,
   FileText, Image as ImageIcon, Music,
   Zap, LayoutTemplate, BarChart3, MessageSquarePlus,
-  HelpCircle, Database,
+  HelpCircle, Database, Share2, Copy, Check,
 } from 'lucide-react'
 import { buildAcceptAttr } from '../../lib/uploadFileTypes'
 import ErpToolPicker from './ErpToolPicker'
@@ -21,6 +21,7 @@ import { copyText } from '../../lib/clipboard'
 import { useAuth } from '../../context/AuthContext'
 import { useStreamHealth } from '../../hooks/useStreamHealth'
 import { useAdminOverride } from '../../context/AdminOverrideContext'
+import { useFeedbackNotifications } from '../../hooks/useFeedbackNotifications'
 import i18n, { SUPPORTED_LANGUAGES, type LangCode } from '../../i18n'
 import type { ChatSession, ChatMessage, LlmModel, ModelType, GeneratedFile } from '../../types'
 import MicButton from '../MicButton'
@@ -52,6 +53,7 @@ export default function MobileChatLayout() {
   const { t } = useTranslation()
   const { user, logout } = useAuth()
   const { overrideTools, isOverrideTool } = useAdminOverride()
+  const { unreadCount: feedbackUnread } = useFeedbackNotifications()
   const navigate = useNavigate()
 
   // 多語名稱 / 描述(對齊桌機 localName / localDesc)
@@ -86,6 +88,11 @@ export default function MobileChatLayout() {
   const [erpInvoking, setErpInvoking] = useState<ErpTool | null>(null)
   const [erpPendingContext, setErpPendingContext] = useState<string | null>(null)
 
+  // Share session
+  const [shareLink, setShareLink] = useState<string | null>(null)
+  const [sharing, setSharing] = useState(false)
+  const [shareCopied, setShareCopied] = useState(false)
+
   // ── Tools picker(MCP / KB / DIFY / Skills 四 tab,checkbox 多選)
   const [toolsOpen, setToolsOpen] = useState(false)
   const [toolsTab, setToolsTab] = useState<'mcp' | 'kb' | 'dify' | 'skill'>('mcp')
@@ -100,6 +107,9 @@ export default function MobileChatLayout() {
   const [pickedSkillIds, setPickedSkillIds] = useState<Set<number>>(new Set())
   const [pendingSkillIds, setPendingSkillIds] = useState<Set<number>>(new Set())
   const [skillSaving, setSkillSaving] = useState(false)
+  // 技能參數(prompt_variables):skillId → values map
+  const [skillVarValues, setSkillVarValues] = useState<Record<number, Record<string, any>>>({})
+  const [skillVarSheet, setSkillVarSheet] = useState<{ skillId: number; skillName: string; variables: any[]; values: Record<string, any> } | null>(null)
   const totalToolsSelected = selectedMcpIds.size + selectedKbIds.size + selectedDifyIds.size + pickedSkillIds.size
 
   // 對齊桌機:authorized + admin override(localStorage 預設好的測試模式工具)合併
@@ -296,7 +306,13 @@ export default function MobileChatLayout() {
         // 把 pending skills(新對話前已挑的)套用到剛建好的 session
         if (pendingSkillIds.size > 0) {
           try {
-            await api.put(`/chat/sessions/${sessionId}/skills`, { skill_ids: [...pendingSkillIds] })
+            const payload: any = { skill_ids: [...pendingSkillIds] }
+            const varsToSend: Record<number, Record<string, any>> = {}
+            for (const sid of pendingSkillIds) {
+              if (skillVarValues[sid]) varsToSend[sid] = skillVarValues[sid]
+            }
+            if (Object.keys(varsToSend).length > 0) payload.skill_variables = varsToSend
+            await api.put(`/chat/sessions/${sessionId}/skills`, payload)
             setPickedSkillIds(new Set(pendingSkillIds))
             setPendingSkillIds(new Set())
           } catch {}
@@ -448,29 +464,100 @@ export default function MobileChatLayout() {
       setStreamingStatus('')
       abortRef.current = null
     }
-  }, [streaming, currentSessionId, model, loadSessions, noteChunk, clearStall, t, pureMode, selectedMcpIds, selectedDifyIds, selectedKbIds, pendingSkillIds])
+  }, [streaming, currentSessionId, model, loadSessions, noteChunk, clearStall, t, pureMode, selectedMcpIds, selectedDifyIds, selectedKbIds, pendingSkillIds, skillVarValues])
 
   const handleStop = useCallback(() => {
     if (abortRef.current) abortRef.current()
   }, [])
 
-  // 切 skill checkbox(即時 toggle pickedSkillIds / pendingSkillIds)
+  // 建立分享連結 — 同桌機 POST /share { sessionId }
+  const handleShareSession = useCallback(async () => {
+    if (!currentSessionId || sharing) return
+    setSharing(true)
+    try {
+      const r = await api.post('/share', { sessionId: currentSessionId })
+      setShareLink(`${window.location.origin}/share/${r.data.token}`)
+    } catch (e: any) {
+      alert(e.response?.data?.error || '分享失敗')
+    } finally {
+      setSharing(false)
+    }
+  }, [currentSessionId, sharing])
+
+  const handleCopyShareLink = useCallback(() => {
+    if (!shareLink) return
+    copyText(shareLink).catch(() => {})
+    setShareCopied(true)
+    setTimeout(() => setShareCopied(false), 2000)
+  }, [shareLink])
+
+  // 切 skill checkbox — 若 ON + 有 prompt_variables → 開參數 sheet 先填,確定才加入 picked
   const toggleSkill = useCallback((id: number) => {
+    const turnOn = !pickedSkillIds.has(id)
+    if (turnOn) {
+      const sk = allSkills.find((s) => s.id === id)
+      const rawVars = sk?.prompt_variables
+      if (sk && rawVars && rawVars !== '[]') {
+        try {
+          const vars = JSON.parse(rawVars)
+          if (Array.isArray(vars) && vars.length > 0) {
+            setSkillVarSheet({
+              skillId: id,
+              skillName: localName(sk),
+              variables: vars,
+              values: skillVarValues[id] || {},
+            })
+            return // 等 modal 確定才實際 add
+          }
+        } catch {}
+      }
+    }
+    // 一般 toggle
     if (currentSessionId) {
       setPickedSkillIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
     } else {
-      // 沒 session 先暫存,送出第一則訊息後 apply
       setPendingSkillIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
       setPickedSkillIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
     }
-  }, [currentSessionId])
+    // 取消選取時順便清掉 saved values
+    if (!turnOn) {
+      setSkillVarValues(prev => { const n = { ...prev }; delete n[id]; return n })
+    }
+  }, [currentSessionId, pickedSkillIds, allSkills, skillVarValues])
 
-  // 完成工具選擇 — 若有 session,把 skill 列表 PUT 進去;沒 session 就讓 pendingSkillIds 在 send 時自動 apply
+  // 確認 skill var 參數 — 寫入 skillVarValues + 加入 pickedSkillIds
+  const confirmSkillVars = useCallback(() => {
+    if (!skillVarSheet) return
+    const { skillId, variables, values } = skillVarSheet
+    // 必填驗證
+    const missing = variables.filter((v: any) => v.required && !values[v.name] && values[v.name] !== false && values[v.name] !== 0).map((v: any) => v.label || v.name)
+    if (missing.length > 0) {
+      alert(`必填:${missing.join('、')}`)
+      return
+    }
+    setSkillVarValues(prev => ({ ...prev, [skillId]: values }))
+    if (currentSessionId) {
+      setPickedSkillIds(prev => new Set(prev).add(skillId))
+    } else {
+      setPendingSkillIds(prev => new Set(prev).add(skillId))
+      setPickedSkillIds(prev => new Set(prev).add(skillId))
+    }
+    setSkillVarSheet(null)
+  }, [skillVarSheet, currentSessionId])
+
+  // 完成工具選擇 — 若有 session,把 skill 列表 + var 一起 PUT
   const confirmTools = useCallback(async () => {
     if (currentSessionId) {
       setSkillSaving(true)
       try {
-        await api.put(`/chat/sessions/${currentSessionId}/skills`, { skill_ids: [...pickedSkillIds] })
+        const payload: any = { skill_ids: [...pickedSkillIds] }
+        // 只送有填參數的 skill var(避免覆蓋 server 端已存的)
+        const varsToSend: Record<number, Record<string, any>> = {}
+        for (const sid of pickedSkillIds) {
+          if (skillVarValues[sid]) varsToSend[sid] = skillVarValues[sid]
+        }
+        if (Object.keys(varsToSend).length > 0) payload.skill_variables = varsToSend
+        await api.put(`/chat/sessions/${currentSessionId}/skills`, payload)
       } catch (e: any) {
         alert(e.response?.data?.error || t('common.unknownError'))
       } finally {
@@ -478,7 +565,7 @@ export default function MobileChatLayout() {
       }
     }
     setToolsOpen(false)
-  }, [currentSessionId, pickedSkillIds, t])
+  }, [currentSessionId, pickedSkillIds, skillVarValues, t])
 
   // 包一層 send,把 ERP pending context 拼到 message 前面
   const handleSendWithErp = useCallback((text: string, files: File[] = []) => {
@@ -555,9 +642,14 @@ export default function MobileChatLayout() {
         <button
           onClick={() => setMenuOpen(true)}
           aria-label={t('mobile.chat.menuLabel')}
-          className="w-11 h-11 -mr-1 flex items-center justify-center rounded-lg hover:bg-slate-100 active:bg-slate-200 text-slate-700"
+          className="relative w-11 h-11 -mr-1 flex items-center justify-center rounded-lg hover:bg-slate-100 active:bg-slate-200 text-slate-700"
         >
           <Settings size={18} />
+          {feedbackUnread > 0 && (
+            <span className="absolute top-1 right-1 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-[10px] text-white font-medium flex items-center justify-center">
+              {feedbackUnread > 99 ? '99+' : feedbackUnread}
+            </span>
+          )}
         </button>
       </header>
 
@@ -591,6 +683,16 @@ export default function MobileChatLayout() {
               streamingStatus={streamingStatus}
               onCopy={handleCopy}
               sessionId={currentSessionId}
+              onFeedback={(content: string) => {
+                const desc = (content || '').slice(0, 500)
+                const params = new URLSearchParams({
+                  source: 'chat_page',
+                  source_session_id: currentSessionId || '',
+                  description: `AI 回覆內容:\n${desc}`,
+                  category_id: '',
+                })
+                navigate(`/feedback/new?${params.toString()}`)
+              }}
             />
           </Suspense>
         )}
@@ -839,6 +941,17 @@ export default function MobileChatLayout() {
               <div className="my-1 h-px bg-slate-200" />
 
               {/* Feature navigation */}
+              {currentSessionId && (
+                <button
+                  onClick={() => { setMenuOpen(false); void handleShareSession() }}
+                  disabled={sharing}
+                  className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left disabled:opacity-50"
+                >
+                  <Share2 size={18} className="text-blue-500" />
+                  <span className="flex-1 text-sm text-slate-800">{sharing ? '建立中…' : '分享當前對話'}</span>
+                </button>
+              )}
+
               <button
                 onClick={() => { setMenuOpen(false); navigate('/skills') }}
                 className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
@@ -866,6 +979,9 @@ export default function MobileChatLayout() {
               >
                 <MessageSquarePlus size={18} className="text-rose-500" />
                 <span className="flex-1 text-sm text-slate-800">{t('mobile.menu.feedback')}</span>
+                {feedbackUnread > 0 && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 font-medium">{feedbackUnread > 99 ? '99+' : feedbackUnread}</span>
+                )}
               </button>
 
               <div className="my-1 h-px bg-slate-200" />
@@ -1157,6 +1273,129 @@ export default function MobileChatLayout() {
           onClose={() => setErpPickerOpen(false)}
         />
       )}
+
+      {/* 分享連結 sheet */}
+      <Drawer.Root open={!!shareLink} onOpenChange={(o) => { if (!o) { setShareLink(null); setShareCopied(false) } }}>
+        <Drawer.Portal>
+          <Drawer.Overlay className="fixed inset-0 bg-black/40 z-[55]" />
+          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-[60] bg-white rounded-t-2xl pb-safe">
+            <Drawer.Title className="sr-only">分享連結</Drawer.Title>
+            <div className="mx-auto w-10 h-1 rounded-full bg-slate-300 mt-2 flex-shrink-0" />
+            <div className="px-4 pt-3 pb-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Share2 size={18} className="text-blue-600" />
+                <p className="text-sm font-semibold text-slate-800">分享連結已建立</p>
+              </div>
+              <p className="text-xs text-slate-500 mb-3 leading-5">
+                任何登入的使用者都可以透過此連結查看對話快照,並選擇繼續這段對話。<br />
+                此快照不會隨原始對話更新,是獨立的分享副本。
+              </p>
+              <div className="flex gap-2">
+                <input
+                  readOnly
+                  value={shareLink || ''}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="flex-1 text-xs border border-slate-200 rounded-lg px-3 py-3 bg-slate-50 text-slate-700 truncate min-w-0"
+                />
+                <button
+                  onClick={handleCopyShareLink}
+                  className="shrink-0 inline-flex items-center gap-1.5 text-xs text-white bg-blue-600 active:bg-blue-700 rounded-lg px-3 py-3 font-medium"
+                >
+                  {shareCopied ? <Check size={14} /> : <Copy size={14} />}
+                  {shareCopied ? '已複製' : '複製'}
+                </button>
+              </div>
+              {/* native share API(若手機支援) */}
+              {typeof navigator !== 'undefined' && (navigator as any).share && (
+                <button
+                  onClick={() => (navigator as any).share({ title: 'Cortex 對話分享', url: shareLink })}
+                  className="w-full mt-3 py-3 text-sm text-blue-600 border border-blue-200 active:bg-blue-50 rounded-lg inline-flex items-center justify-center gap-2"
+                >
+                  <Share2 size={14} /> 用系統分享面板
+                </button>
+              )}
+            </div>
+          </Drawer.Content>
+        </Drawer.Portal>
+      </Drawer.Root>
+
+      {/* Skill 參數填寫 sheet */}
+      <Drawer.Root open={!!skillVarSheet} onOpenChange={(o) => { if (!o) setSkillVarSheet(null) }}>
+        <Drawer.Portal>
+          <Drawer.Overlay className="fixed inset-0 bg-black/40 z-[55]" />
+          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-[60] bg-white rounded-t-2xl pb-safe max-h-[90vh] flex flex-col">
+            <Drawer.Title className="sr-only">技能參數</Drawer.Title>
+            <div className="mx-auto w-10 h-1 rounded-full bg-slate-300 mt-2 flex-shrink-0" />
+            {skillVarSheet && (
+              <>
+                <div className="px-4 pt-2 pb-3 border-b border-slate-100 flex-shrink-0">
+                  <p className="text-sm font-semibold text-slate-800">
+                    技能 <span className="text-purple-600">「{skillVarSheet.skillName}」</span>— 輸入參數
+                  </p>
+                </div>
+                <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+                  {skillVarSheet.variables.map((v: any) => (
+                    <div key={v.name}>
+                      <label className="block text-xs text-slate-500 mb-1">
+                        {v.label || v.name} {v.required && <span className="text-red-400">*</span>}
+                      </label>
+                      {v.type === 'select' ? (
+                        <select
+                          value={skillVarSheet.values[v.name] ?? v.default ?? ''}
+                          onChange={(e) => setSkillVarSheet(prev => prev ? { ...prev, values: { ...prev.values, [v.name]: e.target.value } } : null)}
+                          className="w-full border border-slate-200 rounded-lg px-3 py-3 text-sm bg-white focus:outline-none focus:border-purple-400"
+                        >
+                          <option value="">請選擇</option>
+                          {(v.options || []).map((opt: string) => <option key={opt} value={opt}>{opt}</option>)}
+                        </select>
+                      ) : v.type === 'textarea' ? (
+                        <textarea
+                          value={skillVarSheet.values[v.name] ?? ''}
+                          onChange={(e) => setSkillVarSheet(prev => prev ? { ...prev, values: { ...prev.values, [v.name]: e.target.value } } : null)}
+                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm h-24 resize-y focus:outline-none focus:border-purple-400"
+                          placeholder={v.placeholder}
+                        />
+                      ) : v.type === 'checkbox' ? (
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={!!skillVarSheet.values[v.name]}
+                            onChange={(e) => setSkillVarSheet(prev => prev ? { ...prev, values: { ...prev.values, [v.name]: e.target.checked } } : null)}
+                            className="w-5 h-5"
+                          />
+                          <span className="text-sm text-slate-700">{v.placeholder || (v.label || v.name)}</span>
+                        </label>
+                      ) : (
+                        <input
+                          type={v.type === 'number' ? 'number' : v.type === 'date' ? 'date' : 'text'}
+                          value={skillVarSheet.values[v.name] ?? ''}
+                          onChange={(e) => setSkillVarSheet(prev => prev ? { ...prev, values: { ...prev.values, [v.name]: e.target.value } } : null)}
+                          className="w-full border border-slate-200 rounded-lg px-3 py-3 text-sm focus:outline-none focus:border-purple-400"
+                          placeholder={v.placeholder}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="border-t border-slate-100 p-3 flex items-center gap-2 flex-shrink-0">
+                  <button
+                    onClick={() => setSkillVarSheet(null)}
+                    className="flex-1 py-2.5 text-sm text-slate-600 rounded-lg active:bg-slate-100"
+                  >
+                    {t('common.cancel')}
+                  </button>
+                  <button
+                    onClick={confirmSkillVars}
+                    className="flex-1 py-2.5 text-sm text-white bg-purple-600 rounded-lg active:bg-purple-700"
+                  >
+                    確定
+                  </button>
+                </div>
+              </>
+            )}
+          </Drawer.Content>
+        </Drawer.Portal>
+      </Drawer.Root>
 
       {/* ERP 工具參數填寫 + 執行 */}
       {erpInvoking && (
