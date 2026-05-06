@@ -16,6 +16,8 @@ client/node_modules/
 dist/
 build/
 client/dist/
+# TypeScript incremental build cache — 每次 build 都變,不該進 git
+*.tsbuildinfo
 
 # ─── Database & Storage ───────────────────────────────────────────────────────
 *.db
