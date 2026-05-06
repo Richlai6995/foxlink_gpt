@@ -30,8 +30,9 @@ const duckdb = require('duckdb');
 const XLSX = require('xlsx');
 
 const UPLOAD_ROOT = path.resolve(process.env.UPLOAD_DIR || '/app/uploads');
-const MAX_ROWS_PER_SHEET = 200000;   // 防 xlsx 炸 memory
+const MAX_ROWS_PER_SHEET = 100000;   // 防 xlsx 炸 memory(寬表 ~50 欄 × 100k = 5M cells ≈ 500MB JS heap)
 const RESULT_PREVIEW_ROWS = 200;     // 給 LLM 看的最大列數
+const INSERT_BATCH_SIZE = 1000;      // 每 1000 列 yield event loop 一次,避免 /health 被卡死被砍
 
 // ── Schema 推斷 ────────────────────────────────────────────────────────────────
 function inferType(values) {
@@ -119,26 +120,34 @@ async function loadTable(conn, tableName, headers, data) {
   if (data.length === 0) return { types };
 
   // 用 prepared statement bulk insert(appender API 在 npm duckdb 不穩定,prepare 比較保險)
-  return new Promise((resolve, reject) => {
-    const placeholders = headers.map(() => '?').join(',');
-    const stmt = conn.prepare(`INSERT INTO "${tableName}" VALUES (${placeholders})`);
-    let errored = false;
-    for (const row of data) {
-      const vals = headers.map((_, i) => {
-        const v = row?.[i];
-        if (v === undefined || v === '') return null;
-        if (types[i] === 'DOUBLE' && typeof v === 'string') {
-          const n = parseFloat(v);
-          return isNaN(n) ? null : n;
-        }
-        return v;
-      });
-      try { stmt.run(...vals); } catch (e) {
-        if (!errored) { errored = true; reject(e); }
+  // 重點:每 INSERT_BATCH_SIZE 列 yield 一次 event loop,讓 Express /health
+  // 可以被回應(否則 200k 列 INSERT 會卡 10+ 秒,被 healthMonitor 誤判砍掉)
+  const placeholders = headers.map(() => '?').join(',');
+  const stmt = conn.prepare(`INSERT INTO "${tableName}" VALUES (${placeholders})`);
+
+  try {
+    for (let i = 0; i < data.length; i += INSERT_BATCH_SIZE) {
+      const end = Math.min(i + INSERT_BATCH_SIZE, data.length);
+      for (let j = i; j < end; j++) {
+        const row = data[j];
+        const vals = headers.map((_, k) => {
+          const v = row?.[k];
+          if (v === undefined || v === '') return null;
+          if (types[k] === 'DOUBLE' && typeof v === 'string') {
+            const n = parseFloat(v);
+            return isNaN(n) ? null : n;
+          }
+          return v;
+        });
+        stmt.run(...vals); // 拋例外會直接被外層 catch
       }
+      // Yield 給 event loop(Express /health、別的 request 才有機會)
+      if (end < data.length) await new Promise(r => setImmediate(r));
     }
-    stmt.finalize((err) => err ? reject(err) : resolve({ types }));
-  });
+  } finally {
+    await new Promise((resolve) => stmt.finalize(() => resolve()));
+  }
+  return { types };
 }
 
 // ── Markdown 輸出 ─────────────────────────────────────────────────────────────
@@ -218,9 +227,12 @@ module.exports = async function handler(body) {
   }
 
   // ── 讀 xlsx ──────────────────────────────────────────────────────────────
+  const t1 = Date.now();
   let wb;
   try {
+    const fileSize = fs.statSync(realPath).size;
     wb = XLSX.readFile(realPath, { cellDates: true });
+    console.log(`[excel_query] readFile "${target.name}" ${(fileSize/1024/1024).toFixed(2)}MB took ${Date.now()-t1}ms, sheets=${wb.SheetNames.length}`);
   } catch (e) {
     return { content: `❌ 無法解析 Excel 檔案:${e.message}` };
   }
@@ -245,12 +257,15 @@ module.exports = async function handler(body) {
     for (const name of wb.SheetNames) {
       const ws = wb.Sheets[name];
       if (!ws || !ws['!ref'] || ws['!ref'] === 'A1') continue;
+      const tSheet0 = Date.now();
       const { headers, data } = readSheet(ws);
       if (headers.length === 0) continue;
 
       const tblName = name === pickedSheet ? 't' : sanitizeIdent(name);
       try {
         await loadTable(conn, tblName, headers, data);
+        const elapsed = Date.now() - tSheet0;
+        console.log(`[excel_query] sheet "${name}" → table "${tblName}": ${data.length} rows, ${headers.length} cols, ${elapsed}ms`);
         loadedSheets.push({ original: name, table: tblName, rows: data.length, columns: headers });
       } catch (e) {
         console.warn(`[excel_query] Failed to load sheet "${name}": ${e.message}`);

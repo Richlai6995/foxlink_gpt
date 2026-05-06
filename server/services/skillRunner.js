@@ -370,46 +370,92 @@ async function autoRestoreRunners(db) {
 }
 
 // ── Health Monitor ────────────────────────────────────────────────────────────
+// Health 檢查的「失敗計數」— 連續 N 次才標 error,避免 skill 跑大 query
+// event loop 被佔住時被誤殺(Excel skill 處理 200k 列就會這樣)。
+const healthFailures = new Map(); // skillId → count
+const HEALTH_FAIL_THRESHOLD = 3;   // 連續 3 次失敗才砍(= 1.5 分鐘)
+const HEALTH_TIMEOUT_MS = 10000;   // 10s,給長 query / GC 留 buffer
+
+// Auto-recovery cooldown:同一個 skill 最多每 5 分鐘自動 respawn 一次,
+// 避免 skill 真的有 bug 時無限重啟燒 CPU
+const lastAutoRespawn = new Map(); // skillId → timestamp ms
+const AUTO_RESPAWN_COOLDOWN_MS = 5 * 60 * 1000;
+
 function startHealthMonitor(db) {
   const INTERVAL_MS = 30000;
   setInterval(async () => {
     // 1. Health check running processes
     for (const [skillId, entry] of runningProcesses.entries()) {
+      let healthOk = false;
       try {
         const resp = await Promise.race([
           fetch(`http://127.0.0.1:${entry.port}/health`),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 2000)),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), HEALTH_TIMEOUT_MS)),
         ]);
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        healthOk = true;
+        healthFailures.delete(skillId); // 成功 → 重置計數
       } catch (e) {
-        console.warn(`[skillRunner] Health check failed for skill #${skillId}: ${e.message}`);
-        appendLog(skillId, `[health] check failed: ${e.message} — marking as error`);
+        // 子程序還活著嗎?還活著的話可能只是 event loop 被卡(大 SQL / GC),
+        // 不要急著砍。只在連續 HEALTH_FAIL_THRESHOLD 次失敗 OR 子程序確實退出才砍。
+        const childAlive = entry.process && entry.process.exitCode === null && !entry.process.killed;
+        const fails = (healthFailures.get(skillId) || 0) + 1;
+        healthFailures.set(skillId, fails);
+
+        if (childAlive && fails < HEALTH_FAIL_THRESHOLD) {
+          console.warn(`[skillRunner] Health check soft-fail #${skillId} (${fails}/${HEALTH_FAIL_THRESHOLD}, child alive): ${e.message}`);
+          appendLog(skillId, `[health] soft-fail ${fails}/${HEALTH_FAIL_THRESHOLD} (child still alive, possibly busy): ${e.message}`);
+          continue; // 不砍,下次再看
+        }
+
+        console.warn(`[skillRunner] Health check FAILED for skill #${skillId} (${fails} fails, childAlive=${childAlive}): ${e.message}`);
+        appendLog(skillId, `[health] hard-fail after ${fails} attempts (childAlive=${childAlive}): ${e.message} — marking as error`);
+        try { entry.process.kill('SIGKILL'); } catch (_) {}
         releasePort(entry.port);
         runningProcesses.delete(skillId);
-        pushStatusUpdate(skillId, 'error', { error: 'Process died unexpectedly' });
+        healthFailures.delete(skillId);
+        pushStatusUpdate(skillId, 'error', { error: 'Process unresponsive' });
         try {
-          db.prepare(`UPDATE skills SET code_status='error', code_port=NULL, code_pid=NULL, code_error='Process died unexpectedly' WHERE id=?`).run(skillId);
+          db.prepare(`UPDATE skills SET code_status='error', code_port=NULL, code_pid=NULL, code_error='Process unresponsive' WHERE id=?`).run(skillId);
         } catch (_) {}
       }
     }
 
-    // 2. Hot-reload + missing-spawn: detect DB changes from other pods
+    // 2. Hot-reload + missing-spawn + auto-recover from transient unresponsive
     //    (a) admin UI 在 pod A 改 code → pod B/C/D 30s 內 hot-reload
     //    (b) admin UI 在 pod A 第一次啟動新 skill → pod B/C/D 沒這個 process,
     //        autoRestoreRunners 又只在啟動時跑一次,所以這裡偵測缺漏並補 spawn
+    //    (c) 'error' 狀態 + error_msg='Process unresponsive' → 是被 health
+    //        誤殺(不是真壞),自動回血再 spawn(避免使用者要手動點啟動)
     try {
       const skills = await db.prepare(
-        `SELECT * FROM skills WHERE type='code' AND code_status='running'`
+        `SELECT * FROM skills WHERE type='code' AND (
+           code_status='running'
+           OR (code_status='error' AND code_error='Process unresponsive')
+         )`
       ).all();
       for (const skill of skills) {
         if (!skill.code_snippet) continue;
 
-        // (b) 本 pod 沒這個 skill 的 process → 補 spawn(K8s 多 pod 必要)
+        // (b)/(c) 本 pod 沒這個 skill 的 process → 補 spawn
         if (!runningProcesses.has(skill.id)) {
-          console.log(`[skillRunner] Missing process for skill #${skill.id} (${skill.name}) on this pod, spawning locally...`);
+          // (c) auto-recovery 前先檢查 cooldown(防止 skill 真壞無限重啟)
+          const isErrorRecovery = (skill.code_status === 'error' || skill.CODE_STATUS === 'error');
+          if (isErrorRecovery) {
+            const last = lastAutoRespawn.get(skill.id) || 0;
+            const since = Date.now() - last;
+            if (since < AUTO_RESPAWN_COOLDOWN_MS) {
+              // 還在冷卻,跳過(下個 cycle 再看)
+              continue;
+            }
+            console.log(`[skillRunner] Auto-recovery: skill #${skill.id} (${skill.name}) was 'unresponsive', respawning...`);
+          } else {
+            console.log(`[skillRunner] Missing process for skill #${skill.id} (${skill.name}) on this pod, spawning locally...`);
+          }
           try {
             saveCode(skill.id, skill.code_snippet);
             await spawnRunner(skill, db);
+            if (isErrorRecovery) lastAutoRespawn.set(skill.id, Date.now());
           } catch (e) {
             console.error(`[skillRunner] Auto-spawn failed for #${skill.id}: ${e.message}`);
           }
