@@ -2281,7 +2281,9 @@
     "cost": "Cost (USD)",
     "tabChart": "Chart",
     "tabDetail": "Detail",
-    "monthSpent": "This month"
+    "monthSpent": "This month",
+    "monthGroup": "Month",
+    "dayGroup": "Recent"
   },
   "tpl": {
     "title": "Document Templates",

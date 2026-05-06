@@ -2281,7 +2281,9 @@
     "cost": "費用 (USD)",
     "tabChart": "圖表",
     "tabDetail": "明細",
-    "monthSpent": "本月消耗"
+    "monthSpent": "本月消耗",
+    "monthGroup": "月份",
+    "dayGroup": "近期"
   },
   "tpl": {
     "title": "文件範本庫",

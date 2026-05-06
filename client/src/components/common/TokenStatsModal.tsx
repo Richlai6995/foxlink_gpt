@@ -18,7 +18,10 @@ interface Props {
   onClose: () => void
 }
 
-// 月份 picker:'current' = 本月,'YYYY-MM' = 指定某月
+// Range picker:
+//   'current'    = 本月(default)
+//   'YYYY-MM'    = 指定某月
+//   'days:N'     = 近 N 天(7/14/30/60/90)
 type RangeKey = 'current' | string
 function startOfMonth(d: Date): string { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01` }
 function monthLabel(d: Date): string { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
@@ -26,26 +29,33 @@ function monthLabel(d: Date): string { return `${d.getFullYear()}-${String(d.get
 export default function TokenStatsModal({ onClose }: Props) {
   const { t } = useTranslation()
   const [rows, setRows] = useState<Row[]>([])
-  // 預設本月;月份 picker 提供本月 / 上月 / 上上月 / 上上上月 共 4 選
+  // 預設本月,可選其他月份或近 N 天
   const [rangeKey, setRangeKey] = useState<RangeKey>('current')
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<'chart' | 'detail'>('chart')
 
-  // 計算 from 日期 — 本月走預設(server 自動 TRUNC(SYSDATE,'MM'));其他月份明確帶 from
-  const from = useMemo(() => {
-    if (rangeKey === 'current') return ''
+  // 解析 rangeKey → API query 參數
+  const apiQuery = useMemo(() => {
+    if (rangeKey === 'current') return '' // server 預設本月
+    if (rangeKey.startsWith('days:')) {
+      const n = Number(rangeKey.slice(5))
+      return `?days=${n}`
+    }
+    // YYYY-MM
     const [y, m] = rangeKey.split('-').map(Number)
-    return startOfMonth(new Date(y, m - 1, 1))
+    if (Number.isFinite(y) && Number.isFinite(m)) {
+      return `?from=${startOfMonth(new Date(y, m - 1, 1))}`
+    }
+    return ''
   }, [rangeKey])
 
   useEffect(() => {
     setLoading(true)
-    const qs = from ? `from=${from}` : ''
-    api.get(`/auth/token-stats${qs ? `?${qs}` : ''}`)
+    api.get(`/auth/token-stats${apiQuery}`)
       .then(({ data }) => {
         let r = (data || []) as Row[]
-        // 若 picker 不是當月,需 client 端按月份過濾(server 給的是「from 之後」全部)
-        if (rangeKey !== 'current') {
+        // 指定月份時 client 端再過濾掉 from 之後但跨月的資料
+        if (rangeKey !== 'current' && !rangeKey.startsWith('days:')) {
           const ym = rangeKey
           r = r.filter(x => (x.usage_date || '').startsWith(ym))
         }
@@ -53,15 +63,26 @@ export default function TokenStatsModal({ onClose }: Props) {
       })
       .catch(() => setRows([]))
       .finally(() => setLoading(false))
-  }, [from, rangeKey])
+  }, [apiQuery, rangeKey])
 
-  const monthOptions = useMemo(() => {
+  // dropdown 選項:本月 / 上月 / 上上月 / 上上上月 + 近 7/14/30/60/90 天
+  const rangeOptions = useMemo(() => {
     const now = new Date()
-    return Array.from({ length: 4 }, (_, i) => {
+    const months = Array.from({ length: 4 }, (_, i) => {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-      return { key: i === 0 ? 'current' : monthLabel(d), label: monthLabel(d) }
+      const key = i === 0 ? 'current' : monthLabel(d)
+      const label = i === 0
+        ? `${monthLabel(d)} ${t('tokenStats.thisMonthSuffix', '(本月)')}`
+        : monthLabel(d)
+      return { key, label, group: 'month' as const }
     })
-  }, [])
+    const days = [7, 14, 30, 60, 90].map(n => ({
+      key: `days:${n}`,
+      label: t('tokenStats.days', { n }),
+      group: 'day' as const,
+    }))
+    return { months, days }
+  }, [t])
 
   const { chartOption, totalCost, totalTokens } = useMemo(() => {
     // Collect all unique dates and model names
@@ -136,11 +157,16 @@ export default function TokenStatsModal({ onClose }: Props) {
               onChange={e => setRangeKey(e.target.value)}
               className="text-xs border rounded px-2 py-1"
             >
-              {monthOptions.map(opt => (
-                <option key={opt.key} value={opt.key}>
-                  {opt.key === 'current' ? `${opt.label} ${t('tokenStats.thisMonthSuffix', '(本月)')}` : opt.label}
-                </option>
-              ))}
+              <optgroup label={t('tokenStats.monthGroup', '月份')}>
+                {rangeOptions.months.map(opt => (
+                  <option key={opt.key} value={opt.key}>{opt.label}</option>
+                ))}
+              </optgroup>
+              <optgroup label={t('tokenStats.dayGroup', '近期')}>
+                {rangeOptions.days.map(opt => (
+                  <option key={opt.key} value={opt.key}>{opt.label}</option>
+                ))}
+              </optgroup>
             </select>
             <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600">
               <X size={18} />

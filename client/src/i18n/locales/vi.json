@@ -2281,7 +2281,9 @@
     "cost": "Chi phí (USD)",
     "tabChart": "Biểu đồ",
     "tabDetail": "Chi tiết",
-    "monthSpent": "Tháng này"
+    "monthSpent": "Tháng này",
+    "monthGroup": "Tháng",
+    "dayGroup": "Gần đây"
   },
   "tpl": {
     "title": "Thư viện mẫu tài liệu",
