@@ -2191,7 +2191,14 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           if (sk.system_prompt) {
             skillSystemPrompts.push(`# Skill: ${sk.name}\n${sk.system_prompt}`);
           }
+        } else if (sk.endpoint_mode === 'tool') {
+          // 純 tool mode:LLM 決定何時呼叫,不要 eager call。
+          // 後面的 codeSkillToolMap loop 會註冊為 Gemini function declaration。
+          // 不 push 到 externalInjectSkills 是 Excel skill 之類的關鍵 — 否則
+          // 會被無 args 急 call,skill 回錯誤訊息又被當 system_prompt 灌進 LLM,
+          // 嚇得 LLM 放棄呼叫真正的 tool。
         } else {
+          // 沒指定 mode 或 mode='inject' → eager call,結果灌進 system_prompt
           externalInjectSkills.push(sk);
         }
       } else if (sk.type === 'workflow' && sk.workflow_json) {
