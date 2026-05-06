@@ -137,6 +137,15 @@ function emitTicketAssigned(ticketId, data) {
   io.to(`ticket:${ticketId}`).emit('ticket_assigned', data);
 }
 
+/**
+ * 廣播公告變動 — 所有 client 收到後 refetch /announcements/active
+ * 不直接送公告內容(audience filter 留在 server),client 自己拉
+ */
+function emitAnnouncementChanged(payload = {}) {
+  if (!io) return;
+  io.emit('announcement:changed', { kind: payload.kind || 'invalidate', at: Date.now() });
+}
+
 module.exports = {
   initSocket,
   getIO,
@@ -145,4 +154,5 @@ module.exports = {
   emitNewTicket,
   emitUserNotification,
   emitTicketAssigned,
+  emitAnnouncementChanged,
 };

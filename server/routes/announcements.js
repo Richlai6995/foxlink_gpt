@@ -18,6 +18,7 @@ const express = require('express');
 const router = express.Router();
 const { verifyToken, verifyAdmin } = require('./auth');
 const svc = require('../services/announcementService');
+const { emitAnnouncementChanged } = require('../services/socketService');
 
 // ── User endpoints ───────────────────────────────────────────────────────────
 
@@ -104,6 +105,7 @@ router.post('/admin', verifyToken, verifyAdmin, async (req, res) => {
   try {
     const { db } = require('../database-oracle');
     const id = await svc.create(db, req.user.id, req.body || {});
+    emitAnnouncementChanged({ kind: 'created' });
     res.json({ ok: true, id });
   } catch (e) {
     console.error('[announcements][admin] create error:', e);
@@ -116,6 +118,7 @@ router.put('/admin/:id', verifyToken, verifyAdmin, async (req, res) => {
     const { db } = require('../database-oracle');
     const id = Number(req.params.id);
     await svc.update(db, id, req.body || {});
+    emitAnnouncementChanged({ kind: 'updated' });
     res.json({ ok: true });
   } catch (e) {
     console.error('[announcements][admin] update error:', e);
@@ -128,6 +131,7 @@ router.post('/admin/:id/archive', verifyToken, verifyAdmin, async (req, res) => 
     const { db } = require('../database-oracle');
     const id = Number(req.params.id);
     await svc.archive(db, id);
+    emitAnnouncementChanged({ kind: 'archived' });
     res.json({ ok: true });
   } catch (e) {
     console.error('[announcements][admin] archive error:', e);
@@ -140,6 +144,7 @@ router.post('/admin/:id/publish', verifyToken, verifyAdmin, async (req, res) => 
     const { db } = require('../database-oracle');
     const id = Number(req.params.id);
     await svc.publish(db, id);
+    emitAnnouncementChanged({ kind: 'published' });
     res.json({ ok: true });
   } catch (e) {
     console.error('[announcements][admin] publish error:', e);
@@ -152,6 +157,7 @@ router.post('/admin/:id/unpublish', verifyToken, verifyAdmin, async (req, res) =
     const { db } = require('../database-oracle');
     const id = Number(req.params.id);
     await svc.unpublish(db, id);
+    emitAnnouncementChanged({ kind: 'unpublished' });
     res.json({ ok: true });
   } catch (e) {
     console.error('[announcements][admin] unpublish error:', e);
@@ -166,6 +172,7 @@ router.put('/admin/:id/translations/:lang', verifyToken, verifyAdmin, async (req
     const lang = String(req.params.lang);
     const { title, body } = req.body || {};
     await svc.upsertTranslation(db, id, lang, title, body);
+    emitAnnouncementChanged({ kind: 'translation' });
     res.json({ ok: true });
   } catch (e) {
     console.error('[announcements][admin] upsert translation error:', e);
@@ -181,6 +188,7 @@ router.post('/admin/:id/translate', verifyToken, verifyAdmin, async (req, res) =
     if (!lang) return res.status(400).json({ error: 'lang is required' });
     const result = await svc.translateOne(db, id, String(lang), modelKey || 'flash');
     if (!result.ok) return res.status(500).json({ error: result.error || 'translate failed' });
+    emitAnnouncementChanged({ kind: 'translation' });
     res.json(result);
   } catch (e) {
     console.error('[announcements][admin] translate error:', e);
@@ -193,6 +201,7 @@ router.delete('/admin/:id', verifyToken, verifyAdmin, async (req, res) => {
     const { db } = require('../database-oracle');
     const id = Number(req.params.id);
     await svc.remove(db, id);
+    emitAnnouncementChanged({ kind: 'deleted' });
     res.json({ ok: true });
   } catch (e) {
     console.error('[announcements][admin] delete error:', e);
