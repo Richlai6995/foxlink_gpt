@@ -374,29 +374,29 @@ export default function SkillMarket() {
     const publicSkills = skills.filter(s => !isOwner(s) && s.is_public && s.is_admin_approved)
 
     return (
-        <div className="min-h-screen bg-slate-50">
-            <div className="max-w-6xl mx-auto p-6">
+        <div className="min-h-dvh bg-slate-50 pt-safe pb-safe">
+            <div className="max-w-6xl mx-auto p-3 sm:p-6">
                 {/* Header */}
-                <div className="flex items-center justify-between mb-6">
-                    <div className="flex items-center gap-3">
-                        <button onClick={() => navigate('/chat')} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition">
+                <div className="flex items-center justify-between mb-4 sm:mb-6 gap-2">
+                    <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                        <button onClick={() => navigate('/chat')} aria-label="返回" className="w-10 h-10 sm:w-auto sm:h-auto flex items-center justify-center sm:p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition flex-shrink-0">
                             <ArrowLeft size={18} />
                         </button>
-                        <div>
-                            <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><Zap size={22} className="text-blue-500" />{t('skills.title')}</h1>
-                            <p className="text-sm text-slate-500 mt-0.5">{t('skills.subtitle')}</p>
+                        <div className="min-w-0">
+                            <h1 className="text-base sm:text-2xl font-bold text-slate-800 flex items-center gap-1.5 sm:gap-2 truncate"><Zap size={18} className="text-blue-500 sm:w-[22px] sm:h-[22px] flex-shrink-0" /><span className="truncate">{t('skills.title')}</span></h1>
+                            <p className="text-xs sm:text-sm text-slate-500 mt-0.5 truncate">{t('skills.subtitle')}</p>
                         </div>
                     </div>
                     {canCreateSkill && (
-                        <button onClick={openCreate} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition">
-                            <Plus size={15} />{t('skills.createSkill')}
+                        <button onClick={openCreate} aria-label={t('skills.createSkill')} className="flex items-center gap-1.5 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg text-xs sm:text-sm hover:bg-blue-700 transition whitespace-nowrap flex-shrink-0">
+                            <Plus size={15} /><span className="hidden sm:inline">{t('skills.createSkill')}</span>
                         </button>
                     )}
                 </div>
 
                 {/* Filters */}
-                <div className="flex gap-2 mb-6">
-                    <div className="relative flex-1 max-w-sm">
+                <div className="flex flex-wrap gap-2 mb-4 sm:mb-6">
+                    <div className="relative flex-1 min-w-[160px] sm:max-w-sm">
                         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                         <input value={q} onChange={e => setQ(e.target.value)} placeholder={t('skills.searchPlaceholder')}
                             className="pl-8 pr-3 py-2 border border-slate-200 rounded-lg text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-300" />

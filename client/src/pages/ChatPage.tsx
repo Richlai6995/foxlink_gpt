@@ -1098,19 +1098,19 @@ function ChatPageDesktop() {
             <AlertTriangle size={14} className="text-red-500 flex-shrink-0" />
             <span className="flex-1">
               {stallReason === 'offline'
-                ? '網路中斷,訊息送達後可能會中斷'
-                : '連線中斷或長時間沒有回應,可重新發送上次訊息'}
+                ? t('mobile.stall.offlineWithSent')
+                : t('mobile.stall.backgroundWithDetail')}
             </span>
             <button
               onClick={handleResendAfterStall}
               className="inline-flex items-center gap-1 text-white bg-red-600 hover:bg-red-700 rounded px-2.5 py-1 font-medium"
             >
-              <RefreshCw size={12} /> 重發
+              <RefreshCw size={12} /> {t('mobile.stall.resend')}
             </button>
             <button
               onClick={clearStall}
               className="text-red-400 hover:text-red-600 p-0.5"
-              aria-label="關閉"
+              aria-label={t('common.close')}
             >
               <X size={12} />
             </button>

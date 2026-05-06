@@ -22,6 +22,62 @@
       "desc": "Nền trắng pha vàng"
     }
   },
+  "mobile": {
+    "install": {
+      "title": "Thêm vào màn hình chính",
+      "desc": "Dùng Cortex như một ứng dụng",
+      "action": "Cài đặt"
+    },
+    "unsupported": {
+      "title": "{{page}} chưa hỗ trợ điện thoại",
+      "titleGeneric": "Trang này chưa hỗ trợ điện thoại",
+      "desc": "Giao diện phức tạp, vui lòng dùng trình duyệt máy tính để có trải nghiệm đầy đủ.",
+      "backToChat": "Về cuộc hội thoại",
+      "logout": "Đăng xuất",
+      "page": {
+        "admin": "Quản trị",
+        "scheduledTasks": "Tác vụ định kỳ",
+        "kb": "Cơ sở tri thức",
+        "dashboard": "Bảng AI",
+        "training": "Đào tạo",
+        "pm": "Nền tảng PM"
+      }
+    },
+    "chat": {
+      "sessions": "Hội thoại",
+      "newChat": "Hội thoại mới",
+      "newChatDefaultTitle": "Hội thoại mới",
+      "deleteConfirm": "Xóa hội thoại này?",
+      "inputPlaceholder": "Nhập tin nhắn…",
+      "selectModel": "Chọn model",
+      "noModels": "Chưa có model khả dụng",
+      "welcomeTitle": "Bắt đầu hội thoại mới",
+      "welcomeHint": "Xin chào {{name}}, nhập tin nhắn bên dưới để bắt đầu",
+      "chatting": "Đang trò chuyện",
+      "noSessions": "Chưa có hội thoại nào",
+      "attachFile": "Đính kèm tệp",
+      "remove": "Xóa",
+      "stop": "Dừng",
+      "send": "Gửi",
+      "fileGenerating": "Đang tạo tệp…",
+      "openSidebar": "Mở danh sách hội thoại",
+      "menuLabel": "Menu"
+    },
+    "stall": {
+      "offline": "Mất kết nối mạng",
+      "background": "Mất kết nối hoặc lâu không phản hồi",
+      "offlineWithSent": "Mất mạng, tin nhắn có thể bị ngắt",
+      "backgroundWithDetail": "Mất kết nối hoặc không phản hồi — bạn có thể gửi lại",
+      "resend": "Gửi lại",
+      "abortedNotice": "(Mất kết nối — bấm banner phía trên để gửi lại)",
+      "abortedShort": "(Mất kết nối)"
+    },
+    "menu": {
+      "settings": "Cài đặt",
+      "language": "Ngôn ngữ",
+      "help": "Trợ giúp"
+    }
+  },
   "common": {
     "cancel": "Hủy",
     "close": "Đóng",

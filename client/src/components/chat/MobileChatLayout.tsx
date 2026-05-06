@@ -118,7 +118,7 @@ export default function MobileChatLayout() {
 
   // ── delete session
   const handleDeleteSession = useCallback(async (id: string) => {
-    if (!confirm('確定刪除這個對話?')) return
+    if (!confirm(t('mobile.chat.deleteConfirm'))) return
     try {
       await api.delete(`/chat/sessions/${id}`)
       setSessions((p) => p.filter((s) => s.id !== id))
@@ -129,7 +129,7 @@ export default function MobileChatLayout() {
     } catch (e) {
       console.error('delete session', e)
     }
-  }, [currentSessionId])
+  }, [currentSessionId, t])
 
   // ── change model
   const handleModelChange = useCallback((key: string) => {
@@ -150,11 +150,12 @@ export default function MobileChatLayout() {
     let sessionId = currentSessionId
     if (!sessionId) {
       try {
-        const res = await api.post('/chat/sessions', { model, title: '新對話' })
+        const defaultTitle = t('mobile.chat.newChatDefaultTitle')
+        const res = await api.post('/chat/sessions', { model, title: defaultTitle })
         sessionId = res.data.id
         const newSession: ChatSession = {
           id: res.data.id,
-          title: '新對話',
+          title: defaultTitle,
           model,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
@@ -236,7 +237,7 @@ export default function MobileChatLayout() {
                 accText += ev.content
                 const genIdx = accText.indexOf('```generate_')
                 setStreamingContent(genIdx >= 0 ? accText.slice(0, genIdx).trimEnd() : accText)
-                setStreamingStatus(genIdx >= 0 ? '正在產生文件…' : '')
+                setStreamingStatus(genIdx >= 0 ? t('mobile.chat.fileGenerating') : '')
               } else if (ev.type === 'status') {
                 setStreamingStatus(ev.message || '')
               } else if (ev.type === 'title') {
@@ -277,6 +278,8 @@ export default function MobileChatLayout() {
       })
 
       const stalled = wasStallAbortedRef.current
+      const stallNotice = t('mobile.stall.abortedNotice')
+      const stallShort = t('mobile.stall.abortedShort')
       const aiMsg: ChatMessage = {
         id: Date.now() + 1,
         session_id: sessionId!,
@@ -284,7 +287,7 @@ export default function MobileChatLayout() {
         content: streamError
           ? `⚠️ ${streamError}`
           : stalled
-            ? stripGenerateBlocks(accText) + (accText ? '\n\n*(連線中斷,可點上方 banner 重發)*' : '(連線中斷)')
+            ? stripGenerateBlocks(accText) + (accText ? `\n\n*${stallNotice}*` : stallShort)
             : wasAbortedRef.current
               ? stripGenerateBlocks(accText) + (accText ? '\n\n*(已中止)*' : '(已中止)')
               : stripGenerateBlocks(accText),
@@ -300,8 +303,8 @@ export default function MobileChatLayout() {
         session_id: sessionId!,
         role: 'assistant',
         content: wasStallAbortedRef.current
-          ? (accText ? stripGenerateBlocks(accText) + '\n\n*(連線中斷)*' : '(連線中斷)')
-          : `⚠️ 發生錯誤:${detail}`,
+          ? (accText ? stripGenerateBlocks(accText) + `\n\n*${t('mobile.stall.abortedShort')}*` : t('mobile.stall.abortedShort'))
+          : `⚠️ ${detail}`,
         created_at: new Date().toISOString(),
       }
       setMessages((p) => [...p, errMsg])
@@ -311,7 +314,7 @@ export default function MobileChatLayout() {
       setStreamingStatus('')
       abortRef.current = null
     }
-  }, [streaming, currentSessionId, model, loadSessions, noteChunk, clearStall])
+  }, [streaming, currentSessionId, model, loadSessions, noteChunk, clearStall, t])
 
   const handleStop = useCallback(() => {
     if (abortRef.current) abortRef.current()
@@ -344,11 +347,11 @@ export default function MobileChatLayout() {
 
   const handleCopy = useCallback((s: string) => { copyText(s).catch(() => {}) }, [])
 
-  const currentModelName = availableModels.find((m) => m.key === model)?.name || model || '選擇模型'
+  const currentModelName = availableModels.find((m) => m.key === model)?.name || model || t('mobile.chat.selectModel')
   const currentTitle = currentSessionId
     ? sessions.find((s) => s.id === currentSessionId)
       ? localTitle(sessions.find((s) => s.id === currentSessionId)!, i18n.language)
-      : '對話中'
+      : t('mobile.chat.chatting')
     : 'Cortex'
 
   return (
@@ -357,7 +360,7 @@ export default function MobileChatLayout() {
       <header className="flex items-center gap-2 px-3 h-14 bg-white border-b border-slate-200 pt-safe">
         <button
           onClick={() => setDrawerOpen(true)}
-          aria-label="開啟對話列表"
+          aria-label={t('mobile.chat.openSidebar')}
           className="w-11 h-11 -ml-1 flex items-center justify-center rounded-lg hover:bg-slate-100 active:bg-slate-200 text-slate-700"
         >
           <Menu size={20} />
@@ -373,14 +376,14 @@ export default function MobileChatLayout() {
         </button>
         <button
           onClick={handleNewChat}
-          aria-label="新對話"
+          aria-label={t('mobile.chat.newChat')}
           className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 active:bg-slate-200 text-slate-700"
         >
           <Plus size={20} />
         </button>
         <button
           onClick={() => setMenuOpen(true)}
-          aria-label="選單"
+          aria-label={t('mobile.chat.menuLabel')}
           className="w-11 h-11 -mr-1 flex items-center justify-center rounded-lg hover:bg-slate-100 active:bg-slate-200 text-slate-700"
         >
           <Settings size={18} />
@@ -390,9 +393,9 @@ export default function MobileChatLayout() {
       {/* SSE stall banner */}
       {stallReason && lastUserMessageRef.current && (
         <div className="bg-red-50 border-b border-red-200 px-3 py-2 flex items-center gap-2 text-xs text-red-800">
-          <span className="flex-1">{stallReason === 'offline' ? '網路中斷' : '連線中斷或長時間沒回應'}</span>
-          <button onClick={handleResendAfterStall} className="text-white bg-red-600 rounded px-2 py-1 font-medium">重發</button>
-          <button onClick={clearStall} className="text-red-400 px-1">✕</button>
+          <span className="flex-1">{stallReason === 'offline' ? t('mobile.stall.offline') : t('mobile.stall.background')}</span>
+          <button onClick={handleResendAfterStall} className="text-white bg-red-600 rounded px-2 py-1 font-medium">{t('mobile.stall.resend')}</button>
+          <button onClick={clearStall} className="text-red-400 px-1" aria-label={t('common.close')}>✕</button>
         </div>
       )}
 
@@ -403,9 +406,9 @@ export default function MobileChatLayout() {
             <div className="w-16 h-16 rounded-2xl bg-blue-100 flex items-center justify-center mb-4">
               <Sparkles size={28} className="text-blue-600" />
             </div>
-            <h2 className="text-lg font-semibold text-slate-800 mb-1">開始新對話</h2>
+            <h2 className="text-lg font-semibold text-slate-800 mb-1">{t('mobile.chat.welcomeTitle')}</h2>
             <p className="text-sm text-slate-500">
-              你好 {(user as any)?.name || (user as any)?.username},直接在下方輸入訊息開始
+              {t('mobile.chat.welcomeHint', { name: (user as any)?.name || (user as any)?.username || '' })}
             </p>
           </div>
         ) : (
@@ -436,7 +439,7 @@ export default function MobileChatLayout() {
                 <span className="truncate">{f.name}</span>
                 <button
                   onClick={() => removeAttachment(i)}
-                  aria-label="移除"
+                  aria-label={t('mobile.chat.remove')}
                   className="w-5 h-5 flex items-center justify-center rounded-full hover:bg-slate-200 text-slate-500"
                 >
                   <X size={11} />
@@ -457,7 +460,7 @@ export default function MobileChatLayout() {
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={streaming}
-            aria-label="附加檔案"
+            aria-label={t('mobile.chat.attachFile')}
             className="w-11 h-11 flex items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40 flex-shrink-0"
           >
             <Paperclip size={18} />
@@ -472,7 +475,7 @@ export default function MobileChatLayout() {
                 handleSend(inputText, attachments)
               }
             }}
-            placeholder="輸入訊息…"
+            placeholder={t('mobile.chat.inputPlaceholder')}
             rows={1}
             className="flex-1 resize-none border border-slate-200 rounded-2xl px-4 py-3 max-h-32 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-300"
             style={{ minHeight: '44px' }}
@@ -480,7 +483,7 @@ export default function MobileChatLayout() {
           {streaming ? (
             <button
               onClick={handleStop}
-              aria-label="停止"
+              aria-label={t('mobile.chat.stop')}
               className="w-11 h-11 flex items-center justify-center rounded-full bg-red-500 hover:bg-red-600 text-white flex-shrink-0"
             >
               <Square size={16} fill="currentColor" />
@@ -489,7 +492,7 @@ export default function MobileChatLayout() {
             <button
               onClick={() => handleSend(inputText, attachments)}
               disabled={!inputText.trim() && attachments.length === 0}
-              aria-label="送出"
+              aria-label={t('mobile.chat.send')}
               className="w-11 h-11 flex items-center justify-center rounded-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white flex-shrink-0"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
@@ -506,19 +509,19 @@ export default function MobileChatLayout() {
         <Drawer.Portal>
           <Drawer.Overlay className="fixed inset-0 bg-black/40 z-40" />
           <Drawer.Content className="fixed inset-y-0 left-0 w-[85%] max-w-sm bg-white z-50 flex flex-col pt-safe pb-safe">
-            <Drawer.Title className="sr-only">對話列表</Drawer.Title>
+            <Drawer.Title className="sr-only">{t('mobile.chat.sessions')}</Drawer.Title>
             <div className="flex items-center gap-2 px-4 h-14 border-b border-slate-200">
-              <span className="text-sm font-semibold text-slate-800 flex-1">對話</span>
+              <span className="text-sm font-semibold text-slate-800 flex-1">{t('mobile.chat.sessions')}</span>
               <button
                 onClick={() => { handleNewChat() }}
                 className="text-xs text-white bg-blue-600 hover:bg-blue-700 rounded-lg px-3 py-1.5 inline-flex items-center gap-1"
               >
-                <Plus size={12} /> 新對話
+                <Plus size={12} /> {t('mobile.chat.newChat')}
               </button>
             </div>
             <div className="flex-1 overflow-y-auto py-2">
               {sessions.length === 0 ? (
-                <p className="px-4 py-6 text-xs text-slate-400 text-center">還沒有對話紀錄</p>
+                <p className="px-4 py-6 text-xs text-slate-400 text-center">{t('mobile.chat.noSessions')}</p>
               ) : (
                 sessions.map((s) => {
                   const active = s.id === currentSessionId
@@ -542,7 +545,7 @@ export default function MobileChatLayout() {
                       </button>
                       <button
                         onClick={() => handleDeleteSession(s.id)}
-                        aria-label="刪除"
+                        aria-label={t('common.delete')}
                         className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50"
                       >
                         <Trash2 size={14} />
@@ -565,14 +568,14 @@ export default function MobileChatLayout() {
         <Drawer.Portal>
           <Drawer.Overlay className="fixed inset-0 bg-black/40 z-40" />
           <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl flex flex-col max-h-[80vh] pb-safe">
-            <Drawer.Title className="sr-only">選擇模型</Drawer.Title>
+            <Drawer.Title className="sr-only">{t('mobile.chat.selectModel')}</Drawer.Title>
             <div className="mx-auto w-10 h-1 rounded-full bg-slate-300 mt-2" />
             <div className="px-4 py-3 border-b border-slate-100">
-              <p className="text-sm font-semibold text-slate-800">選擇模型</p>
+              <p className="text-sm font-semibold text-slate-800">{t('mobile.chat.selectModel')}</p>
             </div>
             <div className="flex-1 overflow-y-auto p-2">
               {availableModels.length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-6">沒有可用模型</p>
+                <p className="text-xs text-slate-400 text-center py-6">{t('mobile.chat.noModels')}</p>
               ) : (
                 availableModels.map((m) => {
                   const active = m.key === model
@@ -603,7 +606,7 @@ export default function MobileChatLayout() {
         <Drawer.Portal>
           <Drawer.Overlay className="fixed inset-0 bg-black/40 z-40" />
           <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl pb-safe">
-            <Drawer.Title className="sr-only">選單</Drawer.Title>
+            <Drawer.Title className="sr-only">{t('mobile.chat.menuLabel')}</Drawer.Title>
             <div className="mx-auto w-10 h-1 rounded-full bg-slate-300 mt-2" />
             <div className="p-2">
               <button
@@ -611,7 +614,7 @@ export default function MobileChatLayout() {
                 className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
               >
                 <Globe size={18} className="text-slate-500" />
-                <span className="flex-1 text-sm text-slate-800">語言</span>
+                <span className="flex-1 text-sm text-slate-800">{t('mobile.menu.language')}</span>
                 <span className="text-xs text-slate-500">
                   {SUPPORTED_LANGUAGES.find((l) => l.code === i18n.language)?.label || i18n.language}
                 </span>
@@ -621,7 +624,7 @@ export default function MobileChatLayout() {
                 className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
               >
                 <Settings size={18} className="text-slate-500" />
-                <span className="flex-1 text-sm text-slate-800">說明</span>
+                <span className="flex-1 text-sm text-slate-800">{t('mobile.menu.help')}</span>
               </button>
               <div className="my-1 h-px bg-slate-200" />
               <button
@@ -629,7 +632,7 @@ export default function MobileChatLayout() {
                 className="w-full px-3 py-3 rounded-lg hover:bg-red-50 active:bg-red-100 flex items-center gap-3 text-left"
               >
                 <LogOut size={18} className="text-red-500" />
-                <span className="flex-1 text-sm text-red-600">登出</span>
+                <span className="flex-1 text-sm text-red-600">{t('mobile.unsupported.logout')}</span>
               </button>
             </div>
           </Drawer.Content>
@@ -641,10 +644,10 @@ export default function MobileChatLayout() {
         <Drawer.Portal>
           <Drawer.Overlay className="fixed inset-0 bg-black/40 z-40" />
           <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl pb-safe">
-            <Drawer.Title className="sr-only">選擇語言</Drawer.Title>
+            <Drawer.Title className="sr-only">{t('mobile.menu.language')}</Drawer.Title>
             <div className="mx-auto w-10 h-1 rounded-full bg-slate-300 mt-2" />
             <div className="px-4 py-3 border-b border-slate-100">
-              <p className="text-sm font-semibold text-slate-800">語言</p>
+              <p className="text-sm font-semibold text-slate-800">{t('mobile.menu.language')}</p>
             </div>
             <div className="p-2">
               {SUPPORTED_LANGUAGES.map((l) => {
@@ -673,8 +676,6 @@ export default function MobileChatLayout() {
         </Drawer.Portal>
       </Drawer.Root>
 
-      {/* unused i18n key for ts not to complain */}
-      <span className="hidden">{t('common.cancel')}</span>
     </div>
   )
 }

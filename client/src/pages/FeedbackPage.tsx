@@ -116,27 +116,27 @@ export default function FeedbackPage() {
       .trim()
 
   return (
-    <div className="min-h-screen bg-white text-gray-900">
+    <div className="min-h-dvh bg-white text-gray-900 pt-safe pb-safe">
       {/* Header */}
-      <div className="border-b border-gray-200 bg-gray-50 px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button onClick={() => navigate('/chat')} className="text-gray-400 hover:text-gray-900 transition">
+      <div className="border-b border-gray-200 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+            <button onClick={() => navigate('/chat')} aria-label="返回對話" className="w-10 h-10 sm:w-auto sm:h-auto flex items-center justify-center sm:p-0 text-gray-400 hover:text-gray-900 transition flex-shrink-0">
               <ArrowLeft size={20} />
             </button>
-            <div>
-              <h1 className="text-xl font-bold">{t('feedback.title')}</h1>
-              <p className="text-sm text-gray-500 mt-0.5">
+            <div className="min-w-0">
+              <h1 className="text-base sm:text-xl font-bold truncate">{t('feedback.title')}</h1>
+              <p className="text-xs sm:text-sm text-gray-500 mt-0.5 truncate">
                 {isAdmin && !myOnly ? t('feedback.allTickets') : t('feedback.myTickets')}
                 {' '} ({total})
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 flex-shrink-0">
             {isAdmin && (
               <button
                 onClick={() => setMyOnly(!myOnly)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-medium transition whitespace-nowrap ${
                   myOnly ? 'bg-gray-200 text-gray-600' : 'bg-blue-600 text-white'
                 }`}
               >
@@ -145,9 +145,10 @@ export default function FeedbackPage() {
             )}
             <button
               onClick={() => navigate('/feedback/new')}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition"
+              aria-label={t('feedback.newTicket')}
+              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition whitespace-nowrap"
             >
-              <Plus size={16} /> {t('feedback.newTicket')}
+              <Plus size={16} /> <span className="hidden sm:inline">{t('feedback.newTicket')}</span>
             </button>
           </div>
         </div>
@@ -237,7 +238,7 @@ export default function FeedbackPage() {
       </div>
 
       {/* Ticket List */}
-      <div className="px-6 py-4">
+      <div className="px-3 sm:px-6 py-4">
         {loading ? (
           <div className="flex items-center justify-center py-20">
             <Loader2 size={24} className="animate-spin text-gray-400" />
@@ -257,7 +258,7 @@ export default function FeedbackPage() {
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1.5">
+                    <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
                       <span className="text-xs text-gray-400 font-mono">{ticket.ticket_no}</span>
                       <FeedbackStatusBadge status={ticket.status} />
                       <FeedbackPriorityBadge priority={ticket.priority} />
@@ -272,10 +273,10 @@ export default function FeedbackPage() {
                         </span>
                       )}
                     </div>
-                    <h3 className="text-sm font-medium text-gray-900 group-hover:text-gray-900 truncate">
+                    <h3 className="text-sm font-medium text-gray-900 group-hover:text-gray-900 break-words">
                       {ticket.subject}
                     </h3>
-                    <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs text-gray-500">
                       {ticket.category_name && (
                         <span className="flex items-center gap-1">
                           <Tag size={11} /> {ticket.category_name}

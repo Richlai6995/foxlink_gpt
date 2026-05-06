@@ -22,6 +22,62 @@
       "desc": "白底黃色調"
     }
   },
+  "mobile": {
+    "install": {
+      "title": "加到主畫面",
+      "desc": "像 App 一樣全螢幕使用 Cortex",
+      "action": "加入"
+    },
+    "unsupported": {
+      "title": "{{page}}尚未支援手機",
+      "titleGeneric": "此頁面尚未支援手機",
+      "desc": "這個功能介面較複雜,目前請使用桌機瀏覽器開啟,以獲得完整體驗。",
+      "backToChat": "回到對話",
+      "logout": "登出",
+      "page": {
+        "admin": "管理後台",
+        "scheduledTasks": "排程任務",
+        "kb": "知識庫",
+        "dashboard": "AI 戰情",
+        "training": "教育訓練",
+        "pm": "PM 平台"
+      }
+    },
+    "chat": {
+      "sessions": "對話",
+      "newChat": "新對話",
+      "newChatDefaultTitle": "新對話",
+      "deleteConfirm": "確定刪除這個對話?",
+      "inputPlaceholder": "輸入訊息…",
+      "selectModel": "選擇模型",
+      "noModels": "沒有可用模型",
+      "welcomeTitle": "開始新對話",
+      "welcomeHint": "你好 {{name}},直接在下方輸入訊息開始",
+      "chatting": "對話中",
+      "noSessions": "還沒有對話紀錄",
+      "attachFile": "附加檔案",
+      "remove": "移除",
+      "stop": "停止",
+      "send": "送出",
+      "fileGenerating": "正在產生文件…",
+      "openSidebar": "開啟對話列表",
+      "menuLabel": "選單"
+    },
+    "stall": {
+      "offline": "網路中斷",
+      "background": "連線中斷或長時間沒回應",
+      "offlineWithSent": "網路中斷,訊息送達後可能會中斷",
+      "backgroundWithDetail": "連線中斷或長時間沒有回應,可重新發送上次訊息",
+      "resend": "重發",
+      "abortedNotice": "(連線中斷,可點上方 banner 重新發送)",
+      "abortedShort": "(連線中斷)"
+    },
+    "menu": {
+      "settings": "設定",
+      "language": "語言",
+      "help": "說明"
+    }
+  },
   "common": {
     "cancel": "取消",
     "close": "關閉",

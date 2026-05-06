@@ -96,22 +96,22 @@ export default function MyChartsPage() {
   const list = tab === 'mine' ? mine : shared
 
   return (
-    <div className="min-h-screen bg-slate-100">
+    <div className="min-h-dvh bg-slate-100 pt-safe pb-safe">
       {/* Header — 對齊 KnowledgeBasePage / SkillMarket pattern */}
-      <header className="bg-slate-900 text-white px-6 py-3 flex items-center justify-between shadow">
-        <div className="flex items-center gap-3">
-          <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center">
+      <header className="bg-slate-900 text-white px-3 sm:px-6 py-3 flex items-center justify-between shadow gap-2">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
             <Cpu size={14} className="text-white" />
           </div>
           <span className="font-bold">Cortex</span>
-          <span className="text-slate-500 text-sm">/ {t('chart.library.title', '我的圖庫')}</span>
+          <span className="text-slate-500 text-sm truncate">/ {t('chart.library.title', '我的圖庫')}</span>
         </div>
-        <button onClick={() => navigate('/chat')} className="flex items-center gap-1.5 text-slate-400 hover:text-white text-sm transition">
-          <ArrowLeft size={15} /> {t('common.backToChat', '返回對話')}
+        <button onClick={() => navigate('/chat')} className="flex items-center gap-1.5 text-slate-400 hover:text-white text-sm transition flex-shrink-0">
+          <ArrowLeft size={15} /> <span className="hidden sm:inline">{t('common.backToChat', '返回對話')}</span>
         </button>
       </header>
 
-      <div className="p-6 max-w-6xl mx-auto">
+      <div className="p-3 sm:p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">
           <Star className="text-amber-500" size={24} />

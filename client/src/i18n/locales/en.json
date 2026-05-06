@@ -22,6 +22,62 @@
       "desc": "White base with yellow tint"
     }
   },
+  "mobile": {
+    "install": {
+      "title": "Add to Home Screen",
+      "desc": "Use Cortex like a native app",
+      "action": "Install"
+    },
+    "unsupported": {
+      "title": "{{page}} is not supported on mobile yet",
+      "titleGeneric": "This page is not supported on mobile yet",
+      "desc": "This feature has a complex UI; please open it on a desktop browser for the full experience.",
+      "backToChat": "Back to chat",
+      "logout": "Sign out",
+      "page": {
+        "admin": "Admin",
+        "scheduledTasks": "Scheduled tasks",
+        "kb": "Knowledge base",
+        "dashboard": "AI dashboard",
+        "training": "Training",
+        "pm": "PM platform"
+      }
+    },
+    "chat": {
+      "sessions": "Chats",
+      "newChat": "New chat",
+      "newChatDefaultTitle": "New chat",
+      "deleteConfirm": "Delete this chat?",
+      "inputPlaceholder": "Type a message…",
+      "selectModel": "Select model",
+      "noModels": "No models available",
+      "welcomeTitle": "Start a new chat",
+      "welcomeHint": "Hi {{name}}, type a message below to begin",
+      "chatting": "Chatting",
+      "noSessions": "No chats yet",
+      "attachFile": "Attach file",
+      "remove": "Remove",
+      "stop": "Stop",
+      "send": "Send",
+      "fileGenerating": "Generating file…",
+      "openSidebar": "Open chat list",
+      "menuLabel": "Menu"
+    },
+    "stall": {
+      "offline": "Network offline",
+      "background": "Connection lost or no response for a while",
+      "offlineWithSent": "Network offline; the message may break in transit",
+      "backgroundWithDetail": "Connection lost or no response — you can resend your last message",
+      "resend": "Resend",
+      "abortedNotice": "(Connection lost — tap the banner above to resend)",
+      "abortedShort": "(Connection lost)"
+    },
+    "menu": {
+      "settings": "Settings",
+      "language": "Language",
+      "help": "Help"
+    }
+  },
   "common": {
     "cancel": "Cancel",
     "close": "Close",

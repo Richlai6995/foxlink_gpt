@@ -2,6 +2,7 @@
 // 桌機 / 已 standalone 模式 / 已關閉過 → 不顯示
 import { useEffect, useState } from 'react'
 import { Smartphone, X } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { onInstallPromptChange, isStandalone, type InstallPromptHandle } from '../../lib/pwa'
 import { useDeviceProfile } from '../../hooks/useDeviceProfile'
 
@@ -18,6 +19,7 @@ function isDismissedRecently(): boolean {
 }
 
 export default function InstallPwaPrompt() {
+  const { t } = useTranslation()
   const { isMobile } = useDeviceProfile()
   const [handle, setHandle] = useState<InstallPromptHandle | null>(null)
   const [hidden, setHidden] = useState(() => isStandalone() || isDismissedRecently())
@@ -50,19 +52,19 @@ export default function InstallPwaPrompt() {
         <Smartphone size={20} className="text-blue-600" />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-slate-800">加到主畫面</p>
-        <p className="text-xs text-slate-500">像 App 一樣全螢幕使用 Cortex</p>
+        <p className="text-sm font-medium text-slate-800">{t('mobile.install.title')}</p>
+        <p className="text-xs text-slate-500">{t('mobile.install.desc')}</p>
       </div>
       <button
         onClick={install}
         className="text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg px-3 py-2"
       >
-        加入
+        {t('mobile.install.action')}
       </button>
       <button
         onClick={dismiss}
         className="text-slate-400 hover:text-slate-600 p-1"
-        aria-label="關閉"
+        aria-label={t('common.close')}
       >
         <X size={16} />
       </button>

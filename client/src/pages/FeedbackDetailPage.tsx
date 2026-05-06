@@ -454,7 +454,7 @@ export default function FeedbackDetailPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="min-h-dvh bg-white flex items-center justify-center">
         <Loader2 size={32} className="animate-spin text-gray-400" />
       </div>
     )
@@ -462,7 +462,7 @@ export default function FeedbackDetailPage() {
 
   if (!ticket) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center text-gray-400">
+      <div className="min-h-dvh bg-white flex items-center justify-center text-gray-400">
         {t('feedback.noTickets')}
       </div>
     )
@@ -475,14 +475,14 @@ export default function FeedbackDetailPage() {
   const canClose = ticket.status === 'resolved' && canManage
 
   return (
-    <div className="min-h-screen bg-white text-gray-900 flex flex-col">
+    <div className="h-dvh bg-white text-gray-900 flex flex-col">
       {/* Header */}
-      <div className="border-b border-gray-200 bg-gray-50 px-6 py-3 flex items-center gap-4 shrink-0">
-        <button onClick={() => navigate('/feedback')} className="text-gray-400 hover:text-gray-900">
+      <div className="border-b border-gray-200 bg-gray-50 px-2 sm:px-6 py-2 sm:py-3 flex items-center gap-2 sm:gap-4 shrink-0 pt-safe">
+        <button onClick={() => navigate('/feedback')} aria-label="返回" className="w-10 h-10 sm:w-auto sm:h-auto flex items-center justify-center text-gray-400 hover:text-gray-900 flex-shrink-0">
           <ArrowLeft size={20} />
         </button>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-xs text-gray-400 font-mono">{ticket.ticket_no}</span>
             <FeedbackStatusBadge status={ticket.status} />
             <FeedbackPriorityBadge priority={ticket.priority} />
@@ -497,9 +497,9 @@ export default function FeedbackDetailPage() {
               </span>
             )}
           </div>
-          <h1 className="text-base font-semibold truncate mt-0.5">{ticket.subject}</h1>
+          <h1 className="text-sm sm:text-base font-semibold truncate mt-0.5">{ticket.subject}</h1>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0 overflow-x-auto">
           {canManage && !ticket.assigned_to && !isDraft && (
             <button onClick={() => handleAssign()} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-green-600 hover:bg-green-700 text-white transition flex items-center gap-1">
               <UserCheck size={12} /> {t('feedback.assign')}
@@ -545,7 +545,7 @@ export default function FeedbackDetailPage() {
         {/* Chat Area */}
         <div className="flex-1 flex flex-col">
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+          <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-3 sm:py-4 space-y-3">
             {/* Draft: 編輯表單 */}
             {isDraft && isOwner ? (
               <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4 shadow-sm"
@@ -671,11 +671,11 @@ export default function FeedbackDetailPage() {
                 msg.is_system ? 'justify-center' :
                 msg.sender_role === 'applicant' ? 'justify-start' : 'justify-end'
               }`}>
-                <div className={`relative group/msg rounded-xl px-4 py-2.5 ${
+                <div className={`relative group/msg rounded-xl px-3 sm:px-4 py-2.5 ${
                   msg.is_system ? 'bg-gray-100 text-gray-500 text-center text-xs' :
-                  msg.is_internal ? 'max-w-[70%] bg-amber-50 border border-amber-200' :
-                  msg.sender_role === 'applicant' ? 'max-w-[70%] bg-gray-100 border border-gray-200' :
-                  'max-w-[70%] bg-blue-50 border border-blue-200'
+                  msg.is_internal ? 'max-w-[88%] sm:max-w-[70%] bg-amber-50 border border-amber-200' :
+                  msg.sender_role === 'applicant' ? 'max-w-[88%] sm:max-w-[70%] bg-gray-100 border border-gray-200' :
+                  'max-w-[88%] sm:max-w-[70%] bg-blue-50 border border-blue-200'
                 }`}>
                   {/* 管理員可刪除自己的訊息 */}
                   {!msg.is_system && canManage && msg.sender_role === 'admin' && msg.sender_id === (user as any)?.id && (

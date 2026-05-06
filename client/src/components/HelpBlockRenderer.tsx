@@ -154,24 +154,24 @@ function Section({
   id, icon, iconColor, title, children,
 }: { id: string; icon: React.ReactNode; iconColor: string; title: string; children: React.ReactNode }) {
   return (
-    <section id={id} className="mb-12 scroll-mt-6">
-      <div className={`flex items-center gap-3 mb-5 pb-3 border-b-2 ${iconColor.replace('text-', 'border-')}`}>
+    <section id={id} className="mb-8 sm:mb-12 scroll-mt-6">
+      <div className={`flex items-center gap-2 sm:gap-3 mb-4 sm:mb-5 pb-2.5 sm:pb-3 border-b-2 ${iconColor.replace('text-', 'border-')}`}>
         <div className={`${iconColor} flex-shrink-0`}>{icon}</div>
-        <h2 className="text-xl font-bold text-slate-800">{title}</h2>
+        <h2 className="text-base sm:text-xl font-bold text-slate-800 break-words">{title}</h2>
       </div>
-      <div className="space-y-4">{children}</div>
+      <div className="space-y-3 sm:space-y-4">{children}</div>
     </section>
   )
 }
 
 function SubSectionComp({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="mb-6">
-      <h3 className="text-base font-semibold text-slate-700 mb-3 flex items-center gap-2">
-        <ChevronRight size={16} className="text-blue-400" />
-        {title}
+    <div className="mb-5 sm:mb-6">
+      <h3 className="text-sm sm:text-base font-semibold text-slate-700 mb-2.5 sm:mb-3 flex items-center gap-2 break-words">
+        <ChevronRight size={16} className="text-blue-400 flex-shrink-0" />
+        <span className="min-w-0">{title}</span>
       </h3>
-      <div className="pl-5 space-y-3">{children}</div>
+      <div className="pl-2 sm:pl-5 space-y-2.5 sm:space-y-3">{children}</div>
     </div>
   )
 }
@@ -193,26 +193,26 @@ function Para({ text }: { text: string }) {
 
 function TipBox({ text }: { text: string }) {
   return (
-    <div className="flex gap-3 bg-blue-50 border border-blue-200 rounded-xl p-4">
+    <div className="flex gap-2 sm:gap-3 bg-blue-50 border border-blue-200 rounded-xl p-3 sm:p-4">
       <Lightbulb size={16} className="text-blue-500 flex-shrink-0 mt-0.5" />
-      <p className="text-blue-700 text-sm leading-6">{renderInlineText(text)}</p>
+      <p className="text-blue-700 text-xs sm:text-sm leading-5 sm:leading-6 break-words min-w-0">{renderInlineText(text)}</p>
     </div>
   )
 }
 
 function NoteBox({ text }: { text: string }) {
   return (
-    <div className="flex gap-3 bg-amber-50 border border-amber-200 rounded-xl p-4">
+    <div className="flex gap-2 sm:gap-3 bg-amber-50 border border-amber-200 rounded-xl p-3 sm:p-4">
       <Info size={16} className="text-amber-500 flex-shrink-0 mt-0.5" />
-      <p className="text-amber-700 text-sm leading-6">{renderInlineText(text)}</p>
+      <p className="text-amber-700 text-xs sm:text-sm leading-5 sm:leading-6 break-words min-w-0">{renderInlineText(text)}</p>
     </div>
   )
 }
 
 function CodeBlock({ text }: { text: string }) {
   return (
-    <div className="bg-slate-900 rounded-xl p-4 overflow-x-auto">
-      <pre className="text-sm text-slate-300 font-mono leading-7 whitespace-pre-wrap">{text}</pre>
+    <div className="bg-slate-900 rounded-xl p-3 sm:p-4 overflow-x-auto">
+      <pre className="text-xs sm:text-sm text-slate-300 font-mono leading-6 sm:leading-7 whitespace-pre break-normal">{text}</pre>
     </div>
   )
 }
@@ -248,12 +248,12 @@ function StepItem({ num, title, desc }: { num: number; title: string; desc?: str
 
 function Table({ headers, rows }: { headers: string[]; rows: string[][] }) {
   return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200">
-      <table className="w-full text-sm">
+    <div className="overflow-x-auto rounded-xl border border-slate-200 -mx-1 sm:mx-0">
+      <table className="w-full min-w-[520px] text-xs sm:text-sm">
         <thead>
           <tr className="bg-slate-100">
             {(headers || []).map((h, i) => (
-              <th key={i} className="px-4 py-2.5 text-sm text-left font-semibold text-slate-600">{h}</th>
+              <th key={i} className="px-3 sm:px-4 py-2 sm:py-2.5 text-xs sm:text-sm text-left font-semibold text-slate-600 whitespace-nowrap">{h}</th>
             ))}
           </tr>
         </thead>
@@ -261,7 +261,7 @@ function Table({ headers, rows }: { headers: string[]; rows: string[][] }) {
           {(rows || []).map((row, ri) => (
             <tr key={ri} className="border-t border-slate-100 hover:bg-slate-50">
               {(row || []).map((cell, ci) => (
-                <td key={ci} className="px-4 py-2.5 text-sm text-left text-slate-600">{renderInlineText(cell)}</td>
+                <td key={ci} className="px-3 sm:px-4 py-2 sm:py-2.5 text-xs sm:text-sm text-left text-slate-600 align-top">{renderInlineText(cell)}</td>
               ))}
             </tr>
           ))}
@@ -342,17 +342,17 @@ function renderBlock(block: HelpBlock, index: number): React.ReactNode {
     case 'card_grid': {
       const gridCols = block.cols === 3 ? 'sm:grid-cols-3' : block.cols === 1 ? '' : 'sm:grid-cols-2'
       return (
-        <div key={index} className={`grid grid-cols-1 ${gridCols} gap-3`}>
+        <div key={index} className={`grid grid-cols-1 ${gridCols} gap-2.5 sm:gap-3`}>
           {(block.items || []).map((card, i) => {
             const cs = getColorSet(card.borderColor)
             return (
-              <div key={i} className={`border ${cs.border} rounded-xl p-4 ${cs.bg}`}>
-                <div className="flex items-center gap-2 mb-2">
-                  {card.emoji && <span className="text-lg">{card.emoji}</span>}
-                  <span className={`font-semibold ${cs.title} text-sm`}>{card.title}</span>
+              <div key={i} className={`border ${cs.border} rounded-xl p-3 sm:p-4 ${cs.bg}`}>
+                <div className="flex items-start gap-2 mb-1.5 sm:mb-2 flex-wrap">
+                  {card.emoji && <span className="text-base sm:text-lg leading-none">{card.emoji}</span>}
+                  <span className={`font-semibold ${cs.title} text-sm break-words min-w-0`}>{card.title}</span>
                   {card.tag && <Tag color={card.tag.color}>{card.tag.text}</Tag>}
                 </div>
-                <p className={`text-xs ${cs.desc} leading-5`}>{renderInlineText(card.desc || card.text || '')}</p>
+                <p className={`text-xs ${cs.desc} leading-5 break-words`}>{renderInlineText(card.desc || card.text || '')}</p>
               </div>
             )
           })}
@@ -362,15 +362,15 @@ function renderBlock(block: HelpBlock, index: number): React.ReactNode {
 
     case 'comparison': {
       return (
-        <div key={index} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div key={index} className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
           {(block.items || []).map((item, i) => {
             const cs = getColorSet(item.borderColor)
             return (
-              <div key={i} className={`border-2 ${cs.border} rounded-xl p-4 ${cs.bg}`}>
-                <div className={`font-semibold ${cs.title} text-sm mb-2`}>{item.title}</div>
-                <p className={`text-xs ${cs.desc} leading-5`}>{renderInlineText(item.desc || item.text || '')}</p>
+              <div key={i} className={`border-2 ${cs.border} rounded-xl p-3 sm:p-4 ${cs.bg}`}>
+                <div className={`font-semibold ${cs.title} text-sm mb-1.5 sm:mb-2 break-words`}>{item.title}</div>
+                <p className={`text-xs ${cs.desc} leading-5 break-words`}>{renderInlineText(item.desc || item.text || '')}</p>
                 {item.example && (
-                  <div className={`mt-2 text-xs ${cs.desc} opacity-80`}>{item.example}</div>
+                  <div className={`mt-2 text-xs ${cs.desc} opacity-80 break-words`}>{item.example}</div>
                 )}
               </div>
             )

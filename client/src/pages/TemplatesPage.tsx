@@ -353,32 +353,34 @@ export default function TemplatesPage() {
   )
 
   return (
-    <div className="flex-1 overflow-auto p-6 bg-slate-50 min-h-screen">
+    <div className="flex-1 overflow-auto p-3 sm:p-6 bg-slate-50 min-h-dvh pt-safe pb-safe">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between mb-4 sm:mb-6 gap-2">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
           <button
             onClick={() => navigate(-1)}
-            className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition"
+            aria-label={t('tpl.back')}
+            className="w-10 h-10 sm:w-auto sm:h-auto flex items-center justify-center sm:p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition flex-shrink-0"
             title={t('tpl.back')}
           >
             <ArrowLeft size={18} />
           </button>
-          <div>
-            <h1 className="text-lg font-semibold">{t('tpl.title')}</h1>
-            <p className="text-xs text-slate-400 mt-0.5">{t('tpl.subtitle')}</p>
+          <div className="min-w-0">
+            <h1 className="text-base sm:text-lg font-semibold truncate">{t('tpl.title')}</h1>
+            <p className="text-xs text-slate-400 mt-0.5 truncate">{t('tpl.subtitle')}</p>
           </div>
         </div>
         <button
           onClick={() => setShowWizard(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
+          aria-label={t('tpl.addTemplate')}
+          className="flex items-center gap-1.5 px-3 sm:px-4 py-2 bg-blue-600 text-white text-xs sm:text-sm rounded-lg hover:bg-blue-700 whitespace-nowrap flex-shrink-0"
         >
-          <Plus size={15} /> {t('tpl.addTemplate')}
+          <Plus size={15} /> <span className="hidden sm:inline">{t('tpl.addTemplate')}</span>
         </button>
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
         <div className="relative">
           <Search size={14} className="absolute left-3 top-2.5 text-slate-400" />
           <input

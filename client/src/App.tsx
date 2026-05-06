@@ -47,9 +47,9 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 
 // 手機不支援的頁面攔截 — 顯示「請使用桌機開啟」+ 回 chat / logout
 // 桌機通行,手機被擋
-function MobileGuard({ children, pageName }: { children: React.ReactNode; pageName?: string }) {
+function MobileGuard({ children, pageKey }: { children: React.ReactNode; pageKey?: string }) {
   const { isMobile } = useDeviceProfile()
-  if (isMobile) return <MobileUnsupportedScreen pageName={pageName} />
+  if (isMobile) return <MobileUnsupportedScreen pageKey={pageKey} />
   return <>{children}</>
 }
 
@@ -74,7 +74,7 @@ function AppRoutes() {
         path="/admin"
         element={
           <AdminRoute>
-            <MobileGuard pageName="管理後台">
+            <MobileGuard pageKey="admin">
               <AdminDashboard />
             </MobileGuard>
           </AdminRoute>
@@ -84,7 +84,7 @@ function AppRoutes() {
         path="/scheduled-tasks"
         element={
           <ProtectedRoute>
-            <MobileGuard pageName="排程任務">
+            <MobileGuard pageKey="scheduledTasks">
               <ScheduledTasksPage />
             </MobileGuard>
           </ProtectedRoute>
@@ -106,18 +106,18 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
-      <Route path="/kb" element={<ProtectedRoute><MobileGuard pageName="知識庫"><KnowledgeBasePage /></MobileGuard></ProtectedRoute>} />
-      <Route path="/kb/:id" element={<ProtectedRoute><MobileGuard pageName="知識庫"><KnowledgeBaseDetailPage /></MobileGuard></ProtectedRoute>} />
-      <Route path="/dashboard" element={<ProtectedRoute><MobileGuard pageName="AI 戰情"><AiDashboardPage /></MobileGuard></ProtectedRoute>} />
-      <Route path="/dashboard/boards" element={<ProtectedRoute><MobileGuard pageName="AI 戰情"><DashboardBoardPage /></MobileGuard></ProtectedRoute>} />
+      <Route path="/kb" element={<ProtectedRoute><MobileGuard pageKey="kb"><KnowledgeBasePage /></MobileGuard></ProtectedRoute>} />
+      <Route path="/kb/:id" element={<ProtectedRoute><MobileGuard pageKey="kb"><KnowledgeBaseDetailPage /></MobileGuard></ProtectedRoute>} />
+      <Route path="/dashboard" element={<ProtectedRoute><MobileGuard pageKey="dashboard"><AiDashboardPage /></MobileGuard></ProtectedRoute>} />
+      <Route path="/dashboard/boards" element={<ProtectedRoute><MobileGuard pageKey="dashboard"><DashboardBoardPage /></MobileGuard></ProtectedRoute>} />
       <Route path="/templates" element={<ProtectedRoute><TemplatesPage /></ProtectedRoute>} />
       <Route path="/my-charts" element={<ProtectedRoute><MyChartsPage /></ProtectedRoute>} />
       <Route path="/feedback" element={<ProtectedRoute><FeedbackPage /></ProtectedRoute>} />
       <Route path="/feedback/new" element={<ProtectedRoute><FeedbackNewPage /></ProtectedRoute>} />
       <Route path="/feedback/:id" element={<ProtectedRoute><FeedbackDetailPage /></ProtectedRoute>} />
-      <Route path="/training/*" element={<ProtectedRoute><MobileGuard pageName="教育訓練"><Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-900 text-slate-400">Loading...</div>}><TrainingPage /></Suspense></MobileGuard></ProtectedRoute>} />
-      <Route path="/pm/review" element={<ProtectedRoute><MobileGuard pageName="PM 平台"><Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400">Loading...</div>}><PmReviewQueuePage /></Suspense></MobileGuard></ProtectedRoute>} />
-      <Route path="/pm/briefing" element={<ProtectedRoute><MobileGuard pageName="PM 平台"><Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400">Loading...</div>}><PmBriefingPage /></Suspense></MobileGuard></ProtectedRoute>} />
+      <Route path="/training/*" element={<ProtectedRoute><MobileGuard pageKey="training"><Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-900 text-slate-400">Loading...</div>}><TrainingPage /></Suspense></MobileGuard></ProtectedRoute>} />
+      <Route path="/pm/review" element={<ProtectedRoute><MobileGuard pageKey="pm"><Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400">Loading...</div>}><PmReviewQueuePage /></Suspense></MobileGuard></ProtectedRoute>} />
+      <Route path="/pm/briefing" element={<ProtectedRoute><MobileGuard pageKey="pm"><Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400">Loading...</div>}><PmBriefingPage /></Suspense></MobileGuard></ProtectedRoute>} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="*" element={<Navigate to={isAuthenticated ? '/chat' : '/login'} replace />} />
     </Routes>

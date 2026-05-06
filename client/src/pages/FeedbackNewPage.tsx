@@ -172,17 +172,17 @@ export default function FeedbackNewPage() {
   }
 
   return (
-    <div className="min-h-screen bg-white text-gray-900">
-      <div className="border-b border-gray-200 bg-gray-50 px-6 py-4">
-        <div className="flex items-center gap-3">
-          <button onClick={() => navigate('/feedback')} className="text-gray-400 hover:text-gray-900">
+    <div className="min-h-dvh bg-white text-gray-900 pt-safe pb-safe">
+      <div className="border-b border-gray-200 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <button onClick={() => navigate('/feedback')} aria-label="返回" className="w-10 h-10 sm:w-auto sm:h-auto flex items-center justify-center text-gray-400 hover:text-gray-900">
             <ArrowLeft size={20} />
           </button>
-          <h1 className="text-xl font-bold">{t('feedback.newTicket')}</h1>
+          <h1 className="text-base sm:text-xl font-bold truncate">{t('feedback.newTicket')}</h1>
         </div>
       </div>
 
-      <div className="max-w-3xl mx-auto px-6 py-8" onPaste={handlePaste}>
+      <div className="max-w-3xl mx-auto px-3 sm:px-6 py-4 sm:py-8" onPaste={handlePaste}>
         <div className="space-y-5">
           {/* Admin / 工單管理者:資訊內部紀錄 */}
           {canLogInternally && (
