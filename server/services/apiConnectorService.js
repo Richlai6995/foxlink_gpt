@@ -403,7 +403,8 @@ async function executeDifyWithParams(connector, query, resolvedParams, options =
     if (difyRes.ok) {
       const data = await difyRes.json();
       if (data.conversation_id && setDifyConvId) setDifyConvId(sessionId, connector.id, data.conversation_id);
-      const answer = (data.answer || '').trim();
+      // DIFY workflow 直出 JSON.stringify 結果時非 ASCII 會變 \uXXXX literal,先還原
+      const answer = decodeJsonStringEscapes((data.answer || '').trim());
       logApiCall(db, connector.id, sessionId, userId, query.slice(0, 200), 'ok', null, duration, answer.slice(0, 300));
       console.log(`[DIFY] "${connector.name}" ok in ${duration}ms answer="${answer.slice(0, 100)}"`);
       return { answer: answer || `[${connector.name}: 無相關回應]`, duration, status: 'ok' };
@@ -644,6 +645,27 @@ function parseJson(val) {
   if (!val) return null;
   if (typeof val === 'object') return val;
   try { return JSON.parse(val); } catch { return null; }
+}
+
+/**
+ * 還原 JSON.stringify 風格的字串轉義(\uXXXX、\n、\t 等)
+ * 用於 DIFY workflow 直出 JSON 時非 ASCII 被 escape 成 \uXXXX literal 的情境。
+ * 純文字不含 \\ 直接早退,避免誤傷正常內容。
+ */
+function decodeJsonStringEscapes(s) {
+  if (typeof s !== 'string' || s.indexOf('\\') === -1) return s;
+  // 有 outer quotes:直接 JSON.parse
+  if (s.startsWith('"') && s.endsWith('"')) {
+    try { return JSON.parse(s); } catch { /* fallthrough */ }
+  }
+  // 沒 outer quotes 但是合法 JSON string body:加 quote 試 parse
+  // (會在多行/含未 escape " 時失敗,落到下面 regex)
+  try { return JSON.parse('"' + s + '"'); } catch { /* fallthrough */ }
+  // 最後手段:逐個還原常見 escape;\uXXXX、\n、\r、\t、\"、\\
+  return s.replace(/\\(u[0-9a-fA-F]{4}|n|r|t|"|\\)/g, (_, esc) => {
+    if (esc[0] === 'u') return String.fromCharCode(parseInt(esc.slice(1), 16));
+    return { 'n': '\n', 'r': '\r', 't': '\t', '"': '"', '\\': '\\' }[esc];
+  });
 }
 
 /**
