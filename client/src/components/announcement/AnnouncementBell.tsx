@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Bell, X, Info } from 'lucide-react'
 import api from '../../lib/api'
 import { useAuth } from '../../context/AuthContext'
+import { useAnnouncementSocket } from '../../hooks/useAnnouncementSocket'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Announcement } from './AnnouncementBanner'
@@ -48,6 +49,9 @@ export default function AnnouncementBell() {
       window.removeEventListener('online', onOnline)
     }
   }, [fetchActive])
+
+  // socket.io push:admin 變動公告時即時 refetch(秒級)
+  useAnnouncementSocket(fetchActive)
 
   useEffect(() => {
     if (!open) return
