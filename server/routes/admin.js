@@ -731,6 +731,76 @@ router.post('/ip-blacklist', async (req, res) => {
   }
 });
 
+// GET /api/admin/ip-blacklist/:ip/details — 拉該 IP 在 auth_audit_logs 過去 N 小時的紀錄,
+// 用來判斷自動加入的黑名單是「真的攻擊」(亂打 admin/root + 多 username 掃描)還是
+// 「員工誤觸」(同一 username 連續打錯 + UA 是正常瀏覽器)。
+router.get('/ip-blacklist/:ip/details', async (req, res) => {
+  try {
+    const ip = req.params.ip;
+    if (!isValidIp(ip)) return res.status(400).json({ error: '不合法的 IP' });
+    const hours = Math.min(168, Math.max(1, parseInt(req.query.hours || '24', 10))); // 1 ~ 168 小時(7 天)
+    const db = require('../database-oracle').db;
+
+    // 統計:每個 username 失敗次數 + 是否在 users 表(known)+ 最後一次嘗試
+    const statsSql = `
+      SELECT
+        a.username,
+        u.id            AS user_db_id,
+        u.name          AS user_real_name,
+        u.role          AS user_role,
+        u.status        AS user_status,
+        COUNT(*)        AS attempt_count,
+        SUM(CASE WHEN a.success = 1 THEN 1 ELSE 0 END) AS success_count,
+        MIN(a.created_at) AS first_attempt_at,
+        MAX(a.created_at) AS last_attempt_at,
+        LISTAGG(DISTINCT a.event_type, ', ') WITHIN GROUP (ORDER BY a.event_type) AS event_types
+      FROM auth_audit_logs a
+      LEFT JOIN users u ON UPPER(a.username) = UPPER(u.username)
+      WHERE a.ip = ?
+        AND a.created_at > SYSTIMESTAMP - NUMTODSINTERVAL(?, 'HOUR')
+      GROUP BY a.username, u.id, u.name, u.role, u.status
+      ORDER BY MAX(a.created_at) DESC
+    `;
+    const byUsername = await db.prepare(statsSql).all(ip, hours);
+
+    // 最近 N 筆完整紀錄(timeline 用,展開可看詳細 user_agent / error_msg / metadata)
+    const recentSql = `
+      SELECT id, user_id, username, event_type, success, error_msg,
+             user_agent, challenge_id, metadata, created_at
+      FROM auth_audit_logs
+      WHERE ip = ?
+        AND created_at > SYSTIMESTAMP - NUMTODSINTERVAL(?, 'HOUR')
+      ORDER BY created_at DESC
+      FETCH FIRST 50 ROWS ONLY
+    `;
+    const recent = await db.prepare(recentSql).all(ip, hours);
+
+    // 整體統計
+    const totalAttempts = byUsername.reduce((s, r) => s + Number(r.attempt_count || 0), 0);
+    const totalSuccess  = byUsername.reduce((s, r) => s + Number(r.success_count || 0), 0);
+    const knownUsers    = byUsername.filter(r => r.user_db_id != null).length;
+    const unknownUsers  = byUsername.filter(r => r.user_db_id == null).length;
+
+    res.json({
+      ip,
+      window_hours: hours,
+      summary: {
+        total_attempts: totalAttempts,
+        total_failures: totalAttempts - totalSuccess,
+        total_success: totalSuccess,
+        distinct_usernames: byUsername.length,
+        known_users: knownUsers,
+        unknown_users: unknownUsers,
+      },
+      by_username: byUsername,
+      recent_events: recent,
+    });
+  } catch (e) {
+    console.error('[Admin] ip-blacklist details error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.delete('/ip-blacklist/:ip', async (req, res) => {
   try {
     const ip = req.params.ip;
