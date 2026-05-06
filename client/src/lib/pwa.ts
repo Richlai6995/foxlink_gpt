@@ -77,18 +77,17 @@ export function onUpdateAvailable(fn: (needRefresh: boolean) => void): () => voi
   return () => { updateListeners = updateListeners.filter((f) => f !== fn) }
 }
 
-/** user 同意更新 → skipWaiting + reload */
+/** user 同意更新 → 通知 SW skipWaiting(不負責 reload,由 caller 處理)*/
 export async function applyUpdate() {
-  if (!updateSWFn) {
-    // 沒 SW 就直接 hard reload(加 query 強制 bypass HTTP cache)
-    window.location.href = window.location.pathname + '?_nocache=' + Date.now()
-    return
-  }
+  if (!updateSWFn) return
   try {
-    await updateSWFn(true)
-  } catch {
-    window.location.reload()
-  }
+    // updateSWFn(true) 會 trigger skipWaiting 並可能觸發 reload,但有 race
+    // caller 會自己 reload,所以這邊給 800ms 上限不要卡住 UI
+    await Promise.race([
+      updateSWFn(true),
+      new Promise((resolve) => setTimeout(resolve, 800)),
+    ])
+  } catch {}
 }
 
 // ── 版本輪詢:不依賴 SW,每 5 分鐘問 server /api/version,版本變了就觸發 toast

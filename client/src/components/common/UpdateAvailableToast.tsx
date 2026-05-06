@@ -20,9 +20,19 @@ export default function UpdateAvailableToast() {
 
   const handleUpdate = async () => {
     setReloading(true)
-    await applyUpdate()
-    // applyUpdate 會觸發 controllerchange → 自動 reload,這裡保險再 reload 一次
-    setTimeout(() => window.location.reload(), 1000)
+    try {
+      // 通知 SW 進入新版(best effort,卡住也不阻塞)
+      const p = applyUpdate()
+      // 最多等 800ms,然後不論 SW 結果都強制 reload
+      await Promise.race([
+        p,
+        new Promise((r) => setTimeout(r, 800)),
+      ])
+    } catch {}
+    // 用 query 強制 bypass HTTP cache + reload(SW skipWaiting 後新 SW 接手新請求)
+    const url = new URL(window.location.href)
+    url.searchParams.set('_v', String(Date.now()))
+    window.location.replace(url.toString())
   }
 
   return (
