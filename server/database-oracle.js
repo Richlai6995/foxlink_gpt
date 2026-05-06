@@ -4210,6 +4210,32 @@ async function runMigrations(db) {
     catch (e) { if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn(`[Migration] ${name}:`, e.message); }
   }
 
+  // user_trusted_devices:device-bound MFA 信任(取代純 IP 綁定的 user_trusted_ips)。
+  // device_id 寫入 httpOnly + signed cookie,IP 變不變不影響(只記錄 last_seen_ip 給 audit / UI)。
+  // TTL 預設 30 天 sliding,改密碼 / reset 整批清空。fingerprint_* 欄位 Phase B 才寫,Phase A 先空。
+  await createTable('USER_TRUSTED_DEVICES', `CREATE TABLE user_trusted_devices (
+    id                NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id           NUMBER NOT NULL,
+    device_id         VARCHAR2(36) NOT NULL,
+    device_label      VARCHAR2(200),
+    fingerprint_hash  VARCHAR2(64),
+    fingerprint_json  CLOB,
+    created_via_ip    VARCHAR2(64),
+    last_seen_ip      VARCHAR2(64),
+    last_seen_at      TIMESTAMP DEFAULT SYSTIMESTAMP,
+    user_agent        VARCHAR2(512),
+    created_at        TIMESTAMP DEFAULT SYSTIMESTAMP,
+    expires_at        TIMESTAMP NOT NULL,
+    CONSTRAINT user_trusted_devices_uk UNIQUE (user_id, device_id)
+  )`);
+  for (const [name, ddl] of [
+    ['user_trusted_devices_uid_idx', 'CREATE INDEX user_trusted_devices_uid_idx ON user_trusted_devices(user_id, expires_at)'],
+    ['user_trusted_devices_did_idx', 'CREATE INDEX user_trusted_devices_did_idx ON user_trusted_devices(device_id)'],
+  ]) {
+    try { await db.prepare(ddl).run(); console.log(`[Migration] ${name} created ✓`); }
+    catch (e) { if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn(`[Migration] ${name}:`, e.message); }
+  }
+
   // ip_blacklist:外網 anti-bot 黑名單(自動寫入 + admin 手動)。
   // 內網 IP 永遠不被擋(middleware 的 isInternal 在 blacklist 檢查之前)
   await createTable('IP_BLACKLIST', `CREATE TABLE ip_blacklist (
@@ -4336,6 +4362,23 @@ async function runMigrations(db) {
     ['ann_aud_grantee_idx','CREATE INDEX ann_aud_grantee_idx ON announcement_audiences(grantee_type, grantee_id)'],
     ['ann_dis_user_idx',   'CREATE INDEX ann_dis_user_idx   ON user_announcement_dismissals(user_id, announcement_id)'],
     ['ann_read_user_idx',  'CREATE INDEX ann_read_user_idx  ON user_announcement_reads(user_id, announcement_id)'],
+  ]) {
+    try { await db.prepare(ddl).run(); console.log(`[Migration] ${name} created ✓`); }
+    catch (e) { if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn(`[Migration] ${name}:`, e.message); }
+  }
+
+  // ── Mobile support — device telemetry(觀察 mobile 比例,無 admin UI) ──
+  await createTable('DEVICE_TELEMETRY', `CREATE TABLE device_telemetry (
+    id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id     NUMBER NOT NULL,
+    profile     VARCHAR2(20) NOT NULL,
+    ua          VARCHAR2(500),
+    viewport    VARCHAR2(20),
+    created_at  TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+  for (const [name, ddl] of [
+    ['device_tel_user_idx',    'CREATE INDEX device_tel_user_idx    ON device_telemetry(user_id, created_at)'],
+    ['device_tel_profile_idx', 'CREATE INDEX device_tel_profile_idx ON device_telemetry(profile, created_at)'],
   ]) {
     try { await db.prepare(ddl).run(); console.log(`[Migration] ${name} created ✓`); }
     catch (e) { if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn(`[Migration] ${name}:`, e.message); }

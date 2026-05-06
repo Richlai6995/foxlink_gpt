@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, MessageSquare, Trash2, Pencil, Check, ChevronDown, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, KeyRound, X, Eye, EyeOff, GitFork, Sparkles, Database, Menu, ChevronUp, BarChart3, Globe, FileText, GraduationCap, BookOpen, TicketCheck, PanelLeftClose, PanelLeft, SquarePen, UserCog, Star } from 'lucide-react'
+import { Plus, MessageSquare, Trash2, Pencil, Check, ChevronDown, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, KeyRound, X, Eye, EyeOff, GitFork, Sparkles, Database, Menu, ChevronUp, BarChart3, Globe, FileText, GraduationCap, BookOpen, TicketCheck, PanelLeftClose, PanelLeft, SquarePen, UserCog, Star, Smartphone } from 'lucide-react'
+import MyDevicesModal from './MyDevicesModal'
 import ImpersonateDialog from './ImpersonateDialog'
 import ThemePicker from './ThemePicker'
 import type { ChatSession, ModelType, LlmModel } from '../types'
@@ -136,6 +137,9 @@ export default function Sidebar({
       setImporting(false)
     }
   }
+
+  // My devices modal
+  const [showMyDevices, setShowMyDevices] = useState(false)
 
   // Change password modal
   const [showChangePw, setShowChangePw] = useState(false)
@@ -615,6 +619,13 @@ export default function Sidebar({
               </button>
             )}
             <button
+              onClick={() => setShowMyDevices(true)}
+              title={t('sidebar.myDevices', '我的信任裝置')}
+              className="text-slate-500 hover:text-blue-400 transition"
+            >
+              <Smartphone size={15} />
+            </button>
+            <button
               onClick={() => setShowChangePw(true)}
               title={isManualAccount ? t('sidebar.changePassword') : t('sidebar.adPasswordNote')}
               className="text-slate-500 hover:text-yellow-400 transition"
@@ -666,6 +677,9 @@ export default function Sidebar({
           </div>
         </div>
       )}
+
+      {/* My Devices Modal */}
+      <MyDevicesModal open={showMyDevices} onClose={() => setShowMyDevices(false)} />
 
       {/* Change Password Modal */}
       {showChangePw && (

@@ -12,9 +12,12 @@ import {
   TicketCheck, GripVertical, KeyRound, Printer, Ban,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import { useDeviceProfile } from '../hooks/useDeviceProfile'
 import api from '../lib/api'
 import { RenderHelpSections, RenderHelpSection, getIcon, type HelpSectionData } from '../components/HelpBlockRenderer'
 import HelpTrainingPlayer from '../components/training/HelpTrainingPlayer'
+import { Drawer } from 'vaul'
+import { Menu, MoreVertical } from 'lucide-react'
 import './HelpPage.print.css'
 
 // ── Reusable layout helpers ───────────────────────────────────────────────────
@@ -4471,23 +4474,53 @@ generate_txt:供應商週報_{{date}}.txt
           />
         </SubSection>
 
-        <SubSection title="MFA(Webex 二階段驗證)流程">
+        <SubSection title="Device-bound 信任(2026-05 強化)— 取代純 IP 綁定">
           <Para>
-            外網使用者登入時,在帳密驗證通過後,系統會多走一道 Webex DM OTP 驗證:
+            <strong>UX 痛點解決</strong>:過去「同 IP /32 嚴綁 7 天」對行動使用者很不友善
+            ── 4G ↔ Wi-Fi 切換、ISP 重撥、出差移動都會 IP 變動,每次都要重 OTP。
+            新機制改以 <strong>Device cookie</strong> 為主要識別,IP 變不變不重要。
+          </Para>
+          <Table
+            headers={['情境', '舊(/32 嚴綁)', '新(device-bound)']}
+            rows={[
+              ['辦公室 → 通勤 → 咖啡店 → 家(IP 變 4 次)', '4 次 OTP 😩', '0 次(同 device cookie)'],
+              ['手機 4G ↔ Wi-Fi 切換', '每次都要 OTP', '免 OTP'],
+              ['ISP 半夜重撥', '隔天要 OTP', '免 OTP'],
+              ['同密碼但不同瀏覽器(Edge → Chrome)', '免(若同 IP)', '需 OTP(視為新 device,合理)'],
+              ['同密碼但 incognito', '免(若同 IP)', '需 OTP(符合 incognito 期待)'],
+              ['cookie 被偷,攻擊者試登入', '通(若同 IP)', '異常 IP DM 通知使用者反應(Phase A);Phase B 加 fingerprint 進一步擋'],
+              ['改密碼', '清所有信任 IP', '清所有信任 device + IP + 踢全部 sessions'],
+            ]}
+          />
+          <Para>
+            <strong>原理</strong>:過 MFA 通過時 server 寫一筆 <code>user_trusted_devices</code>(含 device_id UUID),
+            並 set <code>flgpt_did</code> cookie(httpOnly + Secure + SameSite=Lax + HMAC 簽章);後續登入有 cookie
+            對得上、未過期、user_id 一致 → 直接放行。Sliding TTL:每次成功使用刷新 30 天,30 天沒用自動失效。
+          </Para>
+          <NoteBox>
+            Trusted IP(舊機制)仍保留作為 fallback。env <code>MFA_DEVICE_TRUST_TTL_DAYS=0</code> 可關閉新機制純走舊 IP 邏輯。
+            正常情況 cookie 對得上就走 device-bound 路徑;cookie 不在 / 過期才退回 IP 邏輯。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="MFA(Webex 二階段驗證)完整流程">
+          <Para>
+            外網使用者登入時,在帳密驗證通過後,系統會走 Device cookie 快路徑或 Webex DM OTP 驗證:
           </Para>
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm text-slate-700 leading-7">
             <ol className="list-decimal list-inside space-y-1">
               <li>使用者輸入帳號密碼</li>
-              <li>系統判斷:外網 IP + 不在 user 的「信任 IP 名單」</li>
-              <li>產生 6 位數 OTP,Webex Bot DM 給使用者(三語訊息)</li>
-              <li>前端切換到 OTP 輸入畫面,5 分鐘倒數</li>
-              <li>使用者輸入正確 OTP → 建立 session + 寫入「信任 IP」(7 天 TTL)</li>
-              <li>同 IP 7 天內再登入跳過 OTP,IP 變了重新走完整流程</li>
+              <li>系統判斷是否為內網 IP(在 INTERNAL_NETWORKS 範圍)→ 是 = 直接登入</li>
+              <li><strong>檢查 device cookie</strong>:有對得上的有效 cookie 且 user_id 一致 → 直接登入(不管 IP)</li>
+              <li>檢查 trusted IP fallback:在 user_trusted_ips 內 → 直接登入</li>
+              <li>都不過 → 產生 6 位 OTP,Webex Bot DM 給使用者(三語訊息),5 分鐘倒數</li>
+              <li>使用者輸入正確 OTP → 建立 session + 寫入 trusted device(30 天)+ trusted IP(7 天)+ set device cookie</li>
+              <li>下次同 device 再登入即刻通過,跨 IP / 跨網路都可以</li>
             </ol>
           </div>
           <TipBox>
-            7 天內同 IP 免重認的設計是 UX 與安全的平衡。如果使用者改密碼或 admin 停用帳號,
-            「信任 IP」會被自動清空,下次登入必須重新通過 MFA。
+            使用者在 Cortex 左下角狀態列點 <strong>📱 圖示</strong>可進入「我的信任裝置」,看自己有哪些 device、最後使用 IP / 時間,可手動移除單台或全部清空。
+            admin 後台「使用者管理」也可看任何 user 的 trusted devices 並強制清空(緊急應變用)。
           </TipBox>
         </SubSection>
 
@@ -4589,12 +4622,14 @@ MFA_ENABLED=false                      # ⚠️ EXTERNAL_ACCESS_MODE=full 時必
 INTERNAL_NETWORKS=10.0.0.0/8,...       # 內網 CIDR
 
 # Webex MFA
-MFA_TRUSTED_IP_TTL_DAYS=7
+MFA_TRUSTED_IP_TTL_DAYS=7              # 舊機制 fallback
+MFA_DEVICE_TRUST_TTL_DAYS=30           # 新 device cookie sliding(0=關閉)
 MFA_OTP_TTL_SECONDS=300
 MFA_RESEND_COOLDOWN_SECONDS=60
 MFA_MAX_VERIFY_ATTEMPTS=5
 MFA_DM_TIMEOUT_MS=8000
 MFA_RATE_LIMIT_PER_USER_PER_HOUR=20
+# DEVICE_COOKIE_SECRET=                # 留空 = 自動由 JWT_SECRET 衍生
 
 # 失敗告警 + forgot rate
 AUTH_FAIL_ALERT_PER_USER=5
@@ -6679,12 +6714,14 @@ CORS_ALLOWED_ORIGINS=                  # 留空=不限制(dev);正式填 https:/
 
 # ─── Webex MFA(外網開放後啟用)───────────────────────────────────
 MFA_ENABLED=false                      # ⚠️ EXTERNAL_ACCESS_MODE=full 時必須 true
-MFA_TRUSTED_IP_TTL_DAYS=7
+MFA_TRUSTED_IP_TTL_DAYS=7              # 舊機制 fallback
+MFA_DEVICE_TRUST_TTL_DAYS=30           # 新 device cookie sliding(0=關閉)
 MFA_OTP_TTL_SECONDS=300
 MFA_RESEND_COOLDOWN_SECONDS=60
 MFA_MAX_VERIFY_ATTEMPTS=5
 MFA_DM_TIMEOUT_MS=8000
 MFA_RATE_LIMIT_PER_USER_PER_HOUR=20
+# DEVICE_COOKIE_SECRET=                # 留空 = 自動由 JWT_SECRET 衍生
 
 # ─── 認證失敗告警 + forgot-password 限流 ──────────────────────────
 AUTH_FAIL_ALERT_PER_USER=5
@@ -7976,6 +8013,7 @@ interface BookOption {
 export default function HelpPage() {
   const navigate = useNavigate()
   const { isAdmin, canAccessTrainingDev } = useAuth()
+  const { isMobile } = useDeviceProfile()
   const { t, i18n } = useTranslation()
   const [role, setRole] = useState<Role>(isAdmin ? 'admin' : 'user')
   const contentRef = useRef<HTMLDivElement>(null)
@@ -7983,6 +8021,8 @@ export default function HelpPage() {
   const [trainingDevSections, setTrainingDevSections] = useState<HelpSectionData[]>([])
   const [loadingApi, setLoadingApi] = useState(false)
   const [trainingTarget, setTrainingTarget] = useState<{ courseId: number; lessonId?: number | null } | null>(null)
+  const [mobileTocOpen, setMobileTocOpen] = useState(false)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   // ── Multi-book support ────────────────────────────────────────────────────
   const [books, setBooks] = useState<BookOption[]>([])
@@ -8122,93 +8162,136 @@ export default function HelpPage() {
     requestAnimationFrame(() => window.print())
   }
 
+  // Mobile TOC scroll handler — close drawer first then scroll
+  function mobileScrollTo(id: string) {
+    setMobileTocOpen(false)
+    setTimeout(() => {
+      const el = document.getElementById(id)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 200)
+  }
+
   return (
-    <div className="flex flex-col h-screen bg-slate-50">
-      {/* Top bar */}
-      <header
-        data-region="top-bar"
-        className="bg-white border-b border-slate-200 px-6 py-4 flex items-center gap-4 flex-shrink-0 shadow-sm"
-      >
-        <button
-          onClick={() => navigate(-1)}
-          className="flex items-center gap-2 text-slate-500 hover:text-slate-800 transition text-sm"
+    <div className="flex flex-col h-dvh bg-slate-50">
+      {/* Top bar — mobile / desktop 兩套 */}
+      {isMobile ? (
+        <header
+          data-region="top-bar"
+          className="bg-white border-b border-slate-200 px-2 h-14 flex items-center gap-1 flex-shrink-0 shadow-sm pt-safe"
         >
-          <ArrowLeft size={18} />
-          {t('help.back')}
-        </button>
-        <div className="flex items-center gap-2">
-          <BookOpen size={20} className="text-blue-500" />
-          <h1 className="text-lg font-bold text-slate-800">{t('help.pageTitle')}</h1>
-        </div>
-
-        {/* Book selector(只有 >=2 本書時顯示)*/}
-        {books.length > 1 && (
-          <div data-region="book-selector" className="ml-auto flex items-center gap-2">
-            <span className="text-xs text-slate-400">{t('help.book', '說明書')}</span>
-            <select
-              value={selectedBookCode}
-              onChange={(e) => setSelectedBookCode(e.target.value)}
-              data-print-hide="true"
-              className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-blue-400"
-            >
-              {books.map(b => (
-                <option key={b.code} value={b.code}>{b.name}</option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        {/* Role tabs(special book 不顯示 — Q3 不分 user/admin/training-dev)*/}
-        <div data-region="role-tabs" className={`${books.length > 1 ? '' : 'ml-auto'} flex bg-slate-100 rounded-xl p-1 gap-1 ${!isCortex ? 'opacity-0 pointer-events-none' : ''}`}>
           <button
-            onClick={() => setRole('user')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${role === 'user'
-              ? 'bg-white text-blue-700 shadow-sm'
-              : 'text-slate-500 hover:text-slate-700'
-              }`}
+            onClick={() => navigate(-1)}
+            aria-label={t('help.back')}
+            className="w-11 h-11 -ml-1 flex items-center justify-center rounded-lg hover:bg-slate-100 active:bg-slate-200 text-slate-700"
           >
-            <User size={15} />
-            {t('help.roleUser')}
+            <ArrowLeft size={20} />
           </button>
-          {isAdmin && isCortex && (
-            <button
-              onClick={() => setRole('admin')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${role === 'admin'
-                ? 'bg-white text-indigo-700 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700'
-                }`}
-            >
-              <Settings size={15} />
-              {t('help.roleAdmin')}
-            </button>
-          )}
-          {canAccessTrainingDev && isCortex && (
-            <button
-              onClick={() => setRole('training-dev')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${role === 'training-dev'
-                ? 'bg-white text-violet-700 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700'
-                }`}
-            >
-              <BookOpen size={15} />
-              {t('help.roleTrainingDev')}
-            </button>
-          )}
-        </div>
-
-        {/* Export PDF (current tab) */}
-        <button
-          onClick={handleExportPdf}
-          title={t('help.exportPdfHint') as string}
-          className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-blue-700 hover:bg-blue-50 border border-slate-200 transition"
+          <div className="flex-1 min-w-0 flex items-center gap-1.5">
+            <BookOpen size={16} className="text-blue-500 flex-shrink-0" />
+            <h1 className="text-sm font-bold text-slate-800 truncate">{t('help.pageTitle')}</h1>
+          </div>
+          <button
+            onClick={() => setMobileTocOpen(true)}
+            aria-label={t('help.toc')}
+            className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 active:bg-slate-200 text-slate-700"
+          >
+            <Menu size={20} />
+          </button>
+          <button
+            onClick={() => setMobileMenuOpen(true)}
+            aria-label="選單"
+            className="w-11 h-11 -mr-1 flex items-center justify-center rounded-lg hover:bg-slate-100 active:bg-slate-200 text-slate-700"
+          >
+            <MoreVertical size={18} />
+          </button>
+        </header>
+      ) : (
+        <header
+          data-region="top-bar"
+          className="bg-white border-b border-slate-200 px-6 py-4 flex items-center gap-4 flex-shrink-0 shadow-sm"
         >
-          <Printer size={15} />
-          {t('help.exportPdf')}
-        </button>
-      </header>
+          <button
+            onClick={() => navigate(-1)}
+            className="flex items-center gap-2 text-slate-500 hover:text-slate-800 transition text-sm"
+          >
+            <ArrowLeft size={18} />
+            {t('help.back')}
+          </button>
+          <div className="flex items-center gap-2">
+            <BookOpen size={20} className="text-blue-500" />
+            <h1 className="text-lg font-bold text-slate-800">{t('help.pageTitle')}</h1>
+          </div>
+
+          {/* Book selector(只有 >=2 本書時顯示)*/}
+          {books.length > 1 && (
+            <div data-region="book-selector" className="ml-auto flex items-center gap-2">
+              <span className="text-xs text-slate-400">{t('help.book', '說明書')}</span>
+              <select
+                value={selectedBookCode}
+                onChange={(e) => setSelectedBookCode(e.target.value)}
+                data-print-hide="true"
+                className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-blue-400"
+              >
+                {books.map(b => (
+                  <option key={b.code} value={b.code}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Role tabs(special book 不顯示 — Q3 不分 user/admin/training-dev)*/}
+          <div data-region="role-tabs" className={`${books.length > 1 ? '' : 'ml-auto'} flex bg-slate-100 rounded-xl p-1 gap-1 ${!isCortex ? 'opacity-0 pointer-events-none' : ''}`}>
+            <button
+              onClick={() => setRole('user')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${role === 'user'
+                ? 'bg-white text-blue-700 shadow-sm'
+                : 'text-slate-500 hover:text-slate-700'
+                }`}
+            >
+              <User size={15} />
+              {t('help.roleUser')}
+            </button>
+            {isAdmin && isCortex && (
+              <button
+                onClick={() => setRole('admin')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${role === 'admin'
+                  ? 'bg-white text-indigo-700 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700'
+                  }`}
+              >
+                <Settings size={15} />
+                {t('help.roleAdmin')}
+              </button>
+            )}
+            {canAccessTrainingDev && isCortex && (
+              <button
+                onClick={() => setRole('training-dev')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${role === 'training-dev'
+                  ? 'bg-white text-violet-700 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700'
+                  }`}
+              >
+                <BookOpen size={15} />
+                {t('help.roleTrainingDev')}
+              </button>
+            )}
+          </div>
+
+          {/* Export PDF (current tab) */}
+          <button
+            onClick={handleExportPdf}
+            title={t('help.exportPdfHint') as string}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-blue-700 hover:bg-blue-50 border border-slate-200 transition"
+          >
+            <Printer size={15} />
+            {t('help.exportPdf')}
+          </button>
+        </header>
+      )}
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left TOC */}
+        {/* Left TOC — 桌機 only;手機改用 drawer */}
+        {!isMobile && (
         <nav data-region="sidebar" className="w-56 bg-white border-r border-slate-200 overflow-y-auto flex-shrink-0 py-4 px-3">
           <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-2 mb-3">{t('help.toc')}</p>
           <div className="space-y-0.5">
@@ -8224,6 +8307,7 @@ export default function HelpPage() {
             ))}
           </div>
         </nav>
+        )}
 
         {/* Main content */}
         <main
@@ -8231,7 +8315,7 @@ export default function HelpPage() {
           data-region="main"
           className="flex-1 overflow-y-auto"
         >
-          <div className="max-w-3xl mx-auto px-8 py-8">
+          <div className={`max-w-3xl mx-auto ${isMobile ? 'px-4 py-4 pb-safe' : 'px-8 py-8'}`}>
             {/* Print-only cover header */}
             <div className="help-print-header">
               <h1>
@@ -8358,6 +8442,105 @@ export default function HelpPage() {
           </div>
         </main>
       </div>
+
+      {/* ── Mobile TOC drawer(左滑)── */}
+      {isMobile && (
+        <Drawer.Root direction="left" open={mobileTocOpen} onOpenChange={setMobileTocOpen}>
+          <Drawer.Portal>
+            <Drawer.Overlay className="fixed inset-0 bg-black/40 z-40" />
+            <Drawer.Content className="fixed inset-y-0 left-0 w-[85%] max-w-sm bg-white z-50 flex flex-col pt-safe pb-safe">
+              <Drawer.Title className="sr-only">{t('help.toc')}</Drawer.Title>
+              <div className="px-4 h-14 flex items-center border-b border-slate-200">
+                <p className="text-sm font-semibold text-slate-700">{t('help.toc')}</p>
+              </div>
+              <div className="flex-1 overflow-y-auto py-2">
+                {sidebarItems.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => mobileScrollTo(s.id)}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 active:bg-slate-100 hover:bg-blue-50 text-left text-sm"
+                  >
+                    <span className="text-slate-400 flex-shrink-0">{s.icon}</span>
+                    <span className="truncate">{s.label}</span>
+                  </button>
+                ))}
+              </div>
+            </Drawer.Content>
+          </Drawer.Portal>
+        </Drawer.Root>
+      )}
+
+      {/* ── Mobile menu sheet(book / role / export PDF)── */}
+      {isMobile && (
+        <Drawer.Root open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+          <Drawer.Portal>
+            <Drawer.Overlay className="fixed inset-0 bg-black/40 z-40" />
+            <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl pb-safe max-h-[80vh] flex flex-col">
+              <Drawer.Title className="sr-only">說明選項</Drawer.Title>
+              <div className="mx-auto w-10 h-1 rounded-full bg-slate-300 mt-2 flex-shrink-0" />
+              <div className="overflow-y-auto p-3 space-y-3">
+                {/* Book selector */}
+                {books.length > 1 && (
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1.5 px-1">{t('help.book', '說明書')}</p>
+                    <select
+                      value={selectedBookCode}
+                      onChange={(e) => setSelectedBookCode(e.target.value)}
+                      className="w-full border border-slate-200 rounded-lg px-3 py-3 text-sm bg-white"
+                    >
+                      {books.map(b => (
+                        <option key={b.code} value={b.code}>{b.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Role */}
+                {isCortex && (
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1.5 px-1">{t('help.roleUser')} / {t('help.roleAdmin')}</p>
+                    <div className="flex flex-col gap-1.5">
+                      <button
+                        onClick={() => { setRole('user'); setMobileMenuOpen(false) }}
+                        className={`px-3 py-3 rounded-lg flex items-center gap-2.5 text-left ${role === 'user' ? 'bg-blue-50 text-blue-700' : 'bg-slate-50 text-slate-700'}`}
+                      >
+                        <User size={16} /> {t('help.roleUser')}
+                      </button>
+                      {isAdmin && (
+                        <button
+                          onClick={() => { setRole('admin'); setMobileMenuOpen(false) }}
+                          className={`px-3 py-3 rounded-lg flex items-center gap-2.5 text-left ${role === 'admin' ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-50 text-slate-700'}`}
+                        >
+                          <Settings size={16} /> {t('help.roleAdmin')}
+                        </button>
+                      )}
+                      {canAccessTrainingDev && (
+                        <button
+                          onClick={() => { setRole('training-dev'); setMobileMenuOpen(false) }}
+                          className={`px-3 py-3 rounded-lg flex items-center gap-2.5 text-left ${role === 'training-dev' ? 'bg-violet-50 text-violet-700' : 'bg-slate-50 text-slate-700'}`}
+                        >
+                          <BookOpen size={16} /> {t('help.roleTrainingDev')}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <div className="h-px bg-slate-200" />
+
+                {/* Export PDF */}
+                <button
+                  onClick={() => { setMobileMenuOpen(false); handleExportPdf() }}
+                  className="w-full flex items-center gap-2.5 px-3 py-3 rounded-lg text-sm text-slate-700 bg-slate-50 active:bg-slate-100"
+                >
+                  <Printer size={16} className="text-slate-500" />
+                  {t('help.exportPdf')}
+                </button>
+              </div>
+            </Drawer.Content>
+          </Drawer.Portal>
+        </Drawer.Root>
+      )}
     </div>
   )
 }

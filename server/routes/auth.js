@@ -45,6 +45,7 @@ function detectLangFromHeader(acceptLanguage) {
 const redis = require('../services/redisClient');
 const { buildSessionPayload } = require('../services/sessionBuilder');
 const mfa = require('../services/webexMfaService');
+const deviceTrust = require('../services/deviceTrust');
 const { logAuthEventAsync } = require('../services/authAuditLog');
 const throttle = require('../services/authThrottle');
 const { isRequestInternal, getClientIp } = require('../middleware/accessControl');
@@ -608,7 +609,32 @@ const proceedOrChallenge = async ({ req, res, user, source, mode }) => {
       : createSession(res, user);
   }
 
-  // 4. 外網 — IP 已通過 MFA 信任(/32 嚴格)→ 跳過 MFA
+  // 4a. 外網 — Device cookie 對得上 → 跳過 MFA(device-bound,IP 變不變不影響)
+  // 比 IP 嚴綁 user-friendly:同台 device 換網路免重認;cookie 偷不到(httpOnly+signed)
+  try {
+    const trustedDevice = await deviceTrust.verifyAndTouch(db, { req, expectUserId: user.id });
+    if (trustedDevice) {
+      // 換 IP 仍走「異常登入 DM 通知」邏輯,使用者可即時反應
+      const isNewIp = await throttle.isNewLoginIp(db, user.id, ip);
+      logAuthEventAsync(db, {
+        user_id: user.id, username: user.username,
+        event_type: 'login_success_external_skip_mfa_device',
+        ip, user_agent: ua, success: 1,
+        metadata: { source, device_id: trustedDevice.device_id, new_ip: isNewIp },
+      });
+      if (isNewIp && user.email) {
+        const lang = user.preferred_language || 'zh-TW';
+        mfa.sendNewLoginAlertDM({ email: user.email, ip, ua, lang }).catch(() => {});
+      }
+      return mode === 'redirect'
+        ? createSessionAndRedirect(res, user)
+        : createSession(res, user);
+    }
+  } catch (e) {
+    console.warn(`[Auth] device cookie check failed (fallback to IP): ${e.message}`);
+  }
+
+  // 4b. 外網 — Trusted IP fallback(向下相容舊 user_trusted_ips,新使用者走 4a)
   if (await mfa.isTrustedIp(db, user.id, ip)) {
     await mfa.touchTrustedIp(db, user.id, ip);
     logAuthEventAsync(db, {
@@ -785,8 +811,27 @@ router.post('/2fa/verify', async (req, res) => {
     if (user.role !== 'admin' && user.status !== 'active') {
       return res.status(403).json({ error: '帳號失效' });
     }
-    // 新 IP 判斷必須在寫 trusted_ips 之前(寫了之後 audit log 會看到自己 → 永遠 false)
+    // 新 IP 判斷必須在寫 trusted_ips/devices 之前(寫了之後 audit log 會看到自己 → 永遠 false)
     const isNewIp = await throttle.isNewLoginIp(db, user.id, ip);
+
+    // ① 簽 device:寫 user_trusted_devices + set httpOnly cookie(30 天 sliding)
+    let deviceId = null;
+    try {
+      deviceId = await deviceTrust.issueDevice(db, { userId: user.id, ip, userAgent: ua });
+      if (deviceId) {
+        deviceTrust.setDeviceCookie(res, req, deviceId);
+        logAuthEventAsync(db, {
+          user_id: user.id, username: user.username,
+          event_type: 'mfa_trusted_device_added',
+          ip, user_agent: ua, challenge_id, success: 1,
+          metadata: { device_id: deviceId },
+        });
+      }
+    } catch (e) {
+      console.warn(`[MFA] issueDevice failed (fallback to trusted IP only): ${e.message}`);
+    }
+
+    // ② Trusted IP 仍寫(backward compat:device cookie 被清掉時還能靠 IP 短期免重認)
     await mfa.addTrustedIp(db, user.id, ip, ua);
     logAuthEventAsync(db, {
       user_id: user.id, username: user.username,
@@ -797,7 +842,7 @@ router.post('/2fa/verify', async (req, res) => {
       user_id: user.id, username: user.username,
       event_type: 'login_success_external_mfa',
       ip, user_agent: ua, challenge_id, success: 1,
-      metadata: { new_ip: isNewIp },
+      metadata: { new_ip: isNewIp, device_id: deviceId },
     });
     // 新 IP DM 通知使用者(non-blocking)
     if (isNewIp && user.email) {
@@ -952,16 +997,18 @@ router.post('/reset-password', async (req, res) => {
     await db.prepare(`UPDATE users SET password=? WHERE id=?`).run(password, record.user_id);
     await db.prepare(`UPDATE password_reset_tokens SET used=1 WHERE id=?`).run(record.id);
 
-    // 密碼變更必清 trusted IPs(防舊密碼洩漏 + IP 已被信任的情況)
+    // 密碼變更必清 trusted IPs / devices(防舊密碼洩漏 + IP/device 已被信任的情況)
     const revokedIps = await mfa.revokeAllTrustedIps(db, record.user_id);
+    const revokedDevices = await deviceTrust.revokeAllForUser(db, record.user_id);
     // 並把所有現有 session 踢掉(reset 走的人沒有當前 session,全踢)
     const revokedSess = await redis.revokeAllUserSessions(record.user_id);
-    if (revokedIps > 0 || revokedSess > 0) {
+    if (revokedIps > 0 || revokedDevices > 0 || revokedSess > 0) {
       logAuthEventAsync(db, {
         user_id: record.user_id,
         event_type: 'trusted_ip_revoked_password_change',
         ip: getClientIp(req), user_agent: (req.headers['user-agent'] || '').slice(0, 512),
-        success: 1, metadata: { phase: 'reset', revoked_ips: revokedIps, revoked_sessions: revokedSess },
+        success: 1,
+        metadata: { phase: 'reset', revoked_ips: revokedIps, revoked_devices: revokedDevices, revoked_sessions: revokedSess },
       });
     }
 
@@ -993,19 +1040,92 @@ router.post('/change-password', async (req, res) => {
       return res.status(400).json({ error: '舊密碼錯誤' });
     }
     await db.prepare(`UPDATE users SET password=? WHERE id=?`).run(new_password, user.id);
-    // 密碼變更必清 trusted IPs(同 reset-password)
+    // 密碼變更必清 trusted IPs / devices(同 reset-password)
     const revokedIps = await mfa.revokeAllTrustedIps(db, user.id);
+    const revokedDevices = await deviceTrust.revokeAllForUser(db, user.id);
+    // 並清掉當前 device cookie(下次外網登入要重 MFA 並重發 cookie)
+    deviceTrust.clearDeviceCookie(res);
     // 踢掉所有現有 session,但保留當前 session(讓使用者改完密碼後不用重登)
     const revokedSess = await redis.revokeAllUserSessions(user.id, token);
-    if (revokedIps > 0 || revokedSess > 0) {
+    if (revokedIps > 0 || revokedDevices > 0 || revokedSess > 0) {
       logAuthEventAsync(db, {
         user_id: user.id, username: user.username,
         event_type: 'trusted_ip_revoked_password_change',
         ip: getClientIp(req), user_agent: (req.headers['user-agent'] || '').slice(0, 512),
-        success: 1, metadata: { phase: 'change', revoked_ips: revokedIps, revoked_sessions: revokedSess },
+        success: 1,
+        metadata: { phase: 'change', revoked_ips: revokedIps, revoked_devices: revokedDevices, revoked_sessions: revokedSess },
       });
     }
     res.json({ message: '密碼已成功更新' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── My trusted devices(自助頁:看 / 移除自己的信任裝置)──────────────
+
+const requireSession = async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) { res.status(401).json({ error: 'Unauthorized' }); return null; }
+  const session = await redis.getSession(token);
+  if (!session) { res.status(401).json({ error: 'Unauthorized' }); return null; }
+  return { token, session };
+};
+
+// GET /api/auth/me/devices — 列出自己所有信任裝置
+router.get('/me/devices', async (req, res) => {
+  const ctx = await requireSession(req, res);
+  if (!ctx) return;
+  try {
+    const db = require('../database-oracle').db;
+    const list = await deviceTrust.listForUser(db, ctx.session.id);
+    // 標記哪一個是「目前這台」(同 cookie)
+    const currentDeviceId = deviceTrust.readDeviceIdFromRequest(req);
+    const annotated = list.map(d => ({ ...d, is_current: d.device_id === currentDeviceId }));
+    res.json(annotated);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/auth/me/devices/:device_id — 移除指定信任裝置
+router.delete('/me/devices/:deviceId', async (req, res) => {
+  const ctx = await requireSession(req, res);
+  if (!ctx) return;
+  const { deviceId } = req.params;
+  try {
+    const db = require('../database-oracle').db;
+    const n = await deviceTrust.revokeDevice(db, ctx.session.id, deviceId);
+    // 如果移除的是當前 device,順便清自己的 cookie
+    const currentDeviceId = deviceTrust.readDeviceIdFromRequest(req);
+    if (currentDeviceId === deviceId) deviceTrust.clearDeviceCookie(res);
+    logAuthEventAsync(require('../database-oracle').db, {
+      user_id: ctx.session.id,
+      event_type: 'device_revoked_user',
+      ip: getClientIp(req), user_agent: (req.headers['user-agent'] || '').slice(0, 512),
+      success: 1, metadata: { device_id: deviceId, was_current: currentDeviceId === deviceId },
+    });
+    res.json({ ok: true, affected: n });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/auth/me/devices/revoke-all — 全清(常見情境:device 遺失)
+router.post('/me/devices/revoke-all', async (req, res) => {
+  const ctx = await requireSession(req, res);
+  if (!ctx) return;
+  try {
+    const db = require('../database-oracle').db;
+    const n = await deviceTrust.revokeAllForUser(db, ctx.session.id);
+    deviceTrust.clearDeviceCookie(res);
+    logAuthEventAsync(db, {
+      user_id: ctx.session.id,
+      event_type: 'device_revoked_user',
+      ip: getClientIp(req), user_agent: (req.headers['user-agent'] || '').slice(0, 512),
+      success: 1, metadata: { revoked_all: true, count: n },
+    });
+    res.json({ ok: true, revoked: n });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1015,6 +1135,7 @@ router.post('/change-password', async (req, res) => {
 router.post('/logout', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (token) await redis.delSession(token);
+  // 注意:logout **不**清 device cookie,讓下次該裝置來免重 MFA
   res.json({ success: true });
 });
 

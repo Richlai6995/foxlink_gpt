@@ -640,6 +640,52 @@ router.get('/auth-audit-logs', async (req, res) => {
 
 // ── IP Blacklist ──────────────────────────────────────────────────
 const ipBlacklist = require('../services/ipBlacklist');
+const deviceTrust = require('../services/deviceTrust');
+
+// ── User Trusted Devices(admin 看任何 user 的信任裝置 + 強制清空)─────
+router.get('/users/:userId/trusted-devices', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    if (!userId) return res.status(400).json({ error: 'invalid userId' });
+    const list = await deviceTrust.listForUser(req.app.get('db') || require('../database-oracle').db, userId, { activeOnly: false });
+    res.json(list);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/users/:userId/trusted-devices/:deviceId', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const deviceId = req.params.deviceId;
+    if (!userId || !deviceId) return res.status(400).json({ error: 'invalid params' });
+    const db = require('../database-oracle').db;
+    const n = await deviceTrust.revokeDevice(db, userId, deviceId);
+    const { logAuthEventAsync } = require('../services/authAuditLog');
+    logAuthEventAsync(db, {
+      user_id: userId,
+      event_type: 'device_revoked_admin',
+      ip: req.ip, user_agent: (req.headers['user-agent'] || '').slice(0, 512),
+      success: 1, metadata: { device_id: deviceId, by_admin_user_id: req.user?.id },
+    });
+    res.json({ ok: true, affected: n });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/users/:userId/trusted-devices', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    if (!userId) return res.status(400).json({ error: 'invalid userId' });
+    const db = require('../database-oracle').db;
+    const n = await deviceTrust.revokeAllForUser(db, userId);
+    const { logAuthEventAsync } = require('../services/authAuditLog');
+    logAuthEventAsync(db, {
+      user_id: userId,
+      event_type: 'device_revoked_admin',
+      ip: req.ip, user_agent: (req.headers['user-agent'] || '').slice(0, 512),
+      success: 1, metadata: { revoked_all: true, count: n, by_admin_user_id: req.user?.id },
+    });
+    res.json({ ok: true, revoked: n });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // 簡單 IPv4 / IPv6 格式驗證(不全完整,但夠擋 SQL 注入式輸入)
 function isValidIp(ip) {
