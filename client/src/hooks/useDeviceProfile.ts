@@ -21,17 +21,6 @@ function readQueryFlag(): boolean | null {
   return null
 }
 
-function readMobileV1Flag(): boolean {
-  // Dev 環境一律 ON,方便手機接 npm run dev 測試;Prod 仍需 user 顯式開
-  // PR-2 ship 後 prod 也預設 ON(砍掉這行 + 整個函式)
-  if (import.meta.env.DEV) return true
-  try {
-    return localStorage.getItem('mobile_v1') === '1'
-  } catch {
-    return false
-  }
-}
-
 function detect(): DeviceProfile {
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
   const uaPhone = PHONE_RE.test(ua)
@@ -40,21 +29,13 @@ function detect(): DeviceProfile {
     typeof window !== 'undefined' &&
     window.matchMedia('(hover: none) and (pointer: coarse)').matches
 
-  const v1 = readMobileV1Flag()
   const queryOverride = readQueryFlag()
 
   // 規則:
-  // 1. ?mobile=1 / ?mobile=0 為最高優先(debug 用)
-  // 2. mobile_v1 旗標未開 → 一律桌機(灰度開關)
-  // 3. UA 是 phone → mobile;tablet → 桌機;桌機 UA → 桌機
-  let isMobile: boolean
-  if (queryOverride !== null) {
-    isMobile = queryOverride
-  } else if (!v1) {
-    isMobile = false
-  } else {
-    isMobile = uaPhone && !uaTablet
-  }
+  // 1. ?mobile=1 / ?mobile=0 為最高優先(debug / 強制覆蓋)
+  // 2. UA 是 phone → mobile;tablet / 桌機 UA → 桌機
+  //    (桌機 user 縮窗、半屏、開兩窗都不會被切到 mobile)
+  const isMobile = queryOverride !== null ? queryOverride : (uaPhone && !uaTablet)
 
   const viewport =
     typeof window !== 'undefined'
