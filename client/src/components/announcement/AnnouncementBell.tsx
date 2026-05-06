@@ -37,7 +37,16 @@ export default function AnnouncementBell() {
   useEffect(() => {
     fetchActive()
     const t = setInterval(fetchActive, POLL_MS)
-    return () => clearInterval(t)
+    // tab 切回前景 / 重新上線立即抓最新公告(setInterval 在背景會被 throttle)
+    const onVis = () => { if (document.visibilityState === 'visible') fetchActive() }
+    const onOnline = () => fetchActive()
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('online', onOnline)
+    return () => {
+      clearInterval(t)
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('online', onOnline)
+    }
   }, [fetchActive])
 
   useEffect(() => {

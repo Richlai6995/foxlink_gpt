@@ -14,7 +14,16 @@ export function useFeedbackNotifications() {
   useEffect(() => {
     fetchCount()
     const interval = setInterval(fetchCount, 30000) // 30s polling for badge count
-    return () => clearInterval(interval)
+    // tab 切回前景 / 重新上線立即抓(背景 setInterval 會被 throttle)
+    const onVis = () => { if (document.visibilityState === 'visible') fetchCount() }
+    const onOnline = () => fetchCount()
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('online', onOnline)
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('online', onOnline)
+    }
   }, [fetchCount])
 
   const markAllRead = useCallback(async () => {

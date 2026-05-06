@@ -62,7 +62,17 @@ export default function AnnouncementBanner() {
   useEffect(() => {
     fetchActive()
     const t = setInterval(fetchActive, POLL_MS)
-    return () => clearInterval(t)
+    // tab 從背景切回前景立即抓一次(setInterval 在背景會被 throttle)
+    const onVis = () => { if (document.visibilityState === 'visible') fetchActive() }
+    document.addEventListener('visibilitychange', onVis)
+    // 重新連線時也抓一次(離線→上線常見)
+    const onOnline = () => fetchActive()
+    window.addEventListener('online', onOnline)
+    return () => {
+      clearInterval(t)
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('online', onOnline)
+    }
   }, [fetchActive])
 
   if (!isAuthenticated || items.length === 0) return null
