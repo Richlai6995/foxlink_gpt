@@ -217,7 +217,7 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
   console.log(`[Transcribe] ${tagId} read+base64 done in ${Date.now() - tRead0}ms, base64=${base64MB}MB`);
 
   const tCall0 = Date.now();
-  console.log(`[Transcribe] ${tagId} calling SDK (model=${MODEL_FLASH}, provider=studio)...`);
+  console.log(`[Transcribe] ${tagId} calling SDK (model=${modelName}, provider=studio)...`);
 
   const transcribePromise = model.generateContent([
     audioPart,
@@ -264,8 +264,12 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
 // 切成 30 分鐘/段、每段獨立用 Pro 轉錄,attention 集中度大幅提升,單段就能吐滿 maxOutputTokens。
 
 const LONG_AUDIO_SEGMENT_SEC = 30 * 60;     // 30 分鐘/段
-const LONG_AUDIO_CONCURRENCY = 3;           // 平行段數(避免撞 Gemini RPM)
+// concurrency=1(sequential):Gemini 3 Pro Studio 經常 503 UNAVAILABLE(model 滿載,
+// 不是 quota),平行 N 段會 N 個同時 503。改 sequential 後撞 503 機率降到 1/N,
+// 加 retry+backoff 後通過率高很多。代價是總時間 ~7 倍但比全敗好。
+const LONG_AUDIO_CONCURRENCY = 1;
 const LONG_AUDIO_PER_SEG_TIMEOUT_MS = 30 * 60 * 1000; // 單段 30 分鐘上限
+const LONG_AUDIO_RETRY_BACKOFF_MS = [5000, 15000, 30000]; // 3 次 retry,5s/15s/30s
 
 function _runCmd(cmd, args) {
   return new Promise((resolve, reject) => {
@@ -325,8 +329,60 @@ function _fmtTime(sec) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
 }
 
+// 判斷是不是值得 retry 的 transient error
+function _isTransientGeminiErr(e) {
+  const status = e?.status || e?.statusCode;
+  if (status === 503 || status === 429 || status === 500) return true;
+  const msg = (e?.message || '').toLowerCase();
+  if (/unavailable|high demand|rate.?limit|resource.?exhausted|deadline|timeout|econnreset|socket hang up/i.test(msg)) return true;
+  return false;
+}
+
+// 單段轉錄 + retry + Pro→Flash fallback。回傳 { ok, text, inputTokens, outputTokens, attempts, error? }
+async function _transcribeWithRetry(partPath, mimeType, lang, segIdx, segTotal, tagId) {
+  const maxAttempts = LONG_AUDIO_RETRY_BACKOFF_MS.length + 1; // 4(原始 + 3 retry)
+  let lastErr;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    // 最後一次嘗試降到 Flash(Pro 滿載時的逃生門);其他都用 Pro
+    const isFinalFallback = attempt === maxAttempts - 1;
+    const opts = {
+      useProModel: !isFinalFallback,
+      verbatim: true,
+    };
+    try {
+      const r = await transcribeAudio(partPath, mimeType, lang, LONG_AUDIO_PER_SEG_TIMEOUT_MS, opts);
+      return {
+        ok: true,
+        text: r.text,
+        inputTokens: r.inputTokens,
+        outputTokens: r.outputTokens,
+        attempts: attempt + 1,
+      };
+    } catch (e) {
+      lastErr = e;
+      const transient = _isTransientGeminiErr(e);
+      if (!transient || attempt >= maxAttempts - 1) {
+        // 非 transient 或已用完 retry → 結束
+        break;
+      }
+      const wait = LONG_AUDIO_RETRY_BACKOFF_MS[attempt];
+      const status = e?.status || e?.statusCode || 'UNKNOWN';
+      console.warn(`[TranscribeLong] ${tagId} part ${segIdx}/${segTotal} attempt ${attempt + 1}/${maxAttempts} got ${status},等 ${wait}ms 後 retry${attempt + 1 === maxAttempts - 1 ? ' (next attempt fallback to Flash)' : ''}`);
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+  }
+  return {
+    ok: false,
+    text: `[此段轉錄失敗 (${LONG_AUDIO_RETRY_BACKOFF_MS.length + 1} 次嘗試後仍失敗): ${lastErr?.message || 'unknown error'}]`,
+    inputTokens: 0,
+    outputTokens: 0,
+    attempts: maxAttempts,
+    error: lastErr?.message || 'unknown error',
+  };
+}
+
 /**
- * Long-audio transcription: ffmpeg split → parallel Pro transcribe → concat with time markers.
+ * Long-audio transcription: ffmpeg split → sequential Pro transcribe (with retry+fallback) → concat with time markers.
  * Use for files >50MB or >30 min where single-shot Gemini under-produces output.
  */
 async function transcribeLongAudio(filePath, mimeType, lang) {
@@ -350,24 +406,23 @@ async function transcribeLongAudio(filePath, mimeType, lang) {
       throw new Error('ffmpeg produced no segments');
     }
 
-    // 平行轉錄(concurrency 限制),每段獨立 Pro + verbatim
+    // Sequential(concurrency=1)+ retry-with-backoff + Pro→Flash fallback
+    // 每段最多 4 次嘗試(原始 + 3 retry):
+    //   attempt 0/1/2 = Pro + verbatim,503/429 時 backoff 5s/15s/30s 後重打
+    //   attempt 3 = Flash + verbatim(Pro 滿載時的最後逃生門)
     const results = new Array(parts.length);
     for (let i = 0; i < parts.length; i += LONG_AUDIO_CONCURRENCY) {
       const batch = parts.slice(i, i + LONG_AUDIO_CONCURRENCY);
       const batchResults = await Promise.all(batch.map(async (partPath, j) => {
         const idx = i + j;
         const tPart = Date.now();
-        try {
-          const r = await transcribeAudio(partPath, mimeType, lang, LONG_AUDIO_PER_SEG_TIMEOUT_MS, {
-            useProModel: true,
-            verbatim: true,
-          });
-          console.log(`[TranscribeLong] ${tagId} part ${idx + 1}/${parts.length} ok in ${Date.now() - tPart}ms text=${r.text.length}chars in=${r.inputTokens} out=${r.outputTokens}`);
-          return { ok: true, text: r.text, inputTokens: r.inputTokens, outputTokens: r.outputTokens };
-        } catch (e) {
-          console.error(`[TranscribeLong] ${tagId} part ${idx + 1}/${parts.length} FAILED after ${Date.now() - tPart}ms: ${e.message}`);
-          return { ok: false, text: `[此段轉錄失敗: ${e.message}]`, inputTokens: 0, outputTokens: 0 };
+        const r = await _transcribeWithRetry(partPath, mimeType, lang, idx + 1, parts.length, tagId);
+        if (r.ok) {
+          console.log(`[TranscribeLong] ${tagId} part ${idx + 1}/${parts.length} ok in ${Date.now() - tPart}ms text=${r.text.length}chars in=${r.inputTokens} out=${r.outputTokens} attempts=${r.attempts}`);
+        } else {
+          console.error(`[TranscribeLong] ${tagId} part ${idx + 1}/${parts.length} FAILED after ${Date.now() - tPart}ms attempts=${r.attempts}: ${r.error}`);
         }
+        return r;
       }));
       batchResults.forEach((r, j) => { results[i + j] = r; });
     }
