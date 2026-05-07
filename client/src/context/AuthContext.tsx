@@ -41,6 +41,7 @@ interface AuthContextType {
   verifyMfa: (challengeId: string, code: string) => Promise<void>
   resendMfa: (challengeId: string) => Promise<void>
   loginWithSsoToken: (ssoToken: string) => Promise<void>
+  loginWithPasskeyToken: (token: string, user: any) => void
   logout: () => Promise<void>
   isAuthenticated: boolean
   isAdmin: boolean
@@ -188,6 +189,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     finalizeSession(t, u)
   }, [finalizeSession])
 
+  // Passkey / 生物辨識成功後吃 token + user → 同密碼登入流程
+  const loginWithPasskeyToken = useCallback((t: string, u: any) => {
+    finalizeSession(t, u)
+  }, [finalizeSession])
+
   const logout = useCallback(async () => {
     try { await api.post('/auth/logout') } catch (_) {}
     const uid = (user as any)?.id
@@ -265,6 +271,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         verifyMfa,
         resendMfa,
         loginWithSsoToken,
+        loginWithPasskeyToken,
         logout,
         isAuthenticated: !!token && !!user,
         isAdmin,

@@ -1,7 +1,15 @@
 import { useState, useEffect } from 'react'
-import { X, Smartphone, Trash2, MapPin, Clock, CheckCircle2, AlertTriangle } from 'lucide-react'
+import { X, Smartphone, Trash2, MapPin, Clock, CheckCircle2, AlertTriangle, Fingerprint, Plus } from 'lucide-react'
 import api from '../lib/api'
 import { useTranslation } from 'react-i18next'
+import {
+  isWebAuthnSupported,
+  isPlatformBiometricAvailable,
+  registerPasskey,
+  listMyCredentials,
+  deleteMyCredential,
+  type BoundCredential,
+} from '../lib/webauthn'
 
 type Device = {
   id: number
@@ -46,16 +54,52 @@ export default function MyDevicesModal({ open, onClose }: { open: boolean; onClo
   const [confirmAll, setConfirmAll] = useState(false)
   const [err, setErr] = useState('')
 
+  // Passkey(WebAuthn 生物辨識)
+  const [passkeys, setPasskeys] = useState<BoundCredential[]>([])
+  const [biometricAvail, setBiometricAvail] = useState(false)
+  const [passkeyBusy, setPasskeyBusy] = useState(false)
+  const [passkeyErr, setPasskeyErr] = useState('')
+
+  const loadPasskeys = async () => {
+    try { setPasskeys(await listMyCredentials()) } catch { setPasskeys([]) }
+  }
+
   const load = async () => {
     setLoading(true)
     setErr('')
     try {
       const res = await api.get('/auth/me/devices')
       setDevices(res.data || [])
+      await loadPasskeys()
+      if (isWebAuthnSupported()) {
+        setBiometricAvail(await isPlatformBiometricAvailable())
+      }
     } catch (e: any) {
       setErr(e?.response?.data?.error || '載入失敗')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleAddPasskey = async () => {
+    setPasskeyBusy(true); setPasskeyErr('')
+    try {
+      const r = await registerPasskey()
+      if (!r.ok) {
+        if (r.error && r.error !== '使用者取消或裝置拒絕') setPasskeyErr(r.error)
+      } else {
+        await loadPasskeys()
+      }
+    } finally { setPasskeyBusy(false) }
+  }
+
+  const handleRemovePasskey = async (id: number) => {
+    if (!confirm('移除這個裝置綁定?之後此裝置需重新註冊或用密碼登入')) return
+    try {
+      await deleteMyCredential(id)
+      await loadPasskeys()
+    } catch (e: any) {
+      setPasskeyErr(e?.response?.data?.error || '移除失敗')
     }
   }
 
@@ -105,12 +149,74 @@ export default function MyDevicesModal({ open, onClose }: { open: boolean; onClo
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-3">
-          <p className="text-xs text-slate-400 leading-6">
-            {t('myDevices.description',
-              '完成 Webex MFA 驗證後,您的裝置會被信任 30 天免重新驗證。換網路 / IP 變動仍可使用,但換瀏覽器或清 cookie 會視為新裝置。改密碼會自動清空所有裝置。'
-            )}
-          </p>
+        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+
+          {/* ── Passkey / 生物辨識 區塊 ── */}
+          {(isWebAuthnSupported() || passkeys.length > 0) && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 mb-1">
+                <Fingerprint size={14} className="text-emerald-400" />
+                <h3 className="text-sm font-semibold text-white">快速登入(Face ID / 指紋)</h3>
+              </div>
+              <p className="text-xs text-slate-400 leading-6">
+                綁定後可用本機生物辨識直接登入,不用打密碼。資料只在裝置本機驗證,系統僅儲存公鑰。
+              </p>
+
+              {passkeyErr && (
+                <div className="flex items-start gap-2 bg-red-500/15 border border-red-500/30 rounded-xl px-3 py-2 text-red-300 text-sm">
+                  <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                  {passkeyErr}
+                </div>
+              )}
+
+              {passkeys.length === 0 ? (
+                <div className="text-xs text-slate-500 py-2">尚未綁定任何裝置</div>
+              ) : (
+                passkeys.map((p) => (
+                  <div key={p.id} className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-3 flex items-center gap-3">
+                    <Fingerprint size={16} className="text-emerald-400 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-white font-medium truncate">{p.device_label || '未命名裝置'}</p>
+                      <p className="text-[11px] text-slate-400">
+                        綁定:{p.created_at}
+                        {p.last_used_at && ` · 最後使用:${p.last_used_at}`}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleRemovePasskey(p.id)}
+                      className="text-slate-400 hover:text-red-400 shrink-0"
+                      title="移除"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))
+              )}
+
+              {biometricAvail && (
+                <button
+                  onClick={handleAddPasskey}
+                  disabled={passkeyBusy}
+                  className="w-full inline-flex items-center justify-center gap-2 text-xs text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/10 disabled:opacity-50 rounded-xl py-2.5 transition"
+                >
+                  <Plus size={14} />
+                  {passkeyBusy ? '驗證中…' : '綁定當前裝置'}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* ── 信任 IP / MFA 裝置 區塊 ── */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 mb-1">
+              <Smartphone size={14} className="text-blue-400" />
+              <h3 className="text-sm font-semibold text-white">MFA 信任裝置</h3>
+            </div>
+            <p className="text-xs text-slate-400 leading-6">
+              {t('myDevices.description',
+                '完成 Webex MFA 驗證後,您的裝置會被信任 30 天免重新驗證。換網路 / IP 變動仍可使用,但換瀏覽器或清 cookie 會視為新裝置。改密碼會自動清空所有裝置。'
+              )}
+            </p>
 
           {err && (
             <div className="flex items-start gap-2 bg-red-500/15 border border-red-500/30 rounded-xl px-3 py-2 text-red-300 text-sm">
@@ -173,6 +279,7 @@ export default function MyDevicesModal({ open, onClose }: { open: boolean; onClo
               </div>
             </div>
           ))}
+          </div>
         </div>
 
         {/* Footer */}

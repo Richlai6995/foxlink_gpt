@@ -24,6 +24,7 @@ import VoiceHotkeyHint from './components/VoiceHotkeyHint'
 import InstallPwaPrompt from './components/common/InstallPwaPrompt'
 import IosInstallHint from './components/common/IosInstallHint'
 import UpdateAvailableToast from './components/common/UpdateAvailableToast'
+import EnablePasskeyPrompt from './components/common/EnablePasskeyPrompt'
 import MobileUnsupportedScreen from './components/common/MobileUnsupportedScreen'
 import { useDeviceProfile } from './hooks/useDeviceProfile'
 import FeedbackPage from './pages/FeedbackPage'
@@ -130,6 +131,7 @@ function AppRoutes() {
     {isAuthenticated && !isMobile && <VoiceHotkeyHint />}
     {isAuthenticated && <InstallPwaPrompt />}
     {isAuthenticated && <IosInstallHint />}
+    {isAuthenticated && <EnablePasskeyPrompt />}
     {/* SW 新版可用提示(login / chat 都顯示)*/}
     <UpdateAvailableToast />
     </MicProvider>

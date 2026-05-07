@@ -163,6 +163,8 @@
     "or": "或",
     "ssoButton": "Foxlink SSO 登入",
     "ssoLoading": "SSO 登入中...",
+    "biometricButton": "使用 Face ID / 指紋登入",
+    "biometricLoading": "驗證中...",
     "loginHintTitle": "請用以下方法登入",
     "loginHint1": "AD 帳號 / 密碼登入",
     "loginHint2": "Foxlink SSO AD 帳號 / 密碼登入",

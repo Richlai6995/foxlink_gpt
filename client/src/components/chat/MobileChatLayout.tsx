@@ -10,8 +10,9 @@ import {
   LogOut, Globe, Sparkles, Settings, Paperclip, X,
   FileText, Image as ImageIcon, Music,
   Zap, LayoutTemplate, BarChart3, MessageSquarePlus,
-  HelpCircle, Database, Share2, Copy, Check,
+  HelpCircle, Database, Share2, Copy, Check, Fingerprint,
 } from 'lucide-react'
+import MyDevicesModal from '../MyDevicesModal'
 import { buildAcceptAttr } from '../../lib/uploadFileTypes'
 import ErpToolPicker from './ErpToolPicker'
 import ErpToolInvokeModal, { type ResultMode } from './ErpToolInvokeModal'
@@ -92,6 +93,8 @@ export default function MobileChatLayout() {
   const [shareLink, setShareLink] = useState<string | null>(null)
   const [sharing, setSharing] = useState(false)
   const [shareCopied, setShareCopied] = useState(false)
+  // 我的裝置(Passkey + MFA 信任 IP)
+  const [showMyDevices, setShowMyDevices] = useState(false)
 
   // ── Tools picker(MCP / KB / DIFY / Skills 四 tab,checkbox 多選)
   const [toolsOpen, setToolsOpen] = useState(false)
@@ -1000,6 +1003,13 @@ export default function MobileChatLayout() {
                 </span>
               </button>
               <button
+                onClick={() => { setMenuOpen(false); setShowMyDevices(true) }}
+                className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
+              >
+                <Fingerprint size={18} className="text-emerald-600" />
+                <span className="flex-1 text-sm text-slate-800">我的裝置 / 快速登入</span>
+              </button>
+              <button
                 onClick={() => { setMenuOpen(false); navigate('/help') }}
                 className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
               >
@@ -1432,6 +1442,9 @@ export default function MobileChatLayout() {
           }}
         />
       )}
+
+      {/* 我的裝置 modal(Passkey + MFA)*/}
+      <MyDevicesModal open={showMyDevices} onClose={() => setShowMyDevices(false)} />
     </div>
   )
 }

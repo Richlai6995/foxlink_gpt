@@ -4383,6 +4383,30 @@ async function runMigrations(db) {
     try { await db.prepare(ddl).run(); console.log(`[Migration] ${name} created ✓`); }
     catch (e) { if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn(`[Migration] ${name}:`, e.message); }
   }
+
+  // ── WebAuthn / Passkey 生物辨識(Face ID / 指紋)──
+  // 一個 user 可綁多個 credential(多裝置),credential_id 全域唯一
+  await createTable('USER_CREDENTIALS', `CREATE TABLE user_credentials (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id         NUMBER NOT NULL,
+    credential_id   VARCHAR2(500) NOT NULL,
+    public_key      CLOB NOT NULL,
+    sign_count      NUMBER DEFAULT 0,
+    device_label    VARCHAR2(120),
+    transports      VARCHAR2(120),
+    aaguid          VARCHAR2(64),
+    backup_eligible NUMBER(1) DEFAULT 0,
+    backup_state    NUMBER(1) DEFAULT 0,
+    created_at      TIMESTAMP DEFAULT SYSTIMESTAMP,
+    last_used_at    TIMESTAMP,
+    CONSTRAINT user_credentials_cid_uk UNIQUE (credential_id)
+  )`);
+  for (const [name, ddl] of [
+    ['user_creds_user_idx', 'CREATE INDEX user_creds_user_idx ON user_credentials(user_id)'],
+  ]) {
+    try { await db.prepare(ddl).run(); console.log(`[Migration] ${name} created ✓`); }
+    catch (e) { if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn(`[Migration] ${name}:`, e.message); }
+  }
 }
 
 // ─── Default DB Source migration ───────────────────────────────────────────────

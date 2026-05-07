@@ -215,6 +215,8 @@ app.get('/api/version', (req, res) => {
     console.log('[Route] /api/pm/briefing (news/prices/reports/preferences) OK');
     app.use('/api/telemetry', require('./routes/telemetry'));
     console.log('[Route] /api/telemetry (device) OK');
+    app.use('/api/auth/webauthn', require('./routes/webauthn'));
+    console.log('[Route] /api/auth/webauthn (passkey) OK');
 
     // Autoscan user email domains → Webex allowed-domain whitelist
     // 每次啟動時掃描 users.email，union 進白名單（只加不刪，admin 手動加的會保留）

@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { Eye, EyeOff, X, Mail, Shield, Globe, KeyRound, ArrowLeft } from 'lucide-react'
+import { Eye, EyeOff, X, Mail, Shield, Globe, KeyRound, ArrowLeft, Fingerprint } from 'lucide-react'
 import api from '../lib/api'
 import { useTranslation } from 'react-i18next'
 import i18n, { SUPPORTED_LANGUAGES, type LangCode } from '../i18n'
+import { isWebAuthnSupported, isPlatformBiometricAvailable, loginWithPasskey } from '../lib/webauthn'
 
 type Step = 'credentials' | 'otp'
 
 export default function Login() {
-  const { login, verifyMfa, resendMfa, loginWithSsoToken } = useAuth()
+  const { login, verifyMfa, resendMfa, loginWithSsoToken, loginWithPasskeyToken } = useAuth()
   const { t } = useTranslation()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -17,6 +18,31 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
   const [ssoLoading, setSsoLoading] = useState(false)
   const [showLangMenu, setShowLangMenu] = useState(false)
+  const [biometricSupported, setBiometricSupported] = useState(false)
+  const [biometricLoading, setBiometricLoading] = useState(false)
+
+  // 偵測本機是否支援 platform authenticator(Face ID / 指紋 / Windows Hello)
+  useEffect(() => {
+    if (!isWebAuthnSupported()) return
+    isPlatformBiometricAvailable().then(setBiometricSupported).catch(() => {})
+  }, [])
+
+  const handleBiometricLogin = async () => {
+    if (biometricLoading) return
+    setBiometricLoading(true)
+    setError('')
+    try {
+      const r = await loginWithPasskey()
+      if (!r.ok) {
+        // 使用者取消不算錯,只是 cancel
+        if (r.error && r.error !== '使用者取消或裝置拒絕') setError(r.error)
+        return
+      }
+      if (r.token && r.user) loginWithPasskeyToken(r.token, r.user)
+    } finally {
+      setBiometricLoading(false)
+    }
+  }
 
   // ── MFA state ──
   const [step, setStep] = useState<Step>('credentials')
@@ -395,6 +421,21 @@ export default function Login() {
             <Shield size={18} />
             {ssoLoading ? t('login.ssoLoading', 'SSO 登入中...') : t('login.ssoButton', 'Foxlink SSO 登入')}
           </button>
+
+          {/* 生物辨識登入(Face ID / 指紋 / Windows Hello)*/}
+          {biometricSupported && (
+            <button
+              type="button"
+              onClick={handleBiometricLogin}
+              disabled={biometricLoading}
+              className="w-full mt-3 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition shadow-lg shadow-emerald-600/30"
+            >
+              <Fingerprint size={18} />
+              {biometricLoading
+                ? t('login.biometricLoading', '驗證中...')
+                : t('login.biometricButton', '使用 Face ID / 指紋登入')}
+            </button>
+          )}
           </>
           )}
         </div>

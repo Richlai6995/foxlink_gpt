@@ -163,6 +163,8 @@
     "or": "OR",
     "ssoButton": "Foxlink SSO Login",
     "ssoLoading": "SSO logging in...",
+    "biometricButton": "Sign in with Face ID / Fingerprint",
+    "biometricLoading": "Verifying...",
     "loginHintTitle": "Please sign in using one of the following methods",
     "loginHint1": "AD account / password login",
     "loginHint2": "Foxlink SSO AD account / password login",

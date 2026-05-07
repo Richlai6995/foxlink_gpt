@@ -163,6 +163,8 @@
     "or": "HOẶC",
     "ssoButton": "Đăng nhập Foxlink SSO",
     "ssoLoading": "Đang đăng nhập SSO...",
+    "biometricButton": "Đăng nhập bằng Face ID / Vân tay",
+    "biometricLoading": "Đang xác minh...",
     "loginHintTitle": "Vui lòng đăng nhập bằng một trong các phương thức sau",
     "loginHint1": "Đăng nhập bằng tài khoản / mật khẩu AD",
     "loginHint2": "Đăng nhập Foxlink SSO bằng tài khoản / mật khẩu AD",
