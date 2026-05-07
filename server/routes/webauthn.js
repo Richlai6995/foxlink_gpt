@@ -97,14 +97,15 @@ function b64uToBytes(s) {
 
 router.post('/register/options', verifyToken, async (req, res) => {
   try {
-    const { db } = require('../database-oracle');
     const userId = req.user.id;
     const username = req.user.username || `user-${userId}`;
     const displayName = req.user.name || username;
-
-    const existing = await loadUserCredentials(db, userId);
     const rpID = getRpId(req);
 
+    // 不送 excludeCredentials:同裝置重綁時 Android Credential Manager 會
+    // 因 platform keystore 已有同 RP 的 passkey 而拒絕創建(throw "talking to
+    // credential manager")。允許 server 端有重複 credential row 是可接受的副作用 —
+    // 舊 credential 仍能登入,新的也能用,user 想清理走「移除」按鈕即可。
     const options = await generateRegistrationOptions({
       rpName: RP_NAME,
       rpID,
@@ -113,11 +114,6 @@ router.post('/register/options', verifyToken, async (req, res) => {
       // userID 用 user_id 字串(不重要,但要穩定),@simplewebauthn 13 期望 Uint8Array
       userID: new TextEncoder().encode(`u:${userId}`),
       attestationType: 'none', // 我們不需要 attestation,降低隱私顧慮
-      excludeCredentials: existing.map((c) => ({
-        id: c.credential_id, // base64url string
-        // 嚴格 filter — Android 14+ Credential Manager 對非 spec transport 直接 throw
-        transports: sanitizeTransports(c.transports),
-      })),
       authenticatorSelection: {
         // platform = 強制本機 platform authenticator(Face ID / Touch ID / 指紋 / Windows Hello)
         // 不設此值 Android 14+ 會試圖叫使用者選跨裝置,造成「talking to credential manager」錯誤
