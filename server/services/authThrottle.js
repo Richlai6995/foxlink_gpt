@@ -90,15 +90,22 @@ async function countAuthFailure({ userId, username, ip, ua, eventType }) {
 
       // 同 IP 失敗達 alert 閾值 → 自動加入黑名單(預設 24hr)
       // 跟 alert 共用旗標,1 hr 內不重複加;blacklist 本身有 UNIQUE,UPSERT 安全
+      // ⚠️ 跳過內網 IP:① accessControl 對內網不檢查 blacklist,加了也無效果只占 UI ②
+      // 員工誤打密碼導致內網同事被擋,UX 極差。內網誤觸由 admin 信告警處理即可。
       try {
-        const ipBlacklist = require('./ipBlacklist');
-        const ttl = ipBlacklist.cfg().autoFailureBlockHours;
-        ipBlacklist.addAsync({
-          ip,
-          reason: `auto: ${ipCount} failed login attempts in 1h (event=${eventType})`,
-          source: 'auto_failure',
-          ttlHours: ttl,
-        });
+        const { isIpInternal } = require('../middleware/accessControl');
+        if (isIpInternal(ip)) {
+          console.log(`[AuthThrottle] skip auto-blacklist for internal ip=${ip}(${ipCount} fails)`);
+        } else {
+          const ipBlacklist = require('./ipBlacklist');
+          const ttl = ipBlacklist.cfg().autoFailureBlockHours;
+          ipBlacklist.addAsync({
+            ip,
+            reason: `auto: ${ipCount} failed login attempts in 1h (event=${eventType})`,
+            source: 'auto_failure',
+            ttlHours: ttl,
+          });
+        }
       } catch (e) {
         console.warn(`[AuthThrottle] auto-blacklist failed: ${e.message}`);
       }

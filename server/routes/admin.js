@@ -706,7 +706,12 @@ router.get('/ip-blacklist', async (req, res) => {
       activeOnly: activeOnly === '1' || activeOnly === 'true',
       source: source || undefined,
     });
-    res.json(rows);
+    // 加 is_internal 欄位讓 admin 一眼看出該 IP 屬內網還外網
+    // 內網 IP 在黑名單內實際無效果(accessControl 對內網跳過 blacklist 檢查),
+    // 通常是 2026-05-07 修復前自動加的歷史紀錄,可放心移除
+    const { isIpInternal } = require('../middleware/accessControl');
+    const annotated = rows.map(r => ({ ...r, is_internal: isIpInternal(r.ip) }));
+    res.json(annotated);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

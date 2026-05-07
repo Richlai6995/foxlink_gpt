@@ -53,6 +53,7 @@ type BlacklistEntry = {
   created_by_name: string | null
   created_at: string
   expires_at: string | null
+  is_internal: boolean   // 後端用 INTERNAL_NETWORKS 判斷
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -72,6 +73,7 @@ export default function IpBlacklistPanel() {
   const [loading, setLoading] = useState(false)
   const [activeOnly, setActiveOnly] = useState(true)
   const [source, setSource] = useState('')
+  const [networkFilter, setNetworkFilter] = useState<'' | 'internal' | 'external'>('')
   const [showAdd, setShowAdd] = useState(false)
   const [newIp, setNewIp] = useState('')
   const [newReason, setNewReason] = useState('')
@@ -202,7 +204,21 @@ export default function IpBlacklistPanel() {
             <option value="auto_ua">自動 — UA 命中</option>
           </select>
         </label>
-        <span className="text-xs text-slate-400 ml-auto">{rows.length} 筆</span>
+        <label className="text-sm flex items-center gap-2">
+          網路:
+          <select value={networkFilter}
+                  onChange={e => setNetworkFilter(e.target.value as '' | 'internal' | 'external')}
+                  className="border border-slate-300 rounded px-2 py-1 text-sm">
+            <option value="">— 全部 —</option>
+            <option value="external">🌐 外網</option>
+            <option value="internal">🏢 內網(實際無效,可清)</option>
+          </select>
+        </label>
+        <span className="text-xs text-slate-400 ml-auto">
+          {networkFilter
+            ? `${rows.filter(r => networkFilter === 'internal' ? r.is_internal : !r.is_internal).length} / ${rows.length} 筆`
+            : `${rows.length} 筆`}
+        </span>
       </div>
 
       {/* Table */}
@@ -213,6 +229,7 @@ export default function IpBlacklistPanel() {
               <tr>
                 <th className="px-3 py-2 text-left w-6"></th>
                 <th className="px-3 py-2 text-left">IP</th>
+                <th className="px-3 py-2 text-left">網路</th>
                 <th className="px-3 py-2 text-left">來源</th>
                 <th className="px-3 py-2 text-left">原因</th>
                 <th className="px-3 py-2 text-left">建立人</th>
@@ -223,12 +240,15 @@ export default function IpBlacklistPanel() {
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={8} className="text-center py-6 text-slate-400">載入中...</td></tr>
+                <tr><td colSpan={9} className="text-center py-6 text-slate-400">載入中...</td></tr>
               )}
               {!loading && rows.length === 0 && (
-                <tr><td colSpan={8} className="text-center py-6 text-slate-400">無紀錄</td></tr>
+                <tr><td colSpan={9} className="text-center py-6 text-slate-400">無紀錄</td></tr>
               )}
-              {!loading && rows.map(r => {
+              {!loading && rows
+                .filter(r => !networkFilter
+                  || (networkFilter === 'internal' ? r.is_internal : !r.is_internal))
+                .map(r => {
                 const expired = isExpired(r.expires_at)
                 const isExpanded = expandedIp === r.ip
                 const details = detailsCache[r.ip]
@@ -243,6 +263,18 @@ export default function IpBlacklistPanel() {
                         </button>
                       </td>
                       <td className="px-3 py-2 font-mono text-xs">{r.ip}</td>
+                      <td className="px-3 py-2">
+                        {r.is_internal ? (
+                          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-700"
+                                title="此 IP 在 INTERNAL_NETWORKS 內。實際 access control 對內網跳過黑名單檢查,加在這沒效果,可移除">
+                            🏢 內網
+                          </span>
+                        ) : (
+                          <span className="inline-block text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-700">
+                            🌐 外網
+                          </span>
+                        )}
+                      </td>
                       <td className="px-3 py-2">
                         <span className={`inline-block text-xs px-2 py-0.5 rounded ${SOURCE_COLORS[r.source] || 'bg-slate-100 text-slate-600'}`}>
                           {SOURCE_LABELS[r.source] || r.source}
@@ -270,7 +302,7 @@ export default function IpBlacklistPanel() {
                     </tr>
                     {isExpanded && (
                       <tr className="bg-slate-50 border-t border-slate-100">
-                        <td colSpan={8} className="px-4 py-3">
+                        <td colSpan={9} className="px-4 py-3">
                           {loadingDetails === r.ip && !details ? (
                             <div className="text-slate-500 text-xs py-2">載入中...</div>
                           ) : details ? (

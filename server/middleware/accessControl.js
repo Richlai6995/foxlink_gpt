@@ -181,4 +181,11 @@ function isRequestInternal(req) {
   return isInternal(getClientIp(req), _getNets());
 }
 
-module.exports = { createAccessControl, getClientIp, isInCIDR, isInternal, isRequestInternal };
+// 不需 req,直接判斷一個 IP 字串是否落在內網 CIDR(用既有 cache 不重複 parse env)。
+// 給 admin UI 標記黑名單筆每筆是內網/外網用,以及 throttle 跳過內網自動黑名單。
+function isIpInternal(ip) {
+  if (!ip || typeof ip !== 'string') return false;
+  return isInternal(ip, _getNets());
+}
+
+module.exports = { createAccessControl, getClientIp, isInCIDR, isInternal, isRequestInternal, isIpInternal };
