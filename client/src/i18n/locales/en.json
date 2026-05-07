@@ -163,6 +163,7 @@
     "or": "OR",
     "ssoButton": "Foxlink SSO Login",
     "ssoLoading": "SSO logging in...",
+    "externalNoSso": "SSO is disabled on external networks. Please use your username/password. Same device is trusted for 30 days after verification.",
     "biometricButton": "Sign in with Face ID / Fingerprint",
     "biometricLoading": "Verifying...",
     "loginHintTitle": "Please sign in using one of the following methods",
@@ -171,7 +172,7 @@
     "loginHint3": "No AD account? Use your assigned account / password",
     "mfa": {
       "title": "Two-Factor Verification",
-      "sentTo": "Code sent to {{email}} via Webex",
+      "sentTo": "Code sent to {{email}} via Webex AND Email — use whichever arrives first",
       "codeLabel": "6-digit code",
       "verify": "Verify",
       "verifying": "Verifying...",

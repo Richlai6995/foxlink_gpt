@@ -163,6 +163,7 @@
     "or": "HOẶC",
     "ssoButton": "Đăng nhập Foxlink SSO",
     "ssoLoading": "Đang đăng nhập SSO...",
+    "externalNoSso": "SSO không khả dụng từ mạng ngoài. Vui lòng dùng tài khoản/mật khẩu. Thiết bị được tin cậy 30 ngày sau khi xác thực.",
     "biometricButton": "Đăng nhập bằng Face ID / Vân tay",
     "biometricLoading": "Đang xác minh...",
     "loginHintTitle": "Vui lòng đăng nhập bằng một trong các phương thức sau",
@@ -171,7 +172,7 @@
     "loginHint3": "Không có tài khoản AD? Dùng tài khoản / mật khẩu đã đăng ký",
     "mfa": {
       "title": "Xác thực hai yếu tố",
-      "sentTo": "Mã đã gửi tới {{email}} qua Webex",
+      "sentTo": "Mã đã gửi tới {{email}} qua Webex VÀ Email — dùng mã nhận được đầu tiên",
       "codeLabel": "Mã 6 chữ số",
       "verify": "Xác thực",
       "verifying": "Đang xác thực...",

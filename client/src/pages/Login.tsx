@@ -21,10 +21,28 @@ export default function Login() {
   const [biometricSupported, setBiometricSupported] = useState(false)
   const [biometricLoading, setBiometricLoading] = useState(false)
 
+  // Login options(server 端判斷是否內網 + SSO 是否該顯示)
+  const [ssoVisible, setSsoVisible] = useState(false)
+  const [isInternal, setIsInternal] = useState(true)
+
   // 偵測本機是否支援 platform authenticator(Face ID / 指紋 / Windows Hello)
   useEffect(() => {
     if (!isWebAuthnSupported()) return
     isPlatformBiometricAvailable().then(setBiometricSupported).catch(() => {})
+  }, [])
+
+  // 進頁面拉 login-options(決定是否顯示 SSO 按鈕 — 外網 IP 不顯示防 MFA bypass)
+  useEffect(() => {
+    api.get('/auth/login-options')
+      .then(r => {
+        setSsoVisible(!!r.data?.sso_visible)
+        setIsInternal(!!r.data?.internal)
+      })
+      .catch(() => {
+        // 失敗保守處理:當作外網,不顯示 SSO 按鈕
+        setSsoVisible(false)
+        setIsInternal(false)
+      })
   }, [])
 
   const handleBiometricLogin = async () => {
@@ -279,7 +297,7 @@ export default function Login() {
                 <div>
                   <h2 className="text-white font-semibold">{t('login.mfa.title', '二階段驗證')}</h2>
                   <p className="text-slate-400 text-xs mt-0.5">
-                    {t('login.mfa.sentTo', '驗證碼已寄到 {{email}} 的 Webex', { email: maskedEmail || '***' })}
+                    {t('login.mfa.sentTo', '驗證碼已同時寄到 {{email}} 的 Webex 與 Email,任一收到輸入即可', { email: maskedEmail || '***' })}
                   </p>
                 </div>
               </div>
@@ -406,21 +424,33 @@ export default function Login() {
             </div>
           </form>
 
-          {/* SSO Divider & Button */}
-          <div className="flex items-center gap-3 my-5">
-            <div className="flex-1 h-px bg-white/10" />
-            <span className="text-slate-500 text-xs">{t('login.or', 'OR')}</span>
-            <div className="flex-1 h-px bg-white/10" />
-          </div>
-          <button
-            type="button"
-            onClick={() => { window.location.href = '/api/auth/sso/login' }}
-            disabled={ssoLoading}
-            className="w-full flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition shadow-lg shadow-orange-500/30"
-          >
-            <Shield size={18} />
-            {ssoLoading ? t('login.ssoLoading', 'SSO 登入中...') : t('login.ssoButton', 'Foxlink SSO 登入')}
-          </button>
+          {/* SSO Divider & Button — 只在內網顯示。外網禁用 SSO(SSO 流程跳過 Webex MFA,
+              且 SSO 主機通常只在內網,外網點按鈕會死) */}
+          {ssoVisible && (
+            <>
+              <div className="flex items-center gap-3 my-5">
+                <div className="flex-1 h-px bg-white/10" />
+                <span className="text-slate-500 text-xs">{t('login.or', 'OR')}</span>
+                <div className="flex-1 h-px bg-white/10" />
+              </div>
+              <button
+                type="button"
+                onClick={() => { window.location.href = '/api/auth/sso/login' }}
+                disabled={ssoLoading}
+                className="w-full flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition shadow-lg shadow-orange-500/30"
+              >
+                <Shield size={18} />
+                {ssoLoading ? t('login.ssoLoading', 'SSO 登入中...') : t('login.ssoButton', 'Foxlink SSO 登入')}
+              </button>
+            </>
+          )}
+          {!ssoVisible && !isInternal && (
+            <div className="text-center text-xs text-slate-500 mt-4">
+              {t('login.externalNoSso',
+                '外網不支援 SSO 登入,請使用帳號密碼。完成驗證後 30 天內同裝置免重認。'
+              )}
+            </div>
+          )}
 
           {/* 生物辨識登入(Face ID / 指紋 / Windows Hello)*/}
           {biometricSupported && (

@@ -163,6 +163,7 @@
     "or": "或",
     "ssoButton": "Foxlink SSO 登入",
     "ssoLoading": "SSO 登入中...",
+    "externalNoSso": "外網不支援 SSO 登入,請使用帳號密碼。完成驗證後 30 天內同裝置免重認。",
     "biometricButton": "使用 Face ID / 指紋登入",
     "biometricLoading": "驗證中...",
     "loginHintTitle": "請用以下方法登入",
@@ -171,7 +172,7 @@
     "loginHint3": "無 AD 帳號請使用申請的帳號 / 密碼登入",
     "mfa": {
       "title": "二階段驗證",
-      "sentTo": "驗證碼已寄到 {{email}} 的 Webex",
+      "sentTo": "驗證碼已同時寄到 {{email}} 的 Webex 與 Email,任一收到輸入即可",
       "codeLabel": "6 位數驗證碼",
       "verify": "驗證",
       "verifying": "驗證中...",

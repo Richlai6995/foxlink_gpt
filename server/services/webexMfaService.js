@@ -298,6 +298,72 @@ async function regenerateChallengeOtp(challengeId) {
  * Webex API 會自動建立 1:1 room,不需預先建。
  * timeout 套 MFA_DM_TIMEOUT_MS(預設 8s),避免使用者乾等 axios 預設 30s。
  */
+// ── Email 備援(部分同仁手機沒裝 Webex,Email 是另一個 channel)──────
+const EMAIL_TEMPLATES = {
+  'zh-TW': ({ otp, ip }) => ({
+    subject: `[Cortex] 登入驗證碼:${otp}`,
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
+        <h2 style="color:#1e40af">🔐 Cortex 登入驗證</h2>
+        <p>您的登入驗證碼:</p>
+        <div style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;padding:16px;text-align:center;margin:16px 0">
+          <span style="font-size:28px;letter-spacing:6px;font-weight:bold;color:#1e40af">${otp}</span>
+        </div>
+        <p style="color:#64748b;font-size:13px">5 分鐘內有效。來源 IP:<code>${ip || 'unknown'}</code></p>
+        <p style="color:#94a3b8;font-size:12px">若非本人操作,請忽略此郵件並聯絡資安。同一個驗證碼會同時發送至您的 Webex,任一收到輸入即可。</p>
+      </div>
+    `,
+    text: `Cortex 登入驗證碼:${otp}\n5 分鐘內有效。來源 IP: ${ip || 'unknown'}\n若非本人操作,請忽略並聯絡資安。`,
+  }),
+  'en': ({ otp, ip }) => ({
+    subject: `[Cortex] Login Verification Code: ${otp}`,
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
+        <h2 style="color:#1e40af">🔐 Cortex Login Verification</h2>
+        <p>Your verification code:</p>
+        <div style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;padding:16px;text-align:center;margin:16px 0">
+          <span style="font-size:28px;letter-spacing:6px;font-weight:bold;color:#1e40af">${otp}</span>
+        </div>
+        <p style="color:#64748b;font-size:13px">Valid for 5 minutes. Source IP: <code>${ip || 'unknown'}</code></p>
+        <p style="color:#94a3b8;font-size:12px">If this was not you, please ignore and contact IT security. The same code is also sent to your Webex.</p>
+      </div>
+    `,
+    text: `Cortex Login Verification Code: ${otp}\nValid for 5 minutes. Source IP: ${ip || 'unknown'}`,
+  }),
+  'vi': ({ otp, ip }) => ({
+    subject: `[Cortex] Mã xác thực đăng nhập: ${otp}`,
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
+        <h2 style="color:#1e40af">🔐 Xác thực đăng nhập Cortex</h2>
+        <p>Mã xác thực của bạn:</p>
+        <div style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;padding:16px;text-align:center;margin:16px 0">
+          <span style="font-size:28px;letter-spacing:6px;font-weight:bold;color:#1e40af">${otp}</span>
+        </div>
+        <p style="color:#64748b;font-size:13px">Có hiệu lực 5 phút. IP nguồn: <code>${ip || 'unknown'}</code></p>
+        <p style="color:#94a3b8;font-size:12px">Nếu không phải bạn, vui lòng bỏ qua và liên hệ bộ phận bảo mật.</p>
+      </div>
+    `,
+    text: `Cortex Mã xác thực: ${otp}\nCó hiệu lực 5 phút. IP nguồn: ${ip || 'unknown'}`,
+  }),
+};
+
+/**
+ * 發 OTP Email 給使用者(Webex DM 並行 channel,其中一個成功就放行)。
+ * 失敗 throw — 呼叫端用 Promise.allSettled 處理「兩個都失敗才 hard error」。
+ */
+async function sendOtpEmail({ email, otp, ip, lang }) {
+  if (!email) throw new Error('no email');
+  const tpl = (EMAIL_TEMPLATES[lang] || EMAIL_TEMPLATES['zh-TW'])({ otp, ip });
+  const { sendMail } = require('./mailService');
+  await sendMail({
+    to: email,
+    subject: tpl.subject,
+    html: tpl.html,
+    text: tpl.text,
+  });
+  return true;
+}
+
 async function sendOtpDM({ email, otp, ip, lang }) {
   const markdown = buildDmMarkdown({ otp, ip, lang });
   const webex = getWebexService();
@@ -410,6 +476,7 @@ module.exports = {
   verifyChallenge,
   regenerateChallengeOtp,
   sendOtpDM,
+  sendOtpEmail,
   sendNewLoginAlertDM,
 
   isTrustedIp,

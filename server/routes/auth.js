@@ -186,13 +186,38 @@ function tryParseError(text) {
 // Log SSO config status at startup
 console.log(`[SSO] Enabled: ${isSsoEnabled()}, Issuer: ${process.env.SSO_ISSUER || '(not set)'}, ClientID: ${process.env.SSO_CLIENT_ID ? '(set)' : '(not set)'}`);
 
+// ── Login Options(公開,前端進 Login 頁時打,決定 UI 顯示什麼)──────
+// 主要用途:外網 IP 隱藏 SSO 按鈕(SSO 流程依賴內網 SSO 主機 + 跳過 Webex MFA,
+// 外網開放 SSO 等於 MFA 形同虛設)。同時告訴前端是否要走 OTP 流程。
+router.get('/login-options', (req, res) => {
+  const internal = isRequestInternal(req);
+  const ssoConfigured = isSsoEnabled();
+  const mfaEnabled = process.env.MFA_ENABLED === 'true';
+  res.json({
+    internal,
+    ldap_enabled: !!process.env.LDAP_URL,
+    sso_configured: ssoConfigured,
+    // SSO 按鈕顯示條件:SSO 已配置 + 內網(外網不顯示防 MFA bypass)
+    sso_visible: ssoConfigured && internal,
+    mfa_required: !internal && mfaEnabled,
+  });
+});
+
 // ── SSO Routes ─────────────────────────────────────────────────────
 
 // GET /api/auth/sso/login — redirect to SSO authorization page
-router.get('/sso/login', async (_req, res) => {
+router.get('/sso/login', async (req, res) => {
   if (!isSsoEnabled()) {
     console.warn('[SSO] Not configured. SSO_ISSUER:', process.env.SSO_ISSUER || '(empty)', 'SSO_CLIENT_ID:', process.env.SSO_CLIENT_ID ? '(set)' : '(empty)', 'SSO_CLIENT_SECRET:', process.env.SSO_CLIENT_SECRET ? '(set)' : '(empty)');
     return res.status(501).json({ error: 'SSO not configured — 請確認 .env 中 SSO_ISSUER, SSO_CLIENT_ID, SSO_CLIENT_SECRET 皆已設定' });
+  }
+  // 外網禁止走 SSO(防 MFA bypass:SSO 完成後 proceedOrChallenge 仍走 MFA,
+  // 但 SSO 主機通常只在內網,外網點按鈕會死;且 UX 上不該在外網提供 SSO 入口)
+  if (!isRequestInternal(req)) {
+    const baseUrl = process.env.APP_BASE_URL || '';
+    const msg = '外網不支援 SSO 登入,請使用帳號密碼';
+    console.warn(`[SSO] external SSO attempt blocked, ip=${getClientIp(req)}`);
+    return res.redirect(`${baseUrl}/login?sso_error=${encodeURIComponent(msg)}`);
   }
   try {
     const cfg = await getSsoConfig();
@@ -675,31 +700,58 @@ const proceedOrChallenge = async ({ req, res, user, source, mode }) => {
     return mode === 'redirect' ? redirectError(msg) : res.status(429).json({ error: msg });
   }
 
-  // 7. 發 DM(失敗 hard error,不放行)
-  try {
-    const lang = user.preferred_language || 'zh-TW';
-    await mfa.sendOtpDM({ email: user.email, otp: challenge.otp, ip, lang });
-    logAuthEventAsync(db, {
-      user_id: user.id, username: user.username,
-      event_type: 'mfa_challenge_created',
-      ip, user_agent: ua, challenge_id: challenge.challengeId, success: 1,
-      metadata: { source },
-    });
-  } catch (e) {
+  // 7. 並行發 Webex DM + Email(雙 channel,任一成功即可。手機沒裝 Webex 的同仁靠 Email)
+  const lang = user.preferred_language || 'zh-TW';
+  const [dmRes, emailRes] = await Promise.allSettled([
+    mfa.sendOtpDM({ email: user.email, otp: challenge.otp, ip, lang }),
+    mfa.sendOtpEmail({ email: user.email, otp: challenge.otp, ip, lang }),
+  ]);
+  const dmOk = dmRes.status === 'fulfilled';
+  const emailOk = emailRes.status === 'fulfilled';
+  const dmErr = dmRes.status === 'rejected' ? (dmRes.reason?.message || 'unknown') : null;
+  const emailErr = emailRes.status === 'rejected' ? (emailRes.reason?.message || 'unknown') : null;
+
+  if (!dmOk && !emailOk) {
+    // 兩個 channel 都失敗 → hard error
     logAuthEventAsync(db, {
       user_id: user.id, username: user.username,
       event_type: 'mfa_dm_failed',
       ip, user_agent: ua, challenge_id: challenge.challengeId, success: 0,
-      error_msg: e.message, metadata: { source },
+      error_msg: `dm:${dmErr} | email:${emailErr}`, metadata: { source, both_failed: true },
     });
-    console.error(`[MFA] DM failed user=${user.id} email=${user.email}: ${e.message}`);
+    console.error(`[MFA] both channels failed user=${user.id} dm:${dmErr} email:${emailErr}`);
     const msg = `驗證碼發送失敗,請聯絡管理員(代碼:${challenge.incidentId})`;
     return mode === 'redirect' ? redirectError(msg) : res.status(500).json({
       error: msg, incident_id: challenge.incidentId,
     });
   }
+  // 至少一個成功 → 放行,但失敗的那個仍 audit log 讓 admin 觀察趨勢
+  if (!dmOk) {
+    logAuthEventAsync(db, {
+      user_id: user.id, username: user.username,
+      event_type: 'mfa_dm_failed',
+      ip, user_agent: ua, challenge_id: challenge.challengeId, success: 0,
+      error_msg: dmErr, metadata: { source, email_fallback: true },
+    });
+    console.warn(`[MFA] DM failed but email ok user=${user.id}: ${dmErr}`);
+  }
+  if (!emailOk) {
+    logAuthEventAsync(db, {
+      user_id: user.id, username: user.username,
+      event_type: 'mfa_email_failed',
+      ip, user_agent: ua, challenge_id: challenge.challengeId, success: 0,
+      error_msg: emailErr, metadata: { source, dm_fallback: true },
+    });
+    console.warn(`[MFA] email failed but DM ok user=${user.id}: ${emailErr}`);
+  }
+  logAuthEventAsync(db, {
+    user_id: user.id, username: user.username,
+    event_type: 'mfa_challenge_created',
+    ip, user_agent: ua, challenge_id: challenge.challengeId, success: 1,
+    metadata: { source, dm_sent: dmOk, email_sent: emailOk },
+  });
 
-  // 8. DM 成功 → 通知前端進 OTP 輸入步驟
+  // 8. 至少一通成功 → 通知前端進 OTP 輸入步驟
   if (mode === 'redirect') {
     const params = new URLSearchParams({
       mfa_challenge: challenge.challengeId,
@@ -881,18 +933,29 @@ router.post('/2fa/resend', async (req, res) => {
     return res.status(400).json({ error: '參數錯誤' });
   }
 
-  // 撈 user 拿 email + lang,送 DM
+  // 撈 user 拿 email + lang,並行送 Webex DM + Email(任一成功即可)
   try {
     const user = await db.prepare('SELECT * FROM users WHERE id=?').get(r.userId);
     if (!user || !user.email) {
       return res.status(400).json({ error: '使用者狀態異常,請重新登入', expired: true });
     }
     const lang = user.preferred_language || 'zh-TW';
-    await mfa.sendOtpDM({ email: user.email, otp: r.otp, ip: r.ip, lang });
+    const [dmRes2, emailRes2] = await Promise.allSettled([
+      mfa.sendOtpDM({ email: user.email, otp: r.otp, ip: r.ip, lang }),
+      mfa.sendOtpEmail({ email: user.email, otp: r.otp, ip: r.ip, lang }),
+    ]);
+    const dmOk2 = dmRes2.status === 'fulfilled';
+    const emailOk2 = emailRes2.status === 'fulfilled';
+    if (!dmOk2 && !emailOk2) {
+      const dmErr2 = dmRes2.status === 'rejected' ? (dmRes2.reason?.message || 'unknown') : null;
+      const emailErr2 = emailRes2.status === 'rejected' ? (emailRes2.reason?.message || 'unknown') : null;
+      throw new Error(`dm:${dmErr2} | email:${emailErr2}`);
+    }
     logAuthEventAsync(db, {
       user_id: user.id, username: user.username,
       event_type: 'mfa_resend',
       ip, user_agent: ua, challenge_id, success: 1,
+      metadata: { dm_sent: dmOk2, email_sent: emailOk2 },
     });
     return res.json({ ok: true });
   } catch (e) {
@@ -902,7 +965,7 @@ router.post('/2fa/resend', async (req, res) => {
       ip, user_agent: ua, challenge_id, success: 0,
       error_msg: e.message, metadata: { phase: 'resend' },
     });
-    console.error(`[MFA] resend DM failed challenge=${challenge_id}: ${e.message}`);
+    console.error(`[MFA] resend both channels failed challenge=${challenge_id}: ${e.message}`);
     const incident = mfa.shortIncidentId(challenge_id);
     return res.status(500).json({
       error: `驗證碼發送失敗,請聯絡管理員(代碼:${incident})`,

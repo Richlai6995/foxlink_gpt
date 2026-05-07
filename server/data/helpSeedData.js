@@ -1,7 +1,7 @@
 /**
  * Help page seed data — zh-TW (source of truth)
  * Auto-extracted from HelpPage.tsx
- * Generated: 2026-05-06
+ * Generated: 2026-05-07
  *
  * Block types: para, tip, note, table, steps, code, list, subsection, card_grid, comparison
  */
@@ -84,7 +84,7 @@ const userSections = [
     "sort_order": 2,
     "icon": "User",
     "icon_color": "text-indigo-500",
-    "last_modified": "2026-05-06",
+    "last_modified": "2026-05-07",
     "title": "登入與登出",
     "sidebar_label": "登入與登出",
     "blocks": [
@@ -119,6 +119,10 @@ const userSections = [
           {
             "type": "note",
             "text": "**重要：SSO 僅適用於擁有 AD 帳號的正崴員工。**由系統管理員手動建立的本地帳號（如外部合作夥伴、特殊功能帳號）無法使用 SSO，必須以帳號密碼方式登入（見下方說明）。"
+          },
+          {
+            "type": "note",
+            "text": "**外網限制(2026-05 起):從公司外網(VPN 之外、出差、家用、手機 4G)連線時,SSO 按鈕會自動隱藏**,因為 SSO 流程跳過 Webex MFA 二階段驗證,從外網開放等於 MFA 形同虛設。外網請使用帳號密碼登入並完成 Webex / Email 雙通道驗證碼,30 天內同裝置免重認。"
           },
           {
             "type": "tip",
@@ -190,7 +194,11 @@ const userSections = [
         "blocks": [
           {
             "type": "para",
-            "text": "若您**從公司外網**(出差、家用、行動網路)連線 Cortex,系統會在帳密驗證通過後,**多走一道 Webex DM 驗證碼確認**。內網(辦公室 / 廠區)使用者完全無感,流程跟過去一致。"
+            "text": "若您**從公司外網**(出差、家用、行動網路)連線 Cortex,系統會在帳密驗證通過後,**多走一道驗證碼確認**。內網(辦公室 / 廠區)使用者完全無感,流程跟過去一致。"
+          },
+          {
+            "type": "tip",
+            "text": "**雙通道發送(2026-05 強化):驗證碼會「同時」發到您的 Webex 和 Email**,兩個通道都是同一個 6 位數碼,任一收到輸入即可。手機沒裝 Webex App 的同仁可看 Email,在公司用 Webex 比較順手的就用 Webex,各取所需。"
           },
           {
             "type": "steps",
@@ -199,7 +207,7 @@ const userSections = [
                 "title": "輸入帳號密碼後,系統判斷您不在內網範圍"
               },
               {
-                "title": "Webex Bot 自動私訊您一個 6 位數驗證碼",
+                "title": "同時透過 Webex 私訊 + Email 寄出 6 位驗證碼",
                 "desc": "5 分鐘內有效;同時告訴您「來源 IP」讓您確認是不是自己操作"
               },
               {
@@ -216,7 +224,7 @@ const userSections = [
           },
           {
             "type": "note",
-            "text": "**沒收到驗證碼怎麼辦?** 1) 確認 Webex App 開著且通知開啟 2) 檢查跟 Cortex Bot 的 1:1 對話 3) 若一直收不到,登入畫面會顯示「事件代碼」,把它告訴系統管理員可協助查詢"
+            "text": "**沒收到驗證碼怎麼辦?** 1) **檢查 Email**(Webex 沒收到也可從 Email 拿)2) 確認 Webex App 開著且通知開啟 3) 檢查跟 Cortex Bot 的 1:1 對話 4) 若兩個通道都沒收到,登入畫面會顯示「事件代碼」,把它告訴系統管理員可協助查詢"
           },
           {
             "type": "tip",
