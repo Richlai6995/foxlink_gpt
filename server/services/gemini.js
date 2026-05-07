@@ -1,6 +1,9 @@
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+const crypto = require('crypto');
+const { spawn } = require('child_process');
 
 const { classifyUpload } = require('../utils/uploadFileTypes');
 const { getGenerativeModel, extractText, extractUsage } = require('./geminiClient');
@@ -156,8 +159,11 @@ async function extractTextFromFile(filePath, mimeType, originalName) {
  * @param {string} mimeType
  * @param {string|number} [langOrTimeout] - language code ('zh-TW' | 'en' | 'vi') OR legacy timeoutMs (number)
  * @param {number} [timeoutMs] - max wait time
+ * @param {object} [opts]
+ * @param {boolean} [opts.useProModel] - use MODEL_PRO instead of MODEL_FLASH (long audio benefits from Pro)
+ * @param {boolean} [opts.verbatim] - use verbatim prompt (forbid summarization, keep filler words)
  */
-async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25 * 60 * 1000) {
+async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25 * 60 * 1000, opts = {}) {
   // Backward-compat: old callers pass (filePath, mimeType, timeoutMs:number)
   let lang;
   if (typeof langOrTimeout === 'number') {
@@ -167,23 +173,43 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
     lang = langOrTimeout;
   }
 
-  const PROMPTS = {
+  const useProModel = opts.useProModel === true;
+  const verbatim = opts.verbatim === true;
+
+  const PROMPTS_NORMAL = {
     'zh-TW': '請完整轉錄這段音訊，使用繁體中文，只回傳轉錄文字，不要加任何說明。',
     'en':    'Please transcribe this audio completely in English. Return only the transcription, no explanations.',
     'vi':    'Vui lòng phiên âm hoàn chỉnh đoạn âm thanh này bằng tiếng Việt. Chỉ trả lời nội dung phiên âm, không thêm giải thích.',
   };
-  const prompt = PROMPTS[lang] || '請完整轉錄這段音訊，只回傳轉錄文字，不要加任何說明。';
+  // Verbatim prompt 對 Gemini 偷懶問題的反制:明確禁止省略/摘要/合併,要求保留口語贅詞
+  const PROMPTS_VERBATIM = {
+    'zh-TW': '請逐字完整轉錄這段音訊，使用繁體中文。絕對不可以省略、摘要、合併或重組內容。每位發言者每一句話都要保留，包含「嗯」「對」「然後」「就是」等口語贅詞和填充詞、重複詞。換人講話時換行。只回傳逐字稿，不要加任何說明、標題、摘要、整理。',
+    'en':    'Please verbatim transcribe this audio in English. Do NOT summarize, omit, merge, or reorganize any content. Keep every utterance from every speaker including filler words like "uh", "um", "you know", and repetitions. Use line breaks when speaker changes. Return ONLY the verbatim transcript, no explanations, headings, or summaries.',
+    'vi':    'Vui lòng phiên âm nguyên văn đoạn âm thanh này bằng tiếng Việt. KHÔNG được tóm tắt, bỏ sót, gộp hoặc sắp xếp lại nội dung. Giữ lại mọi câu nói của mọi người phát biểu, bao gồm cả các từ đệm. Xuống dòng khi đổi người nói. Chỉ trả lời phiên âm nguyên văn, không thêm giải thích, tiêu đề hay tóm tắt.',
+  };
+  const PROMPTS = verbatim ? PROMPTS_VERBATIM : PROMPTS_NORMAL;
+  const prompt = PROMPTS[lang] || PROMPTS['zh-TW'];
 
   // 取檔案 size 給 log 用 (用來判斷是不是因為太大 inline 失敗)
   let fileSizeMB = -1;
   try { fileSizeMB = +(fs.statSync(filePath).size / 1024 / 1024).toFixed(2); } catch {}
   const tagId = `${path.basename(filePath)}|${fileSizeMB}MB`;
-  console.log(`[Transcribe] start ${tagId} mime=${mimeType} lang=${lang || 'auto'} timeout=${timeoutMs}ms`);
+  console.log(`[Transcribe] start ${tagId} mime=${mimeType} lang=${lang || 'auto'} timeout=${timeoutMs}ms model=${useProModel ? 'pro' : 'flash'} verbatim=${verbatim}`);
 
   // 音訊轉錄強制走 AI Studio:Vertex gRPC 的 inline payload 上限 ~4MB,
   // wav 等未壓縮檔 base64 後動輒數十 MB 會被 backend silently drop,
   // 回 "contents field required" 誤導錯誤。AI Studio REST 對大 payload 寬鬆得多。
-  const model = getGenerativeModel({ model: MODEL_FLASH, provider: 'studio' });
+  // maxOutputTokens 防呆:Pro 上限 65536、Flash 上限 8192。Gemini 預設值較保守,長音訊會被截斷。
+  const modelName = useProModel ? MODEL_PRO : MODEL_FLASH;
+  const maxOut = useProModel ? 65536 : 8192;
+  const model = getGenerativeModel({
+    model: modelName,
+    provider: 'studio',
+    generationConfig: {
+      maxOutputTokens: maxOut,
+      temperature: 0,
+    },
+  });
 
   const tRead0 = Date.now();
   const audioPart = await fileToGeminiPart(filePath, mimeType);
@@ -230,6 +256,143 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
   };
+}
+
+// ── Long-audio transcription (ffmpeg split + parallel Pro) ────────────────────
+// 為什麼要切片:Gemini 對 >30 分鐘音訊會自動「壓縮輸出」(即使指令說逐字),
+// 表現為 finishReason=STOP 但 output 只有幾百 token。3.5 小時會議只回 2k token 就是這狀況。
+// 切成 30 分鐘/段、每段獨立用 Pro 轉錄,attention 集中度大幅提升,單段就能吐滿 maxOutputTokens。
+
+const LONG_AUDIO_SEGMENT_SEC = 30 * 60;     // 30 分鐘/段
+const LONG_AUDIO_CONCURRENCY = 3;           // 平行段數(避免撞 Gemini RPM)
+const LONG_AUDIO_PER_SEG_TIMEOUT_MS = 30 * 60 * 1000; // 單段 30 分鐘上限
+
+function _runCmd(cmd, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => { stdout += d.toString(); });
+    child.stderr.on('data', (d) => { stderr += d.toString(); });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) resolve({ stdout, stderr });
+      else reject(new Error(`${cmd} exit ${code}: ${stderr.slice(0, 500)}`));
+    });
+  });
+}
+
+async function _probeAudioDuration(filePath) {
+  try {
+    const { stdout } = await _runCmd('ffprobe', [
+      '-v', 'error',
+      '-show_entries', 'format=duration',
+      '-of', 'default=nw=1:nk=1',
+      filePath,
+    ]);
+    const sec = parseFloat(stdout.trim());
+    return Number.isFinite(sec) ? sec : 0;
+  } catch (e) {
+    console.warn(`[ffprobe] duration probe failed: ${e.message}`);
+    return 0;
+  }
+}
+
+async function _splitAudio(filePath, segmentSec, outDir) {
+  const ext = path.extname(filePath) || '.m4a';
+  // -c copy 不重編碼(30 秒切完 185MB);-reset_timestamps 1 讓每段時間從 0 開始
+  await _runCmd('ffmpeg', [
+    '-hide_banner', '-loglevel', 'error',
+    '-i', filePath,
+    '-f', 'segment',
+    '-segment_time', String(segmentSec),
+    '-c', 'copy',
+    '-reset_timestamps', '1',
+    '-y',
+    path.join(outDir, `part_%03d${ext}`),
+  ]);
+  return fs.readdirSync(outDir)
+    .filter((n) => n.startsWith('part_'))
+    .sort()
+    .map((n) => path.join(outDir, n));
+}
+
+function _fmtTime(sec) {
+  const s = Math.max(0, Math.floor(sec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+}
+
+/**
+ * Long-audio transcription: ffmpeg split → parallel Pro transcribe → concat with time markers.
+ * Use for files >50MB or >30 min where single-shot Gemini under-produces output.
+ */
+async function transcribeLongAudio(filePath, mimeType, lang) {
+  const fileSizeMB = +(fs.statSync(filePath).size / 1024 / 1024).toFixed(2);
+  const tagId = `${path.basename(filePath)}|${fileSizeMB}MB`;
+  const tStart = Date.now();
+  console.log(`[TranscribeLong] start ${tagId} mime=${mimeType} lang=${lang || 'auto'}`);
+
+  const tmpRoot = path.join(os.tmpdir(), `transcribe_${crypto.randomUUID()}`);
+  fs.mkdirSync(tmpRoot, { recursive: true });
+
+  try {
+    const totalDuration = await _probeAudioDuration(filePath);
+    console.log(`[TranscribeLong] ${tagId} duration=${_fmtTime(totalDuration)} (${totalDuration.toFixed(0)}s)`);
+
+    const tSplit = Date.now();
+    const parts = await _splitAudio(filePath, LONG_AUDIO_SEGMENT_SEC, tmpRoot);
+    console.log(`[TranscribeLong] ${tagId} split into ${parts.length} parts in ${Date.now() - tSplit}ms`);
+
+    if (parts.length === 0) {
+      throw new Error('ffmpeg produced no segments');
+    }
+
+    // 平行轉錄(concurrency 限制),每段獨立 Pro + verbatim
+    const results = new Array(parts.length);
+    for (let i = 0; i < parts.length; i += LONG_AUDIO_CONCURRENCY) {
+      const batch = parts.slice(i, i + LONG_AUDIO_CONCURRENCY);
+      const batchResults = await Promise.all(batch.map(async (partPath, j) => {
+        const idx = i + j;
+        const tPart = Date.now();
+        try {
+          const r = await transcribeAudio(partPath, mimeType, lang, LONG_AUDIO_PER_SEG_TIMEOUT_MS, {
+            useProModel: true,
+            verbatim: true,
+          });
+          console.log(`[TranscribeLong] ${tagId} part ${idx + 1}/${parts.length} ok in ${Date.now() - tPart}ms text=${r.text.length}chars in=${r.inputTokens} out=${r.outputTokens}`);
+          return { ok: true, text: r.text, inputTokens: r.inputTokens, outputTokens: r.outputTokens };
+        } catch (e) {
+          console.error(`[TranscribeLong] ${tagId} part ${idx + 1}/${parts.length} FAILED after ${Date.now() - tPart}ms: ${e.message}`);
+          return { ok: false, text: `[此段轉錄失敗: ${e.message}]`, inputTokens: 0, outputTokens: 0 };
+        }
+      }));
+      batchResults.forEach((r, j) => { results[i + j] = r; });
+    }
+
+    let totalIn = 0;
+    let totalOut = 0;
+    const segments = results.map((r, idx) => {
+      const startSec = idx * LONG_AUDIO_SEGMENT_SEC;
+      const endSec = totalDuration > 0
+        ? Math.min((idx + 1) * LONG_AUDIO_SEGMENT_SEC, totalDuration)
+        : (idx + 1) * LONG_AUDIO_SEGMENT_SEC;
+      const marker = `[${_fmtTime(startSec)}–${_fmtTime(endSec)}]`;
+      totalIn += r.inputTokens;
+      totalOut += r.outputTokens;
+      return `${marker}\n${r.text}`;
+    });
+    const merged = segments.join('\n\n');
+
+    console.log(`[TranscribeLong] ${tagId} ALL done in ${Date.now() - tStart}ms total=${merged.length}chars in=${totalIn} out=${totalOut} segs=${parts.length}`);
+    return { text: merged, inputTokens: totalIn, outputTokens: totalOut };
+  } finally {
+    try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch (e) {
+      console.warn(`[TranscribeLong] tmp cleanup failed (${tmpRoot}): ${e.message}`);
+    }
+  }
 }
 
 /**
@@ -1060,4 +1223,4 @@ async function generateWithToolsStream(
   return { text: fullText, inputTokens, outputTokens, toolCallCount };
 }
 
-module.exports = { streamChat, generateWithImage, generateTextSync, generateWithTools, generateWithToolsStream, transcribeAudio, extractTextFromFile, fileToGeminiPart, generateTitle, MODEL_PRO, MODEL_FLASH };
+module.exports = { streamChat, generateWithImage, generateTextSync, generateWithTools, generateWithToolsStream, transcribeAudio, transcribeLongAudio, extractTextFromFile, fileToGeminiPart, generateTitle, MODEL_PRO, MODEL_FLASH };

@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { verifyToken } = require('./auth');
-const { streamChat, generateWithImage, generateWithTools, generateWithToolsStream, transcribeAudio, extractTextFromFile, fileToGeminiPart, generateTitle } = require('../services/gemini');
+const { streamChat, generateWithImage, generateWithTools, generateWithToolsStream, transcribeAudio, transcribeLongAudio, extractTextFromFile, fileToGeminiPart, generateTitle } = require('../services/gemini');
 const { streamChatAoai, streamChatAoaiWithTools } = require('../services/llmService');
 const { processGenerateBlocks } = require('../services/fileGenerator');
 const { parseChartBlocks } = require('../services/chartSpecParser');
@@ -1361,10 +1361,18 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
       // Audio → transcribe
       if (mimeType.startsWith('audio/')) {
         const audioSizeMB = +(file.size / 1024 / 1024).toFixed(2);
-        console.log(`[Chat] Audio branch: "${originalName}" size=${audioSizeMB}MB mime=${mimeType} user=${req.user.id}`);
-        // 經驗值:Flash 約 1.2 秒/MB(WAV),100MB 約 2 分鐘;最少 30 秒避免短檔顯示太樂觀
-        const etaSec = Math.max(30, Math.round(audioSizeMB * 1.2));
-        sendEvent({ type: 'status', message: `正在轉錄: ${originalName} (${audioSizeMB}MB),預計 ${etaSec}s,大檔請耐心等候勿刷新...` });
+        // > 50MB 走 long-audio pipeline(ffmpeg 切 30 分鐘/段 + Pro + 平行轉錄 + 反摘要 prompt)
+        // 解決 Gemini 對長音訊「自動壓縮輸出」問題:3.5 小時會議只回 2k token 的根因
+        const isLongAudio = file.size > 50 * 1024 * 1024;
+        console.log(`[Chat] Audio branch: "${originalName}" size=${audioSizeMB}MB mime=${mimeType} long=${isLongAudio} user=${req.user.id}`);
+        // 經驗值:Flash 約 1.2 秒/MB(WAV),100MB 約 2 分鐘;long path 約 1.5 秒/MB(切片+Pro+平行)
+        const etaSec = isLongAudio
+          ? Math.max(120, Math.round(audioSizeMB * 1.5))
+          : Math.max(30, Math.round(audioSizeMB * 1.2));
+        const initMsg = isLongAudio
+          ? `正在轉錄(長音訊模式): ${originalName} (${audioSizeMB}MB),切片+Pro 模型平行處理,預計 ${etaSec}s,請耐心等候勿刷新...`
+          : `正在轉錄: ${originalName} (${audioSizeMB}MB),預計 ${etaSec}s,大檔請耐心等候勿刷新...`;
+        sendEvent({ type: 'status', message: initMsg });
         const tAudio0 = Date.now();
         // 心跳:每 10 秒送一次 status 給前端,避免使用者以為卡住而刷新;
         // 同時防中間 proxy 把 idle SSE 連線砍掉(雖然 ingress 已設 3600s)
@@ -1373,7 +1381,9 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           sendEvent({ type: 'status', message: `轉錄中: ${originalName} — 已等 ${elapsedSec}s / 預計 ${etaSec}s` });
         }, 10000);
         try {
-          const transcribeResult = await transcribeAudio(filePath, mimeType);
+          const transcribeResult = isLongAudio
+            ? await transcribeLongAudio(filePath, mimeType)
+            : await transcribeAudio(filePath, mimeType);
           const transcription = transcribeResult.text;
           combinedUserText += `\n\n[音訊轉錄: ${originalName}]\n${transcription}`;
           fileMetas.push({ name: originalName, type: 'audio', transcription });

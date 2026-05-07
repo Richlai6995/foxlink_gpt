@@ -27,6 +27,7 @@ RUN apt-get update \
     && (apt-get install -y --no-install-recommends libaio1t64 2>/dev/null \
         || apt-get install -y --no-install-recommends libaio1) \
     && apt-get install -y --no-install-recommends libreoffice-impress libreoffice-core \
+    && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Timezone
