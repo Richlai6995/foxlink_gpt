@@ -263,13 +263,14 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
 // 表現為 finishReason=STOP 但 output 只有幾百 token。3.5 小時會議只回 2k token 就是這狀況。
 // 切成 30 分鐘/段、每段獨立用 Pro 轉錄,attention 集中度大幅提升,單段就能吐滿 maxOutputTokens。
 
-const LONG_AUDIO_SEGMENT_SEC = 30 * 60;     // 30 分鐘/段
-// concurrency=1(sequential):Gemini 3 Pro Studio 經常 503 UNAVAILABLE(model 滿載,
-// 不是 quota),平行 N 段會 N 個同時 503。改 sequential 後撞 503 機率降到 1/N,
-// 加 retry+backoff 後通過率高很多。代價是總時間 ~7 倍但比全敗好。
+// 15 分鐘/段 = ~14MB inline 安全範圍 + Flash 對短段偷懶傾向低;
+// 30 分鐘/段 + Pro 實測在 Studio 滿載時 100% 失敗,沒實用價值
+const LONG_AUDIO_SEGMENT_SEC = 15 * 60;
+// concurrency=1(sequential):Gemini Studio 滿載時平行 N 段會 N 個同時 503。
+// 改 sequential 後撞 503 機率降到 1/N,加 retry+backoff 後通過率高很多。
 const LONG_AUDIO_CONCURRENCY = 1;
-const LONG_AUDIO_PER_SEG_TIMEOUT_MS = 30 * 60 * 1000; // 單段 30 分鐘上限
-const LONG_AUDIO_RETRY_BACKOFF_MS = [5000, 15000, 30000]; // 3 次 retry,5s/15s/30s
+const LONG_AUDIO_PER_SEG_TIMEOUT_MS = 20 * 60 * 1000; // 單段 20 分鐘上限(15 分鐘音訊預留 buffer)
+const LONG_AUDIO_RETRY_BACKOFF_MS = [5000, 15000, 45000]; // 3 次 retry,5s/15s/45s
 
 function _runCmd(cmd, args) {
   return new Promise((resolve, reject) => {
@@ -338,15 +339,25 @@ function _isTransientGeminiErr(e) {
   return false;
 }
 
-// 單段轉錄 + retry + Pro→Flash fallback。回傳 { ok, text, inputTokens, outputTokens, attempts, error? }
+// 單段轉錄 + retry + 模型切換策略
+// 策略:Flash 為主 + 第 3 次賭一次 Pro(當 Studio Pro 滿載時 fallback 已經沒用)
+//   attempt 0: Flash + verbatim          ← 大多數情況一次就過
+//   attempt 1: Flash + verbatim          ← 5s backoff,Flash 短暫擠時通常恢復
+//   attempt 2: Pro + verbatim            ← 15s backoff,Pro 滿載 spike 通常 1-2 分鐘
+//   attempt 3: Flash + verbatim          ← 45s backoff,最後保險
 async function _transcribeWithRetry(partPath, mimeType, lang, segIdx, segTotal, tagId) {
-  const maxAttempts = LONG_AUDIO_RETRY_BACKOFF_MS.length + 1; // 4(原始 + 3 retry)
+  const ATTEMPT_PLAN = [
+    { useProModel: false, label: 'Flash' },
+    { useProModel: false, label: 'Flash' },
+    { useProModel: true,  label: 'Pro' },
+    { useProModel: false, label: 'Flash' },
+  ];
+  const maxAttempts = ATTEMPT_PLAN.length;
   let lastErr;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    // 最後一次嘗試降到 Flash(Pro 滿載時的逃生門);其他都用 Pro
-    const isFinalFallback = attempt === maxAttempts - 1;
+    const plan = ATTEMPT_PLAN[attempt];
     const opts = {
-      useProModel: !isFinalFallback,
+      useProModel: plan.useProModel,
       verbatim: true,
     };
     try {
@@ -367,7 +378,8 @@ async function _transcribeWithRetry(partPath, mimeType, lang, segIdx, segTotal, 
       }
       const wait = LONG_AUDIO_RETRY_BACKOFF_MS[attempt];
       const status = e?.status || e?.statusCode || 'UNKNOWN';
-      console.warn(`[TranscribeLong] ${tagId} part ${segIdx}/${segTotal} attempt ${attempt + 1}/${maxAttempts} got ${status},等 ${wait}ms 後 retry${attempt + 1 === maxAttempts - 1 ? ' (next attempt fallback to Flash)' : ''}`);
+      const nextLabel = ATTEMPT_PLAN[attempt + 1]?.label || '?';
+      console.warn(`[TranscribeLong] ${tagId} part ${segIdx}/${segTotal} attempt ${attempt + 1}/${maxAttempts} (${plan.label}) got ${status},等 ${wait}ms 後 retry (next=${nextLabel})`);
       await new Promise((resolve) => setTimeout(resolve, wait));
     }
   }

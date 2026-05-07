@@ -1365,12 +1365,13 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
         // 解決 Gemini 對長音訊「自動壓縮輸出」問題:3.5 小時會議只回 2k token 的根因
         const isLongAudio = file.size > 50 * 1024 * 1024;
         console.log(`[Chat] Audio branch: "${originalName}" size=${audioSizeMB}MB mime=${mimeType} long=${isLongAudio} user=${req.user.id}`);
-        // 經驗值:Flash 約 1.2 秒/MB(WAV),100MB 約 2 分鐘;long path 約 1.5 秒/MB(切片+Pro+平行)
+        // 經驗值:Flash 約 1.2 秒/MB(WAV);long path sequential 切 15 分鐘段,
+        // ~1.5 分鐘/段 + 偶爾 retry,3.5h 估 12-18 分鐘 → 約 4 秒/MB
         const etaSec = isLongAudio
-          ? Math.max(120, Math.round(audioSizeMB * 1.5))
+          ? Math.max(180, Math.round(audioSizeMB * 4))
           : Math.max(30, Math.round(audioSizeMB * 1.2));
         const initMsg = isLongAudio
-          ? `正在轉錄(長音訊模式): ${originalName} (${audioSizeMB}MB),切片+Pro 模型平行處理,預計 ${etaSec}s,請耐心等候勿刷新...`
+          ? `正在轉錄(長音訊模式): ${originalName} (${audioSizeMB}MB),切 15 分鐘/段順序處理,預計 ${etaSec}s,請耐心等候勿刷新...`
           : `正在轉錄: ${originalName} (${audioSizeMB}MB),預計 ${etaSec}s,大檔請耐心等候勿刷新...`;
         sendEvent({ type: 'status', message: initMsg });
         const tAudio0 = Date.now();
