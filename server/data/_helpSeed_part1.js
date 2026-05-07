@@ -154,6 +154,25 @@ module.exports = [
               { type: 'tip', text: '這是密碼洩漏後的第一道補救:即使攻擊者拿到舊密碼 + 舊裝置 cookie,改密碼瞬間全部失效。' },
             ],
           },
+          {
+            type: 'subsection',
+            title: '快速登入(Face ID / 指紋)綁定失敗排錯',
+            blocks: [
+              { type: 'para', text: '在「我的信任裝置」按「綁定當前裝置」進行 Face ID / 指紋註冊時,**Android 手機若出現以下錯誤** 多半是手機本身設定問題,可逐項檢查:' },
+              {
+                type: 'list',
+                items: [
+                  '**錯誤:「與 Android Credential Manager 通訊失敗 / unknown error」**',
+                  '➤ ① 手機是否設了螢幕鎖定:**設定 → 安全性 → 螢幕鎖定** 設 PIN / 圖形 / 指紋。沒設 lock screen 不能存 passkey',
+                  '➤ ② Google Password Manager 是否啟用:**設定 → 密碼、密鑰與帳戶** 確認 Google 為 default provider',
+                  '➤ ③ Google Play 服務需更新:Play Store → 我的應用程式 → 更新「Google Play 服務」',
+                  '➤ ④ 重啟手機後再試一次',
+                ],
+              },
+              { type: 'note', text: '**iOS 通常無此問題**(iCloud Keychain 預設啟用)。Android < 13 也用舊 FIDO2 API,不會踩到 Credential Manager 問題。' },
+              { type: 'tip', text: '即使生物辨識綁定失敗,**完全不影響正常登入** — 您仍可走帳密 + Webex/Email 驗證碼,通過後 30 天內同裝置免重認。生物辨識只是 UX 加速,不是必要。' },
+            ],
+          },
         ],
       },
       {

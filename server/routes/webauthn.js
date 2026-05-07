@@ -74,6 +74,16 @@ async function loadUserCredentials(db, userId) {
   ).all(userId);
 }
 
+// WebAuthn spec 定義的合法 transport(其他值會讓 Android 14+ Credential Manager
+// 嚴格驗證失敗,回 "unknown error occurred while talking to the credential manager")
+const VALID_TRANSPORTS = new Set(['usb', 'nfc', 'ble', 'hybrid', 'internal', 'cable', 'smart-card']);
+function sanitizeTransports(raw) {
+  return (raw || '')
+    .split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter(s => VALID_TRANSPORTS.has(s));
+}
+
 // 把 base64url string 轉 Uint8Array(@simplewebauthn 13.x 用 isoUint8Array)
 function b64uToBytes(s) {
   if (!s) return new Uint8Array(0);
@@ -105,9 +115,13 @@ router.post('/register/options', verifyToken, async (req, res) => {
       attestationType: 'none', // 我們不需要 attestation,降低隱私顧慮
       excludeCredentials: existing.map((c) => ({
         id: c.credential_id, // base64url string
-        transports: (c.transports || '').split(',').filter(Boolean),
+        // 嚴格 filter — Android 14+ Credential Manager 對非 spec transport 直接 throw
+        transports: sanitizeTransports(c.transports),
       })),
       authenticatorSelection: {
+        // platform = 強制本機 platform authenticator(Face ID / Touch ID / 指紋 / Windows Hello)
+        // 不設此值 Android 14+ 會試圖叫使用者選跨裝置,造成「talking to credential manager」錯誤
+        authenticatorAttachment: 'platform',
         residentKey: 'preferred',  // discoverable credential — 支援 usernameless 登入
         userVerification: 'required', // 強制要 Face ID / 指紋
       },
@@ -234,7 +248,7 @@ router.post('/auth/verify', async (req, res) => {
         id: credRow.credential_id,
         publicKey,
         counter: credRow.sign_count || 0,
-        transports: (credRow.transports || '').split(',').filter(Boolean),
+        transports: sanitizeTransports(credRow.transports),
       },
       requireUserVerification: true,
     });
