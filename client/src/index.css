@@ -40,12 +40,13 @@ body {
   max-height: 100dvh;
 }
 
-/* Safe-area utilities(iPhone 瀏海 / 底邊),桌機 env() 為 0 不影響 */
+/* Safe-area utilities(iPhone 瀏海 / 底邊),桌機 env() 為 0 不影響
+   用 max() 保底 8px,避免完全沒空白/觸控餘裕,且不蓋過 iOS home indicator */
 .pb-safe {
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: max(env(safe-area-inset-bottom), 0.5rem);
 }
 .pt-safe {
-  padding-top: env(safe-area-inset-top);
+  padding-top: max(env(safe-area-inset-top), 0.25rem);
 }
 .pl-safe {
   padding-left: env(safe-area-inset-left);

@@ -614,8 +614,9 @@ export default function MobileChatLayout() {
 
   return (
     <div className="fixed inset-0 flex flex-col bg-slate-50 overflow-hidden">
-      {/* Topbar */}
-      <header className="flex items-center gap-2 px-3 h-14 bg-white border-b border-slate-200 pt-safe">
+      {/* Topbar — pt-safe 撐瀏海;固定 inner row 56px */}
+      <header className="bg-white border-b border-slate-200 pt-safe">
+        <div className="flex items-center gap-2 px-3 h-14">
         <button
           onClick={() => setDrawerOpen(true)}
           aria-label={t('mobile.chat.openSidebar')}
@@ -651,6 +652,7 @@ export default function MobileChatLayout() {
             </span>
           )}
         </button>
+        </div>
       </header>
 
       {/* SSE stall banner */}
@@ -698,8 +700,8 @@ export default function MobileChatLayout() {
         )}
       </main>
 
-      {/* Input bar */}
-      <div className="border-t border-slate-200 bg-white px-2 py-2 pb-safe">
+      {/* Input bar — 視覺加重 + bg 延伸到 home indicator,避免空白感 */}
+      <div className="border-t border-slate-200 bg-white px-2 pt-2 pb-safe shadow-[0_-2px_8px_-4px_rgba(15,23,42,0.08)]">
         {/* ERP context chip(ask_with 模式) */}
         {erpPendingContext && (
           <div className="mx-1 mb-1.5 px-3 py-1.5 bg-sky-50 border border-sky-200 rounded-lg text-xs text-sky-800 flex items-center gap-2">

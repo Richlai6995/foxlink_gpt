@@ -178,3 +178,13 @@ export function isStandalone(): boolean {
   if ((window.navigator as any).standalone === true) return true
   return false
 }
+
+/** 偵測是否 iOS 裝置(iPhone / iPad / iPod)— iOS Safari 不支援 beforeinstallprompt,要自己教 user */
+export function isIOS(): boolean {
+  if (typeof navigator === 'undefined') return false
+  const ua = navigator.userAgent
+  if (/iPhone|iPad|iPod/i.test(ua)) return true
+  // iPadOS 13+ 偽裝成 macOS,但 maxTouchPoints > 0
+  if (/Mac/.test(ua) && (navigator as any).maxTouchPoints > 1) return true
+  return false
+}
