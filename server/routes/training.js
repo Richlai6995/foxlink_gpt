@@ -5670,8 +5670,12 @@ router.post('/ai/analyze-screenshot', upload.single('screenshot'), async (req, r
     const context = req.body.context || '';
 
     const { getGenerativeModel, extractText } = require('../services/geminiClient');
+    // 強制 Flash:Pro 在 vision + JSON 任務 latency 跨前端 timeout 邊界,且 thinking 浪費
     const flashRow = await db.prepare(
-      `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
+      `SELECT api_model FROM llm_models
+       WHERE model_role='chat' AND is_active=1 AND provider_type='gemini'
+         AND LOWER(api_model) LIKE '%flash%'
+       ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
     // 走 AI Studio:Vertex gRPC payload 上限 ~4MB,screenshot base64 常超限。
     const model = getGenerativeModel({
@@ -6064,8 +6068,12 @@ router.post('/ai/batch-analyze', upload.array('screenshots', 50), async (req, re
     if (files.length === 0) return res.status(400).json({ error: '需提供截圖檔案' });
 
     const { getGenerativeModel, extractText } = require('../services/geminiClient');
+    // 強制 Flash:Pro 在 vision + JSON 任務 latency 跨前端 timeout 邊界,且 thinking 浪費
     const flashRow = await db.prepare(
-      `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
+      `SELECT api_model FROM llm_models
+       WHERE model_role='chat' AND is_active=1 AND provider_type='gemini'
+         AND LOWER(api_model) LIKE '%flash%'
+       ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
     // 走 AI Studio:Vertex gRPC payload 上限 ~4MB,screenshot base64 常超限。
     const model = getGenerativeModel({
@@ -6375,8 +6383,12 @@ router.post('/recording/:sessionId/analyze-step/:stepId', async (req, res) => {
       modelName = setting?.value || null;
     }
     if (!modelName) {
+      // 強制 Flash:Pro 在 vision + JSON 任務 latency 跨前端 timeout 邊界,thinking 浪費
       const flashRow = await db.prepare(
-        `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
+        `SELECT api_model FROM llm_models
+         WHERE model_role='chat' AND is_active=1 AND provider_type='gemini'
+           AND LOWER(api_model) LIKE '%flash%'
+         ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
       ).get();
       modelName = flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview';
     }
@@ -6470,8 +6482,12 @@ router.post('/recording/:sessionId/analyze', async (req, res) => {
     ).all(req.params.sessionId);
 
     const { getGenerativeModel, extractText } = require('../services/geminiClient');
+    // 強制 Flash:Pro 在 vision + JSON 任務 latency 跨前端 timeout 邊界,且 thinking 浪費
     const flashRow = await db.prepare(
-      `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
+      `SELECT api_model FROM llm_models
+       WHERE model_role='chat' AND is_active=1 AND provider_type='gemini'
+         AND LOWER(api_model) LIKE '%flash%'
+       ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
     // 走 AI Studio:Vertex gRPC payload 上限 ~4MB,screenshot base64 常超限。
     const model = getGenerativeModel({
@@ -7682,18 +7698,32 @@ document.addEventListener('click',function(e){
 // ═══════════════════════════════════════════════════════════════════════════════
 
 router.post('/slides/:sid/ai-analyze', async (req, res) => {
+  const t0 = Date.now();
+  const tag = `[AiAnalyzeSlide pod=${POD} sid=${req.params.sid}]`;
   try {
     const slide = await db.prepare('SELECT * FROM course_slides WHERE id=?').get(req.params.sid);
-    if (!slide) return res.status(404).json({ error: '投影片不存在' });
+    if (!slide) {
+      console.warn(`${tag} SKIP: slide not found`);
+      return res.status(404).json({ error: '投影片不存在' });
+    }
 
     const check = await verifyLessonAccess(slide.lesson_id, req.user, true);
-    if (check.error) return res.status(check.status).json({ error: check.error });
+    if (check.error) {
+      console.warn(`${tag} SKIP: access denied (${check.error})`);
+      return res.status(check.status).json({ error: check.error });
+    }
 
     // Parse content_json to find the image block
     let blocks;
-    try { blocks = JSON.parse(slide.content_json || '[]'); } catch { return res.status(400).json({ error: 'Invalid content_json' }); }
+    try { blocks = JSON.parse(slide.content_json || '[]'); } catch {
+      console.warn(`${tag} SKIP: invalid content_json`);
+      return res.status(400).json({ error: 'Invalid content_json' });
+    }
     const imgBlock = blocks.find(b => (b.type === 'hotspot' || b.type === 'image') && (b.image || b.src));
-    if (!imgBlock) return res.status(400).json({ error: '投影片無截圖' });
+    if (!imgBlock) {
+      console.warn(`${tag} SKIP: no image block in slide`);
+      return res.status(400).json({ error: '投影片無截圖' });
+    }
 
     const imgUrl = imgBlock.image || imgBlock.src;
     let filePath = path.join(uploadDir, imgUrl.replace('/api/training/files/', ''));
@@ -7701,9 +7731,13 @@ router.post('/slides/:sid/ai-analyze', async (req, res) => {
       const alt = path.join(altUploadDir, imgUrl.replace('/api/training/files/', ''));
       if (fs.existsSync(alt)) filePath = alt;
     }
-    if (!fs.existsSync(filePath)) return res.status(400).json({ error: '截圖檔案不存在' });
+    if (!fs.existsSync(filePath)) {
+      console.warn(`${tag} SKIP: file not found ${filePath}`);
+      return res.status(400).json({ error: '截圖檔案不存在' });
+    }
 
     const imageBase64 = fs.readFileSync(filePath).toString('base64');
+    console.log(`${tag} START block_type=${imgBlock.type} annotations=${(imgBlock.annotations || []).length} image_bytes=${imageBase64.length}`);
 
     // Build annotation prompt from existing annotations
     let annotationPrompt = '';
@@ -7720,7 +7754,7 @@ router.post('/slides/:sid/ai-analyze', async (req, res) => {
       }
     }
 
-    // AI model selection
+    // AI model selection — 強制 Flash(Pro 在 vision + JSON 任務 latency 跨前端 timeout 邊界)
     const { getGenerativeModel, extractText } = require('../services/geminiClient');
     let modelName = req.body.model || null;
     if (!modelName) {
@@ -7728,13 +7762,22 @@ router.post('/slides/:sid/ai-analyze', async (req, res) => {
       modelName = setting?.value || null;
     }
     if (!modelName) {
+      // 過濾 LIKE '%flash%' — 避 sort_order 第一名是 Pro 的時候誤抓
       const flashRow = await db.prepare(
-        `SELECT api_model FROM llm_models WHERE model_role='chat' AND is_active=1 AND provider_type='gemini' ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
+        `SELECT api_model FROM llm_models
+         WHERE model_role='chat' AND is_active=1 AND provider_type='gemini'
+           AND LOWER(api_model) LIKE '%flash%'
+         ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
       ).get();
       modelName = flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview';
     }
     // 走 AI Studio:Vertex gRPC payload 上限 ~4MB,screenshot base64 常超限。
-    const model = getGenerativeModel({ model: modelName, provider: 'studio' });
+    // JSON mode 強制純 JSON,避 Gemini 偶爾掺雜說明文字導致 JSON.parse 炸。
+    const model = getGenerativeModel({
+      model: modelName,
+      provider: 'studio',
+      generationConfig: { responseMimeType: 'application/json' },
+    });
 
     const prompt = `分析這張系統操作截圖。${annotationPrompt}
 識別所有可互動 UI 元素，回傳 JSON：
@@ -7743,13 +7786,37 @@ router.post('/slides/:sid/ai-analyze', async (req, res) => {
 注意：coords 的 x, y, w, h 必須是百分比 (0-100)，相對於圖片寬高。
 只回傳 JSON。`;
 
-    const result = await model.generateContent([
-      { inlineData: { mimeType: 'image/png', data: imageBase64 } },
-      { text: prompt }
-    ]);
-    const text = extractText(result);
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+    // Retry 一次（網路 glitch / 模型偶發 formatting issue）
+    const MAX_ATTEMPTS = 2;
+    let parsed = null;
+    let lastErr = null;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS && !parsed; attempt++) {
+      const tGemini = Date.now();
+      console.log(`${tag} calling Gemini model=${modelName} attempt=${attempt}/${MAX_ATTEMPTS}`);
+      try {
+        const result = await model.generateContent([
+          { inlineData: { mimeType: 'image/png', data: imageBase64 } },
+          { text: prompt }
+        ]);
+        const text = extractText(result);
+        const geminiMs = Date.now() - tGemini;
+        const jsonText = text.trim().startsWith('{') ? text.trim() : (text.match(/\{[\s\S]*\}/)?.[0] || '');
+        if (!jsonText) {
+          console.warn(`${tag} attempt=${attempt} Gemini returned NO JSON (${geminiMs}ms). text_preview="${(text || '').slice(0, 200)}"`);
+          lastErr = new Error('no_json_in_response');
+          continue;
+        }
+        parsed = JSON.parse(jsonText);
+        console.log(`${tag} attempt=${attempt} Gemini OK (${geminiMs}ms) regions_raw=${(parsed.regions || []).length}`);
+      } catch (e) {
+        lastErr = e;
+        console.warn(`${tag} attempt=${attempt} Gemini FAILED (${Date.now() - tGemini}ms): ${e.message}`);
+      }
+    }
+    if (!parsed) {
+      console.error(`${tag} all ${MAX_ATTEMPTS} Gemini attempts failed. last_error=${lastErr?.message}`);
+      return res.status(502).json({ error: `AI 分析失敗:${lastErr?.message || 'Gemini 無回應'}` });
+    }
 
     // Normalize coordinates
     const sizeOf = require('image-size');
@@ -7814,6 +7881,7 @@ router.post('/slides/:sid/ai-analyze', async (req, res) => {
         .run(JSON.stringify(blocks), newSlideType, slide.id);
     }
 
+    console.log(`${tag} OK regions=${hotspotRegions.length} has_instruction=${!!parsed.instruction} has_narration=${!!parsed.narration} total=${Date.now() - t0}ms`);
     res.json({
       ok: true,
       instruction: parsed.instruction,
@@ -7822,7 +7890,7 @@ router.post('/slides/:sid/ai-analyze', async (req, res) => {
       block_index: blockIdx
     });
   } catch (e) {
-    console.error('[Training] slide ai-analyze:', e.message);
+    console.error(`${tag} ERROR (${Date.now() - t0}ms):`, e.stack || e.message);
     res.status(500).json({ error: e.message });
   }
 });

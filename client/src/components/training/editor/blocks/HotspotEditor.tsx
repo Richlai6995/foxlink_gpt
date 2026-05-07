@@ -235,7 +235,7 @@ export default function HotspotEditor({ block, onChange, courseId, slideId, bloc
       const res = await api.post('/training/ai/analyze-screenshot', {
         screenshot_url: block.image,
         context: block.instruction || ''
-      })
+      }, { timeout: 180000 })
       const data = res.data
       if (data.regions?.length > 0) {
         const newRegions: Region[] = data.regions.map((r: any, i: number) => ({
@@ -258,7 +258,13 @@ export default function HotspotEditor({ block, onChange, courseId, slideId, bloc
         onChange({ ...block, instruction: data.instruction })
       }
     } catch (e: any) {
-      alert(e.response?.data?.error || 'AI 分析失敗')
+      console.warn('[HotspotEditor] aiAnalyze failed:', {
+        code: e?.code,
+        status: e?.response?.status,
+        serverError: e?.response?.data?.error,
+        message: e?.message,
+      })
+      alert(e.response?.data?.error || e?.message || 'AI 分析失敗')
     } finally { setAiLoading(false) }
   }
 

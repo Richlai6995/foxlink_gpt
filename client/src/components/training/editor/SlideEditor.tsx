@@ -79,12 +79,18 @@ export default function SlideEditor({ slideId, courseId, slideList = [], onSlide
   const aiAnalyze = async () => {
     try {
       setAiAnalyzing(true)
-      const res = await api.post(`/training/slides/${slideId}/ai-analyze`, {}, { timeout: 30000 })
+      const res = await api.post(`/training/slides/${slideId}/ai-analyze`, {}, { timeout: 180000 })
       if (res.data.ok) {
         await loadSlide() // reload to get updated content
       }
     } catch (e: any) {
-      alert(e.response?.data?.error || 'AI 分析失敗')
+      console.warn('[SlideEditor] aiAnalyze failed:', {
+        code: e?.code,
+        status: e?.response?.status,
+        serverError: e?.response?.data?.error,
+        message: e?.message,
+      })
+      alert(e.response?.data?.error || e?.message || 'AI 分析失敗')
     } finally { setAiAnalyzing(false) }
   }
 
