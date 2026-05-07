@@ -125,10 +125,10 @@ async function resolveToolRefs(text, db, opts = {}) {
     const placeholder = m[0];
     try {
       const kb = await db.prepare(
-        `SELECT id, name FROM knowledge_bases WHERE UPPER(name)=UPPER(?) AND is_active=1 FETCH FIRST 1 ROWS ONLY`
+        `SELECT id, name FROM knowledge_bases WHERE UPPER(name)=UPPER(?) FETCH FIRST 1 ROWS ONLY`
       ).get(kbName);
       if (!kb) {
-        result = result.replace(placeholder, `[知識庫「${kbName}」不存在或未啟用]`);
+        result = result.replace(placeholder, `[知識庫「${kbName}」不存在]`);
         continue;
       }
       console.log(`[PromptResolver] KB search: "${kbName}" query="${query}"`);

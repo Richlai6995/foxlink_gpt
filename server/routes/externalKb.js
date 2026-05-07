@@ -69,14 +69,13 @@ router.get('/kb/list', async (req, res) => {
       rows = await db.prepare(`
         SELECT id, name, description, retrieval_mode, embedding_dims, created_at
         FROM knowledge_bases
-        WHERE is_active = 1 AND id IN (${placeholders})
+        WHERE id IN (${placeholders})
         ORDER BY name
       `).all(...req.allowedKbIds);
     } else {
       rows = await db.prepare(`
         SELECT id, name, description, retrieval_mode, embedding_dims, created_at
         FROM knowledge_bases
-        WHERE is_active = 1
         ORDER BY name
       `).all();
     }
@@ -92,7 +91,7 @@ async function getAccessibleKb(db, kbId, allowedKbIds) {
     return null;
   }
   return await db.prepare(`
-    SELECT * FROM knowledge_bases WHERE id = ? AND is_active = 1
+    SELECT * FROM knowledge_bases WHERE id = ?
   `).get(kbId);
 }
 
