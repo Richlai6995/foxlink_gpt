@@ -77,6 +77,11 @@ ENV NODE_ENV=production
 ENV DB_PATH=/app/data/system.db
 ENV UPLOAD_DIR=/app/uploads
 
+# Build-time version(同 image 所有 pod 共用,避免 K8s 多 pod 環境下 /api/version
+# 因 HOSTNAME 不同各回不一樣,造成 client 一直彈「新版本」toast)
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
+
 EXPOSE 3007
 
 CMD ["node", "server.js"]

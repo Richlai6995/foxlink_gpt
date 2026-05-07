@@ -13,8 +13,11 @@ FULL_IMAGE="${REGISTRY}/${IMAGE}:${TAG}"
 NAMESPACE="foxlink"
 DEPLOY="foxlink-gpt"
 
-echo "▶ Building: ${FULL_IMAGE}"
-docker build -t "${FULL_IMAGE}" .
+# Build-time version — 同 image 全 pod 共用,client 端 /api/version polling 才會穩定
+APP_VERSION="$(git rev-parse --short HEAD 2>/dev/null || date -u +%Y%m%d%H%M%S)"
+
+echo "▶ Building: ${FULL_IMAGE}  (APP_VERSION=${APP_VERSION})"
+docker build --build-arg APP_VERSION="${APP_VERSION}" -t "${FULL_IMAGE}" .
 
 echo "▶ Pushing to registry: ${FULL_IMAGE}"
 docker push "${FULL_IMAGE}"

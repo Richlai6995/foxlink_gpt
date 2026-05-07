@@ -123,12 +123,13 @@ app.use('/uploads', express.static(UPLOAD_DIR, {
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
-// /api/version — server 啟動時抓 docker tag / git commit,client 用此偵測新版需重整
-// 邏輯:每次 docker build 啟動會有新時間戳,client 每 5 分鐘 poll 一次,版本變了就觸發 toast
+// /api/version — client 用此偵測新版需重整
+// ⚠️ K8s 多 pod 環境必須用 build-time 固定值,不能用 HOSTNAME / Date.now() 因為
+//    每個 pod 都不同,client poll 會 round-robin 到不同 pod 看到不同版本 → 一直彈 toast
+// APP_VERSION 由 deploy.sh 在 docker build 時帶 --build-arg APP_VERSION=$(git rev-parse --short HEAD)
 const APP_VERSION = process.env.APP_VERSION
   || process.env.GIT_COMMIT
-  || process.env.HOSTNAME // K8s pod name 變了也算一個 signal
-  || String(Date.now()); // 最終 fallback:啟動時間(每次重啟都不同)
+  || 'dev';
 app.get('/api/version', (req, res) => {
   res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.json({ version: APP_VERSION, ts: new Date().toISOString() });
