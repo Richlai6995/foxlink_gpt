@@ -92,6 +92,133 @@ module.exports = [
       },
       {
         type: 'subsection',
+        title: '手機 / 平板 用主畫面開啟(PWA,推薦)',
+        blocks: [
+          { type: 'para', text: 'Cortex 是 PWA(Progressive Web App),**加到主畫面後可像 native App 一樣開啟**,沒有瀏覽器網址列,有自己的 icon、全螢幕體驗,還支援自動更新通知。是手機使用者建議的方式。' },
+          {
+            type: 'subsection',
+            title: 'iPhone / iPad(Safari)',
+            blocks: [
+              {
+                type: 'steps',
+                items: [
+                  { title: '用 **Safari 瀏覽器**開啟 Cortex 網址(Chrome / 其他瀏覽器不支援加入主畫面)' },
+                  { title: '點底部中央的「分享」圖示(向上箭頭方框)' },
+                  { title: '下滑找到「**加入主畫面**」(Add to Home Screen),點選' },
+                  { title: '右上角點「加入」確認', desc: '可改名稱(預設「Cortex」)' },
+                  { title: '回主畫面點 Cortex icon 即可啟動,無 Safari 工具列、全螢幕體驗' },
+                ],
+              },
+              { type: 'tip', text: '**首次開啟 Cortex 在 Safari 時會自動跳出藍色教學提示框**告訴你怎麼加入主畫面,點「看詳細步驟」即可展開逐步說明。' },
+            ],
+          },
+          {
+            type: 'subsection',
+            title: 'Android(Chrome)',
+            blocks: [
+              { type: 'para', text: '**Chrome 會自動偵測並彈出「安裝應用程式」提示框**,點「安裝」即可加到主畫面。如果沒看到提示:' },
+              {
+                type: 'steps',
+                items: [
+                  { title: '點右上角三個點 ⋮ 選單' },
+                  { title: '選「**安裝應用程式**」或「加到主畫面」' },
+                  { title: '確認名稱後點「安裝」' },
+                ],
+              },
+            ],
+          },
+          { type: 'note', text: '**新版本通知**:當 IT 部署新功能,Cortex 會在右下角彈出「新版本可用」通知,點「更新」即可拿到最新版,**不需要清 cache 或重灌**。如果某次更新後沒看到新功能,通知 5 分鐘內會自動彈出,點一下即可。' },
+        ],
+      },
+      {
+        type: 'subsection',
+        title: '快速登入(Face ID / Touch ID / 指紋 / Windows Hello)',
+        blocks: [
+          { type: 'para', text: '綁定後可用本機生物辨識**直接登入,不用打密碼**。資料只在裝置本機驗證,系統僅儲存公鑰(passkey 標準 / WebAuthn),即使 Cortex DB 被入侵也無法重建您的指紋 / 臉孔。' },
+          {
+            type: 'subsection',
+            title: '第一次啟用',
+            blocks: [
+              {
+                type: 'steps',
+                items: [
+                  { title: '正常用帳密 / SSO 完成第一次登入(可能要過 Webex MFA)' },
+                  { title: '登入完成後系統會彈出「**啟用快速登入**」對話框', desc: '若您按「稍後再說」,7 天內不會再彈;手動啟用走下面步驟' },
+                  { title: '點「**立即啟用**」,系統觸發手機 / 電腦的生物辨識提示' },
+                  { title: '完成 Face ID / 指紋 驗證,綁定完成', desc: '裝置會以「iPhone / Android / Mac / Windows」等名稱記在「我的裝置」' },
+                ],
+              },
+              { type: 'tip', text: '**手動啟用入口**:左下角狀態列點「我的裝置 / 快速登入」(手機:右上 ⚙ 選單 → 我的裝置 / 快速登入)→ 在「快速登入(Face ID / 指紋)」區塊按「**綁定當前裝置**」。' },
+            ],
+          },
+          {
+            type: 'subsection',
+            title: '下次登入流程',
+            blocks: [
+              {
+                type: 'steps',
+                items: [
+                  { title: '進到登入頁,密碼欄上方會多一個**綠色「使用 Face ID / 指紋登入」按鈕**', desc: '只在當前裝置支援且綁過時才出現' },
+                  { title: '點該按鈕,系統觸發 Face ID / 指紋' },
+                  { title: '驗證通過直接進入 Cortex,**不用打帳密、也不用 Webex 驗證碼**' },
+                ],
+              },
+              { type: 'note', text: '**通過 Face ID = 等同已通過 MFA**:passkey 本身已是「裝置擁有 + 生物辨識」雙因素,系統認為足夠強度,免再走 Webex 驗證碼。' },
+            ],
+          },
+          {
+            type: 'subsection',
+            title: '管理已綁定裝置',
+            blocks: [
+              { type: 'para', text: '在「我的裝置」頁面的「快速登入(Face ID / 指紋)」區塊可看到所有綁定:' },
+              {
+                type: 'list',
+                items: [
+                  '**裝置名稱**(自動推測,如 iPhone / Android / Mac / Windows)',
+                  '**綁定時間 / 最後使用時間**(最後使用很久沒更新代表沒在用,可考慮移除)',
+                  '右側 🗑️ 移除按鈕 — 移除後該裝置下次登入需重走帳密 + MFA',
+                ],
+              },
+            ],
+          },
+          {
+            type: 'subsection',
+            title: '何時需要移除快速登入裝置',
+            blocks: [
+              {
+                type: 'list',
+                items: [
+                  '**手機 / 電腦遺失或失竊** — 立即移除避免他人用您的生物辨識登入',
+                  '**換新手機 / 筆電前** — 移除舊裝置(passkey 不會跟著 iCloud / Google 帳號搬到新裝置 — 新裝置要重新綁定)',
+                  '**懷疑帳號被盜** — 一併走「我的裝置」底部的「移除所有裝置」+ 立刻改密碼',
+                ],
+              },
+              { type: 'note', text: '**遺失裝置但還能登入**:用其他綁定裝置或帳密登入後從「我的裝置」移除遺失那台。**完全進不去**:聯絡 IT 部門,管理員可在後台直接重置您所有綁定。' },
+            ],
+          },
+          {
+            type: 'subsection',
+            title: '綁定失敗排錯(Android)',
+            blocks: [
+              { type: 'para', text: '**Android 手機若出現以下錯誤** 多半是手機本身設定問題,可逐項檢查:' },
+              {
+                type: 'list',
+                items: [
+                  '**錯誤:「與 Android Credential Manager 通訊失敗 / unknown error」**',
+                  '➤ ① 手機是否設了螢幕鎖定:**設定 → 安全性 → 螢幕鎖定** 設 PIN / 圖形 / 指紋。沒設 lock screen 不能存 passkey',
+                  '➤ ② Google Password Manager 是否啟用:**設定 → 密碼、密鑰與帳戶** 確認 Google 為 default provider',
+                  '➤ ③ Google Play 服務需更新:Play Store → 我的應用程式 → 更新「Google Play 服務」',
+                  '➤ ④ 重啟手機後再試一次',
+                ],
+              },
+              { type: 'note', text: '**iOS 通常無此問題**(iCloud Keychain 預設啟用)。Android < 13 用舊 FIDO2 API,不會踩到 Credential Manager 問題。' },
+              { type: 'tip', text: '即使生物辨識綁定失敗,**完全不影響正常登入** — 您仍可走帳密 + Webex/Email 驗證碼,通過後同裝置免重認。生物辨識只是 UX 加速,不是必要。' },
+            ],
+          },
+        ],
+      },
+      {
+        type: 'subsection',
         title: '外網登入 — 二階段驗證(Webex MFA)',
         blocks: [
           { type: 'para', text: '若您**從公司外網**(出差、家用、行動網路)連線 Cortex,系統會在帳密驗證通過後,**多走一道驗證碼確認**。內網(辦公室 / 廠區)使用者完全無感,流程跟過去一致。' },
@@ -152,25 +279,6 @@ module.exports = [
             blocks: [
               { type: 'para', text: '當您「修改密碼」或透過 Email 連結「重設密碼」時,系統會**自動清空所有信任裝置 + 踢掉所有現有登入 session**(只保留當前這個改密碼的視窗)。下次外網登入無論哪台裝置都需重新走 Webex 驗證碼。' },
               { type: 'tip', text: '這是密碼洩漏後的第一道補救:即使攻擊者拿到舊密碼 + 舊裝置 cookie,改密碼瞬間全部失效。' },
-            ],
-          },
-          {
-            type: 'subsection',
-            title: '快速登入(Face ID / 指紋)綁定失敗排錯',
-            blocks: [
-              { type: 'para', text: '在「我的信任裝置」按「綁定當前裝置」進行 Face ID / 指紋註冊時,**Android 手機若出現以下錯誤** 多半是手機本身設定問題,可逐項檢查:' },
-              {
-                type: 'list',
-                items: [
-                  '**錯誤:「與 Android Credential Manager 通訊失敗 / unknown error」**',
-                  '➤ ① 手機是否設了螢幕鎖定:**設定 → 安全性 → 螢幕鎖定** 設 PIN / 圖形 / 指紋。沒設 lock screen 不能存 passkey',
-                  '➤ ② Google Password Manager 是否啟用:**設定 → 密碼、密鑰與帳戶** 確認 Google 為 default provider',
-                  '➤ ③ Google Play 服務需更新:Play Store → 我的應用程式 → 更新「Google Play 服務」',
-                  '➤ ④ 重啟手機後再試一次',
-                ],
-              },
-              { type: 'note', text: '**iOS 通常無此問題**(iCloud Keychain 預設啟用)。Android < 13 也用舊 FIDO2 API,不會踩到 Credential Manager 問題。' },
-              { type: 'tip', text: '即使生物辨識綁定失敗,**完全不影響正常登入** — 您仍可走帳密 + Webex/Email 驗證碼,通過後 30 天內同裝置免重認。生物辨識只是 UX 加速,不是必要。' },
             ],
           },
         ],
