@@ -229,11 +229,14 @@ router.post('/auth/verify', async (req, res) => {
     if (!credentialID) return res.status(400).json({ error: 'missing credential id' });
 
     // 找 credential
-    // 注意:Oracle 對 explicit SELECT 含 u.role 在某些 driver 版本下會炸 ORA-00923
-    // (跟 MODE 那次教訓一樣)— 直接 alias 成 user_role 避坑,id/user_id 也 alias 防 ambiguous
+    // ⚠️ Oracle reserved keywords / pseudocolumn 雷區:
+    //   - u.role       → role 是 unreserved keyword,某些 driver 炸 ORA-00923
+    //   - u.id AS uid  → UID 是 Oracle pseudocolumn(SELECT UID FROM dual 內建)
+    //                    用作 alias parser 直接炸 ORA-00923
+    // 全部 alias 用安全名字避坑(跟 MODE / role 同類教訓)
     const credRow = await db.prepare(
-      `SELECT c.id AS cred_pk, c.user_id, c.credential_id, c.public_key, c.sign_count, c.transports,
-              u.id AS uid, u.username, u.role AS user_role, u.status AS user_status
+      `SELECT c.id AS cred_pk, c.user_id AS owner_id, c.credential_id, c.public_key, c.sign_count, c.transports,
+              u.username, u.role AS user_role, u.status AS user_status
        FROM user_credentials c
        JOIN users u ON u.id = c.user_id
        WHERE c.credential_id = ?`
@@ -267,7 +270,7 @@ router.post('/auth/verify', async (req, res) => {
     ).run(newCounter, credRow.cred_pk);
 
     // 簽 session token — 跟密碼登入相同流程
-    const userRow = await db.prepare(`SELECT * FROM users WHERE id = ?`).get(credRow.uid);
+    const userRow = await db.prepare(`SELECT * FROM users WHERE id = ?`).get(credRow.owner_id);
     if (!userRow) return res.status(400).json({ error: 'user not found' });
 
     const { buildSessionPayload } = require('../services/sessionBuilder');
