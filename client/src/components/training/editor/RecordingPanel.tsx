@@ -631,7 +631,7 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
             setSteps(prev => prev.map(st => st.id === `server_${s.id}` ? { ...st, status: 'analyzing' } : st))
             try {
               await api.post(`/training/recording/${sid}/analyze-step/${s.id}`,
-                selectedModel ? { model: selectedModel } : {}, { timeout: 60000 })
+                selectedModel ? { model: selectedModel } : {}, { timeout: 180000 })
               setSteps(prev => prev.map(st => st.id === `server_${s.id}` ? { ...st, status: 'done' } : st))
             } catch (err) {
               console.warn(`[processAll] analyze step ${s.id} failed:`, err)
@@ -704,8 +704,15 @@ export default function RecordingPanel({ courseId, lessonId, onComplete, onClose
             const s = uploadedSteps[myIdx]
             try {
               await api.post(`/training/recording/${processingSessionId}/analyze-step/${s.id}`,
-                selectedModel ? { model: selectedModel } : {}, { timeout: 60000 })
-            } catch { console.warn(`analyze step ${s.id} failed, continuing...`) }
+                selectedModel ? { model: selectedModel } : {}, { timeout: 180000 })
+            } catch (err: any) {
+              console.warn(`analyze step ${s.id} failed:`, {
+                code: err?.code,
+                status: err?.response?.status,
+                serverError: err?.response?.data?.error,
+                message: err?.message,
+              })
+            }
             ulDone++
             setProcessProgress({ current: steps.length + ulDone, total: steps.length * 2 + 1 })
           }

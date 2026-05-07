@@ -32,7 +32,7 @@ function fmt(ts: string | null) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-function relativeTime(ts: string | null, t: (k: string, d?: string) => string) {
+function relativeTime(ts: string | null, t: (k: string, d?: any) => string) {
   if (!ts) return '—'
   const diff = Date.now() - new Date(ts).getTime()
   if (isNaN(diff)) return ts
