@@ -5,6 +5,7 @@ import api from '../lib/api'
 import { useTranslation } from 'react-i18next'
 import i18n, { SUPPORTED_LANGUAGES, type LangCode } from '../i18n'
 import { isWebAuthnSupported, isPlatformBiometricAvailable, loginWithPasskey } from '../lib/webauthn'
+import { useDeviceProfile } from '../hooks/useDeviceProfile'
 
 type Step = 'credentials' | 'otp'
 
@@ -20,6 +21,7 @@ export default function Login() {
   const [showLangMenu, setShowLangMenu] = useState(false)
   const [biometricSupported, setBiometricSupported] = useState(false)
   const [biometricLoading, setBiometricLoading] = useState(false)
+  const { isMobile } = useDeviceProfile()
 
   // Login options(server 端判斷是否內網 + SSO 是否該顯示)
   const [ssoVisible, setSsoVisible] = useState(false)
@@ -452,8 +454,9 @@ export default function Login() {
             </div>
           )}
 
-          {/* 生物辨識登入(Face ID / 指紋 / Windows Hello)*/}
-          {biometricSupported && (
+          {/* 生物辨識登入 — 只在手機顯示。桌機 user 即使裝了 Windows Hello,
+              在登入頁也少用 passkey;主要 UX 場景是手機 Face ID / Touch ID */}
+          {biometricSupported && isMobile && (
             <button
               type="button"
               onClick={handleBiometricLogin}
