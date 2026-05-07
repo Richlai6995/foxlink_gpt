@@ -164,6 +164,8 @@
     "ssoButton": "Foxlink SSO 登入",
     "ssoLoading": "SSO 登入中...",
     "externalNoSso": "外網不支援 SSO 登入,請使用帳號密碼。完成驗證後 30 天內同裝置免重認。",
+    "resetCache": "畫面異常?清除 cache 重新載入",
+    "resetCacheConfirm": "將清除瀏覽器 cache 並重新載入畫面。確定?",
     "biometricButton": "使用 Face ID / 指紋登入",
     "biometricLoading": "驗證中...",
     "loginHintTitle": "請用以下方法登入",

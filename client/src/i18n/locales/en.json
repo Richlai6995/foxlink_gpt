@@ -164,6 +164,8 @@
     "ssoButton": "Foxlink SSO Login",
     "ssoLoading": "SSO logging in...",
     "externalNoSso": "SSO is disabled on external networks. Please use your username/password. Same device is trusted for 30 days after verification.",
+    "resetCache": "Blank screen? Clear cache and reload",
+    "resetCacheConfirm": "This will clear browser cache and reload the page. Continue?",
     "biometricButton": "Sign in with Face ID / Fingerprint",
     "biometricLoading": "Verifying...",
     "loginHintTitle": "Please sign in using one of the following methods",

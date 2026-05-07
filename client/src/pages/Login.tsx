@@ -469,6 +469,22 @@ export default function Login() {
                 : t('login.biometricButton', '使用 Face ID / 指紋登入')}
             </button>
           )}
+
+          {/* 緊急逃生門 — 畫面異常(部署新版後 PWA cache 卡舊版)時用 */}
+          <div className="text-center mt-5">
+            <button
+              type="button"
+              onClick={async () => {
+                if (!confirm(t('login.resetCacheConfirm',
+                  '將清除瀏覽器 cache 並重新載入畫面。確定?'))) return
+                const { clearSwAndCachesAndReload } = await import('../lib/swReset')
+                clearSwAndCachesAndReload('manual-login')
+              }}
+              className="text-slate-600 hover:text-slate-400 text-[11px] underline"
+            >
+              {t('login.resetCache', '畫面異常?清除 cache 重新載入')}
+            </button>
+          </div>
           </>
           )}
         </div>

@@ -164,6 +164,8 @@
     "ssoButton": "Đăng nhập Foxlink SSO",
     "ssoLoading": "Đang đăng nhập SSO...",
     "externalNoSso": "SSO không khả dụng từ mạng ngoài. Vui lòng dùng tài khoản/mật khẩu. Thiết bị được tin cậy 30 ngày sau khi xác thực.",
+    "resetCache": "Màn hình trống? Xóa cache và tải lại",
+    "resetCacheConfirm": "Sẽ xóa cache trình duyệt và tải lại trang. Tiếp tục?",
     "biometricButton": "Đăng nhập bằng Face ID / Vân tay",
     "biometricLoading": "Đang xác minh...",
     "loginHintTitle": "Vui lòng đăng nhập bằng một trong các phương thức sau",
