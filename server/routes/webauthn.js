@@ -229,14 +229,17 @@ router.post('/auth/verify', async (req, res) => {
     if (!credentialID) return res.status(400).json({ error: 'missing credential id' });
 
     // 找 credential
+    // 注意:Oracle 對 explicit SELECT 含 u.role 在某些 driver 版本下會炸 ORA-00923
+    // (跟 MODE 那次教訓一樣)— 直接 alias 成 user_role 避坑,id/user_id 也 alias 防 ambiguous
     const credRow = await db.prepare(
-      `SELECT c.*, u.id AS uid, u.username, u.role, u.status
+      `SELECT c.id AS cred_pk, c.user_id, c.credential_id, c.public_key, c.sign_count, c.transports,
+              u.id AS uid, u.username, u.role AS user_role, u.status AS user_status
        FROM user_credentials c
        JOIN users u ON u.id = c.user_id
        WHERE c.credential_id = ?`
     ).get(credentialID);
     if (!credRow) return res.status(400).json({ error: '此裝置未綁定任何帳號' });
-    if (credRow.status === 'inactive') return res.status(403).json({ error: '帳號已停用' });
+    if (credRow.user_status === 'inactive') return res.status(403).json({ error: '帳號已停用' });
 
     const publicKey = Uint8Array.from(Buffer.from(credRow.public_key, 'base64'));
     const verification = await verifyAuthenticationResponse({
@@ -261,7 +264,7 @@ router.post('/auth/verify', async (req, res) => {
     const newCounter = verification.authenticationInfo?.newCounter ?? credRow.sign_count;
     await db.prepare(
       `UPDATE user_credentials SET sign_count = ?, last_used_at = SYSTIMESTAMP WHERE id = ?`
-    ).run(newCounter, credRow.id);
+    ).run(newCounter, credRow.cred_pk);
 
     // 簽 session token — 跟密碼登入相同流程
     const userRow = await db.prepare(`SELECT * FROM users WHERE id = ?`).get(credRow.uid);
