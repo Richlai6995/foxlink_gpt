@@ -340,7 +340,6 @@ async function runTranscribeJob(db, jobId) {
     // 7. 更新 placeholder chat_message
     if (job.message_id) {
       try {
-        const okCount = segments.filter(s => s.ok).length;
         const summary = finalStatus === 'done'
           ? `✅ 音訊轉錄完成:${job.audio_filename}\n📄 共 ${merged.length.toLocaleString()} 字 / ${segments.length} 段\n⬇ 點選附件下載完整逐字稿`
           : `❌ 音訊轉錄失敗:${job.audio_filename}\n${finalError}`;
@@ -354,6 +353,40 @@ async function runTranscribeJob(db, jobId) {
       } catch (e) {
         console.warn(`[TranscribeJob] ${tagId} update chat_message ${job.message_id} failed: ${e.message}`);
       }
+    }
+
+    // 8. 推 user_notifications(鈴鐺/toast 跨 tab/session 通知)
+    try {
+      const userNotificationService = require('./userNotificationService');
+      const linkUrl = job.session_id ? `/chat/${job.session_id}` : null;
+      if (finalStatus === 'done') {
+        await userNotificationService.create(db, {
+          userId: job.user_id,
+          type: userNotificationService.TYPE_TRANSCRIBE_JOB_DONE,
+          title: `音訊轉錄完成:${job.audio_filename}`,
+          message: `共 ${merged.length.toLocaleString()} 字 / ${segments.length} 段,點此查看`,
+          linkUrl,
+          payload: {
+            jobId,
+            sessionId: job.session_id,
+            messageId: job.message_id,
+            transcriptFile: txtFname,
+            chars: merged.length,
+            segments: segments.length,
+          },
+        });
+      } else {
+        await userNotificationService.create(db, {
+          userId: job.user_id,
+          type: userNotificationService.TYPE_TRANSCRIBE_JOB_FAILED,
+          title: `音訊轉錄失敗:${job.audio_filename}`,
+          message: finalError || 'unknown error',
+          linkUrl,
+          payload: { jobId, sessionId: job.session_id, error: finalError },
+        });
+      }
+    } catch (e) {
+      console.warn(`[TranscribeJob] ${tagId} push user_notification failed: ${e.message}`);
     }
 
   } catch (e) {

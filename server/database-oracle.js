@@ -1265,6 +1265,33 @@ async function runMigrations(db) {
   await safeCreateTranscribeIdx('IDX_TRANSJOBS_RECOVERY',    'CREATE INDEX idx_transjobs_recovery ON transcribe_jobs(status, heartbeat_at)');
   await safeCreateTranscribeIdx('IDX_TRANSJOBS_SESSION',     'CREATE INDEX idx_transjobs_session ON transcribe_jobs(session_id)');
 
+  // ── 通用個人通知 user_notifications(per-user toast/鈴鐺通知)──────────────
+  // 跟 announcements(廣播公告)正交,跟 feedback_notifications(綁 ticket)解耦。
+  // 設計給「個人 background job 完成」「系統訊息」「未來各 service 推送」共用。
+  // 設計文件:docs/long-audio-background-job-plan.md(P4a)
+  await createTable('USER_NOTIFICATIONS', `CREATE TABLE user_notifications (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id       NUMBER NOT NULL,
+    type          VARCHAR2(50) NOT NULL,           -- transcribe_job_done | transcribe_job_failed | <future types>
+    title         VARCHAR2(500) NOT NULL,
+    message       CLOB,                            -- markdown 支援
+    link_url      VARCHAR2(1000),                  -- 點擊跳轉 URL(內部 path,例 /chat/<sessionId>)
+    payload_json  CLOB,                            -- type-specific 結構化資料(jobId、檔名等)
+    is_read       NUMBER(1) DEFAULT 0,             -- 鈴鐺紅點計算用
+    is_dismissed  NUMBER(1) DEFAULT 0,             -- user 按掉(從 list 移除)
+    created_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
+    read_at       TIMESTAMP
+  )`);
+
+  // user_notifications 索引
+  const safeCreateUserNotifIdx = async (name, ddl) => {
+    try { await db.prepare(ddl).run(); } catch (e) {
+      if (!e.message?.includes('ORA-00955')) console.warn(`[Migration] index ${name}: ${e.message}`);
+    }
+  };
+  await safeCreateUserNotifIdx('IDX_USER_NOTIF_USER_READ', 'CREATE INDEX idx_user_notif_user_read ON user_notifications(user_id, is_read, is_dismissed)');
+  await safeCreateUserNotifIdx('IDX_USER_NOTIF_CREATED',   'CREATE INDEX idx_user_notif_created ON user_notifications(user_id, created_at DESC)');
+
   // ── AI 戰情 ─────────────────────────────────────────────────────────────────
   await addCol('USERS', 'CAN_DESIGN_AI_SELECT', 'NUMBER(1)');
   await addCol('USERS', 'CAN_USE_AI_DASHBOARD',  'NUMBER(1)');

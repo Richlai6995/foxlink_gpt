@@ -197,6 +197,8 @@ app.get('/api/version', (req, res) => {
     console.log('[Route] /api/help OK');
     app.use('/api/announcements', require('./routes/announcements'));
     console.log('[Route] /api/announcements OK');
+    app.use('/api/notifications', require('./routes/notifications'));
+    console.log('[Route] /api/notifications OK');
     app.use('/api/training', require('./routes/training'));
     console.log('[Route] /api/training OK');
     app.use('/api/feedback', require('./routes/feedback'));
