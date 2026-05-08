@@ -1386,7 +1386,37 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
             ? await transcribeLongAudio(filePath, mimeType)
             : await transcribeAudio(filePath, mimeType);
           const transcription = transcribeResult.text;
-          combinedUserText += `\n\n[音訊轉錄: ${originalName}]\n${transcription}`;
+
+          // 長 transcription(>10000 chars)寫 .txt 附件 + chat input 用 stub
+          // 為什麼:LLM 拿到完整 30k token 逐字稿後一定 summarize 成幾百 token 短回應(實測 out=449),
+          // user 體驗就是「漏了很多」。改成生成 .txt 讓 user 可下載完整稿,LLM 只需簡短回覆。
+          // history 裡仍保留完整 transcription 給後續對話用。
+          const TRANSCRIPT_FILE_THRESHOLD = 10000;
+          let transcriptFileMeta = null;
+          if (transcription.length > TRANSCRIPT_FILE_THRESHOLD) {
+            try {
+              const generatedDir = path.join(UPLOAD_DIR, 'generated');
+              if (!fs.existsSync(generatedDir)) fs.mkdirSync(generatedDir, { recursive: true });
+              const safeBase = originalName.replace(/\.[^.]+$/, '').replace(/[^\w一-龥\-]/g, '_').slice(0, 50);
+              const txtFname = `transcript_${safeBase}_${Date.now()}.txt`;
+              const txtPath = path.join(generatedDir, txtFname);
+              const header = `音訊逐字稿\n檔案: ${originalName}\n時間: ${new Date().toISOString()}\n字數: ${transcription.length}\n${'='.repeat(60)}\n\n`;
+              fs.writeFileSync(txtPath, header + transcription, 'utf-8');
+              transcriptFileMeta = { type: 'text', filename: txtFname, publicUrl: `/uploads/generated/${txtFname}` };
+              sendEvent({ type: 'generated_files', files: [transcriptFileMeta] });
+              console.log(`[Chat] Long transcription saved as ${txtFname} (${transcription.length} chars)`);
+            } catch (e) {
+              console.warn(`[Chat] Failed to write transcript .txt: ${e.message}`);
+            }
+          }
+
+          if (transcriptFileMeta) {
+            // Stub:給 LLM 看到 transcription 完整內容(後續對話需要)+ 明確指示不要 echo
+            // 包 <transcription> tag 讓 LLM 容易識別「這是已生成檔案的內容,不要重複輸出」
+            combinedUserText += `\n\n[音訊轉錄: ${originalName}] (${transcription.length} 字,完整逐字稿已生成為附件 ${transcriptFileMeta.filename},使用者可直接下載)\n\n<transcription>\n${transcription}\n</transcription>\n\n[系統指示] 完整逐字稿已存為附件,請勿在回覆中重複輸出整份逐字稿。請以 1-2 段話確認轉錄完成、提示使用者下載附件、並摘要重點(若使用者明確要求整理/摘要/翻譯則照做)。`;
+          } else {
+            combinedUserText += `\n\n[音訊轉錄: ${originalName}]\n${transcription}`;
+          }
           fileMetas.push({ name: originalName, type: 'audio', transcription });
           console.log(`[Chat] Audio transcribed in ${Date.now() - tAudio0}ms: ${transcription.length} chars, in=${transcribeResult.inputTokens} out=${transcribeResult.outputTokens}`);
           // Plan B: record transcription tokens as a separate flash entry

@@ -263,14 +263,12 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
 // 表現為 finishReason=STOP 但 output 只有幾百 token。3.5 小時會議只回 2k token 就是這狀況。
 // 切成 30 分鐘/段、每段獨立用 Pro 轉錄,attention 集中度大幅提升,單段就能吐滿 maxOutputTokens。
 
-// 15 分鐘/段 = ~14MB inline 安全範圍 + Flash 對短段偷懶傾向低;
-// 30 分鐘/段 + Pro 實測在 Studio 滿載時 100% 失敗,沒實用價值
-const LONG_AUDIO_SEGMENT_SEC = 15 * 60;
+// 30 分鐘/段:Pro 對長段 verbatim 服從度高,內容更完整(Flash 即使 15 分鐘段仍偷懶)
+const LONG_AUDIO_SEGMENT_SEC = 30 * 60;
 // concurrency=1(sequential):Gemini Studio 滿載時平行 N 段會 N 個同時 503。
-// 改 sequential 後撞 503 機率降到 1/N,加 retry+backoff 後通過率高很多。
 const LONG_AUDIO_CONCURRENCY = 1;
-const LONG_AUDIO_PER_SEG_TIMEOUT_MS = 20 * 60 * 1000; // 單段 20 分鐘上限(15 分鐘音訊預留 buffer)
-const LONG_AUDIO_RETRY_BACKOFF_MS = [5000, 15000, 45000]; // 3 次 retry,5s/15s/45s
+const LONG_AUDIO_PER_SEG_TIMEOUT_MS = 35 * 60 * 1000; // 單段 35 分鐘上限(30 分鐘音訊 + buffer)
+const LONG_AUDIO_RETRY_BACKOFF_MS = [10000, 30000, 60000]; // 3 次 retry,10s/30s/60s,給 Pro 滿載恢復時間
 
 function _runCmd(cmd, args) {
   return new Promise((resolve, reject) => {
@@ -340,15 +338,15 @@ function _isTransientGeminiErr(e) {
 }
 
 // 單段轉錄 + retry + 模型切換策略
-// 策略:Flash 為主 + 第 3 次賭一次 Pro(當 Studio Pro 滿載時 fallback 已經沒用)
-//   attempt 0: Flash + verbatim          ← 大多數情況一次就過
-//   attempt 1: Flash + verbatim          ← 5s backoff,Flash 短暫擠時通常恢復
-//   attempt 2: Pro + verbatim            ← 15s backoff,Pro 滿載 spike 通常 1-2 分鐘
-//   attempt 3: Flash + verbatim          ← 45s backoff,最後保險
+// 策略:Pro 為主(verbatim 服從度高)+ 最後 fallback Flash
+//   attempt 0: Pro + verbatim            ← 主路徑,長段 verbatim 最完整
+//   attempt 1: Pro + verbatim            ← 10s backoff,撞 503 通常 10-30s 內緩解
+//   attempt 2: Pro + verbatim            ← 30s backoff,Pro 滿載 spike 通常 1-2 分鐘
+//   attempt 3: Flash + verbatim          ← 60s backoff,最後保險(Pro 持續滿載時的逃生門)
 async function _transcribeWithRetry(partPath, mimeType, lang, segIdx, segTotal, tagId) {
   const ATTEMPT_PLAN = [
-    { useProModel: false, label: 'Flash' },
-    { useProModel: false, label: 'Flash' },
+    { useProModel: true,  label: 'Pro' },
+    { useProModel: true,  label: 'Pro' },
     { useProModel: true,  label: 'Pro' },
     { useProModel: false, label: 'Flash' },
   ];
