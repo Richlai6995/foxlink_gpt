@@ -90,17 +90,18 @@ app.use(createAccessControl());
 // 在 access control 之後,讓黑名單 / 內網跳過 / UA 黑名單先處理,這層只看「合法外網 IP」
 app.use(require('./middleware/externalRateLimit'));
 
-// ── 安全聯動:外網開放(EXTERNAL_ACCESS_MODE=full)時必須啟用 MFA ──
+// ── 安全聯動:外網開放(full mode 或 EXTERNAL_ALLOWED_IPS 試營運)時必須啟用 MFA ──
 // 防 ops 失誤把外網打開但忘記開 MFA → 裸奔。緊急狀況改回 webhook_only 收回外網,
-// 而非關 MFA 留外網開放。
+// 而非關 MFA 留外網開放。試營運白名單也算「開外網」,一樣強制 MFA。
 {
   const accessMode = (process.env.EXTERNAL_ACCESS_MODE || 'webhook_only').toLowerCase().trim();
+  const externalAllowlistOn = (process.env.EXTERNAL_ALLOWED_IPS || '').trim() !== '';
   const mfaEnabled = process.env.MFA_ENABLED === 'true';
-  if (accessMode === 'full' && !mfaEnabled) {
-    console.error('[FATAL] EXTERNAL_ACCESS_MODE=full 必須搭配 MFA_ENABLED=true,拒絕啟動');
+  if ((accessMode === 'full' || externalAllowlistOn) && !mfaEnabled) {
+    console.error('[FATAL] 外網開放(EXTERNAL_ACCESS_MODE=full 或 EXTERNAL_ALLOWED_IPS 有值)必須搭配 MFA_ENABLED=true,拒絕啟動');
     process.exit(1);
   }
-  console.log(`[Security] accessMode=${accessMode} | mfaEnabled=${mfaEnabled}`);
+  console.log(`[Security] accessMode=${accessMode} | externalAllowlist=${externalAllowlistOn} | mfaEnabled=${mfaEnabled}`);
 }
 
 // Serve uploaded files statically

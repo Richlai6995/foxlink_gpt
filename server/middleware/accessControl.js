@@ -5,6 +5,10 @@
  *   EXTERNAL_ACCESS_MODE    = internal_only | webhook_only | full
  *   INTERNAL_NETWORKS       = CIDR list (comma-separated)
  *   EXTERNAL_ALLOWED_PATHS  = paths allowed in webhook_only mode (comma-separated)
+ *   EXTERNAL_ALLOWED_IPS    = 試營運外網白名單 CIDR/IP(逗號分隔,bare IP 視為 /32)。
+ *                             命中此清單的外網 IP 走 full mode 行為(仍受 blacklist / UA /
+ *                             internal-only paths / login rate limit 約束),其他外網照原 mode。
+ *                             用途:準備開外網時只放自己進來測,等於是「窄門 full」。
  *   INTERNAL_ONLY_PATHS     = paths restricted to internal even in full mode (comma-separated prefixes)
  *   EXTERNAL_LOGIN_RATE_LIMIT = max login attempts per IP per minute (full mode)
  */
@@ -81,6 +85,11 @@ function createAccessControl() {
   const allowedPaths = (process.env.EXTERNAL_ALLOWED_PATHS || '/api/webex/webhook')
     .split(',').map(s => s.trim()).filter(Boolean);
 
+  // 試營運白名單:bare IP 補 /32,其餘原樣當 CIDR
+  const externalAllowedIps = (process.env.EXTERNAL_ALLOWED_IPS || '')
+    .split(',').map(s => s.trim()).filter(Boolean)
+    .map(s => s.includes('/') ? s : `${s}/32`);
+
   const internalOnlyPrefixes = (process.env.INTERNAL_ONLY_PATHS || '/uploads,/api/v1')
     .split(',').map(s => s.trim()).filter(Boolean);
 
@@ -91,6 +100,9 @@ function createAccessControl() {
 
   console.log(`[AccessControl] mode=${mode} | internalNets=${internalNets.join(',')} | extPaths=${allowedPaths.join(',')}`);
   console.log(`[AccessControl] internalOnlyPrefixes=${internalOnlyPrefixes.join(',')}`);
+  if (externalAllowedIps.length) {
+    console.log(`[AccessControl] ⚠️  EXTERNAL ALLOWLIST active | ips=${externalAllowedIps.join(',')} (treated as full-mode)`);
+  }
   if (mode === 'full') {
     console.log(`[AccessControl] ⚠️  FULL external access | loginRateLimit=${loginRateMax}/min`);
   }
@@ -137,6 +149,18 @@ function createAccessControl() {
     if (internalOnlyPrefixes.some(prefix => req.path.startsWith(prefix))) {
       console.warn(`[AccessControl] blocked internal-only path from external | ip=${ip} ${req.method} ${req.path}`);
       return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // 5.5 EXTERNAL_ALLOWED_IPS — 試營運白名單,命中即走 full mode 行為(仍套 login rate limit)。
+    //     注意:這裡 IP 仍當外網對待(MFA、isRequestInternal=false 都照舊),不會跳過 MFA。
+    if (externalAllowedIps.length && externalAllowedIps.some(cidr => isInCIDR(ip, cidr))) {
+      if (req.path === '/api/auth/login' && req.method === 'POST') {
+        if (!checkLoginRate(ip, loginRateMax)) {
+          console.warn(`[AccessControl] login rate limit hit (allowlisted) | ip=${ip}`);
+          return res.status(429).json({ error: 'Too many login attempts, try again later' });
+        }
+      }
+      return next();
     }
 
     // 6. Mode-specific logic
