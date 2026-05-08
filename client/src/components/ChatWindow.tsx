@@ -3,6 +3,7 @@ import { Copy, Check, RefreshCw, Download, Cpu, User, MessageSquarePlus, BarChar
 import { useState } from 'react'
 import MarkdownRenderer from './MarkdownRenderer'
 import ResearchProgressCard from './ResearchProgressCard'
+import TranscribeProgressCard from './TranscribeProgressCard'
 import InlineChart from './chat/InlineChart'
 import ArtifactCard from './ArtifactCard'
 import type { ChatMessage, GeneratedFile, InlineChartType } from '../types'
@@ -243,6 +244,8 @@ function MessageBubble({
         >
           {(msg.content ?? '').startsWith('__RESEARCH_JOB__:')
             ? <ResearchProgressCard jobId={(msg.content ?? '').slice('__RESEARCH_JOB__:'.length)} />
+            : (msg.content ?? '').startsWith('__TRANSCRIBE_JOB__:')
+            ? <TranscribeProgressCard jobId={(msg.content ?? '').slice('__TRANSCRIBE_JOB__:'.length).split(/\s/)[0]} />
             : <>
                 <MarkdownRenderer content={msg.content ?? ''} />
                 {msg.charts?.map((spec, i) => (

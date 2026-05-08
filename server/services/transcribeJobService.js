@@ -358,7 +358,7 @@ async function runTranscribeJob(db, jobId) {
     // 8. 推 user_notifications(鈴鐺/toast 跨 tab/session 通知)
     try {
       const userNotificationService = require('./userNotificationService');
-      const linkUrl = job.session_id ? `/chat/${job.session_id}` : null;
+      const linkUrl = job.session_id ? `/chat?session=${job.session_id}` : null;
       if (finalStatus === 'done') {
         await userNotificationService.create(db, {
           userId: job.user_id,
