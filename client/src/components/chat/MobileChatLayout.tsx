@@ -211,6 +211,8 @@ export default function MobileChatLayout() {
   }, [])
 
   useEffect(() => { loadSessions() }, [loadSessions])
+  // 預先把可用工具列表 fetch 起來:讓「不選工具」時 send 也能 fallback 把全部 id 帶上(走 LLM function-calling 自選)
+  useEffect(() => { void loadTools() }, [loadTools])
 
   // 載入 budget(本月消耗)— 開啟 menu 時抓最新
   // 優先讀 monthly_spent(無上限也會回);fallback 到 monthly.spent(有設上限時)
@@ -235,10 +237,10 @@ export default function MobileChatLayout() {
       // 載入該 session 已綁定的 skills + tools 上次選擇
       const skillIds = new Set<number>((r.data?.skills || []).map((s: any) => Number(s.id)))
       setPickedSkillIds(skillIds)
-      // 從 used* 還原工具選擇(server 在 GET session 回傳 usedMcpIds 等)
-      if (Array.isArray(r.data?.usedMcpIds))  setSelectedMcpIds(new Set(r.data.usedMcpIds.map(Number)))
-      if (Array.isArray(r.data?.usedDifyIds)) setSelectedDifyIds(new Set(r.data.usedDifyIds.map(Number)))
-      if (Array.isArray(r.data?.usedKbIds))   setSelectedKbIds(new Set(r.data.usedKbIds.map(String)))
+      // 從 used_* 還原工具選擇(server 在 GET session 回傳 snake_case)
+      if (Array.isArray(r.data?.used_mcp_ids))  setSelectedMcpIds(new Set(r.data.used_mcp_ids.map(Number)))
+      if (Array.isArray(r.data?.used_dify_ids)) setSelectedDifyIds(new Set(r.data.used_dify_ids.map(Number)))
+      if (Array.isArray(r.data?.used_kb_ids))   setSelectedKbIds(new Set(r.data.used_kb_ids.map(String)))
     }).catch((e) => {
       console.error('load session messages', e)
       setMessages([])
@@ -346,11 +348,18 @@ export default function MobileChatLayout() {
     formData.append('model', model)
     // 多檔附件 — 走桌機相同的 multipart 路徑
     files.forEach((f) => formData.append('files', f))
-    // 工具選擇:有選才明確送(讓 server skip auto-discover);沒選就不送(server 自動依權限挑)
-    if (selectedMcpIds.size > 0) formData.append('mcp_server_ids', JSON.stringify([...selectedMcpIds]))
-    if (selectedDifyIds.size > 0) formData.append('dify_kb_ids', JSON.stringify([...selectedDifyIds]))
-    if (selectedKbIds.size > 0) formData.append('self_kb_ids', JSON.stringify([...selectedKbIds]))
-    if (pureMode) formData.append('pure_mode', 'true')
+    // 工具選擇 — 不選=把全部可用工具送過去當 explicit,讓 LLM 自己 function-calling 挑
+    // (避開 server 端嚴格 intent filter 漏判;PureMode 例外,純走 LLM)
+    if (pureMode) {
+      formData.append('pure_mode', 'true')
+    } else {
+      const sendMcp  = selectedMcpIds.size  > 0 ? [...selectedMcpIds]  : allMcpServers.map((s: any) => Number(s.id)).filter(Boolean)
+      const sendDify = selectedDifyIds.size > 0 ? [...selectedDifyIds] : allDifyKbs.map((d: any) => Number(d.id)).filter(Boolean)
+      const sendKb   = selectedKbIds.size   > 0 ? [...selectedKbIds]   : allSelfKbs.map((k: any) => String(k.id)).filter(Boolean)
+      if (sendMcp.length  > 0) formData.append('mcp_server_ids', JSON.stringify(sendMcp))
+      if (sendDify.length > 0) formData.append('dify_kb_ids',    JSON.stringify(sendDify))
+      if (sendKb.length   > 0) formData.append('self_kb_ids',    JSON.stringify(sendKb))
+    }
 
     const token = localStorage.getItem('token')
     let accText = ''
@@ -467,7 +476,7 @@ export default function MobileChatLayout() {
       setStreamingStatus('')
       abortRef.current = null
     }
-  }, [streaming, currentSessionId, model, loadSessions, noteChunk, clearStall, t, pureMode, selectedMcpIds, selectedDifyIds, selectedKbIds, pendingSkillIds, skillVarValues])
+  }, [streaming, currentSessionId, model, loadSessions, noteChunk, clearStall, t, pureMode, selectedMcpIds, selectedDifyIds, selectedKbIds, pendingSkillIds, skillVarValues, allMcpServers, allDifyKbs, allSelfKbs])
 
   const handleStop = useCallback(() => {
     if (abortRef.current) abortRef.current()
@@ -1088,7 +1097,7 @@ export default function MobileChatLayout() {
                 className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
               >
                 <Zap size={18} className="text-cyan-500" />
-                <span className="flex-1 text-sm text-slate-800">工具(MCP / KB / API 連接器)</span>
+                <span className="flex-1 text-sm text-slate-800">工具(MCP / 知識庫 / API / 技能)</span>
                 {totalToolsSelected > 0 && (
                   <span className="text-xs px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-700 font-medium">{totalToolsSelected}</span>
                 )}
