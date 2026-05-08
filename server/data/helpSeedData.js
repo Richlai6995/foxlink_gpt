@@ -1,7 +1,7 @@
 /**
  * Help page seed data — zh-TW (source of truth)
  * Auto-extracted from HelpPage.tsx
- * Generated: 2026-05-07
+ * Generated: 2026-05-08
  *
  * Block types: para, tip, note, table, steps, code, list, subsection, card_grid, comparison
  */
@@ -84,7 +84,7 @@ const userSections = [
     "sort_order": 2,
     "icon": "User",
     "icon_color": "text-indigo-500",
-    "last_modified": "2026-05-07",
+    "last_modified": "2026-05-08",
     "title": "登入與登出",
     "sidebar_label": "登入與登出",
     "blocks": [
@@ -425,7 +425,7 @@ const userSections = [
           },
           {
             "type": "tip",
-            "text": "**Admin 帳號(系統管理員)永遠不能從外網登入**,即使有信任裝置也不行。如果您是 admin 想從外面工作,請走 VPN 或內網連線。"
+            "text": "**Admin 帳號**從外網登入跟一般使用者一樣需走 Webex / Email 驗證碼;通過後同樣享 30 天信任裝置免重認。若資安政策變嚴可改用 IP 白名單(EXTERNAL_ALLOWED_IPS)限定 admin 連線來源。"
           }
         ]
       },

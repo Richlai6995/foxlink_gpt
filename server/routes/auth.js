@@ -593,22 +593,9 @@ const proceedOrChallenge = async ({ req, res, user, source, mode }) => {
       : createSession(res, user);
   }
 
-  // 2. 外網 — admin role 一律拒絕(政策:admin 只能從內網,降低帳號被釣後的影響面)
-  if (user.role === 'admin') {
-    logAuthEventAsync(db, {
-      user_id: user.id, username: user.username,
-      event_type: 'login_failed_admin_external',
-      ip, user_agent: ua, success: 0, error_msg: 'admin role rejected on external network',
-      metadata: { source },
-    });
-    // admin 帳號被嘗試外網登入 = 高度可疑,計入 alert(已用真 user_id,優先觸發告警)
-    throttle.countAuthFailureAsync({
-      userId: user.id, username: user.username, ip, ua,
-      eventType: 'login_failed_admin_external',
-    });
-    const msg = '管理員帳號不允許從外網登入,請使用公司內網或 VPN';
-    return mode === 'redirect' ? redirectError(msg) : res.status(403).json({ error: msg });
-  }
+  // (2026-05) admin 外網禁登 規則已移除 — admin 仍走 MFA 即可,免 IT 自己被擋
+  // 政策上 admin 通過 MFA + 信任裝置 + 異常登入告警 已是合理保護,
+  // 真有疑慮可改用 EXTERNAL_ALLOWED_IPS 白名單限定 admin 連線來源 IP
 
   // 3. 外網 — 沒 email 拒絕(政策:外網必須有 email 走 Webex MFA)
   if (!user.email) {
