@@ -222,10 +222,13 @@ router.get('/sso/login', async (req, res) => {
   }
   try {
     const cfg = await getSsoConfig();
+    // SSO_BASE_URL 優先;未設則沿用 APP_BASE_URL。用途:WAF 443 / 內部 8443 並存時,
+    // SSO redirect_uri 必須跟 SSO server 註冊清單逐字元一致(否則 invalid_client)。
+    const ssoBase = process.env.SSO_BASE_URL || process.env.APP_BASE_URL;
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: process.env.SSO_CLIENT_ID,
-      redirect_uri: `${process.env.APP_BASE_URL}/api/auth/sso/callback`,
+      redirect_uri: `${ssoBase}/api/auth/sso/callback`,
       scope: process.env.SSO_SCOPE || 'openid profile email',
     });
     res.redirect(`${cfg.authorization_endpoint}?${params}`);
@@ -252,7 +255,9 @@ router.get('/sso/callback', async (req, res) => {
     const cfg = await getSsoConfig();
 
     // 1. Exchange authorization code for tokens
-    const redirectUri = `${process.env.APP_BASE_URL}/api/auth/sso/callback`;
+    // 必須跟 /sso/login 階段送出去的 redirect_uri 完全一致,否則 invalid_client / invalid_grant
+    const ssoBase = process.env.SSO_BASE_URL || process.env.APP_BASE_URL;
+    const redirectUri = `${ssoBase}/api/auth/sso/callback`;
     const basicAuth = Buffer.from(`${process.env.SSO_CLIENT_ID}:${process.env.SSO_CLIENT_SECRET}`).toString('base64');
     console.log('[SSO] Token exchange → endpoint:', cfg.token_endpoint, 'redirect_uri:', redirectUri);
 
@@ -1026,10 +1031,11 @@ router.post('/forgot-password', async (req, res) => {
     await db.prepare(`DELETE FROM password_reset_tokens WHERE user_id=?`).run(user.id);
 
     const token = uuidv4();
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1hr
+    // expires_at 讓 Oracle 自己算 — JS toISOString 的 'YYYY-MM-DDTHH...Z' 格式 Oracle
+    // 不認(ORA-01843 invalid month),改用 SYSTIMESTAMP + INTERVAL 直接由 DB 計算 1hr
     await db.prepare(
-      `INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?,?,?)`
-    ).run(user.id, token, expiresAt);
+      `INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, SYSTIMESTAMP + INTERVAL '60' MINUTE)`
+    ).run(user.id, token);
 
     const baseUrl = process.env.APP_BASE_URL || `http://localhost:${process.env.PORT || 3007}`;
     const resetLink = `${baseUrl}/reset-password?token=${token}`;
