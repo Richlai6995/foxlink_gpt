@@ -196,9 +196,13 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
   const tagId = `${path.basename(filePath)}|${fileSizeMB}MB`;
   console.log(`[Transcribe] start ${tagId} mime=${mimeType} lang=${lang || 'auto'} timeout=${timeoutMs}ms model=${useProModel ? 'pro' : 'flash'} verbatim=${verbatim}`);
 
-  // 音訊轉錄強制走 AI Studio:Vertex gRPC 的 inline payload 上限 ~4MB,
-  // wav 等未壓縮檔 base64 後動輒數十 MB 會被 backend silently drop,
-  // 回 "contents field required" 誤導錯誤。AI Studio REST 對大 payload 寬鬆得多。
+  // 音訊轉錄走 Vertex global REST(2026-05-08 起):
+  //   舊版寫死 Studio 是因為 Vertex gRPC 4MB inline 上限,但 new SDK + GCP_LOCATION=global
+  //   走 REST endpoint,inline 容量寬鬆。Vertex 比 Studio 優勢:
+  //     1. Quota 寬(default 1500-3000 RPM vs Studio Tier1 1000)
+  //     2. 沒 Studio Pro 20 分鐘 silent deadline(可以跑 30+ 分鐘音訊)
+  //     3. capacity pool 跟 Studio 不同,Studio 滿載時 Vertex 通常還活著
+  //   實測若 Vertex inline 失敗,改回 'studio' fallback 即可。
   // maxOutputTokens 防呆:Pro 上限 65536、Flash 上限 8192。Gemini 預設值較保守,長音訊會被截斷。
   // thinkingBudget:轉錄是 perception 任務不是 reasoning 任務,Pro 預設 dynamic thinking
   // 會浪費 30-50% 時間在無謂思考。設 low(Pro=2048 / Flash=512)讓 SDK 直接轉錄。
@@ -207,7 +211,7 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
   const thinkingBudget = useProModel ? 2048 : 512;
   const model = getGenerativeModel({
     model: modelName,
-    provider: 'studio',
+    provider: 'vertex',
     generationConfig: {
       maxOutputTokens: maxOut,
       temperature: 0,
@@ -221,7 +225,7 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
   console.log(`[Transcribe] ${tagId} read+base64 done in ${Date.now() - tRead0}ms, base64=${base64MB}MB`);
 
   const tCall0 = Date.now();
-  console.log(`[Transcribe] ${tagId} calling SDK (model=${modelName}, provider=studio)...`);
+  console.log(`[Transcribe] ${tagId} calling SDK (model=${modelName}, provider=vertex, concurrency=${LONG_AUDIO_CONCURRENCY})...`);
 
   const transcribePromise = model.generateContent([
     audioPart,
@@ -269,13 +273,14 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
 
 // 30 分鐘/段:Pro 對長段 verbatim 服從度高,內容更完整(Flash 即使 15 分鐘段仍偷懶)
 const LONG_AUDIO_SEGMENT_SEC = 30 * 60;
-// concurrency=2:Pro Studio 滿載已緩解(實測 7/7 attempts=1),平行 2 段加速 2×;
-// 撞 503 還有 retry+Flash fallback 兜底。如果再撞滿載降回 1。
-const LONG_AUDIO_CONCURRENCY = 2;
-// per-seg 19 分鐘:Google Studio Pro 內部 deadline 約 20 分鐘(超過回 503
-// "Deadline expired"),我們自己先放手 retry,避免被 Google 端拖滿 20 分鐘
-// 才知道失敗。實測正常 part 3-9 分鐘完成,19 分鐘已是 outlier 上限。
-const LONG_AUDIO_PER_SEG_TIMEOUT_MS = 19 * 60 * 1000;
+// concurrency=7:全並發(2026-05-08 切 Vertex 後)。Vertex quota 寬(1500+ RPM)、
+// 沒 Studio Pro 20 分鐘 deadline,可以全段同時送 SDK。
+// 7 段 × 7-8 分鐘 / 7 並發 = 8-12 分鐘 total(對比 sequential ~50 分鐘)。
+// 撞 503/quota 還有 retry+Flash fallback 兜底。
+const LONG_AUDIO_CONCURRENCY = 7;
+// per-seg 35 分鐘:Vertex 沒 Studio 20 分鐘 silent deadline,可以拉長給長 outlier 段
+// (實測正常 part 3-9 分鐘,35 分鐘只是極端 fallback 上限)
+const LONG_AUDIO_PER_SEG_TIMEOUT_MS = 35 * 60 * 1000;
 const LONG_AUDIO_RETRY_BACKOFF_MS = [10000, 30000, 60000]; // 3 次 retry,10s/30s/60s
 
 function _runCmd(cmd, args) {
