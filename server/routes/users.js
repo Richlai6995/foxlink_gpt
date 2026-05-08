@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken, verifyAdmin } = require('./auth');
+const passwordService = require('../services/passwordService');
 
 router.use(verifyToken);
 
@@ -89,17 +90,18 @@ router.post('/', async (req, res) => {
 
     const parseBudget = (v) => (v != null && v !== '') ? Number(v) : null;
     const DI = `TO_DATE(?, 'YYYY-MM-DD')`;
+    const hashedPw = await passwordService.hash(password);
     const result = await db
       .prepare(
-        `INSERT INTO users (username, password, name, employee_id, email, role, start_date, end_date, status,
+        `INSERT INTO users (username, password, password_hashed, name, employee_id, email, role, start_date, end_date, status,
                             allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
                             allow_image_upload, image_max_mb, allow_scheduled_tasks, role_id, creation_method,
                             budget_daily, budget_weekly, budget_monthly, quota_exceed_action,
                             can_design_ai_select, can_use_ai_dashboard, webex_bot_enabled)
-         VALUES (?, ?, ?, ?, ?, ?, ${DI}, ${DI}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)`
+         VALUES (?, ?, 'Y', ?, ?, ?, ?, ${DI}, ${DI}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)`
       )
       .run(
-        username, password, name,
+        username, hashedPw, name,
         employee_id || null, (email ? String(email).replace(/[​-‍﻿]/g, '').trim() : null) || null,
         role || 'user',
         start_date || null, end_date || null,
@@ -226,8 +228,9 @@ router.put('/:id', async (req, res) => {
 
     const cleanedEmail = (email ? String(email).replace(/[​-‍﻿]/g, '').trim() : null) || null;
     if (password) {
-      sql = `UPDATE users SET password=?, ${baseSet}${orgSet} WHERE id=?`;
-      params = [password, name, employee_id || null, cleanedEmail, role, start_date || null, end_date || null, status,
+      const hashedPw = await passwordService.hash(password);
+      sql = `UPDATE users SET password=?, password_hashed='Y', ${baseSet}${orgSet} WHERE id=?`;
+      params = [hashedPw, name, employee_id || null, cleanedEmail, role, start_date || null, end_date || null, status,
         ...permParams, ...orgVals, id];
     } else {
       sql = `UPDATE users SET ${baseSet}${orgSet} WHERE id=?`;

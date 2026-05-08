@@ -49,6 +49,7 @@ const deviceTrust = require('../services/deviceTrust');
 const { logAuthEventAsync } = require('../services/authAuditLog');
 const throttle = require('../services/authThrottle');
 const { isRequestInternal, getClientIp } = require('../middleware/accessControl');
+const passwordService = require('../services/passwordService');
 
 // ── SSO / OIDC Config ──────────────────────────────────────────────
 // Runtime check (not cached at module load) so env changes take effect after restart
@@ -344,13 +345,16 @@ router.get('/sso/callback', async (req, res) => {
         ? await db.prepare('SELECT * FROM roles WHERE id=?').get(resolvedRoleId)
         : null;
 
+      // SSO user 永不走 local 密碼登入,塞一個無人知的 random hash 作 sentinel,
+      // 避免 password='' + password_hashed='N' 留下「空密碼 + 未 hashed」的曖昧狀態。
+      const ssoPwSentinel = await passwordService.hash(`sso-sentinel-${Date.now()}-${Math.random()}`);
       const result = await db.prepare(
-        `INSERT INTO users (username, name, email, role, status, password, employee_id, creation_method,
+        `INSERT INTO users (username, name, email, role, status, password, password_hashed, employee_id, creation_method,
           role_id, allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
           allow_image_upload, image_max_mb, allow_scheduled_tasks)
-         VALUES (?,?,?,'user','active',?,?,?, ?,?,?,?,?,?,?,?)`
+         VALUES (?,?,?,'user','active',?,'Y',?,?, ?,?,?,?,?,?,?,?)`
       ).run(
-        username, ssoUser.name, ssoUser.email, '', ssoUser.emp_cd || '', 'sso',
+        username, ssoUser.name, ssoUser.email, ssoPwSentinel, ssoUser.emp_cd || '', 'sso',
         resolvedRoleId ?? null,
         rolePerms?.allow_text_upload ?? 1,
         rolePerms?.text_max_mb ?? 10,
@@ -446,9 +450,14 @@ router.post('/login', async (req, res) => {
           if (dbUser) {
             // Existing user (may have been manually created) — sync AD info and mark as LDAP managed
             // name_manually_set=1 表示管理員已手動鎖定姓名，不讓 LDAP 覆蓋
+            // password 存 bcrypt hash(LDAP 失敗時 fallback 用)— 永不存明文 AD 密碼
+            const ldapPwHash = await passwordService.hash(password);
             await db.prepare(
-              'UPDATE users SET name=CASE WHEN name_manually_set=1 THEN name ELSE ? END, email=?, employee_id=CASE WHEN name_manually_set=1 THEN employee_id ELSE ? END, password=?, creation_method=? WHERE id=?'
-            ).run(ldapUser.name, ldapUser.email, ldapUser.employeeId, password, 'ldap', dbUser.id);
+              `UPDATE users SET name=CASE WHEN name_manually_set=1 THEN name ELSE ? END,
+                                email=?,
+                                employee_id=CASE WHEN name_manually_set=1 THEN employee_id ELSE ? END,
+                                password=?, password_hashed='Y', creation_method=? WHERE id=?`
+            ).run(ldapUser.name, ldapUser.email, ldapUser.employeeId, ldapPwHash, 'ldap', dbUser.id);
 
             if (dbUser.status !== 'active') {
               return res.status(403).json({ error: '帳號已停用，請聯絡系統管理員' });
@@ -489,13 +498,14 @@ router.post('/login', async (req, res) => {
             const rolePerms = resolvedRoleId
               ? await db.prepare(`SELECT * FROM roles WHERE id=?`).get(resolvedRoleId)
               : null;
+            const ldapPwHash = await passwordService.hash(password);
             const result = await db.prepare(
-              `INSERT INTO users (username, name, email, role, status, password, employee_id, creation_method,
+              `INSERT INTO users (username, name, email, role, status, password, password_hashed, employee_id, creation_method,
                 role_id, allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
                 allow_image_upload, image_max_mb, allow_scheduled_tasks)
-               VALUES (?,?,?,'user','active',?,?,?, ?,?,?,?,?,?,?,?)`
+               VALUES (?,?,?,'user','active',?,'Y',?,?, ?,?,?,?,?,?,?,?)`
             ).run(
-              ldapUser.account, ldapUser.name, ldapUser.email, password, ldapUser.employeeId, 'ldap',
+              ldapUser.account, ldapUser.name, ldapUser.email, ldapPwHash, ldapUser.employeeId, 'ldap',
               resolvedRoleId ?? null,
               rolePerms?.allow_text_upload ?? 1,
               rolePerms?.text_max_mb ?? 10,
@@ -522,8 +532,31 @@ router.post('/login', async (req, res) => {
     }
 
     // Local DB fallback (case-insensitive username)
-    const user = await db.prepare('SELECT * FROM users WHERE UPPER(username) = UPPER(?) AND password = ?').get(username, password);
+    // Lazy migration:既有明文密碼比對成功時順手 hash 化(detail: docs/auth-password-hashing-plan.md)
     const auditCtx = { ip: getClientIp(req), user_agent: (req.headers['user-agent'] || '').slice(0, 512) };
+    const candidateUser = await db.prepare('SELECT * FROM users WHERE UPPER(username) = UPPER(?)').get(username);
+    let user = null;
+    if (candidateUser) {
+      const isHashed = candidateUser.password_hashed === 'Y';
+      const passwordOk = isHashed
+        ? await passwordService.verify(password, candidateUser.password)
+        : (candidateUser.password != null && candidateUser.password === password);
+      if (passwordOk) {
+        user = candidateUser;
+        // 過渡期:明文比對成功 → 立刻 hash 化
+        if (!isHashed) {
+          try {
+            const hashed = await passwordService.hash(password);
+            await db.prepare(`UPDATE users SET password=?, password_hashed='Y' WHERE id=?`)
+              .run(hashed, candidateUser.id);
+            console.log(`[Auth] lazy-hashed password for user_id=${candidateUser.id}`);
+          } catch (e) {
+            // hash 失敗不影響登入,下次再試
+            console.warn(`[Auth] lazy-hash failed for user_id=${candidateUser.id}: ${e.message}`);
+          }
+        }
+      }
+    }
     if (!user) {
       logAuthEventAsync(db, {
         username, event_type: 'login_failed_credentials',
@@ -1044,7 +1077,8 @@ router.post('/reset-password', async (req, res) => {
       return res.status(400).json({ error: '重置連結已過期，請重新申請' });
     }
 
-    await db.prepare(`UPDATE users SET password=? WHERE id=?`).run(password, record.user_id);
+    const hashedPw = await passwordService.hash(password);
+    await db.prepare(`UPDATE users SET password=?, password_hashed='Y' WHERE id=?`).run(hashedPw, record.user_id);
     await db.prepare(`UPDATE password_reset_tokens SET used=1 WHERE id=?`).run(record.id);
 
     // 密碼變更必清 trusted IPs / devices(防舊密碼洩漏 + IP/device 已被信任的情況)
@@ -1086,10 +1120,15 @@ router.post('/change-password', async (req, res) => {
     if (user.creation_method === 'ldap') {
       return res.status(403).json({ error: '本系統無法進行AD密碼變更，請由AD管理介面進行密碼變更' });
     }
-    if (user.password !== old_password) {
+    // 舊密碼比對:hash 過走 bcrypt.compare,過渡期明文走字串比對
+    const oldOk = user.password_hashed === 'Y'
+      ? await passwordService.verify(old_password, user.password)
+      : (user.password != null && user.password === old_password);
+    if (!oldOk) {
       return res.status(400).json({ error: '舊密碼錯誤' });
     }
-    await db.prepare(`UPDATE users SET password=? WHERE id=?`).run(new_password, user.id);
+    const newHashed = await passwordService.hash(new_password);
+    await db.prepare(`UPDATE users SET password=?, password_hashed='Y' WHERE id=?`).run(newHashed, user.id);
     // 密碼變更必清 trusted IPs / devices(同 reset-password)
     const revokedIps = await mfa.revokeAllTrustedIps(db, user.id);
     const revokedDevices = await deviceTrust.revokeAllForUser(db, user.id);

@@ -257,22 +257,83 @@ async function initializeOracleDB() {
   return new OracleDatabaseWrapper(pool);
 }
 
+// ─── Password hash migration ─────────────────────────────────────────────────
+// 必須在 ensureDefaultAdmin 之前跑,以便:
+//   1. fresh install:先建 password_hashed 欄位,讓 ensureDefaultAdmin 能寫 'Y'
+//   2. existing install:把既有 plaintext password batch hash 化,DB 立刻無明文
+// 相容 lazy fallback:auth.js 仍保留登入時 lazy hash 邏輯作雙保險(防 batch 漏網)
+async function ensurePasswordHashing(db) {
+  // 1. 加 password_hashed 欄位(若不存在)
+  try {
+    const exists = await db.columnExists('USERS', 'PASSWORD_HASHED');
+    if (!exists) {
+      await db.prepare(`ALTER TABLE users ADD password_hashed CHAR(1) DEFAULT 'N'`).run();
+      console.log('[Migration] Added USERS.PASSWORD_HASHED');
+    }
+  } catch (e) {
+    console.warn('[Migration] add USERS.PASSWORD_HASHED:', e.message);
+    return; // 欄位加不出來就放棄 batch,讓 ensureDefaultAdmin 自己處理 fallback
+  }
+
+  // 2. Batch hash 所有仍明文的 password
+  try {
+    const passwordService = require('./services/passwordService');
+    const rows = await db.prepare(
+      `SELECT id, username, password FROM users
+        WHERE (password_hashed IS NULL OR password_hashed='N')
+          AND password IS NOT NULL AND LENGTH(password) > 0`
+    ).all();
+    if (rows.length === 0) {
+      console.log('[Migration] password_hashed: 無 plaintext 待處理 ✓');
+      return;
+    }
+    console.log(`[Migration] password_hashed: 開始 batch hash ${rows.length} 筆 plaintext...`);
+    let ok = 0, fail = 0;
+    for (const u of rows) {
+      try {
+        // 跳過看起來已是 bcrypt 但旗標漏設 'Y' 的 row(只 flip 旗標,不重 hash)
+        if (passwordService.isHashed(u.password)) {
+          await db.prepare(`UPDATE users SET password_hashed='Y' WHERE id=?`).run(u.id);
+          ok++;
+          continue;
+        }
+        const hashed = await passwordService.hash(u.password);
+        await db.prepare(`UPDATE users SET password=?, password_hashed='Y' WHERE id=?`).run(hashed, u.id);
+        ok++;
+      } catch (e) {
+        console.warn(`[Migration] password_hashed batch failed for user_id=${u.id} (${u.username}): ${e.message}`);
+        fail++;
+      }
+    }
+    console.log(`[Migration] password_hashed: hashed=${ok} failed=${fail} ✓`);
+  } catch (e) {
+    console.warn('[Migration] password_hashed batch:', e.message);
+  }
+}
+
 // ─── Ensure default admin user exists ────────────────────────────────────────
+// 啟動時把 .env 的 DEFAULT_ADMIN_PASSWORD bcrypt hash 化後寫入,維持 ops 救命門
+// (admin 忘密碼 → 改 .env 重啟即可)。每次啟動 hash 結果不同但語意等價。
 async function ensureDefaultAdmin(db) {
   const account  = (process.env.DEFAULT_ADMIN_ACCOUNT  || 'admin').toUpperCase();
   const password = process.env.DEFAULT_ADMIN_PASSWORD  || '123456';
+  if (password === '123456' || password.length < 8) {
+    console.warn(`[Oracle] ⚠️ DEFAULT_ADMIN_PASSWORD 過弱(${password.length} 字),外網開放後請立即更換`);
+  }
   try {
+    const passwordService = require('./services/passwordService');
+    const hashed = await passwordService.hash(password);
     const existing = await db.prepare('SELECT id FROM users WHERE UPPER(username)=?').get(account);
     if (!existing) {
       await db.prepare(
-        `INSERT INTO users (username, password, name, role, status, creation_method)
-         VALUES (?,?,?,'admin','active','manual')`
-      ).run(account, password, account);
-      console.log(`[Oracle] Default admin '${account}' created`);
+        `INSERT INTO users (username, password, password_hashed, name, role, status, creation_method)
+         VALUES (?,?,'Y',?,'admin','active','manual')`
+      ).run(account, hashed, account);
+      console.log(`[Oracle] Default admin '${account}' created (bcrypt cost=${passwordService.COST})`);
     } else {
       // Reset password to env value on every startup so it's always recoverable
-      await db.prepare(`UPDATE users SET password=?, role='admin', status='active' WHERE UPPER(username)=?`)
-        .run(password, account);
+      await db.prepare(`UPDATE users SET password=?, password_hashed='Y', role='admin', status='active' WHERE UPPER(username)=?`)
+        .run(hashed, account);
     }
   } catch (e) {
     console.error('[Oracle] ensureDefaultAdmin error:', e.message);
@@ -334,6 +395,10 @@ async function runMigrations(db) {
   // ERP 分流：分類 flag + 使用者 ERP 管理員 flag
   await addCol('FEEDBACK_CATEGORIES', 'IS_ERP', 'NUMBER(1) DEFAULT 0');
   await addCol('USERS', 'IS_ERP_ADMIN', 'NUMBER(1) DEFAULT 0');
+  // [2026-05-08] 密碼 bcrypt hash 化 — Lazy migration:既有明文密碼下次登入成功時自動 hash。
+  // password_hashed='Y' → password 是 bcrypt hash;'N' → 仍是明文(過渡期)。
+  // 設計詳見 docs/auth-password-hashing-plan.md
+  await addCol('USERS', 'PASSWORD_HASHED', `CHAR(1) DEFAULT 'N'`);
   // 資訊內部紀錄：admin 用工單紀錄電話/系統外 Q&A,不發通知、不進統計
   await addCol('FEEDBACK_TICKETS', 'IS_INTERNAL_LOG', 'NUMBER(1) DEFAULT 0');
   // Training: 章節制測驗 — 題目綁章節
@@ -4851,6 +4916,9 @@ const oracleDbExports = {
   init: async () => {
     const wrapper = await initializeOracleDB();
     oracleDbExports.db = wrapper;
+    // password_hashed 必須先跑 — fresh install 要先有欄位才能讓 ensureDefaultAdmin 寫,
+    // existing install 要把既有 plaintext 批次 hash 化
+    await ensurePasswordHashing(wrapper);
     await ensureDefaultAdmin(wrapper);
     await runMigrations(wrapper);
     return wrapper;
