@@ -37,8 +37,16 @@ function getRpId(req) {
   const host = (req.headers['x-forwarded-host'] || req.headers.host || '').split(':')[0];
   return host || 'localhost';
 }
+// 支援多 origin(逗號分隔)— K8s 多入口場景:
+//   外網(WAF 443) → https://flgpt.foxlink.com.tw
+//   內網直連       → https://flgpt.foxlink.com.tw:8443
+//   Vite dev       → http://localhost:5173
+// 只要 user 訪問用的 origin 在白名單內,WebAuthn 就驗過。rpId 仍是同一個 domain,credential 共用。
 function getOrigin(req) {
-  if (process.env.WEBAUTHN_ORIGIN) return process.env.WEBAUTHN_ORIGIN;
+  if (process.env.WEBAUTHN_ORIGIN) {
+    const list = process.env.WEBAUTHN_ORIGIN.split(',').map(s => s.trim()).filter(Boolean);
+    return list.length > 1 ? list : list[0];
+  }
   const proto = (req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0].trim();
   const host = req.headers['x-forwarded-host'] || req.headers.host || '';
   return `${proto}://${host}`;
