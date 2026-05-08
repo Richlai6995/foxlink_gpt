@@ -348,11 +348,16 @@ export default function MobileChatLayout() {
     formData.append('model', model)
     // 多檔附件 — 走桌機相同的 multipart 路徑
     files.forEach((f) => formData.append('files', f))
-    // 工具選擇 — 對齊桌機:總是送(空陣列也送),server 端把 [] 視為 null → 走 auto mode + intent classifier
-    // (空 → auto-routing 自動挑;有勾 → explicit mode 只用勾的)
+    // 工具選擇 — 對齊桌機 ChatPage:所有欄位都送(含空 array),server 把 [] 視為 null → auto mode
     formData.append('mcp_server_ids', JSON.stringify([...selectedMcpIds]))
     formData.append('dify_kb_ids',    JSON.stringify([...selectedDifyIds]))
     formData.append('self_kb_ids',    JSON.stringify([...selectedKbIds]))
+    formData.append('erp_tool_ids',   JSON.stringify([]))
+    formData.append('hidden_mcp_ids',     JSON.stringify([]))
+    formData.append('hidden_dify_ids',    JSON.stringify([]))
+    formData.append('hidden_self_kb_ids', JSON.stringify([]))
+    formData.append('hidden_skill_ids',   JSON.stringify([]))
+    formData.append('hidden_erp_ids',     JSON.stringify([]))
     if (pureMode) formData.append('pure_mode', 'true')
 
     const token = localStorage.getItem('token')
