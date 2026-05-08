@@ -200,14 +200,18 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
   // wav 等未壓縮檔 base64 後動輒數十 MB 會被 backend silently drop,
   // 回 "contents field required" 誤導錯誤。AI Studio REST 對大 payload 寬鬆得多。
   // maxOutputTokens 防呆:Pro 上限 65536、Flash 上限 8192。Gemini 預設值較保守,長音訊會被截斷。
+  // thinkingBudget:轉錄是 perception 任務不是 reasoning 任務,Pro 預設 dynamic thinking
+  // 會浪費 30-50% 時間在無謂思考。設 low(Pro=2048 / Flash=512)讓 SDK 直接轉錄。
   const modelName = useProModel ? MODEL_PRO : MODEL_FLASH;
   const maxOut = useProModel ? 65536 : 8192;
+  const thinkingBudget = useProModel ? 2048 : 512;
   const model = getGenerativeModel({
     model: modelName,
     provider: 'studio',
     generationConfig: {
       maxOutputTokens: maxOut,
       temperature: 0,
+      thinkingConfig: { thinkingBudget },
     },
   });
 
@@ -265,8 +269,9 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
 
 // 30 分鐘/段:Pro 對長段 verbatim 服從度高,內容更完整(Flash 即使 15 分鐘段仍偷懶)
 const LONG_AUDIO_SEGMENT_SEC = 30 * 60;
-// concurrency=1(sequential):Gemini Studio 滿載時平行 N 段會 N 個同時 503。
-const LONG_AUDIO_CONCURRENCY = 1;
+// concurrency=2:Pro Studio 滿載已緩解(實測 7/7 attempts=1),平行 2 段加速 2×;
+// 撞 503 還有 retry+Flash fallback 兜底。如果再撞滿載降回 1。
+const LONG_AUDIO_CONCURRENCY = 2;
 const LONG_AUDIO_PER_SEG_TIMEOUT_MS = 35 * 60 * 1000; // 單段 35 分鐘上限(30 分鐘音訊 + buffer)
 const LONG_AUDIO_RETRY_BACKOFF_MS = [10000, 30000, 60000]; // 3 次 retry,10s/30s/60s,給 Pro 滿載恢復時間
 
