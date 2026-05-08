@@ -135,6 +135,138 @@ router.post('/', verifyToken, upload.single('audio'), budgetGuard, async (req, r
   }
 });
 
+// ── 長音訊背景轉錄 Job ───────────────────────────────────────────────────────
+// 設計文件:docs/long-audio-background-job-plan.md
+// 對齊 /api/research/jobs pattern,前端 polling 3s 拿進度
+
+// 從 DB row 整理回前端可用的 JSON 結構
+function _formatJob(row) {
+  if (!row) return null;
+  let segmentsLite = null;
+  if (row.segments_json) {
+    try {
+      const segs = JSON.parse(row.segments_json);
+      // 不回傳 segments[i].text(可能很大,前端只需要進度資訊)
+      segmentsLite = segs.map(s => ({
+        idx: s.idx,
+        ok: s.ok,
+        marker: s.marker,
+        attempts: s.attempts,
+        chars: s.text?.length || 0,
+        error: s.error,
+      }));
+    } catch (_) {}
+  }
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    session_id: row.session_id,
+    message_id: row.message_id,
+    audio_filename: row.audio_filename,
+    audio_size_mb: row.audio_size_mb,
+    duration_sec: row.duration_sec,
+    status: row.status,
+    segment_total: row.segment_total,
+    segment_done: row.segment_done,
+    segments: segmentsLite,
+    transcript_chars: row.transcript_chars,
+    transcript_file: row.transcript_file,
+    transcript_url: row.transcript_file ? `/uploads/generated/${row.transcript_file}` : null,
+    in_tokens_total: row.in_tokens_total,
+    out_tokens_total: row.out_tokens_total,
+    error_msg: row.error_msg,
+    is_notified: row.is_notified,
+    recovery_count: row.recovery_count,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    completed_at: row.completed_at,
+  };
+}
+
+// GET /api/transcribe/jobs — 列當前 user 自己的 job(最新 50 筆)
+router.get('/jobs', verifyToken, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const rows = await db.prepare(`
+      SELECT * FROM transcribe_jobs
+      WHERE user_id = ?
+      ORDER BY created_at DESC
+      FETCH FIRST 50 ROWS ONLY
+    `).all(req.user.id);
+    res.json(rows.map(_formatJob));
+  } catch (e) {
+    console.error('[TranscribeJob] list error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/transcribe/jobs/unnotified — 撈未通知的完成 job(前端鈴鐺/toast 用)
+router.get('/jobs/unnotified', verifyToken, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const rows = await db.prepare(`
+      SELECT * FROM transcribe_jobs
+      WHERE user_id = ? AND is_notified = 0 AND status IN ('done','failed')
+      ORDER BY completed_at DESC
+    `).all(req.user.id);
+    res.json(rows.map(_formatJob));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/transcribe/jobs/:id — 單一 job 詳情(前端 polling 主用)
+router.get('/jobs/:id', verifyToken, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const row = await db.prepare('SELECT * FROM transcribe_jobs WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'job not found' });
+    // 權限:本人 / admin
+    if (row.user_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    res.json(_formatJob(row));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/transcribe/jobs/:id/notify — 標已通知(前端拿到 toast 後呼叫)
+router.post('/jobs/:id/notify', verifyToken, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const row = await db.prepare('SELECT user_id FROM transcribe_jobs WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'job not found' });
+    if (row.user_id !== req.user.id) return res.status(403).json({ error: 'forbidden' });
+    await db.prepare('UPDATE transcribe_jobs SET is_notified = 1, updated_at = SYSTIMESTAMP WHERE id = ?').run(req.params.id);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/transcribe/admin/jobs — admin 監控(全系統)
+router.get('/admin/jobs', verifyToken, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'admin only' });
+  try {
+    const db = require('../database-oracle').db;
+    const status = req.query.status;
+    const limit = Math.min(parseInt(req.query.limit || '100'), 500);
+    const offset = parseInt(req.query.offset || '0');
+    let sql = 'SELECT * FROM transcribe_jobs';
+    const params = [];
+    if (status) {
+      sql += ' WHERE status = ?';
+      params.push(status);
+    }
+    sql += ` ORDER BY created_at DESC OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`;
+    const rows = await db.prepare(sql).all(...params);
+    res.json(rows.map(_formatJob));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // 對 multer 錯誤的友善處理（檔案過大等）
 router.use((err, req, res, _next) => {
   if (err) {

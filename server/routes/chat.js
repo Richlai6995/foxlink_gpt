@@ -1349,6 +1349,85 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
     const { providerType: earlyProvider } = await resolveApiModel(db, earlyModel);
     const isAoaiProvider = earlyProvider === 'azure_openai';
 
+    // ── 長音訊背景 Job 早退路徑 ─────────────────────────────────────────────
+    // 條件:單獨 1 個音訊 > 50MB(無其他附件)→ 走背景 job
+    //   理由:同步 SSE 撐 12-18 分鐘體驗差,user 也不能關 tab。
+    //   有其他附件混合 → fallback 同步路徑(維持原本能力,99% case 用不到混合)
+    // 設計文件:docs/long-audio-background-job-plan.md
+    const audioFiles = uploadedFiles.filter(f => (f.mimetype || '').startsWith('audio/'));
+    const isLongAudioBackgroundJob = audioFiles.length === 1
+      && audioFiles[0].size > 50 * 1024 * 1024
+      && uploadedFiles.length === 1;
+
+    if (isLongAudioBackgroundJob) {
+      const audioFile = audioFiles[0];
+      const audioOriginalName = Buffer.from(audioFile.originalname, 'latin1').toString('utf8');
+      const audioSizeMB = +(audioFile.size / 1024 / 1024).toFixed(2);
+      console.log(`[Chat] Long audio → background job: "${audioOriginalName}" ${audioSizeMB}MB user=${req.user.id}`);
+
+      try {
+        // 1. 移檔到 NFS persistent location(worker 可能在其他 pod 跑)
+        const persistDir = path.join(UPLOAD_DIR, 'long_audio', String(req.user.id));
+        if (!fs.existsSync(persistDir)) fs.mkdirSync(persistDir, { recursive: true });
+        const persistFname = `${Date.now()}_${audioOriginalName.replace(/[^\w一-龥.\-]/g, '_')}`;
+        const persistPath = path.join(persistDir, persistFname);
+        fs.renameSync(audioFile.path, persistPath);
+
+        // 2. 創 job
+        const transcribeJobService = require('../services/transcribeJobService');
+        const jobId = await transcribeJobService.createJob(db, {
+          userId: req.user.id,
+          sessionId,
+          audioPath: persistPath,
+          audioFilename: audioOriginalName,
+          audioSizeMb: audioSizeMB,
+          audioMimeType: audioFile.mimetype || 'audio/x-m4a',
+        });
+
+        // 3. INSERT user message + assistant placeholder(同步 history)
+        const userMsgText = combinedUserText
+          ? `${combinedUserText}\n\n[音訊背景轉錄: ${audioOriginalName} (${audioSizeMB}MB)]`
+          : `[音訊背景轉錄: ${audioOriginalName} (${audioSizeMB}MB)]`;
+        await db.prepare(
+          `INSERT INTO chat_messages (session_id, role, content, files_json) VALUES (?, 'user', ?, ?)`
+        ).run(sessionId, userMsgText, JSON.stringify([{ name: audioOriginalName, type: 'audio', sizeMB: audioSizeMB }]));
+
+        // Placeholder assistant message:前端偵測 __TRANSCRIBE_JOB__:{id} 渲染 ProgressCard
+        const assistantMsgText = `__TRANSCRIBE_JOB__:${jobId}\n\n⏳ 音訊背景轉錄已啟動 (${audioSizeMB}MB),預計 12-18 分鐘完成。\n您可以關閉視窗,完成後會通知您。`;
+        const insertResult = await db.prepare(
+          `INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'assistant', ?)`
+        ).run(sessionId, assistantMsgText);
+
+        // 拿剛 INSERT 的 message_id(Oracle:用 sequence 或 RETURNING;這裡 query latest)
+        const latestMsg = await db.prepare(
+          `SELECT id FROM chat_messages WHERE session_id = ? AND role = 'assistant' ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`
+        ).get(sessionId);
+        const messageId = latestMsg?.id;
+        if (messageId) {
+          await transcribeJobService.attachMessageId(db, jobId, messageId);
+        }
+
+        // 4. 啟動 worker(setImmediate 不阻塞 SSE 回應)
+        setImmediate(() => {
+          transcribeJobService.runTranscribeJob(db, jobId).catch((e) =>
+            console.error(`[TranscribeJob] ${jobId} unhandled:`, e.message)
+          );
+        });
+
+        // 5. SSE 推啟動訊息 + done,前端關連線
+        sendEvent({ type: 'status', message: `✅ 已啟動背景轉錄 (${audioSizeMB}MB),預計 12-18 分鐘。完成後會在訊息列表更新並通知您,可關閉視窗。` });
+        sendEvent({ type: 'transcribe_job_started', jobId, message_id: messageId });
+        sendEvent({ type: 'done' });
+        return res.end();
+      } catch (e) {
+        console.error(`[Chat] Long audio background job creation failed:`, e.message);
+        sendEvent({ type: 'status', message: `背景轉錄啟動失敗: ${e.message}` });
+        sendEvent({ type: 'error', error: e.message });
+        sendEvent({ type: 'done' });
+        return res.end();
+      }
+    }
+
     _timing.fileStart = Date.now();
     for (const file of uploadedFiles) {
       const ext = path.extname(file.originalname).toLowerCase();
