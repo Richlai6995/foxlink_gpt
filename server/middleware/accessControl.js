@@ -90,7 +90,9 @@ function createAccessControl() {
     .split(',').map(s => s.trim()).filter(Boolean)
     .map(s => s.includes('/') ? s : `${s}/32`);
 
-  const internalOnlyPrefixes = (process.env.INTERNAL_ONLY_PATHS || '/uploads,/api/v1')
+  // ?? 而非 ||:讓 ops 可以用 INTERNAL_ONLY_PATHS=(空字串)明確清空清單,把 /uploads /api/v1 也對外開。
+  // 用 || 會把空字串當 falsy 退回預設值,等於沒法關。
+  const internalOnlyPrefixes = (process.env.INTERNAL_ONLY_PATHS ?? '/uploads,/api/v1')
     .split(',').map(s => s.trim()).filter(Boolean);
 
   const loginRateMax = parseInt(process.env.EXTERNAL_LOGIN_RATE_LIMIT || '10') || 0;
