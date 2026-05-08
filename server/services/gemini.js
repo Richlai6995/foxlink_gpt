@@ -1293,4 +1293,11 @@ async function generateWithToolsStream(
   return { text: fullText, inputTokens, outputTokens, toolCallCount };
 }
 
-module.exports = { streamChat, generateWithImage, generateTextSync, generateWithTools, generateWithToolsStream, transcribeAudio, transcribeLongAudio, extractTextFromFile, fileToGeminiPart, generateTitle, MODEL_PRO, MODEL_FLASH };
+module.exports = {
+  streamChat, generateWithImage, generateTextSync, generateWithTools, generateWithToolsStream,
+  transcribeAudio, transcribeLongAudio, extractTextFromFile, fileToGeminiPart, generateTitle,
+  MODEL_PRO, MODEL_FLASH,
+  // 給 transcribeJobService.js 用(背景 job 重用同一套 ffmpeg + retry + Pro→Flash fallback)
+  _probeAudioDuration, _splitAudio, _fmtTime, _transcribeWithRetry,
+  LONG_AUDIO_SEGMENT_SEC, LONG_AUDIO_CONCURRENCY, LONG_AUDIO_PER_SEG_TIMEOUT_MS,
+};

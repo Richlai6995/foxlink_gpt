@@ -374,6 +374,14 @@ app.get('/api/version', (req, res) => {
       } catch (e) {
         console.warn('[Shutdown] gracefullyPauseActiveJobs error:', e.message);
       }
+      // 同上,長音訊轉錄 jobs
+      try {
+        const transcribeJobService = require('./services/transcribeJobService');
+        const { db } = require('./database-oracle');
+        await transcribeJobService.gracefullyPauseActiveJobs(db);
+      } catch (e) {
+        console.warn('[Shutdown] transcribeJobService.gracefullyPauseActiveJobs error:', e.message);
+      }
       server.close(async () => {
         try {
           const { getPool } = require('./database-oracle');
@@ -421,6 +429,17 @@ app.get('/api/version', (req, res) => {
       }, 5 * 60 * 1000);
     } catch (e) {
       console.error('[Research] Failed to start recovery scheduler:', e.message);
+    }
+
+    // Transcribe job recovery scheduler:同上 pattern,負責長音訊背景轉錄
+    try {
+      const transcribeJobService = require('./services/transcribeJobService');
+      transcribeJobService.recoverStaleJobs(db).catch((e) => console.warn('[TranscribeJob] startup recovery:', e.message));
+      setInterval(() => {
+        transcribeJobService.recoverStaleJobs(db).catch((e) => console.warn('[TranscribeJob] recovery tick:', e.message));
+      }, 5 * 60 * 1000);
+    } catch (e) {
+      console.error('[TranscribeJob] Failed to start recovery scheduler:', e.message);
     }
 
     // KB maintenance scheduler（orphan chunks cleanup, Phase 1 of kb-retrieval v2）
