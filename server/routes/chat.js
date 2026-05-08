@@ -1414,8 +1414,11 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           );
         });
 
-        // 5. SSE 推啟動訊息 + done,前端關連線
+        // 5. SSE 推啟動訊息 + assistant message chunk + done,前端關連線
+        //    注意:必須推 chunk(content key)讓前端按既有 chunk → assistant message
+        //    流程組裝。沒推 chunk 前端不知道有新 assistant message → UI 不顯示 ProgressCard。
         sendEvent({ type: 'status', message: `✅ 已啟動背景轉錄 (${audioSizeMB}MB),預計 12-18 分鐘。完成後會在訊息列表更新並通知您,可關閉視窗。` });
+        sendEvent({ type: 'chunk', content: assistantMsgText });
         sendEvent({ type: 'transcribe_job_started', jobId, message_id: messageId });
         sendEvent({ type: 'done' });
         return res.end();
