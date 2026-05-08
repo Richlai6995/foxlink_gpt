@@ -272,8 +272,11 @@ const LONG_AUDIO_SEGMENT_SEC = 30 * 60;
 // concurrency=2:Pro Studio 滿載已緩解(實測 7/7 attempts=1),平行 2 段加速 2×;
 // 撞 503 還有 retry+Flash fallback 兜底。如果再撞滿載降回 1。
 const LONG_AUDIO_CONCURRENCY = 2;
-const LONG_AUDIO_PER_SEG_TIMEOUT_MS = 35 * 60 * 1000; // 單段 35 分鐘上限(30 分鐘音訊 + buffer)
-const LONG_AUDIO_RETRY_BACKOFF_MS = [10000, 30000, 60000]; // 3 次 retry,10s/30s/60s,給 Pro 滿載恢復時間
+// per-seg 19 分鐘:Google Studio Pro 內部 deadline 約 20 分鐘(超過回 503
+// "Deadline expired"),我們自己先放手 retry,避免被 Google 端拖滿 20 分鐘
+// 才知道失敗。實測正常 part 3-9 分鐘完成,19 分鐘已是 outlier 上限。
+const LONG_AUDIO_PER_SEG_TIMEOUT_MS = 19 * 60 * 1000;
+const LONG_AUDIO_RETRY_BACKOFF_MS = [10000, 30000, 60000]; // 3 次 retry,10s/30s/60s
 
 function _runCmd(cmd, args) {
   return new Promise((resolve, reject) => {
@@ -343,15 +346,16 @@ function _isTransientGeminiErr(e) {
 }
 
 // 單段轉錄 + retry + 模型切換策略
-// 策略:Pro 為主(verbatim 服從度高)+ 最後 fallback Flash
-//   attempt 0: Pro + verbatim            ← 主路徑,長段 verbatim 最完整
-//   attempt 1: Pro + verbatim            ← 10s backoff,撞 503 通常 10-30s 內緩解
-//   attempt 2: Pro + verbatim            ← 30s backoff,Pro 滿載 spike 通常 1-2 分鐘
-//   attempt 3: Flash + verbatim          ← 60s backoff,最後保險(Pro 持續滿載時的逃生門)
+// 策略:Pro 為主 + Flash 快速 fallback(第 2 次就 Flash,不浪費 2 次 Pro timeout)
+//   attempt 0: Pro + verbatim    ← 主路徑,長段 verbatim 最完整
+//   attempt 1: Flash + verbatim  ← 10s backoff,Pro 撞 deadline/503 直接 Flash 救
+//                                  (實測 attempt 1 Pro 通常還是慢,不如直接 Flash)
+//   attempt 2: Pro + verbatim    ← 30s backoff,給 Pro 一次恢復機會
+//   attempt 3: Flash + verbatim  ← 60s backoff,最後保險
 async function _transcribeWithRetry(partPath, mimeType, lang, segIdx, segTotal, tagId) {
   const ATTEMPT_PLAN = [
     { useProModel: true,  label: 'Pro' },
-    { useProModel: true,  label: 'Pro' },
+    { useProModel: false, label: 'Flash' },
     { useProModel: true,  label: 'Pro' },
     { useProModel: false, label: 'Flash' },
   ];
