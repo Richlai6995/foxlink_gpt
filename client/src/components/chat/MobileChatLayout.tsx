@@ -348,18 +348,12 @@ export default function MobileChatLayout() {
     formData.append('model', model)
     // 多檔附件 — 走桌機相同的 multipart 路徑
     files.forEach((f) => formData.append('files', f))
-    // 工具選擇 — 不選=把全部可用工具送過去當 explicit,讓 LLM 自己 function-calling 挑
-    // (避開 server 端嚴格 intent filter 漏判;PureMode 例外,純走 LLM)
-    if (pureMode) {
-      formData.append('pure_mode', 'true')
-    } else {
-      const sendMcp  = selectedMcpIds.size  > 0 ? [...selectedMcpIds]  : allMcpServers.map((s: any) => Number(s.id)).filter(Boolean)
-      const sendDify = selectedDifyIds.size > 0 ? [...selectedDifyIds] : allDifyKbs.map((d: any) => Number(d.id)).filter(Boolean)
-      const sendKb   = selectedKbIds.size   > 0 ? [...selectedKbIds]   : allSelfKbs.map((k: any) => String(k.id)).filter(Boolean)
-      if (sendMcp.length  > 0) formData.append('mcp_server_ids', JSON.stringify(sendMcp))
-      if (sendDify.length > 0) formData.append('dify_kb_ids',    JSON.stringify(sendDify))
-      if (sendKb.length   > 0) formData.append('self_kb_ids',    JSON.stringify(sendKb))
-    }
+    // 工具選擇 — 對齊桌機:總是送(空陣列也送),server 端把 [] 視為 null → 走 auto mode + intent classifier
+    // (空 → auto-routing 自動挑;有勾 → explicit mode 只用勾的)
+    formData.append('mcp_server_ids', JSON.stringify([...selectedMcpIds]))
+    formData.append('dify_kb_ids',    JSON.stringify([...selectedDifyIds]))
+    formData.append('self_kb_ids',    JSON.stringify([...selectedKbIds]))
+    if (pureMode) formData.append('pure_mode', 'true')
 
     const token = localStorage.getItem('token')
     let accText = ''
@@ -476,7 +470,7 @@ export default function MobileChatLayout() {
       setStreamingStatus('')
       abortRef.current = null
     }
-  }, [streaming, currentSessionId, model, loadSessions, noteChunk, clearStall, t, pureMode, selectedMcpIds, selectedDifyIds, selectedKbIds, pendingSkillIds, skillVarValues, allMcpServers, allDifyKbs, allSelfKbs])
+  }, [streaming, currentSessionId, model, loadSessions, noteChunk, clearStall, t, pureMode, selectedMcpIds, selectedDifyIds, selectedKbIds, pendingSkillIds, skillVarValues])
 
   const handleStop = useCallback(() => {
     if (abortRef.current) abortRef.current()
