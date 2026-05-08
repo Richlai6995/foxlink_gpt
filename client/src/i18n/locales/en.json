@@ -3499,5 +3499,26 @@
       "parsedByCursor": "Parsed from OUT ref cursor",
       "parsedByMarkdown": "Parsed from markdown table"
     }
+  },
+  "transcribe_job": {
+    "title": "Audio Background Transcription",
+    "starting": "Background transcription started ({{size}}MB), ETA {{eta}}s. You may close this window; you'll be notified when done.",
+    "preparing": "Preparing (splitting)...",
+    "running": "Transcribing {{done}}/{{total}} segments · {{chars}} chars produced",
+    "done": "Transcription complete · {{time}} · {{chars}} chars / {{total}} segments",
+    "failed": "Transcription failed",
+    "recovery": "Recovered {{count}} times",
+    "cancel": "Cancel",
+    "canceling": "Canceling",
+    "cancelConfirm": "Cancel this transcription? Already completed segments will still be saved in the transcript.",
+    "download": "Download transcript",
+    "loading": "Loading transcription info...",
+    "notify": {
+      "done": "Transcription done: {{file}}",
+      "failed": "Transcription failed: {{file}}",
+      "doneMessage": "{{chars}} chars / {{segments}} segments, click to view"
+    },
+    "personal": "Notifications",
+    "announcements": "Announcements"
   }
 }

@@ -274,6 +274,14 @@ async function runTranscribeJob(db, jobId) {
     // 5. 平行轉錄,sequential batch(concurrency=2)
     const lang = 'zh-TW'; // TODO: 之後可以從 session 拉
     for (let i = 0; i < segments.length; i += LONG_AUDIO_CONCURRENCY) {
+      // batch 間檢查 status — 若被外部 cancel(改成 failed),立刻 abort worker,
+      // 不再啟動新 batch、不要 overwrite cancelled status
+      const cur = await db.prepare('SELECT status FROM transcribe_jobs WHERE id=?').get(jobId);
+      if (cur?.status !== 'running') {
+        console.log(`[TranscribeJob] ${tagId} status changed to ${cur?.status},abort worker`);
+        return; // finally 會清 heartbeat / tmp
+      }
+
       const batch = segments.slice(i, i + LONG_AUDIO_CONCURRENCY).filter(s => !s.ok);
       if (batch.length === 0) continue;
 
@@ -411,10 +419,49 @@ async function runTranscribeJob(db, jobId) {
   }
 }
 
+// ─── Cleanup cron(>30 天 done/failed 的 job 清音檔)─────────────────────────
+// .txt 逐字稿仍保留(讓 user 能下載歷史結果);只清原始音檔(占 NFS 大頭)
+const CLEANUP_AUDIO_AFTER_DAYS = 30;
+
+async function cleanupOldJobAudio(db) {
+  try {
+    const rows = await db.prepare(`
+      SELECT id, audio_path FROM transcribe_jobs
+      WHERE status IN ('done','failed')
+        AND completed_at IS NOT NULL
+        AND completed_at < SYSTIMESTAMP - INTERVAL '${CLEANUP_AUDIO_AFTER_DAYS}' DAY
+        AND audio_path IS NOT NULL
+    `).all();
+
+    let cleaned = 0;
+    let missed = 0;
+    for (const row of rows) {
+      try {
+        if (fs.existsSync(row.audio_path)) {
+          fs.unlinkSync(row.audio_path);
+          cleaned++;
+        } else {
+          missed++;
+        }
+        // 把 audio_path 清空,標示已清(避免重跑同 job 又 query)
+        await db.prepare(`UPDATE transcribe_jobs SET audio_path=NULL WHERE id=?`).run(row.id);
+      } catch (e) {
+        console.warn(`[TranscribeJob] cleanup ${row.id} (${row.audio_path}) error:`, e.message);
+      }
+    }
+    if (rows.length > 0) {
+      console.log(`[TranscribeJob] audio cleanup: scanned=${rows.length} deleted=${cleaned} missed=${missed} (>${CLEANUP_AUDIO_AFTER_DAYS}d)`);
+    }
+  } catch (e) {
+    console.error('[TranscribeJob] cleanupOldJobAudio error:', e.message);
+  }
+}
+
 module.exports = {
   createJob,
   attachMessageId,
   runTranscribeJob,
   recoverStaleJobs,
   gracefullyPauseActiveJobs,
+  cleanupOldJobAudio,
 };

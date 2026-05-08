@@ -3499,5 +3499,26 @@
       "parsedByCursor": "從 OUT ref cursor 取得資料",
       "parsedByMarkdown": "從 markdown table 解析"
     }
+  },
+  "transcribe_job": {
+    "title": "音訊背景轉錄",
+    "starting": "已啟動背景轉錄 ({{size}}MB),預計 {{eta}}s 完成。可關閉視窗,完成後會通知您。",
+    "preparing": "準備中(切片中)...",
+    "running": "轉錄中 {{done}}/{{total}} 段 · 已產出 {{chars}} 字",
+    "done": "轉錄完成 · {{time}} · {{chars}} 字 / {{total}} 段",
+    "failed": "轉錄失敗",
+    "recovery": "中斷恢復 {{count}} 次",
+    "cancel": "取消",
+    "canceling": "取消中",
+    "cancelConfirm": "確定要取消此轉錄?已轉錄完成的段落仍會保留在逐字稿。",
+    "download": "下載逐字稿",
+    "loading": "載入轉錄資訊...",
+    "notify": {
+      "done": "音訊轉錄完成:{{file}}",
+      "failed": "音訊轉錄失敗:{{file}}",
+      "doneMessage": "共 {{chars}} 字 / {{segments}} 段,點此查看"
+    },
+    "personal": "個人通知",
+    "announcements": "公告"
   }
 }

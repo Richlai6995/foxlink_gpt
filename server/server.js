@@ -441,6 +441,12 @@ app.get('/api/version', (req, res) => {
       setInterval(() => {
         transcribeJobService.recoverStaleJobs(db).catch((e) => console.warn('[TranscribeJob] recovery tick:', e.message));
       }, 5 * 60 * 1000);
+
+      // 每天跑一次音檔清理(>30 天 done/failed 的 job 清原始音檔,.txt 留)
+      transcribeJobService.cleanupOldJobAudio(db).catch((e) => console.warn('[TranscribeJob] startup cleanup:', e.message));
+      setInterval(() => {
+        transcribeJobService.cleanupOldJobAudio(db).catch((e) => console.warn('[TranscribeJob] cleanup tick:', e.message));
+      }, 24 * 60 * 60 * 1000);
     } catch (e) {
       console.error('[TranscribeJob] Failed to start recovery scheduler:', e.message);
     }

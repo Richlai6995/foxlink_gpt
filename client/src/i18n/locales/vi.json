@@ -3499,5 +3499,26 @@
       "parsedByCursor": "Phân tích từ OUT ref cursor",
       "parsedByMarkdown": "Phân tích từ markdown table"
     }
+  },
+  "transcribe_job": {
+    "title": "Phiên âm âm thanh nền",
+    "starting": "Đã bắt đầu phiên âm nền ({{size}}MB), dự kiến {{eta}}s. Bạn có thể đóng cửa sổ; sẽ được thông báo khi hoàn tất.",
+    "preparing": "Đang chuẩn bị (cắt đoạn)...",
+    "running": "Đang phiên âm {{done}}/{{total}} đoạn · {{chars}} ký tự đã tạo",
+    "done": "Hoàn tất · {{time}} · {{chars}} ký tự / {{total}} đoạn",
+    "failed": "Phiên âm thất bại",
+    "recovery": "Khôi phục {{count}} lần",
+    "cancel": "Hủy",
+    "canceling": "Đang hủy",
+    "cancelConfirm": "Hủy phiên âm này? Các đoạn đã hoàn tất vẫn được lưu trong bản phiên âm.",
+    "download": "Tải bản phiên âm",
+    "loading": "Đang tải thông tin phiên âm...",
+    "notify": {
+      "done": "Phiên âm hoàn tất: {{file}}",
+      "failed": "Phiên âm thất bại: {{file}}",
+      "doneMessage": "{{chars}} ký tự / {{segments}} đoạn, nhấp để xem"
+    },
+    "personal": "Thông báo",
+    "announcements": "Thông báo chung"
   }
 }

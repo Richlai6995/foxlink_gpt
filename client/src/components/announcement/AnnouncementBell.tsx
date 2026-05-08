@@ -42,6 +42,9 @@ export default function AnnouncementBell() {
   const [notifications, setNotifications] = useState<UserNotification[]>([])
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  // 收到新個人通知時短暫顯示 mini toast(3s)
+  const prevUnreadRef = useRef<number>(0)
+  const [showToast, setShowToast] = useState<UserNotification | null>(null)
 
   const fetchActive = useCallback(async () => {
     if (!isAuthenticated) return
@@ -56,7 +59,18 @@ export default function AnnouncementBell() {
     if (!isAuthenticated) return
     try {
       const { data } = await api.get<UserNotification[]>('/notifications', { params: { limit: 30 } })
-      setNotifications(data || [])
+      const list = data || []
+      // 偵測未讀數增加 → 抓最新一條未讀 popup 3 秒
+      const unreadNow = list.filter(n => !n.is_read && !n.is_dismissed).length
+      if (unreadNow > prevUnreadRef.current && prevUnreadRef.current >= 0) {
+        const newest = list.find(n => !n.is_read && !n.is_dismissed)
+        if (newest && document.visibilityState === 'visible') {
+          setShowToast(newest)
+          setTimeout(() => setShowToast(null), 5000)
+        }
+      }
+      prevUnreadRef.current = unreadNow
+      setNotifications(list)
     } catch { /* ignore */ }
   }, [isAuthenticated])
 
@@ -180,6 +194,39 @@ export default function AnnouncementBell() {
         )}
       </button>
 
+      {/* Mini toast:收到新個人通知時短暫提示(3 秒)*/}
+      {showToast && !open && (
+        <div
+          className="absolute right-0 top-9 w-80 bg-white rounded-xl border border-blue-300 shadow-2xl z-50 p-3 cursor-pointer hover:bg-blue-50 transition animate-[fadeIn_0.2s_ease-out]"
+          onClick={() => {
+            const sessionId = showToast.payload?.sessionId
+            if (sessionId) navigate(`/chat?session=${sessionId}`)
+            else if (showToast.link_url) navigate(showToast.link_url)
+            setShowToast(null)
+          }}
+        >
+          <div className="flex items-start gap-2">
+            <span className="mt-0.5 flex-shrink-0">
+              {showToast.type === 'transcribe_job_done' ? <CheckCircle size={16} className="text-green-500" /> :
+               showToast.type === 'transcribe_job_failed' ? <XCircle size={16} className="text-red-500" /> :
+               <Mic size={16} className="text-blue-500" />}
+            </span>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium text-slate-800 break-words">{showToast.title}</div>
+              {showToast.message && (
+                <div className="text-xs text-slate-500 mt-0.5 break-words">{showToast.message}</div>
+              )}
+            </div>
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowToast(null) }}
+              className="text-slate-300 hover:text-slate-600 flex-shrink-0"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {open && (
         <div className="absolute right-0 top-9 w-96 max-h-[70vh] bg-white rounded-xl border border-slate-200 shadow-2xl z-50 flex flex-col overflow-hidden">
           <div className="px-4 py-2.5 border-b border-slate-100 flex items-center justify-between bg-slate-50">
@@ -198,7 +245,7 @@ export default function AnnouncementBell() {
             {visibleNotifications.length > 0 && (
               <>
                 <div className="px-4 py-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wide bg-slate-50/50">
-                  個人通知
+                  {t('transcribe_job.personal')}
                 </div>
                 {visibleNotifications.map(n => (
                   <div
@@ -239,7 +286,7 @@ export default function AnnouncementBell() {
               <>
                 {visibleNotifications.length > 0 && (
                   <div className="px-4 py-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wide bg-slate-50/50">
-                    公告
+                    {t('transcribe_job.announcements')}
                   </div>
                 )}
                 {items.map(a => (

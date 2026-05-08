@@ -245,6 +245,32 @@ router.post('/jobs/:id/notify', verifyToken, async (req, res) => {
   }
 });
 
+// POST /api/transcribe/jobs/:id/cancel — user 取消(只 mark failed,worker 看 status 自會收尾)
+//   注意:無法強制中止跑到一半的 transcribeAudio SDK call(Gemini 還是會繼續跑完該段)
+//   但可以阻止下一個 batch 啟動,並把 status 標 failed,讓前端立即 UI 反映
+router.post('/jobs/:id/cancel', verifyToken, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const row = await db.prepare('SELECT user_id, status FROM transcribe_jobs WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'job not found' });
+    if (row.user_id !== req.user.id) return res.status(403).json({ error: 'forbidden' });
+    if (row.status === 'done' || row.status === 'failed') {
+      return res.status(400).json({ error: '此 job 已結束,無法取消' });
+    }
+    await db.prepare(`
+      UPDATE transcribe_jobs SET
+        status = 'failed',
+        error_msg = '已由使用者取消',
+        completed_at = SYSTIMESTAMP,
+        updated_at = SYSTIMESTAMP
+      WHERE id = ?
+    `).run(req.params.id);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/transcribe/admin/jobs — admin 監控(全系統)
 router.get('/admin/jobs', verifyToken, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'admin only' });

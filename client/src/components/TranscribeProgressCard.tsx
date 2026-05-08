@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Mic, CheckCircle, XCircle, Loader2, Download } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { Mic, CheckCircle, XCircle, Loader2, Download, X } from 'lucide-react'
 import api from '../lib/api'
 import { fmtTW } from '../lib/fmtTW'
 
@@ -40,7 +41,25 @@ function _fmtDur(sec?: number): string {
 }
 
 export default function TranscribeProgressCard({ jobId }: Props) {
+  const { t } = useTranslation()
   const [job, setJob] = useState<TranscribeJob | null>(null)
+  const [canceling, setCanceling] = useState(false)
+
+  const handleCancel = async () => {
+    if (!confirm(t('transcribe_job.cancelConfirm'))) return
+    setCanceling(true)
+    try {
+      await api.post(`/transcribe/jobs/${jobId}/cancel`)
+      // 立刻 fetch 拿到最新 failed status
+      const res = await api.get(`/transcribe/jobs/${jobId}`)
+      setJob(res.data)
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || '取消失敗'
+      alert(msg)
+    } finally {
+      setCanceling(false)
+    }
+  }
 
   const fetchJob = useCallback(async () => {
     try {
@@ -62,7 +81,7 @@ export default function TranscribeProgressCard({ jobId }: Props) {
   if (!job) {
     return (
       <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-400">
-        <Loader2 size={15} className="animate-spin" /> 載入轉錄資訊...
+        <Loader2 size={15} className="animate-spin" /> {t('transcribe_job.loading')}
       </div>
     )
   }
@@ -77,12 +96,12 @@ export default function TranscribeProgressCard({ jobId }: Props) {
                               'border-blue-200 bg-blue-50'
 
   const subtitle = job.status === 'done'
-    ? `轉錄完成 · ${fmtTW(job.completed_at)} · ${(job.transcript_chars || 0).toLocaleString()} 字 / ${job.segment_total} 段`
+    ? t('transcribe_job.done', { time: fmtTW(job.completed_at), chars: (job.transcript_chars || 0).toLocaleString(), total: job.segment_total })
     : job.status === 'failed'
-    ? (job.error_msg || '轉錄失敗')
+    ? (job.error_msg || t('transcribe_job.failed'))
     : (job.segment_total > 0
-        ? `轉錄中 ${job.segment_done}/${job.segment_total} 段 · 已產出 ${(job.transcript_chars || 0).toLocaleString()} 字`
-        : '準備中(切片中)...')
+        ? t('transcribe_job.running', { done: job.segment_done, total: job.segment_total, chars: (job.transcript_chars || 0).toLocaleString() })
+        : t('transcribe_job.preparing'))
 
   return (
     <div className={`border rounded-xl overflow-hidden ${statusColor}`}>
@@ -96,7 +115,7 @@ export default function TranscribeProgressCard({ jobId }: Props) {
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-slate-800 truncate">
             <Mic size={13} className="inline mr-1 text-blue-500" />
-            音訊背景轉錄:{job.audio_filename}
+            {t('transcribe_job.title')}:{job.audio_filename}
             {job.duration_sec ? <span className="text-xs text-slate-400 font-normal ml-2">· {_fmtDur(job.duration_sec)}</span> : null}
             {job.audio_size_mb ? <span className="text-xs text-slate-400 font-normal ml-2">· {job.audio_size_mb.toFixed(1)}MB</span> : null}
           </p>
@@ -108,7 +127,7 @@ export default function TranscribeProgressCard({ jobId }: Props) {
           }`}>
             {subtitle}
             {job.recovery_count && job.recovery_count > 0 ? (
-              <span className="text-amber-600 ml-2">(中斷恢復 {job.recovery_count} 次)</span>
+              <span className="text-amber-600 ml-2">({t('transcribe_job.recovery', { count: job.recovery_count })})</span>
             ) : null}
           </p>
 
@@ -130,8 +149,20 @@ export default function TranscribeProgressCard({ jobId }: Props) {
             title={job.transcript_file}
           >
             <Download size={12} />
-            下載逐字稿
+            {t('transcribe_job.download')}
           </a>
+        )}
+
+        {(job.status === 'pending' || job.status === 'running') && (
+          <button
+            onClick={handleCancel}
+            disabled={canceling}
+            className="flex items-center gap-1 px-2.5 py-1.5 bg-white border border-slate-300 text-slate-600 text-xs rounded-lg hover:bg-red-50 hover:border-red-300 hover:text-red-600 transition flex-shrink-0 disabled:opacity-50"
+            title={t('transcribe_job.cancel')}
+          >
+            <X size={12} />
+            {canceling ? t('transcribe_job.canceling') : t('transcribe_job.cancel')}
+          </button>
         )}
       </div>
     </div>
