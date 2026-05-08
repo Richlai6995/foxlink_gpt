@@ -299,23 +299,31 @@ async function runTranscribeJob(db, jobId) {
         } else {
           console.error(`[TranscribeJob] ${tagId} part ${seg.idx + 1}/${segments.length} FAILED after ${Date.now() - tPart}ms attempts=${r.attempts}: ${r.error}`);
         }
-      }));
 
-      // 每 batch 完更新 DB(前端 polling 才看得到 N/M 進度)
-      const done = segments.filter(s => s.ok).length;
-      const totalIn = segments.reduce((sum, s) => sum + (s.inputTokens || 0), 0);
-      const totalOut = segments.reduce((sum, s) => sum + (s.outputTokens || 0), 0);
-      const totalChars = segments.filter(s => s.ok).reduce((sum, s) => sum + (s.text?.length || 0), 0);
-      await db.prepare(`
-        UPDATE transcribe_jobs SET
-          segments_json=?,
-          segment_done=?,
-          in_tokens_total=?,
-          out_tokens_total=?,
-          transcript_chars=?,
-          updated_at=SYSTIMESTAMP
-        WHERE id=?
-      `).run(JSON.stringify(segments), done, totalIn, totalOut, totalChars, jobId);
+        // ★ 每段完成立即 flush DB(關鍵):
+        //   原本是 batch 結束後才 UPDATE。但 SIGTERM 可能在 Promise.all 中間發生,
+        //   in-memory 的 seg.ok=true 沒寫進 DB → recovery 看 segments_json 還是空
+        //   → 段被重複跑、segment_done 永遠 0/N。
+        //   現在每段完成立刻寫,worst case 浪費 1 段的工(SIGTERM 在 flush 之前的瞬間)。
+        try {
+          const done = segments.filter(s => s.ok).length;
+          const totalIn = segments.reduce((sum, s) => sum + (s.inputTokens || 0), 0);
+          const totalOut = segments.reduce((sum, s) => sum + (s.outputTokens || 0), 0);
+          const totalChars = segments.filter(s => s.ok).reduce((sum, s) => sum + (s.text?.length || 0), 0);
+          await db.prepare(`
+            UPDATE transcribe_jobs SET
+              segments_json=?,
+              segment_done=?,
+              in_tokens_total=?,
+              out_tokens_total=?,
+              transcript_chars=?,
+              updated_at=SYSTIMESTAMP
+            WHERE id=?
+          `).run(JSON.stringify(segments), done, totalIn, totalOut, totalChars, jobId);
+        } catch (e) {
+          console.warn(`[TranscribeJob] ${tagId} part ${seg.idx + 1} DB flush failed: ${e.message}`);
+        }
+      }));
     }
 
     // 6. Concat → 寫 .txt
