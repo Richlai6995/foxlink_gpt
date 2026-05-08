@@ -1222,6 +1222,49 @@ async function runMigrations(db) {
     updated_at       TIMESTAMP     DEFAULT SYSTIMESTAMP
   )`);
 
+  // ── 長音訊背景轉錄 Job(對齊 research_jobs pattern)────────────────────────
+  // 設計文件:docs/long-audio-background-job-plan.md
+  // 同 process setImmediate worker + DB row lock + heartbeat + recovery scheduler
+  await createTable('TRANSCRIBE_JOBS', `CREATE TABLE transcribe_jobs (
+    id                VARCHAR2(36)   PRIMARY KEY,
+    user_id           NUMBER         NOT NULL,
+    session_id        VARCHAR2(36),                          -- 來源 chat session
+    message_id        NUMBER,                                -- placeholder chat_message id
+    audio_filename    VARCHAR2(500)  NOT NULL,               -- 顯示名
+    audio_path        VARCHAR2(1000) NOT NULL,               -- NFS persisted upload path
+    audio_size_mb     NUMBER,
+    audio_mime_type   VARCHAR2(100),
+    duration_sec      NUMBER,                                -- ffprobe 抓的總時長
+    status            VARCHAR2(20)   DEFAULT 'pending',      -- pending / running / done / failed
+    segment_total     NUMBER         DEFAULT 0,              -- ffmpeg 切完才知道
+    segment_done      NUMBER         DEFAULT 0,              -- 進度
+    segments_json     CLOB,                                  -- [{idx,ok,text,attempts,marker,in,out,error?}]
+    transcript_chars  NUMBER         DEFAULT 0,              -- 累計字數
+    transcript_file   VARCHAR2(500),                         -- transcript_xxx.txt 檔名
+    in_tokens_total   NUMBER         DEFAULT 0,
+    out_tokens_total  NUMBER         DEFAULT 0,
+    estimated_usd     NUMBER,
+    actual_usd        NUMBER         DEFAULT 0,
+    error_msg         VARCHAR2(1000),
+    is_notified       NUMBER(1)      DEFAULT 0,
+    recovery_count    NUMBER         DEFAULT 0,              -- 中斷後 resume 次數,>=3 標 failed
+    lock_token        VARCHAR2(64),                          -- pod 識別,防多 pod 搶
+    heartbeat_at      TIMESTAMP,                             -- worker 60s 更新一次
+    created_at        TIMESTAMP      DEFAULT SYSTIMESTAMP,
+    updated_at        TIMESTAMP      DEFAULT SYSTIMESTAMP,
+    completed_at      TIMESTAMP
+  )`);
+
+  // transcribe_jobs 索引
+  const safeCreateTranscribeIdx = async (name, ddl) => {
+    try { await db.prepare(ddl).run(); } catch (e) {
+      if (!e.message?.includes('ORA-00955')) console.warn(`[Migration] index ${name}: ${e.message}`);
+    }
+  };
+  await safeCreateTranscribeIdx('IDX_TRANSJOBS_USER_STATUS', 'CREATE INDEX idx_transjobs_user_status ON transcribe_jobs(user_id, status)');
+  await safeCreateTranscribeIdx('IDX_TRANSJOBS_RECOVERY',    'CREATE INDEX idx_transjobs_recovery ON transcribe_jobs(status, heartbeat_at)');
+  await safeCreateTranscribeIdx('IDX_TRANSJOBS_SESSION',     'CREATE INDEX idx_transjobs_session ON transcribe_jobs(session_id)');
+
   // ── AI 戰情 ─────────────────────────────────────────────────────────────────
   await addCol('USERS', 'CAN_DESIGN_AI_SELECT', 'NUMBER(1)');
   await addCol('USERS', 'CAN_USE_AI_DASHBOARD',  'NUMBER(1)');
