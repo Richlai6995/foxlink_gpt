@@ -107,9 +107,9 @@ const DM_TEMPLATES = {
 
 const NEW_LOGIN_TEMPLATES = {
   'zh-TW': ({ ip, ua, when }) => [
-    '🔔 **Cortex 新位置登入提醒**',
+    '🔔 **Cortex 新裝置登入提醒**',
     '',
-    `您的帳號剛從新 IP 登入:`,
+    `您的帳號剛從新裝置登入(同裝置上 IP 變動不會觸發此通知):`,
     `- 時間:${when}`,
     `- IP:\`${ip || 'unknown'}\``,
     `- 裝置:${ua || 'unknown'}`,
@@ -120,9 +120,9 @@ const NEW_LOGIN_TEMPLATES = {
   ].join('\n'),
 
   'en': ({ ip, ua, when }) => [
-    '🔔 **Cortex New Location Login**',
+    '🔔 **Cortex New Device Login**',
     '',
-    'Your account just logged in from a new IP:',
+    'Your account just logged in from a new device (IP changes on the same device do not trigger this alert):',
     `- Time: ${when}`,
     `- IP: \`${ip || 'unknown'}\``,
     `- Device: ${ua || 'unknown'}`,
@@ -133,9 +133,9 @@ const NEW_LOGIN_TEMPLATES = {
   ].join('\n'),
 
   'vi': ({ ip, ua, when }) => [
-    '🔔 **Đăng nhập Cortex từ vị trí mới**',
+    '🔔 **Đăng nhập Cortex từ thiết bị mới**',
     '',
-    'Tài khoản của bạn vừa đăng nhập từ IP mới:',
+    'Tài khoản của bạn vừa đăng nhập từ thiết bị mới (thay đổi IP trên cùng thiết bị sẽ không kích hoạt thông báo này):',
     `- Thời gian: ${when}`,
     `- IP: \`${ip || 'unknown'}\``,
     `- Thiết bị: ${ua || 'unknown'}`,

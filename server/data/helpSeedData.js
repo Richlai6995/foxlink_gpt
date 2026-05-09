@@ -84,7 +84,7 @@ const userSections = [
     "sort_order": 2,
     "icon": "User",
     "icon_color": "text-indigo-500",
-    "last_modified": "2026-05-08",
+    "last_modified": "2026-05-09",
     "title": "登入與登出",
     "sidebar_label": "登入與登出",
     "blocks": [
@@ -493,7 +493,7 @@ const userSections = [
         "blocks": [
           {
             "type": "para",
-            "text": "當您**從新 IP 完成驗證碼**(系統判斷過去 30 天沒在這個 IP 看過您)時,Webex Bot 會主動私訊您「**新位置登入提醒**」,內含時間 / IP / 裝置資訊。"
+            "text": "當您**從新裝置完成驗證碼**(系統根據裝置 fingerprint 判斷,信任裝置 30 天內未過期就視為已知)時,Webex Bot 會主動私訊您「**新裝置登入提醒**」,內含時間 / IP / 裝置資訊。**同一裝置上 IP 變動不會觸發**(出差、行動網路、撥接 IP 變更等情境不再造成通知噪音)。"
           },
           {
             "type": "note",

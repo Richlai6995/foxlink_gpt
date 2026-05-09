@@ -219,6 +219,34 @@ async function revokeAllForUser(db, userId) {
   return r.changes || 0;
 }
 
+// ── 新裝置判斷(取代過去的 isNewLoginIp 通知條件)──────────────────
+/**
+ * 判斷這次登入是否為新裝置:該 user 在 user_trusted_devices 內有沒有
+ * 完全相同 UA 字串、且尚未過期的紀錄 — 沒有就是新裝置。
+ *
+ * 改用 device-based 判斷的理由:user 抱怨「外網 IP 一直在變,通知很煩」。
+ * device-bound trust(cookie + user_trusted_devices)已經把 IP 變動納入沿用,
+ * 通知層也應該對齊 — 同一裝置上 IP 變不通知,真的換裝置才通知。
+ *
+ * 必須在 issueDevice 之前呼用(寫進去就會查到自己,永遠 false)。
+ */
+async function isNewDevice(db, userId, userAgent) {
+  if (!userId || !userAgent) return false;
+  try {
+    const r = await db.prepare(
+      `SELECT 1 FROM user_trusted_devices
+       WHERE user_id = ?
+         AND user_agent = ?
+         AND expires_at > SYSTIMESTAMP
+       FETCH FIRST 1 ROWS ONLY`
+    ).get(userId, String(userAgent).slice(0, 512));
+    return !r;
+  } catch (e) {
+    console.warn(`[DeviceTrust] isNewDevice lookup failed: ${e.message}`);
+    return false;  // 失敗保守:不判定新裝置,避免噪音
+  }
+}
+
 module.exports = {
   COOKIE_NAME,
   cfg,
@@ -233,4 +261,5 @@ module.exports = {
   listForUser,
   revokeDevice,
   revokeAllForUser,
+  isNewDevice,
 };

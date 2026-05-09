@@ -742,15 +742,16 @@ const proceedOrChallenge = async ({ req, res, user, source, mode }) => {
   try {
     const trustedDevice = await deviceTrust.verifyAndTouch(db, { req, expectUserId: user.id });
     if (trustedDevice) {
-      // 換 IP 仍走「異常登入 DM 通知」邏輯,使用者可即時反應
-      const isNewIp = await throttle.isNewLoginIp(db, user.id, ip);
+      // 通知改 device-based:device cookie 已驗過代表是已知裝置,正常一律 false 不發。
+      // 保留判斷僅為防禦(萬一 device record 被刪又重建等異常情境)
+      const isNew = await deviceTrust.isNewDevice(db, user.id, ua);
       logAuthEventAsync(db, {
         user_id: user.id, username: user.username,
         event_type: 'login_success_external_skip_mfa_device',
         ip, user_agent: ua, success: 1,
-        metadata: { source, device_id: trustedDevice.device_id, new_ip: isNewIp },
+        metadata: { source, device_id: trustedDevice.device_id, new_device: isNew },
       });
-      if (isNewIp && user.email) {
+      if (isNew && user.email) {
         const lang = user.preferred_language || 'zh-TW';
         mfa.sendNewLoginAlertDM({ email: user.email, ip, ua, lang }).catch(() => {});
       }
@@ -966,8 +967,10 @@ router.post('/2fa/verify', async (req, res) => {
     if (user.role !== 'admin' && user.status !== 'active') {
       return res.status(403).json({ error: '帳號失效' });
     }
-    // 新 IP 判斷必須在寫 trusted_ips/devices 之前(寫了之後 audit log 會看到自己 → 永遠 false)
-    const isNewIp = await throttle.isNewLoginIp(db, user.id, ip);
+    // 新裝置判斷必須在 issueDevice 之前(寫進 user_trusted_devices 後會查到自己 → 永遠 false)
+    // 改用 device-based(同 UA 30 天內看過 = 已知裝置),取代過去 isNewLoginIp 的純 IP 判斷,
+    // 避免外網 IP 一直變動造成通知噪音 — 真的換裝置才會通知一次。
+    const isNew = await deviceTrust.isNewDevice(db, user.id, ua);
 
     // ① 簽 device:寫 user_trusted_devices + set httpOnly cookie(30 天 sliding)
     let deviceId = null;
@@ -997,10 +1000,10 @@ router.post('/2fa/verify', async (req, res) => {
       user_id: user.id, username: user.username,
       event_type: 'login_success_external_mfa',
       ip, user_agent: ua, challenge_id, success: 1,
-      metadata: { new_ip: isNewIp, device_id: deviceId },
+      metadata: { new_device: isNew, device_id: deviceId },
     });
-    // 新 IP DM 通知使用者(non-blocking)
-    if (isNewIp && user.email) {
+    // 新裝置 DM 通知使用者(non-blocking) — IP 變動不再觸發,只有真的換裝置才提醒
+    if (isNew && user.email) {
       const lang = user.preferred_language || 'zh-TW';
       mfa.sendNewLoginAlertDM({ email: user.email, ip, ua, lang }).catch(() => {});
     }
