@@ -83,6 +83,39 @@ if (LDAP_ENABLED) {
   }
 }
 
+// ── LDAP TLS hardening(2026-05-09)─────────────────────────────────────
+// 三種狀態:
+//   1. LDAP_CA_PATH 有設且檔案讀得到  → verify=true + 用該 CA(最安全,推薦 prod)
+//   2. LDAP_TLS_VERIFY='true' 但無 CA → verify=true 走 system root(自簽 cert 會炸)
+//   3. 否則(預設)                    → verify=false + 啟動 warn(沿用現狀 / 過渡)
+//
+// 建議流程:ops 從 AD 拿 root CA → 放進 server/certs/foxlink-ad-root.pem
+// → 設 LDAP_CA_PATH=./certs/foxlink-ad-root.pem → 重啟驗證,確認後刪除 fallback
+function buildLdapTlsOptions() {
+  const fs = require('fs');
+  const path = require('path');
+  const caPath = process.env.LDAP_CA_PATH;
+  if (caPath) {
+    try {
+      const resolved = path.isAbsolute(caPath) ? caPath : path.resolve(__dirname, '..', caPath);
+      const caPem = fs.readFileSync(resolved, 'utf8');
+      console.log(`[LDAP] TLS verify ENABLED (CA=${resolved})`);
+      return { rejectUnauthorized: true, ca: [caPem] };
+    } catch (e) {
+      console.error(`[LDAP] ❌ LDAP_CA_PATH 讀取失敗 (${caPath}): ${e.message} — 退回不驗證模式`);
+    }
+  }
+  if (process.env.LDAP_TLS_VERIFY === 'true') {
+    console.log('[LDAP] TLS verify ENABLED (system root CAs)');
+    return { rejectUnauthorized: true };
+  }
+  // Fallback:不驗證(現況)— 啟動大聲警告
+  if (LDAP_ENABLED) {
+    console.warn('[LDAP] ⚠️  TLS verify DISABLED — MITM 風險。請設 LDAP_CA_PATH 啟用 CA 驗證');
+  }
+  return { rejectUnauthorized: false };
+}
+
 const LDAP_CONFIG = {
   url: process.env.LDAP_URL,
   baseDN: process.env.LDAP_BASE_DN,
@@ -90,12 +123,43 @@ const LDAP_CONFIG = {
   managerPass: process.env.LDAP_MANAGER_PASSWORD,
   reconnect: false,
   strictDN: false,
-  tlsOptions: { rejectUnauthorized: false },
+  tlsOptions: buildLdapTlsOptions(),
 };
+
+// ── LDAP filter escape(2026-05-09 LDAP injection fix)──────────────────
+// RFC 4515 規定 search filter 內這些字元必須以 \xx hex 形式 escape。
+// 不 escape 的話 username='*)(uid=*' 會把 filter 變 (sAMAccountName=*)(uid=*),
+// 列舉到非預期 user → search.searchEntry 取最後一筆 → 用攻擊者送的密碼 bind
+// 那個 user 的 DN(雖仍要密碼正確才過,但能列舉 + 偷襲特定條件帳號)。
+function escapeLdapFilter(s) {
+  // RFC 4515:filter 中這些字元必須 escape。space 在 filter 是合法字元不需處理。
+  // NUL byte 已被白名單(LDAP_USERNAME_REGEX)在更早一層擋掉,不會走到此。
+  return String(s).replace(/[\\*()]/g, (c) => {
+    switch (c) {
+      case '\\': return '\\5c';
+      case '*':  return '\\2a';
+      case '(':  return '\\28';
+      case ')':  return '\\29';
+      default:   return c;
+    }
+  });
+}
+
+// 第二層防呆:Foxlink AD username 規範一律 alphanumeric + 少數符號,
+// 直接拒絕怪字元(攻擊 payload 一定有特殊字元),escape 失效時仍能擋。
+const LDAP_USERNAME_REGEX = /^[A-Za-z0-9._\-@]{1,64}$/;
+function isValidLdapUsername(s) {
+  return typeof s === 'string' && LDAP_USERNAME_REGEX.test(s);
+}
 
 const authenticateLDAP = (account, password) => {
   return new Promise((resolve, reject) => {
     if (!ldap || !LDAP_ENABLED) return resolve(null);
+    // 防 LDAP injection:白名單先擋怪字元,再 escape
+    if (!isValidLdapUsername(account)) {
+      console.warn(`[LDAP] rejected suspicious username: "${String(account).slice(0, 40)}"`);
+      return resolve(null);  // 不洩漏「此 username 格式錯」,跟「找不到」同回應
+    }
     try {
       const client = ldap.createClient(LDAP_CONFIG);
       client.on('error', (err) => console.error('[LDAP] Client Error:', err.message));
@@ -107,7 +171,7 @@ const authenticateLDAP = (account, password) => {
         }
 
         const opts = {
-          filter: `(sAMAccountName=${account})`,
+          filter: `(sAMAccountName=${escapeLdapFilter(account)})`,
           scope: 'sub',
           attributes: ['dn', 'sAMAccountName', 'displayName', 'mail'],
         };
