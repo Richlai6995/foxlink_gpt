@@ -59,9 +59,11 @@ interface Props {
   onPrimaryChange: (code: string) => void
   /** 標題色帶 — 'lme'(黃) / 'precious'(綠) */
   theme?: 'lme' | 'precious'
+  /** 結束日期(YYYY-MM-DD)— chart 區間以這天為終點往回 days;空 = 今天 */
+  viewDate?: string
 }
 
-export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChange, theme = 'lme' }: Props) {
+export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChange, theme = 'lme', viewDate }: Props) {
   const [overlay, setOverlay] = useState<string[]>([])  // 疊加金屬(最多 1-2 個)
   const [range, setRange] = useState<RangeKey>('6m')
   const [customFrom, setCustomFrom] = useState<string>('')
@@ -86,16 +88,25 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
     const wanted = [primaryMetal, ...overlay]
     if (wanted.length === 0) return
     setLoading(true)
+    const params: Record<string, any> = { days }
+    if (viewDate) params.end_date = viewDate
     Promise.all(wanted.map(code =>
-      api.get('/metals/prices/timeseries', { params: { metal: code, days } })
-        .then(r => [code, (r.data || []) as PricePoint[]] as const)
-        .catch(() => [code, []] as const)
+      api.get('/metals/prices/timeseries', { params: { ...params, metal: code } })
+        .then(r => {
+          const pts = (r.data || []) as PricePoint[]
+          if (pts.length === 0) console.warn(`[MetalsChart] ${code} timeseries 回 0 筆 (days=${days}, end=${viewDate || 'today'})`)
+          return [code, pts] as const
+        })
+        .catch(err => {
+          console.error(`[MetalsChart] ${code} timeseries 失敗:`, err?.response?.status, err?.response?.data || err?.message)
+          return [code, []] as const
+        })
     )).then(results => {
       const byMetal: Record<string, PricePoint[]> = {}
       for (const [code, pts] of results) byMetal[code] = pts
       setSeriesByMetal(byMetal)
     }).finally(() => setLoading(false))
-  }, [primaryMetal, overlay.join(','), days])
+  }, [primaryMetal, overlay.join(','), days, viewDate])
 
   const toggleIndicator = (k: IndicatorKey) => {
     setIndicators(indicators.includes(k) ? indicators.filter(x => x !== k) : [...indicators, k])

@@ -22,7 +22,11 @@ interface NewsItem {
   related_metals?: string
 }
 
-export default function MetalsNewsPanel() {
+interface Props {
+  viewDate?: string  // 'YYYY-MM-DD'
+}
+
+export default function MetalsNewsPanel({ viewDate }: Props) {
   const [tab, setTab] = useState<Tab>('news')
   const [news, setNews] = useState<NewsItem[]>([])
   const [report, setReport] = useState<any>(null)
@@ -31,7 +35,10 @@ export default function MetalsNewsPanel() {
   useEffect(() => {
     setLoading(true)
     if (tab === 'news') {
-      api.get('/metals/news', { params: { limit: 30, today: 1 } })
+      const params: Record<string, any> = { limit: 30 }
+      if (viewDate) params.date = viewDate
+      else params.today = 1
+      api.get('/metals/news', { params })
         .then(r => setNews(r.data?.rows || []))
         .finally(() => setLoading(false))
     } else {
@@ -39,7 +46,7 @@ export default function MetalsNewsPanel() {
         .then(r => setReport(r.data?.report || null))
         .finally(() => setLoading(false))
     }
-  }, [tab])
+  }, [tab, viewDate])
 
   return (
     <div className="bg-white border rounded-lg flex flex-col flex-1 min-h-0 overflow-hidden">

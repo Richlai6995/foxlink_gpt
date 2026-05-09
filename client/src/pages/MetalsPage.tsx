@@ -12,7 +12,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { ArrowLeft, Settings, Download, Loader2, AlertCircle, Sparkles, X, MessageSquare } from 'lucide-react'
+import { ArrowLeft, Settings, Download, Loader2, AlertCircle, Sparkles, X, MessageSquare, Calendar } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import api from '../lib/api'
 import MetalsPriceBlock from '../components/metals/MetalsPriceBlock'
@@ -54,6 +54,8 @@ export default function MetalsPage() {
   const [primaryBase, setPrimaryBase] = useState('CU')
   const [primaryPrecious, setPrimaryPrecious] = useState('AU')
   const [showAi, setShowAi] = useState(false)
+  // 基準日期 — 預設今天,可切歷史日方便對舊資料 / debug
+  const [viewDate, setViewDate] = useState<string>(() => new Date().toISOString().slice(0, 10))
 
   // 初始載入:偏好 + 是否有採購完整版權限
   useEffect(() => {
@@ -72,26 +74,37 @@ export default function MetalsPage() {
 
   const focusedSet = useMemo(() => new Set(prefs.focused_metals || []), [prefs])
 
-  // 載報價
+  // 載報價(viewDate 換時 refetch)
   useEffect(() => {
     if (denied || loadingInit) return
     setLoadingPrices(true)
-    api.get('/metals/prices').then(r => setPrices(r.data || [])).finally(() => setLoadingPrices(false))
-  }, [denied, loadingInit])
+    const params: Record<string, string> = {}
+    if (viewDate) params.as_of = viewDate
+    api.get('/metals/prices', { params }).then(r => setPrices(r.data || [])).finally(() => setLoadingPrices(false))
+  }, [denied, loadingInit, viewDate])
 
   const downloadXlsx = async () => {
     const params: Record<string, string> = {}
     if (prefs.focused_metals?.length) params.metals = prefs.focused_metals.join(',')
+    if (viewDate) params.as_of = viewDate
     const url = '/metals/export.xlsx?' + new URLSearchParams(params).toString()
     const resp = await api.get(url, { responseType: 'blob' })
     const blob = new Blob([resp.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
     const dl = document.createElement('a')
     dl.href = URL.createObjectURL(blob)
     const now = new Date()
-    const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`
-    dl.download = `metals_snapshot_${stamp}.xlsx`
+    const hhmm = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`
+    dl.download = `metals_snapshot_${viewDate || now.toISOString().slice(0, 10)}_${hhmm}.xlsx`
     dl.click()
     URL.revokeObjectURL(dl.href)
+  }
+
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const isToday = viewDate === todayStr
+  const stepDate = (delta: number) => {
+    const d = new Date(viewDate + 'T00:00:00')
+    d.setDate(d.getDate() + delta)
+    setViewDate(d.toISOString().slice(0, 10))
   }
 
   if (denied) {
@@ -121,6 +134,37 @@ export default function MetalsPage() {
         <Sparkles size={18} className="text-amber-500" />
         <h1 className="text-lg font-bold text-slate-800">{t('metalsLite.title', '金屬情報')}</h1>
         <span className="text-xs text-slate-400">{t('metalsLite.subtitle', '報價 / 走勢 / 宏觀 / 新聞 / AI')}</span>
+
+        {/* 日期切換 — 預設今天,可選歷史日期 */}
+        <div className="ml-4 flex items-center gap-1 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
+          <Calendar size={12} className="text-amber-600" />
+          <button
+            onClick={() => stepDate(-1)}
+            className="px-1.5 py-0.5 text-xs text-slate-600 hover:bg-white rounded"
+            title="前一天"
+          >‹</button>
+          <input
+            type="date"
+            value={viewDate}
+            max={todayStr}
+            onChange={e => setViewDate(e.target.value || todayStr)}
+            className="bg-transparent text-xs font-mono text-slate-700 focus:outline-none"
+            style={{ width: 110 }}
+          />
+          <button
+            onClick={() => stepDate(1)}
+            disabled={isToday}
+            className="px-1.5 py-0.5 text-xs text-slate-600 hover:bg-white rounded disabled:opacity-30"
+            title="後一天"
+          >›</button>
+          {!isToday && (
+            <button
+              onClick={() => setViewDate(todayStr)}
+              className="ml-1 px-2 py-0.5 text-[10px] rounded bg-amber-600 text-white hover:bg-amber-700"
+            >今</button>
+          )}
+        </div>
+
         <div className="ml-auto flex items-center gap-2">
           <button
             onClick={() => setShowAi(true)}
@@ -180,6 +224,7 @@ export default function MetalsPage() {
             primaryMetal={primaryBase}
             onPrimaryChange={setPrimaryBase}
             theme="lme"
+            viewDate={viewDate}
           />
           <MetalsChart
             title={t('metalsLite.preciousChartTitle', '貴金屬走勢')}
@@ -187,13 +232,14 @@ export default function MetalsPage() {
             primaryMetal={primaryPrecious}
             onPrimaryChange={setPrimaryPrecious}
             theme="precious"
+            viewDate={viewDate}
           />
         </div>
 
         {/* 右欄 — 宏觀(精簡單欄)/ 新聞(展開吃滿) */}
         <div className="flex flex-col gap-3 min-h-0">
-          <MetalsMacroPanel />
-          <MetalsNewsPanel />
+          <MetalsMacroPanel viewDate={viewDate} />
+          <MetalsNewsPanel viewDate={viewDate} />
         </div>
       </div>
 

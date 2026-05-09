@@ -1,6 +1,8 @@
 /**
- * MetalsPriceBlock — 左欄報價卡片(基本金屬 / 貴金屬各一個)
- * 每張卡顯示:metal_code / 中文名 / USD 價 / 日 % / 週 % / 月 %
+ * MetalsPriceBlock — 左欄報價(基本金屬 / 貴金屬 各一個)
+ * 每張卡 = 一橫排:metal_code  中文名  USD 價格  D% W% M%
+ *
+ * 改版(2026-05-10):從兩行(主價/D-W-M)壓成一行,讓 11 個金屬不會擠
  */
 import { Loader2 } from 'lucide-react'
 import { useMemo } from 'react'
@@ -20,17 +22,15 @@ interface PriceRow {
 interface Props {
   title: string
   rows: PriceRow[]
-  metalsAllowed: string[]   // 該 block 該顯示哪些金屬代碼
+  metalsAllowed: string[]
   loading: boolean
   selectedCode: string
   onSelect: (code: string) => void
-  focusedSet?: Set<string>  // user 偏好;若空 = 顯示全部
-  /** 標題色帶配色 — 'lme'(黃) / 'precious'(綠) */
+  focusedSet?: Set<string>
   theme?: 'lme' | 'precious'
 }
 
 export default function MetalsPriceBlock({ title, rows, metalsAllowed, loading, selectedCode, onSelect, focusedSet, theme = 'lme' }: Props) {
-  // 把 rows index by metal_code,以保證 metalsAllowed 順序
   const visible = useMemo(() => {
     const byCode = new Map<string, PriceRow>()
     for (const r of rows) byCode.set(String(r.metal_code).toUpperCase(), r)
@@ -51,9 +51,21 @@ export default function MetalsPriceBlock({ title, rows, metalsAllowed, loading, 
         <h3 className="text-sm font-bold">{title}</h3>
         {loading && <Loader2 size={14} className="animate-spin opacity-50" />}
       </div>
-      <div className="p-2 space-y-1.5">
+
+      {/* 欄位標題小提示 */}
+      <div className="grid items-center gap-1 px-2 py-1 text-[9px] text-slate-400 border-b bg-slate-50/50"
+        style={{ gridTemplateColumns: '46px 1fr 80px 50px 50px 50px' }}>
+        <span>代碼</span>
+        <span></span>
+        <span className="text-right">USD</span>
+        <span className="text-right">D%</span>
+        <span className="text-right">W%</span>
+        <span className="text-right">M%</span>
+      </div>
+
+      <div>
         {visible.length === 0 && (
-          <div className="text-xs text-slate-400 py-3 text-center">(偏好設定中無此分類金屬)</div>
+          <div className="text-xs text-slate-400 py-3 px-3 text-center">(偏好設定中無此分類金屬)</div>
         )}
         {visible.map(r => {
           const code = String(r.metal_code).toUpperCase()
@@ -63,30 +75,20 @@ export default function MetalsPriceBlock({ title, rows, metalsAllowed, loading, 
             <button
               key={code}
               onClick={() => onSelect(code)}
-              className={`w-full text-left px-2 py-1.5 rounded border transition ${
-                isSelected
-                  ? 'border-blue-400 bg-blue-50'
-                  : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+              className={`w-full grid items-center gap-1 px-2 py-1.5 text-xs border-b last:border-b-0 transition ${
+                isSelected ? (theme === 'precious' ? 'bg-emerald-50' : 'bg-amber-50') : 'hover:bg-slate-50'
               } ${noData ? 'opacity-50' : ''}`}
+              style={{ gridTemplateColumns: '46px 1fr 80px 50px 50px 50px' }}
               title={`${code} 資料日期 ${r.as_of_date || '—'}${r.source ? ' / ' + r.source : ''}`}
             >
-              <div className="flex items-baseline gap-1.5">
-                <span className="font-mono font-bold text-sm text-slate-800">{code}</span>
-                <span className="text-[11px] text-slate-500">{r.metal_name || ''}</span>
-                <span className="ml-auto font-mono text-sm text-slate-700">
-                  {noData ? '—' : Number(r.price_usd).toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                </span>
-              </div>
-              {!noData && (
-                <div className="flex items-center justify-between mt-0.5 text-[11px]">
-                  <span className="text-slate-400">D / W / M</span>
-                  <div className="flex items-center gap-2 font-mono">
-                    <ChangePct value={r.day_change_pct ?? null} />
-                    <ChangePct value={r.week_change_pct ?? null} />
-                    <ChangePct value={r.month_change_pct ?? null} />
-                  </div>
-                </div>
-              )}
+              <span className="font-mono font-bold text-slate-800 text-left">{code}</span>
+              <span className="text-[11px] text-slate-500 text-left truncate">{r.metal_name || ''}</span>
+              <span className="font-mono text-slate-700 text-right tabular-nums">
+                {noData ? '—' : Number(r.price_usd).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+              </span>
+              <ChangePct value={r.day_change_pct ?? null} />
+              <ChangePct value={r.week_change_pct ?? null} />
+              <ChangePct value={r.month_change_pct ?? null} />
             </button>
           )
         })}
@@ -96,7 +98,9 @@ export default function MetalsPriceBlock({ title, rows, metalsAllowed, loading, 
 }
 
 function ChangePct({ value }: { value: number | null }) {
-  if (value == null || !Number.isFinite(value)) return <span className="text-slate-300">—</span>
+  if (value == null || !Number.isFinite(value)) {
+    return <span className="text-slate-300 text-right tabular-nums">—</span>
+  }
   const cls = value > 0 ? 'text-emerald-600' : value < 0 ? 'text-red-600' : 'text-slate-400'
-  return <span className={cls}>{value > 0 ? '+' : ''}{value.toFixed(1)}%</span>
+  return <span className={`${cls} text-right tabular-nums font-medium`}>{value > 0 ? '+' : ''}{value.toFixed(1)}%</span>
 }

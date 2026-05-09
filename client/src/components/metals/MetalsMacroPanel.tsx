@@ -29,7 +29,11 @@ const MACRO_GLOSSARY: Record<string, string> = {
   WTI: '西德州中質原油期貨 — 反映全球工業需求景氣。WTI 強 → 經濟熱 → 工業金屬(銅/鎳/鋁)有支撐。',
 }
 
-export default function MetalsMacroPanel() {
+interface Props {
+  viewDate?: string  // 'YYYY-MM-DD'
+}
+
+export default function MetalsMacroPanel({ viewDate }: Props) {
   const [rows, setRows] = useState<MacroRow[]>([])
   const [loading, setLoading] = useState(false)
   const [openCode, setOpenCode] = useState<string | null>(null)
@@ -37,8 +41,10 @@ export default function MetalsMacroPanel() {
 
   useEffect(() => {
     setLoading(true)
-    api.get('/metals/macro').then(r => setRows(r.data || [])).finally(() => setLoading(false))
-  }, [])
+    const params: Record<string, string> = {}
+    if (viewDate) params.as_of = viewDate
+    api.get('/metals/macro', { params }).then(r => setRows(r.data || [])).finally(() => setLoading(false))
+  }, [viewDate])
 
   // 點 popover 外面 close
   useEffect(() => {
