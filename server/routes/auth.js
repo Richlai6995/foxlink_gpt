@@ -326,7 +326,8 @@ router.get('/sso/login', async (req, res) => {
 // GET /api/auth/sso/callback — exchange code for token, get userinfo, create session
 router.get('/sso/callback', async (req, res) => {
   const { code, state, error: ssoError } = req.query;
-  const baseUrl = process.env.APP_BASE_URL || '';
+  // 動態 base — error redirect 對齊進來的 host(內網 8443 / 外網 443)
+  const baseUrl = resolveSsoBaseUrl(req) || process.env.APP_BASE_URL || '';
 
   if (!isSsoEnabled()) {
     return res.redirect(`${baseUrl}/login?sso_error=${encodeURIComponent('SSO 未設定')}`);
@@ -722,7 +723,8 @@ const proceedOrChallenge = async ({ req, res, user, source, mode }) => {
   const ip = getClientIp(req);
   const ua = (req.headers['user-agent'] || '').slice(0, 512);
   const internal = isRequestInternal(req);
-  const baseUrl = process.env.APP_BASE_URL || '';
+  // 動態 base — 支援內網 8443 / 外網 443 並存(error redirect + sso_token redirect 都對齊)
+  const baseUrl = resolveSsoBaseUrl(req) || process.env.APP_BASE_URL || '';
   const db = require('../database-oracle').db;
   const c = mfa.cfg();
 
@@ -737,7 +739,7 @@ const proceedOrChallenge = async ({ req, res, user, source, mode }) => {
       ip, user_agent: ua, success: 1, metadata: { source },
     });
     return mode === 'redirect'
-      ? createSessionAndRedirect(res, user)
+      ? createSessionAndRedirect(res, user, baseUrl)
       : createSession(res, user);
   }
 
@@ -765,7 +767,7 @@ const proceedOrChallenge = async ({ req, res, user, source, mode }) => {
       ip, user_agent: ua, success: 1, metadata: { source, reason: 'user_mfa_disabled' },
     });
     return mode === 'redirect'
-      ? createSessionAndRedirect(res, user)
+      ? createSessionAndRedirect(res, user, baseUrl)
       : createSession(res, user);
   }
 
@@ -788,7 +790,7 @@ const proceedOrChallenge = async ({ req, res, user, source, mode }) => {
         mfa.sendNewLoginAlertDM({ email: user.email, ip, ua, lang }).catch(() => {});
       }
       return mode === 'redirect'
-        ? createSessionAndRedirect(res, user)
+        ? createSessionAndRedirect(res, user, baseUrl)
         : createSession(res, user);
     }
   } catch (e) {
@@ -804,7 +806,7 @@ const proceedOrChallenge = async ({ req, res, user, source, mode }) => {
       ip, user_agent: ua, success: 1, metadata: { source },
     });
     return mode === 'redirect'
-      ? createSessionAndRedirect(res, user)
+      ? createSessionAndRedirect(res, user, baseUrl)
       : createSession(res, user);
   }
 
@@ -902,13 +904,15 @@ const proceedOrChallenge = async ({ req, res, user, source, mode }) => {
   });
 };
 
-const createSessionAndRedirect = async (res, user) => {
+const createSessionAndRedirect = async (res, user, baseUrl) => {
   const db = require('../database-oracle').db;
   const sessionToken = uuidv4();
   const payload = await buildSessionPayload(db, user.id);
   await redis.setSession(sessionToken, payload, user.role === 'admin');
-  const baseUrl = process.env.APP_BASE_URL || '';
-  res.redirect(`${baseUrl}/login?sso_token=${sessionToken}`);
+  // baseUrl 由 caller(proceedOrChallenge)從 request 動態判斷後傳入,
+  // 才能對齊 8443 / 443 並存的多 origin 架構。沒傳就 fallback APP_BASE_URL。
+  const target = baseUrl || process.env.APP_BASE_URL || '';
+  res.redirect(`${target}/login?sso_token=${sessionToken}`);
 };
 
 const createSession = async (res, user) => {
