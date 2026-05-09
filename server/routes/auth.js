@@ -337,19 +337,23 @@ router.get('/sso/callback', async (req, res) => {
     const cfg = await getSsoConfig();
 
     // 1. Exchange authorization code for tokens
-    // 必須跟 /sso/login 階段送出去的 redirect_uri 完全一致,否則 invalid_client / invalid_grant
+    // redirect_uri 必須跟 /sso/login 階段送出去的完全一致(否則 invalid_grant)
+    // Foxlink SSO(FoxlinkSSO-Api.html /oauth/token spec)只支援 client_secret_post:
+    // client_id / client_secret 必須在 form body,Authorization Basic header 不認。
+    // 之前 commit e833398 改成 Basic auth 是踩雷 → 這裡走回 form body 才是對的。
     const redirectUri = `${process.env.APP_BASE_URL}/api/auth/sso/callback`;
-    const basicAuth = Buffer.from(`${process.env.SSO_CLIENT_ID}:${process.env.SSO_CLIENT_SECRET}`).toString('base64');
     console.log('[SSO] Token exchange → endpoint:', cfg.token_endpoint, 'redirect_uri:', redirectUri);
 
     const tokenResp = await fetch(cfg.token_endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'Authorization': `Basic ${basicAuth}`,
+        'Accept': 'application/json',
       },
       body: new URLSearchParams({
         grant_type: 'authorization_code',
+        client_id: process.env.SSO_CLIENT_ID,
+        client_secret: process.env.SSO_CLIENT_SECRET,
         code: String(code),
         redirect_uri: redirectUri,
       }),
