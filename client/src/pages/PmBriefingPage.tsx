@@ -8,7 +8,7 @@
  *   └── Tabs: [新聞 (預設)] [週報] [月報] [Prompt 審核]
  */
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import {
   ArrowLeft, Settings, Download, ChevronDown, ChevronUp, Loader2, RefreshCw,
   X, Filter, Pin, ExternalLink, Calendar, Search, FileText, BarChart3, Newspaper,
@@ -18,6 +18,7 @@ import {
 import api from '../lib/api'
 import PmReviewQueueView from '../components/pm/PmReviewQueueView'
 import PmFeedbackThumbs from '../components/pm/PmFeedbackThumbs'
+import MetalsShareInline from '../components/metals/MetalsShareInline'
 import ReactECharts from 'echarts-for-react'
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -44,11 +45,15 @@ interface Prefs {
 
 export default function PmBriefingPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  // 從哪進來?有 state.from → 返回那;沒 → /chat
+  const backTo = (location.state as any)?.from || '/chat'
   const [denied, setDenied] = useState(false)
   const [loadingInit, setLoadingInit] = useState(true)
   const [prefs, setPrefs] = useState<Prefs>({ focused_metals: [], default_24h_only: 1 })
   const [tab, setTab] = useState<Tab>('news')
   const [showPrefs, setShowPrefs] = useState(false)
+  const [showMetalsShare, setShowMetalsShare] = useState(false)
   const [reviewPendingCount, setReviewPendingCount] = useState(0)
   const [bannerExpanded, setBannerExpanded] = useState(false)
 
@@ -82,7 +87,7 @@ export default function PmBriefingPage() {
     <div className="flex flex-col h-screen bg-slate-50">
       {/* Top bar */}
       <header className="bg-white border-b px-6 py-3 flex items-center gap-4 shadow-sm">
-        <button onClick={() => navigate(-1)} className="text-slate-500 hover:text-slate-800 text-sm flex items-center gap-1">
+        <button onClick={() => navigate(backTo)} className="text-slate-500 hover:text-slate-800 text-sm flex items-center gap-1">
           <ArrowLeft size={16} /> 返回
         </button>
         <Sparkles size={18} className="text-amber-500" />
@@ -93,6 +98,16 @@ export default function PmBriefingPage() {
             onClick={() => setShowPrefs(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border border-slate-200 hover:bg-slate-50 text-slate-700"
           ><Settings size={14} /> 我的偏好</button>
+          <button
+            onClick={() => setShowMetalsShare(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border border-purple-200 text-purple-700 hover:bg-purple-50"
+            title="設定誰可看「金屬情報精簡版 (/metals)」"
+          ><Bookmark size={14} /> 精簡版分享</button>
+          <button
+            onClick={() => navigate('/metals', { state: { from: '/pm/briefing' } })}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+            title="切到一般 user 看到的精簡版(用於驗證所見即所得)"
+          ><Sparkles size={14} /> 精簡視角預覽</button>
           <button
             onClick={() => downloadPricesCSV(prefs.focused_metals)}
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border border-blue-200 text-blue-700 hover:bg-blue-50"
@@ -149,6 +164,32 @@ export default function PmBriefingPage() {
       </div>
 
       {showPrefs && <PrefsModal prefs={prefs} onClose={() => setShowPrefs(false)} onSaved={(p) => { setPrefs(p); setShowPrefs(false) }} />}
+      {showMetalsShare && <MetalsShareModal onClose={() => setShowMetalsShare(false)} />}
+    </div>
+  )
+}
+
+// ── 精簡版分享設定 modal ───────────────────────────────────────────────────
+function MetalsShareModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg w-[640px] max-h-[80vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-3 border-b">
+          <span className="font-medium flex items-center gap-2">
+            <Bookmark size={14} className="text-purple-600" />
+            金屬情報精簡版 — 閱讀權限
+          </span>
+          <button onClick={onClose}><X size={16} /></button>
+        </div>
+        <div className="p-5 overflow-y-auto flex-1">
+          <MetalsShareInline />
+        </div>
+        <div className="flex justify-end px-5 py-3 border-t">
+          <button onClick={onClose} className="px-4 py-1.5 text-sm bg-slate-700 hover:bg-slate-800 text-white rounded">
+            完成
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -1775,64 +1816,341 @@ function MetricsCards({ metals, metricsMap }: { metals: string[]; metricsMap: Re
 }
 
 function ReportsTab({ type }: { type: 'weekly' | 'monthly' }) {
-  const [reports, setReports] = useState<any[]>([])
-  const [offset, setOffset] = useState(0)
-  const [loading, setLoading] = useState(false)
-  const [history, setHistory] = useState<any[]>([])
+  // ─ LLM 自動草稿(read-only,只當素材參考)
+  const [llmReports, setLlmReports] = useState<any[]>([])
+  const [llmOffset, setLlmOffset] = useState(0)
+  const [loadingLlm, setLoadingLlm] = useState(false)
 
-  useEffect(() => {
-    setLoading(true)
-    api.get('/pm/briefing/reports', { params: { type, offset, limit: 1 } })
-      .then(r => setReports(r.data?.rows || []))
-      .finally(() => setLoading(false))
-  }, [type, offset])
+  // ─ 我的版本(pm_purchaser_reports,可寫 + 發布)
+  const [myReports, setMyReports] = useState<any[]>([])
+  const [loadingMy, setLoadingMy] = useState(false)
+  const [editingId, setEditingId] = useState<number | 'new' | null>(null)
+  const [draftTitle, setDraftTitle] = useState('')
+  const [draftContent, setDraftContent] = useState('')
+  const [draftAsOfDate, setDraftAsOfDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [draftSourceLlmId, setDraftSourceLlmId] = useState<number | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [statusMsg, setStatusMsg] = useState('')
 
-  // 載歷史 dropdown
-  useEffect(() => {
-    const max = type === 'weekly' ? 8 : 12
-    api.get('/pm/briefing/reports', { params: { type, offset: 0, limit: max } })
-      .then(r => setHistory(r.data?.rows || []))
-      .catch(() => {})
-  }, [type])
+  const reloadLlm = () => {
+    setLoadingLlm(true)
+    api.get('/pm/briefing/reports', { params: { type, offset: llmOffset, limit: 1 } })
+      .then(r => setLlmReports(r.data?.rows || []))
+      .finally(() => setLoadingLlm(false))
+  }
+  const reloadMy = () => {
+    setLoadingMy(true)
+    api.get('/pm/briefing/purchaser-reports', { params: { type, limit: 30 } })
+      .then(r => setMyReports(r.data?.rows || []))
+      .finally(() => setLoadingMy(false))
+  }
 
-  const current = reports[0]
+  useEffect(() => { reloadLlm() }, [type, llmOffset])
+  useEffect(() => { reloadMy() }, [type])
+
+  const llm = llmReports[0]
+
+  // ─── 編輯流程 ───────────────────────────────────────────────────────────
+  const startNew = () => {
+    setEditingId('new')
+    setDraftTitle('')
+    setDraftContent('')
+    setDraftAsOfDate(new Date().toISOString().slice(0, 10))
+    setDraftSourceLlmId(null)
+    setStatusMsg('')
+  }
+
+  const startCopyFromLlm = async () => {
+    if (!llm) return
+    // 直接呼叫 backend 複製,複製完進編輯
+    setSaving(true); setStatusMsg('')
+    try {
+      const r = await api.post('/pm/briefing/purchaser-reports', {
+        type, as_of_date: llm.as_of_date,
+        title: llm.title || `${llm.as_of_date} ${type === 'weekly' ? '週報' : '月報'}(複製 AI)`,
+        content: '__COPY_FROM_LLM__',
+        source_llm_report_id: llm.id,
+      })
+      setStatusMsg('已複製 AI 內容到我的草稿,可開始編輯')
+      reloadMy()
+      // 立刻載入並進入編輯
+      const newId = r.data?.id
+      if (newId) {
+        const detail = await api.get(`/pm/briefing/purchaser-reports/${newId}`)
+        setEditingId(newId)
+        setDraftTitle(detail.data?.title || '')
+        setDraftContent(detail.data?.content || '')
+        setDraftAsOfDate(detail.data?.as_of_date || new Date().toISOString().slice(0, 10))
+        setDraftSourceLlmId(detail.data?.source_llm_report_id || null)
+      }
+    } catch (e: any) {
+      setStatusMsg('複製失敗:' + (e?.response?.data?.error || String(e)))
+    } finally { setSaving(false) }
+  }
+
+  const startEditExisting = async (id: number) => {
+    setSaving(true); setStatusMsg('')
+    try {
+      const r = await api.get(`/pm/briefing/purchaser-reports/${id}`)
+      setEditingId(id)
+      setDraftTitle(r.data?.title || '')
+      setDraftContent(r.data?.content || '')
+      setDraftAsOfDate(r.data?.as_of_date || new Date().toISOString().slice(0, 10))
+      setDraftSourceLlmId(r.data?.source_llm_report_id || null)
+    } catch (e: any) {
+      setStatusMsg('載入失敗:' + (e?.response?.data?.error || String(e)))
+    } finally { setSaving(false) }
+  }
+
+  const cancelEdit = () => {
+    setEditingId(null)
+    setDraftTitle(''); setDraftContent(''); setDraftSourceLlmId(null); setStatusMsg('')
+  }
+
+  const save = async (publishAfter = false) => {
+    if (!draftContent.trim()) { setStatusMsg('內容不可空白'); return }
+    setSaving(true); setStatusMsg('')
+    try {
+      let id: number | null = null
+      if (editingId === 'new') {
+        const r = await api.post('/pm/briefing/purchaser-reports', {
+          type, as_of_date: draftAsOfDate,
+          title: draftTitle || null,
+          content: draftContent,
+          source_llm_report_id: draftSourceLlmId,
+        })
+        id = r.data?.id
+      } else if (typeof editingId === 'number') {
+        await api.put(`/pm/briefing/purchaser-reports/${editingId}`, { title: draftTitle || null, content: draftContent })
+        id = editingId
+      }
+      if (publishAfter && id) {
+        if (!confirm('確定發布?發布後一般 user 在「金屬情報精簡版」會看到。')) {
+          setStatusMsg('已儲存草稿,未發布'); reloadMy(); return
+        }
+        await api.post(`/pm/briefing/purchaser-reports/${id}/publish`)
+        setStatusMsg('✅ 已發布')
+      } else {
+        setStatusMsg('💾 已儲存草稿(未發布)')
+      }
+      cancelEdit()
+      reloadMy()
+    } catch (e: any) {
+      setStatusMsg('儲存失敗:' + (e?.response?.data?.error || String(e)))
+    } finally { setSaving(false) }
+  }
+
+  const togglePublish = async (r: any) => {
+    const action = Number(r.is_published) === 1 ? 'unpublish' : 'publish'
+    const isPub = action === 'publish'
+    if (!confirm(isPub ? '確定發布?一般 user 將會看到。' : '確定取消發布?一般 user 將看不到。')) return
+    setSaving(true); setStatusMsg('')
+    try {
+      await api.post(`/pm/briefing/purchaser-reports/${r.id}/${action}`)
+      reloadMy()
+      setStatusMsg(isPub ? '✅ 已發布' : '已取消發布')
+    } catch (e: any) {
+      setStatusMsg('失敗:' + (e?.response?.data?.error || String(e)))
+    } finally { setSaving(false) }
+  }
+
+  const deleteReport = async (r: any) => {
+    if (!confirm(`確定刪除「${r.title || r.as_of_date}」?此操作不可復原。`)) return
+    setSaving(true)
+    try {
+      await api.delete(`/pm/briefing/purchaser-reports/${r.id}`)
+      reloadMy()
+    } catch (e: any) {
+      setStatusMsg('刪除失敗:' + (e?.response?.data?.error || String(e)))
+    } finally { setSaving(false) }
+  }
 
   return (
     <div className="h-full overflow-y-auto p-6 bg-white">
-      <div className="max-w-4xl mx-auto space-y-4">
-        <div className="flex items-center gap-3 border-b pb-3">
+      <div className="max-w-5xl mx-auto space-y-6">
+        <div className="flex items-center gap-3 border-b pb-3 flex-wrap">
           <h2 className="text-lg font-bold text-slate-800">{type === 'weekly' ? '📊 週報' : '📈 月報'}</h2>
-          {history.length > 0 && (
-            <select
-              value={offset}
-              onChange={e => setOffset(Number(e.target.value))}
-              className="border rounded px-2 py-1 text-sm"
-            >
-              {history.map((h, i) => (
-                <option key={h.id} value={i}>{i === 0 ? '最新 ▾ ' : ''}{h.as_of_date}</option>
-              ))}
-            </select>
-          )}
-          {current?.file_url && (
-            <a
-              href={current.file_url} target="_blank" rel="noreferrer"
-              className="ml-auto flex items-center gap-1 px-3 py-1 text-sm rounded border border-blue-200 text-blue-700 hover:bg-blue-50"
-            ><Download size={12} /> 下載 docx</a>
-          )}
+          <span className="text-xs text-slate-500">
+            上方 = AI 自動產出(僅參考)/ 下方 = 採購自寫(發布後一般 user 看到)
+          </span>
         </div>
 
-        {loading ? (
-          <div className="text-center text-slate-400 py-8 flex items-center justify-center gap-2"><Loader2 className="animate-spin" /> 載入中…</div>
-        ) : !current ? (
-          <div className="text-center text-slate-400 py-8 text-sm">無 {type} 報告</div>
-        ) : (
-          <article className="prose prose-sm max-w-none">
-            <h3 className="text-base font-medium text-slate-700">{current.title || `${current.as_of_date} ${type === 'weekly' ? '週' : '月'}報`}</h3>
-            <pre className="whitespace-pre-wrap text-sm text-slate-700 bg-slate-50 border rounded p-4 font-sans leading-relaxed">{current.content || '(無內容)'}</pre>
-            <div className="not-prose mt-3">
-              <PmFeedbackThumbs targetType="report" targetRef={`${type}-${current.as_of_date}`} />
+        {/* ── LLM 草稿(read-only)── */}
+        <section className="border rounded-lg bg-slate-50">
+          <header className="flex items-center gap-2 px-3 py-2 border-b bg-white rounded-t-lg flex-wrap">
+            <Sparkles size={14} className="text-amber-500" />
+            <span className="text-sm font-semibold text-slate-700">AI 自動 {type === 'weekly' ? '週' : '月'}報(僅參考)</span>
+            {llm && (
+              <span className="text-xs text-slate-500">{llm.as_of_date}</span>
+            )}
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                onClick={() => setLlmOffset(Math.max(0, llmOffset - 1))}
+                disabled={llmOffset === 0}
+                className="px-2 py-0.5 text-xs rounded border border-slate-200 disabled:opacity-30"
+              >新</button>
+              <span className="text-xs text-slate-400">第 {llmOffset + 1} 筆</span>
+              <button
+                onClick={() => setLlmOffset(llmOffset + 1)}
+                className="px-2 py-0.5 text-xs rounded border border-slate-200"
+              >舊</button>
+              {llm && (
+                <button
+                  onClick={startCopyFromLlm}
+                  disabled={saving || editingId !== null}
+                  className="ml-2 flex items-center gap-1 px-3 py-1 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
+                  title="複製 AI 內容到我的草稿,作為起點修改"
+                >📋 複製到我的草稿編輯</button>
+              )}
             </div>
-          </article>
+          </header>
+          <div className="p-3 max-h-[280px] overflow-y-auto">
+            {loadingLlm ? (
+              <div className="text-center text-slate-400 py-4 text-sm flex items-center justify-center gap-2">
+                <Loader2 className="animate-spin" size={14} /> 載入中…
+              </div>
+            ) : !llm ? (
+              <div className="text-center text-slate-400 py-4 text-sm">無 AI 自動 {type === 'weekly' ? '週' : '月'}報</div>
+            ) : (
+              <pre className="whitespace-pre-wrap text-xs text-slate-600 leading-relaxed font-sans">
+                {llm.content || llm.summary || '(無內容)'}
+              </pre>
+            )}
+          </div>
+        </section>
+
+        {/* ── 我的版本(管理區)── */}
+        <section className="border rounded-lg">
+          <header className="flex items-center gap-2 px-3 py-2 border-b bg-emerald-50 rounded-t-lg flex-wrap">
+            <FileText size={14} className="text-emerald-700" />
+            <span className="text-sm font-semibold text-slate-800">我的 {type === 'weekly' ? '週' : '月'}報</span>
+            <span className="text-xs text-slate-500">({myReports.length})</span>
+            {statusMsg && <span className="text-xs text-slate-700 ml-2">{statusMsg}</span>}
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                onClick={startNew}
+                disabled={saving || editingId !== null}
+                className="flex items-center gap-1 px-3 py-1 text-xs rounded bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50"
+              >➕ 自己寫一篇</button>
+            </div>
+          </header>
+
+          {/* 編輯區 */}
+          {editingId !== null && (
+            <div className="p-3 bg-amber-50/40 border-b space-y-2">
+              <div className="flex items-center gap-2 text-xs text-slate-700">
+                <span>{editingId === 'new' ? '✏️ 新增' : '✏️ 編輯'}</span>
+                {draftSourceLlmId && (
+                  <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[10px]">
+                    來源:AI 草稿 #{draftSourceLlmId}
+                  </span>
+                )}
+                <div className="ml-auto flex items-center gap-1.5 text-[11px]">
+                  <span className="text-slate-500">資料日期</span>
+                  <input
+                    type="date"
+                    value={draftAsOfDate}
+                    onChange={e => setDraftAsOfDate(e.target.value)}
+                    className="border rounded px-1 py-0.5 text-xs"
+                    disabled={editingId !== 'new'}
+                  />
+                </div>
+              </div>
+              <input
+                type="text"
+                value={draftTitle}
+                onChange={e => setDraftTitle(e.target.value)}
+                placeholder="標題(選填)"
+                className="w-full border rounded px-2 py-1 text-sm"
+              />
+              <textarea
+                value={draftContent}
+                onChange={e => setDraftContent(e.target.value)}
+                placeholder="(輸入週/月報內容,純文字或 Markdown)"
+                className="w-full min-h-[280px] border rounded p-2 text-sm font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-emerald-300"
+              />
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => save(false)}
+                  disabled={saving}
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs rounded bg-slate-700 hover:bg-slate-800 text-white disabled:opacity-50"
+                >{saving ? '儲存中…' : '💾 儲存草稿'}</button>
+                <button
+                  onClick={() => save(true)}
+                  disabled={saving}
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
+                >🚀 儲存並發布</button>
+                <button
+                  onClick={cancelEdit}
+                  disabled={saving}
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs rounded border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >取消</button>
+              </div>
+            </div>
+          )}
+
+          {/* List */}
+          <div className="divide-y">
+            {loadingMy ? (
+              <div className="text-center text-slate-400 py-6 flex items-center justify-center gap-2 text-sm">
+                <Loader2 className="animate-spin" size={14} /> 載入中…
+              </div>
+            ) : myReports.length === 0 && editingId === null ? (
+              <div className="text-center text-slate-400 py-6 text-sm">
+                尚未寫任何 {type === 'weekly' ? '週' : '月'}報。
+                <br />
+                <span className="text-xs">可從上方 AI 草稿「複製到我的草稿編輯」,或點右上「自己寫一篇」</span>
+              </div>
+            ) : myReports.map((r: any) => {
+              const isPub = Number(r.is_published) === 1
+              return (
+                <div key={r.id} className="px-3 py-2 hover:bg-slate-50">
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <span className="font-mono text-xs text-slate-600">{r.as_of_date}</span>
+                    <span className="text-sm font-medium text-slate-800 flex-1">{r.title || `(無標題)`}</span>
+                    {r.source_type === 'copied_from_llm' && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-50 text-blue-700">來自 AI #{r.source_llm_report_id}</span>
+                    )}
+                    {isPub ? (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        ✓ 已發布 {r.published_at || ''}
+                      </span>
+                    ) : (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600">草稿</span>
+                    )}
+                  </div>
+                  {r.preview && (
+                    <div className="text-[11px] text-slate-500 line-clamp-2 mt-1 leading-snug">{r.preview}</div>
+                  )}
+                  <div className="flex items-center gap-1.5 mt-1.5">
+                    <button
+                      onClick={() => startEditExisting(r.id)}
+                      disabled={saving || editingId !== null}
+                      className="px-2 py-0.5 text-[11px] rounded border border-slate-300 hover:bg-slate-100 disabled:opacity-30"
+                    >編輯</button>
+                    <button
+                      onClick={() => togglePublish(r)}
+                      disabled={saving}
+                      className={`px-2 py-0.5 text-[11px] rounded text-white disabled:opacity-30 ${
+                        isPub ? 'bg-rose-500 hover:bg-rose-600' : 'bg-blue-600 hover:bg-blue-700'
+                      }`}
+                    >{isPub ? '取消發布' : '發布'}</button>
+                    <button
+                      onClick={() => deleteReport(r)}
+                      disabled={saving}
+                      className="px-2 py-0.5 text-[11px] rounded border border-rose-200 text-rose-600 hover:bg-rose-50 disabled:opacity-30"
+                    >刪除</button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+
+        {llm && (
+          <div className="not-prose">
+            <PmFeedbackThumbs targetType="report" targetRef={`${type}-${llm.as_of_date}`} />
+          </div>
         )}
       </div>
     </div>

@@ -217,6 +217,8 @@ app.get('/api/version', (req, res) => {
     console.log('[Route] /api/pm (review/feedback/accuracy) OK');
     app.use('/api/pm/briefing', require('./routes/pmBriefing'));
     console.log('[Route] /api/pm/briefing (news/prices/reports/preferences) OK');
+    app.use('/api/metals', require('./routes/metals'));
+    console.log('[Route] /api/metals (lite — prices/macro/news/ai/xlsx/preferences) OK');
     app.use('/api/telemetry', require('./routes/telemetry'));
     console.log('[Route] /api/telemetry (device) OK');
     app.use('/api/auth/webauthn', require('./routes/webauthn'));

@@ -4166,6 +4166,57 @@ async function runMigrations(db) {
     updated_at        TIMESTAMP DEFAULT SYSTIMESTAMP
   )`);
 
+  // ── Metals Lite (精簡版,docs/metals-lite-plan.md) ─────────────────────────
+  //
+  // 設計變更紀錄(2026-05-10 v2):
+  //   v1 把 is_published / edited_content 加在 pm_analysis_report 上,讓採購直接「編輯 LLM 草稿」。
+  //   v2 改成完全分離 — LLM 自動產出維持 read-only(pm_analysis_report 不動),
+  //   採購自寫的版本進新表 pm_purchaser_reports,可從 LLM 複製或完全自己寫。
+  //   pm_analysis_report 上的 4 欄(IS_PUBLISHED/EDITED_BY/EDITED_CONTENT/PUBLISHED_AT)
+  //   保留(已 alter 過的 DB 不需 drop),但不再使用。
+  await addCol('PM_ANALYSIS_REPORT', 'IS_PUBLISHED', 'NUMBER(1) DEFAULT 0');     // deprecated v2
+  await addCol('PM_ANALYSIS_REPORT', 'EDITED_BY', 'NUMBER');                     // deprecated v2
+  await addCol('PM_ANALYSIS_REPORT', 'EDITED_CONTENT', 'CLOB');                  // deprecated v2
+  await addCol('PM_ANALYSIS_REPORT', 'PUBLISHED_AT', 'TIMESTAMP');               // deprecated v2
+
+  // pm_purchaser_reports — 採購自寫 / 複製修改的週月報(取代 v1 的 edited_content 流程)
+  // source_type:
+  //   'manual'           — 採購完全自己寫
+  //   'copied_from_llm'  — 從 pm_analysis_report.id 複製,source_llm_report_id 紀錄原始
+  // 一般 user 在 /metals/reports 只看 is_published=1
+  await createTable('PM_PURCHASER_REPORTS', `CREATE TABLE pm_purchaser_reports (
+    id                   NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    report_type          VARCHAR2(20) NOT NULL,
+    as_of_date           DATE NOT NULL,
+    title                VARCHAR2(200),
+    content              CLOB NOT NULL,
+    source_type          VARCHAR2(20) DEFAULT 'manual',
+    source_llm_report_id NUMBER,
+    created_by           NUMBER NOT NULL,
+    is_published         NUMBER(1) DEFAULT 0,
+    published_at         TIMESTAMP,
+    creation_date        TIMESTAMP DEFAULT SYSTIMESTAMP,
+    last_updated_date    TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_ppr_type_pub ON pm_purchaser_reports(report_type, is_published, as_of_date)`).run(); } catch (_) {}
+  try { await db.prepare(`CREATE INDEX idx_ppr_creator ON pm_purchaser_reports(created_by)`).run(); } catch (_) {}
+
+  // help_books seed 'metals-public'(精簡版閱讀權限,獨立於採購用 'precious-metals')
+  try {
+    const metalsBook = await db.prepare(
+      `SELECT id FROM help_books WHERE code = 'metals-public'`
+    ).get();
+    if (!metalsBook) {
+      await db.prepare(`
+        INSERT INTO help_books (code, name, description, icon, is_special, is_active, sort_order, last_modified)
+        VALUES ('metals-public', '金屬情報(精簡版)', '面向一般 user 的金屬報價/新聞/AI 速查', 'gem', 1, 1, 50, ?)
+      `).run(new Date().toISOString().slice(0, 10));
+      console.log('[Migration] Seeded help_books metals-public');
+    }
+  } catch (e) {
+    console.warn('[Migration] metals-public seed:', e.message);
+  }
+
   // user 釘選的新聞(個人收藏,跨裝置同步)
   await createTable('PM_NEWS_PINS', `CREATE TABLE pm_news_pins (
     id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

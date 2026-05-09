@@ -1036,17 +1036,32 @@ router.get('/reports', verifyToken, verifyPmUser, async (req, res) => {
     const colSet = new Set((cols || []).map(r => r.c || r.C));
     const contentCol = colSet.has('content') ? 'content'
                      : colSet.has('content_md') ? 'content_md'
+                     : colSet.has('full_content') ? 'full_content'
                      : colSet.has('summary') ? 'summary'
                      : null;
     const fileCol = colSet.has('file_url') ? 'file_url'
                   : colSet.has('docx_path') ? 'docx_path' : null;
     if (!contentCol) return res.json({ rows: [], note: 'pm_analysis_report 找不到 content 欄位' });
 
+    // Metals Lite — 採購端要看到 is_published / edited_content / published_at(若 schema 已 migrate)
+    const hasPub      = colSet.has('is_published');
+    const hasEdited   = colSet.has('edited_content');
+    const hasEditor   = colSet.has('edited_by');
+    const hasPubAt    = colSet.has('published_at');
+
+    const extraCols = [
+      hasPub    ? 'is_published'   : `0 AS is_published`,
+      hasEdited ? 'edited_content' : `NULL AS edited_content`,
+      hasEditor ? 'edited_by'      : `NULL AS edited_by`,
+      hasPubAt  ? `TO_CHAR(published_at, 'YYYY-MM-DD HH24:MI') AS published_at` : `NULL AS published_at`,
+    ].join(',\n             ');
+
     const rows = await db.prepare(`
       SELECT id, report_type,
              TO_CHAR(as_of_date, 'YYYY-MM-DD') AS as_of_date,
              ${colSet.has('title') ? 'title' : `'${type} 報告' AS title`},
-             ${contentCol} AS content
+             ${contentCol} AS content,
+             ${extraCols}
              ${fileCol ? `, ${fileCol} AS file_url` : ''}
       FROM pm_analysis_report
       WHERE report_type = ?
@@ -1057,6 +1072,265 @@ router.get('/reports', verifyToken, verifyPmUser, async (req, res) => {
     res.json({ rows });
   } catch (e) {
     console.error('[PmBriefing] /reports error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// PURCHASER REPORTS:採購自寫週月報(v2,docs/metals-lite-plan.md §4)
+//
+// LLM 自動產的 pm_analysis_report 維持 read-only,採購要嘛從 LLM「複製到我的」,
+// 要嘛完全自己寫,所有採購自寫進 pm_purchaser_reports。
+//   GET   /purchaser-reports?type=weekly|monthly[&include_drafts=1]
+//   GET   /purchaser-reports/:id
+//   POST  /purchaser-reports                  — 建立(manual 或 copied_from_llm)
+//   PUT   /purchaser-reports/:id              — 更新 content / title
+//   DELETE /purchaser-reports/:id
+//   POST  /purchaser-reports/:id/publish
+//   POST  /purchaser-reports/:id/unpublish
+// ────────────────────────────────────────────────────────────────────────────
+
+router.get('/purchaser-reports', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const type = String(req.query.type || '').toLowerCase();
+    if (!['weekly', 'monthly'].includes(type)) return res.status(400).json({ error: 'type 必須 weekly/monthly' });
+    const includeDrafts = String(req.query.include_drafts || '1') === '1';
+    const limit = Math.min(Math.max(Number(req.query.limit || 20), 1), 100);
+
+    const where = [`report_type = ?`];
+    const params = [type];
+    if (!includeDrafts) where.push(`is_published = 1`);
+
+    const rows = await db.prepare(`
+      SELECT id, report_type,
+             TO_CHAR(as_of_date, 'YYYY-MM-DD') AS as_of_date,
+             title,
+             DBMS_LOB.SUBSTR(content, 4000, 1) AS preview,
+             LENGTH(content) AS content_length,
+             source_type, source_llm_report_id,
+             created_by, is_published,
+             TO_CHAR(published_at, 'YYYY-MM-DD HH24:MI') AS published_at,
+             TO_CHAR(creation_date, 'YYYY-MM-DD HH24:MI') AS creation_date,
+             TO_CHAR(last_updated_date, 'YYYY-MM-DD HH24:MI') AS last_updated_date
+      FROM pm_purchaser_reports
+      WHERE ${where.join(' AND ')}
+      ORDER BY as_of_date DESC, creation_date DESC
+      FETCH FIRST ? ROWS ONLY
+    `).all(...params, limit);
+
+    res.json({ rows });
+  } catch (e) {
+    console.error('[PmBriefing] GET /purchaser-reports error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/purchaser-reports/:id', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid id' });
+    const row = await db.prepare(`
+      SELECT id, report_type,
+             TO_CHAR(as_of_date, 'YYYY-MM-DD') AS as_of_date,
+             title, content,
+             source_type, source_llm_report_id,
+             created_by, is_published,
+             TO_CHAR(published_at, 'YYYY-MM-DD HH24:MI') AS published_at,
+             TO_CHAR(creation_date, 'YYYY-MM-DD HH24:MI') AS creation_date,
+             TO_CHAR(last_updated_date, 'YYYY-MM-DD HH24:MI') AS last_updated_date
+      FROM pm_purchaser_reports WHERE id = ?
+    `).get(id);
+    if (!row) return res.status(404).json({ error: 'not found' });
+    res.json(row);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/purchaser-reports', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { type, as_of_date, title, content, source_llm_report_id } = req.body || {};
+    if (!['weekly', 'monthly'].includes(String(type))) return res.status(400).json({ error: 'type 必須 weekly/monthly' });
+    if (!as_of_date) return res.status(400).json({ error: 'as_of_date required (YYYY-MM-DD)' });
+    if (typeof content !== 'string' || !content.trim()) return res.status(400).json({ error: 'content required' });
+
+    let actualContent = content;
+    let sourceType = 'manual';
+    let llmRefId = null;
+
+    // 若帶 source_llm_report_id 且 content 為空 / 等於 sentinel,從 LLM 報告複製內容
+    if (source_llm_report_id) {
+      const llmRow = await db.prepare(`
+        SELECT id, full_content, summary, title FROM pm_analysis_report WHERE id = ?
+      `).get(Number(source_llm_report_id));
+      if (!llmRow) return res.status(400).json({ error: 'source LLM report not found' });
+      sourceType = 'copied_from_llm';
+      llmRefId = Number(source_llm_report_id);
+      // 若 caller content 為空字串才用 LLM 內容(否則尊重 caller 已修改版本)
+      if (!actualContent || actualContent === '__COPY_FROM_LLM__') {
+        actualContent = (llmRow.full_content ?? llmRow.FULL_CONTENT ?? llmRow.summary ?? llmRow.SUMMARY ?? '').toString();
+      }
+    }
+
+    const r = await db.prepare(`
+      INSERT INTO pm_purchaser_reports
+        (report_type, as_of_date, title, content, source_type, source_llm_report_id, created_by)
+      VALUES (?, TO_DATE(?, 'YYYY-MM-DD'), ?, ?, ?, ?, ?)
+    `).run(type, as_of_date, title || null, actualContent, sourceType, llmRefId, req.user.id);
+
+    // 取回 id(Oracle GENERATED ALWAYS AS IDENTITY)— 用 RETURNING 不容易,改用 query
+    const newRow = await db.prepare(`
+      SELECT id FROM pm_purchaser_reports
+      WHERE report_type = ? AND created_by = ?
+      ORDER BY id DESC FETCH FIRST 1 ROWS ONLY
+    `).get(type, req.user.id);
+    res.json({ ok: true, id: newRow?.id ?? newRow?.ID ?? null, source_type: sourceType });
+  } catch (e) {
+    console.error('[PmBriefing] POST /purchaser-reports error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.put('/purchaser-reports/:id', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid id' });
+    const { title, content } = req.body || {};
+    if (typeof content !== 'string' || !content.trim()) return res.status(400).json({ error: 'content required' });
+    const r = await db.prepare(`
+      UPDATE pm_purchaser_reports
+      SET title = ?, content = ?, last_updated_date = SYSTIMESTAMP
+      WHERE id = ?
+    `).run(title ?? null, content, id);
+    const cnt = r?.rowsAffected ?? r?.changes ?? 0;
+    if (!cnt) return res.status(404).json({ error: 'not found' });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.delete('/purchaser-reports/:id', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid id' });
+    const r = await db.prepare(`DELETE FROM pm_purchaser_reports WHERE id = ?`).run(id);
+    const cnt = r?.rowsAffected ?? r?.changes ?? 0;
+    if (!cnt) return res.status(404).json({ error: 'not found' });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/purchaser-reports/:id/publish', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid id' });
+    await db.prepare(`
+      UPDATE pm_purchaser_reports
+      SET is_published = 1, published_at = SYSTIMESTAMP, last_updated_date = SYSTIMESTAMP
+      WHERE id = ?
+    `).run(id);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/purchaser-reports/:id/unpublish', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid id' });
+    await db.prepare(`
+      UPDATE pm_purchaser_reports SET is_published = 0 WHERE id = ?
+    `).run(id);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// METALS SHARE — 採購管理 'metals-public' 分享名單
+// (admin 仍可從「特殊說明書管理」改;本 endpoint 給採購用,hardcode 對 metals-public)
+// ────────────────────────────────────────────────────────────────────────────
+
+async function getMetalsBookId(db) {
+  const row = await db.prepare(`SELECT id FROM help_books WHERE code = 'metals-public'`).get();
+  return row?.id ?? row?.ID ?? null;
+}
+
+router.get('/metals-share', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const bookId = await getMetalsBookId(db);
+    if (!bookId) return res.json([]);
+    const rows = await db.prepare(`
+      SELECT s.id, s.book_id, s.grantee_type, s.grantee_id, s.granted_by,
+             TO_CHAR(s.granted_at, 'YYYY-MM-DD HH24:MI') AS granted_at,
+             u.name AS granted_by_name
+      FROM help_book_shares s
+      LEFT JOIN users u ON u.id = s.granted_by
+      WHERE s.book_id = ?
+      ORDER BY s.granted_at DESC
+    `).all(bookId);
+
+    // Resolve grantee_name(同 admin endpoint pattern)
+    try {
+      const { resolveGranteeNamesInRows, getLangFromReq } = require('../services/granteeNameResolver');
+      await resolveGranteeNamesInRows(rows, getLangFromReq(req));
+    } catch (_) {}
+
+    res.json(rows);
+  } catch (e) {
+    console.error('[PmBriefing] GET /metals-share error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/metals-share', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const bookId = await getMetalsBookId(db);
+    if (!bookId) return res.status(400).json({ error: 'metals-public book not seeded' });
+    const { grantee_type, grantee_id } = req.body || {};
+    const VALID = ['user', 'role', 'factory', 'department', 'cost_center', 'division', 'org_group'];
+    if (!VALID.includes(grantee_type)) return res.status(400).json({ error: 'invalid grantee_type' });
+    if (!grantee_id) return res.status(400).json({ error: 'grantee_id required' });
+    try {
+      await db.prepare(`
+        INSERT INTO help_book_shares (book_id, grantee_type, grantee_id, granted_by, granted_at)
+        VALUES (?, ?, ?, ?, SYSTIMESTAMP)
+      `).run(bookId, grantee_type, String(grantee_id), req.user.id);
+    } catch (e) {
+      if (/ORA-00001|UNIQUE/i.test(e.message)) return res.status(409).json({ error: '此對象已分享' });
+      throw e;
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[PmBriefing] POST /metals-share error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.delete('/metals-share/:id', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const bookId = await getMetalsBookId(db);
+    if (!bookId) return res.status(404).json({ error: 'not found' });
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid id' });
+    await db.prepare(`DELETE FROM help_book_shares WHERE id = ? AND book_id = ?`).run(id, bookId);
+    res.json({ ok: true });
+  } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });

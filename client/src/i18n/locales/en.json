@@ -48,7 +48,8 @@
         "kb": "Knowledge base",
         "dashboard": "AI dashboard",
         "training": "Training",
-        "pm": "PM platform"
+        "pm": "PM platform",
+        "metals": "Metals briefing"
       }
     },
     "chat": {
@@ -3520,5 +3521,27 @@
     },
     "personal": "Notifications",
     "announcements": "Announcements"
+  },
+  "metalsLite": {
+    "title": "Metals Briefing",
+    "subtitle": "Prices / Trends / Macro / News / AI",
+    "back": "Back",
+    "loading": "Loading…",
+    "myPrefs": "My Preferences",
+    "exportXlsx": "Export XLSX",
+    "exportTitle": "Export current metal prices + changes + macro",
+    "toFull": "Procurement view",
+    "toFullTitle": "Switch to procurement (full) view",
+    "deniedTitle": "Metals briefing access required",
+    "deniedHint": "Please ask admin to add you to the 'Metals Briefing (Lite)' share list under Special Manuals.",
+    "backToChat": "Back to chat",
+    "baseMetals": "Base metals (LME)",
+    "preciousMetals": "Precious metals",
+    "baseChartTitle": "Base metal trend (LME)",
+    "preciousChartTitle": "Precious metal trend",
+    "prefsHint": "Selected metals will be shown in price cards / charts. Leave blank to show all.",
+    "prefsShared": "This preference is shared with the procurement full view; changing here applies to both.",
+    "save": "Save",
+    "cancel": "Cancel"
   }
 }

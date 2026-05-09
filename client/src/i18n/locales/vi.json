@@ -48,7 +48,8 @@
         "kb": "Cơ sở tri thức",
         "dashboard": "Bảng AI",
         "training": "Đào tạo",
-        "pm": "Nền tảng PM"
+        "pm": "Nền tảng PM",
+        "metals": "Thông tin kim loại"
       }
     },
     "chat": {
@@ -3520,5 +3521,27 @@
     },
     "personal": "Thông báo",
     "announcements": "Thông báo chung"
+  },
+  "metalsLite": {
+    "title": "Thông tin kim loại",
+    "subtitle": "Giá / Xu hướng / Vĩ mô / Tin tức / AI",
+    "back": "Quay lại",
+    "loading": "Đang tải…",
+    "myPrefs": "Tuỳ chỉnh của tôi",
+    "exportXlsx": "Xuất XLSX",
+    "exportTitle": "Xuất giá kim loại hiện tại + biến động + vĩ mô",
+    "toFull": "Bản đầy đủ (Mua hàng)",
+    "toFullTitle": "Chuyển sang bản đầy đủ cho bộ phận Mua hàng",
+    "deniedTitle": "Cần quyền đọc thông tin kim loại",
+    "deniedHint": "Vui lòng liên hệ admin để thêm bạn vào danh sách chia sẻ 'Thông tin kim loại (Bản gọn)' trong mục Hướng dẫn đặc biệt.",
+    "backToChat": "Trở về cuộc trò chuyện",
+    "baseMetals": "Kim loại cơ bản (LME)",
+    "preciousMetals": "Kim loại quý",
+    "baseChartTitle": "Xu hướng kim loại cơ bản (LME)",
+    "preciousChartTitle": "Xu hướng kim loại quý",
+    "prefsHint": "Các kim loại đã chọn sẽ hiển thị trên thẻ giá / biểu đồ. Bỏ trống = hiển thị tất cả.",
+    "prefsShared": "Tuỳ chỉnh này dùng chung với bản đầy đủ; thay đổi ở đây áp dụng cho cả hai.",
+    "save": "Lưu",
+    "cancel": "Huỷ"
   }
 }

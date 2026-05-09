@@ -89,19 +89,22 @@ export default function Sidebar({
   const navigate = useNavigate()
   const { t, i18n } = useTranslation()
   const { unreadCount: feedbackUnread } = useFeedbackNotifications()
-  const [hasPmAccess, setHasPmAccess] = useState(false)
+  const [hasPmAccess, setHasPmAccess] = useState(false)             // 採購完整版 (precious-metals)
+  const [hasMetalsLite, setHasMetalsLite] = useState(false)          // 一般精簡版 (metals-public)
   const [pmReviewPending, setPmReviewPending] = useState(0)
   useEffect(() => {
     api.get('/help/books').then(r => {
       const list = r.data || []
       const pm = list.find((b: any) => b.code === 'precious-metals')
+      const metals = list.find((b: any) => b.code === 'metals-public')
       setHasPmAccess(!!pm)
+      setHasMetalsLite(!!metals)
       if (pm) {
         api.get('/pm/review/queue', { params: { status: 'pending' } })
           .then(rr => setPmReviewPending((rr.data || []).length))
           .catch(() => setPmReviewPending(0))
       }
-    }).catch(() => setHasPmAccess(false))
+    }).catch(() => { setHasPmAccess(false); setHasMetalsLite(false) })
   }, [])
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -534,8 +537,12 @@ export default function Sidebar({
                   </span>
                 )}
               </button>
-              {hasPmAccess && (
-                <button onClick={() => { setShowMenu(false); navigate('/pm/briefing') }}
+              {(hasPmAccess || hasMetalsLite) && (
+                <button onClick={() => {
+                  setShowMenu(false)
+                  // 分流:採購進完整版,一般 user 進精簡版
+                  navigate(hasPmAccess ? '/pm/briefing' : '/metals')
+                }}
                   className="w-full flex items-center gap-2 text-amber-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
                   <Sparkles size={13} />
                   <span className="flex-1 text-left">{t('sidebar.pmBriefing', '貴金屬情報')}</span>

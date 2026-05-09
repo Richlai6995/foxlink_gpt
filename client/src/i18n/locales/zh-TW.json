@@ -48,7 +48,8 @@
         "kb": "知識庫",
         "dashboard": "AI 戰情",
         "training": "教育訓練",
-        "pm": "PM 平台"
+        "pm": "PM 平台",
+        "metals": "金屬情報"
       }
     },
     "chat": {
@@ -3520,5 +3521,27 @@
     },
     "personal": "個人通知",
     "announcements": "公告"
+  },
+  "metalsLite": {
+    "title": "金屬情報",
+    "subtitle": "報價 / 走勢 / 宏觀 / 新聞 / AI",
+    "back": "返回",
+    "loading": "載入中…",
+    "myPrefs": "我的偏好",
+    "exportXlsx": "匯出 XLSX",
+    "exportTitle": "匯出當前金屬報價 + 漲跌 + 宏觀",
+    "toFull": "採購完整版",
+    "toFullTitle": "切到採購完整版",
+    "deniedTitle": "需要金屬情報閱讀權限",
+    "deniedHint": "請洽 admin 在「特殊說明書管理」加你進「金屬情報(精簡版)」的分享名單",
+    "backToChat": "回到對話",
+    "baseMetals": "基本金屬(LME)",
+    "preciousMetals": "貴金屬",
+    "baseChartTitle": "基本金屬走勢(LME)",
+    "preciousChartTitle": "貴金屬走勢",
+    "prefsHint": "勾選後:報價列 / 走勢圖只顯示這些金屬。留空 = 全部都顯示。",
+    "prefsShared": "本偏好與「貴金屬情報(完整版)」共用,改一邊兩邊同步。",
+    "save": "儲存",
+    "cancel": "取消"
   }
 }
