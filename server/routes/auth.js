@@ -252,8 +252,8 @@ function tryParseError(text) {
 console.log(`[SSO] Enabled: ${isSsoEnabled()}, Issuer: ${process.env.SSO_ISSUER || '(not set)'}, ClientID: ${process.env.SSO_CLIENT_ID ? '(set)' : '(not set)'}`);
 
 // ── Login Options(公開,前端進 Login 頁時打,決定 UI 顯示什麼)──────
-// 主要用途:外網 IP 隱藏 SSO 按鈕(SSO 流程依賴內網 SSO 主機 + 跳過 Webex MFA,
-// 外網開放 SSO 等於 MFA 形同虛設)。同時告訴前端是否要走 OTP 流程。
+// SSO 不會 bypass MFA(callback 完成後一律過 proceedOrChallenge),所以
+// 內外網都顯示 SSO 按鈕。MFA 仍由 mfa_required(外網 + MFA_ENABLED)獨立決定。
 router.get('/login-options', (req, res) => {
   const internal = isRequestInternal(req);
   const ssoConfigured = isSsoEnabled();
@@ -262,8 +262,7 @@ router.get('/login-options', (req, res) => {
     internal,
     ldap_enabled: !!process.env.LDAP_URL,
     sso_configured: ssoConfigured,
-    // SSO 按鈕顯示條件:SSO 已配置 + 內網(外網不顯示防 MFA bypass)
-    sso_visible: ssoConfigured && internal,
+    sso_visible: ssoConfigured,
     mfa_required: !internal && mfaEnabled,
   });
 });
@@ -276,14 +275,8 @@ router.get('/sso/login', async (req, res) => {
     console.warn('[SSO] Not configured. SSO_ISSUER:', process.env.SSO_ISSUER || '(empty)', 'SSO_CLIENT_ID:', process.env.SSO_CLIENT_ID ? '(set)' : '(empty)', 'SSO_CLIENT_SECRET:', process.env.SSO_CLIENT_SECRET ? '(set)' : '(empty)');
     return res.status(501).json({ error: 'SSO not configured — 請確認 .env 中 SSO_ISSUER, SSO_CLIENT_ID, SSO_CLIENT_SECRET 皆已設定' });
   }
-  // 外網禁止走 SSO(防 MFA bypass:SSO 完成後 proceedOrChallenge 仍走 MFA,
-  // 但 SSO 主機通常只在內網,外網點按鈕會死;且 UX 上不該在外網提供 SSO 入口)
-  if (!isRequestInternal(req)) {
-    const baseUrl = process.env.APP_BASE_URL || '';
-    const msg = '外網不支援 SSO 登入,請使用帳號密碼';
-    console.warn(`[SSO] external SSO attempt blocked, ip=${getClientIp(req)}`);
-    return res.redirect(`${baseUrl}/login?sso_error=${encodeURIComponent(msg)}`);
-  }
+  // 內外網都允許 SSO:callback 完成後一律過 proceedOrChallenge → 外網會走 MFA OTP,內網直放,
+  // 等同其他登入路徑,沒有 MFA bypass 風險。SSO IdP 走 https://sso.foxlink.com.tw 公開 host。
   try {
     const cfg = await getSsoConfig();
     // OIDC state(2026-05-09 fix #6):防 login CSRF — 攻擊者誘導 victim 走攻擊者的
