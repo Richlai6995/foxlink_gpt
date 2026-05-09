@@ -1509,6 +1509,56 @@ router.delete('/designer/joins/:id', requireDesigner, async (req, res) => {
 
 // ─── ETL Jobs ─────────────────────────────────────────────────────────────────
 
+// [2026-05-09 fix horizontal escalation] 所有 ETL job 寫入/執行操作都要驗 user 對該 job 有管理權。
+// 修補前 PUT / DELETE / run / cancel 只 requireDesigner — 任何 designer 可動別人的 ETL job
+// (e.g. 把 source_sql 改成 SELECT password FROM users 來 leak 全 DB)。
+// 規則對齊 GET list 的 filter:admin / created_by 自己 / project develop share grantee 才可。
+async function canManageEtlJob(db, jobId, user) {
+  if (user.role === 'admin') return true;
+  const job = await db.prepare(
+    'SELECT created_by, project_id FROM ai_etl_jobs WHERE id=?'
+  ).get(jobId);
+  if (!job) return false;
+  if ((job.created_by ?? job.CREATED_BY) === user.id) return true;
+  const projectId = job.project_id ?? job.PROJECT_ID;
+  if (!projectId) return false;  // 沒掛 project 的 ETL = 只 owner / admin 能管
+  const access = await db.prepare(`
+    SELECT 1 FROM ai_select_projects p WHERE p.id=? AND (
+      p.created_by=? OR EXISTS (
+        SELECT 1 FROM ai_project_shares sh WHERE sh.project_id=p.id AND sh.share_type='develop' AND (
+          (sh.grantee_type='user'           AND sh.grantee_id=TO_CHAR(?))
+          OR (sh.grantee_type='role'        AND sh.grantee_id=TO_CHAR(?))
+          OR (sh.grantee_type='department'  AND sh.grantee_id=? AND ? IS NOT NULL)
+          OR (sh.grantee_type='cost_center' AND sh.grantee_id=? AND ? IS NOT NULL)
+          OR (sh.grantee_type='division'    AND sh.grantee_id=? AND ? IS NOT NULL)
+          OR (sh.grantee_type='factory'     AND sh.grantee_id=? AND ? IS NOT NULL)
+          OR (sh.grantee_type='org_group'   AND sh.grantee_id=? AND ? IS NOT NULL)
+        )
+      )
+    ) FETCH FIRST 1 ROWS ONLY
+  `).get(
+    projectId, user.id,
+    user.id, user.role_id || '',
+    user.dept_code, user.dept_code,
+    user.profit_center, user.profit_center,
+    user.org_section, user.org_section,
+    user.factory_code, user.factory_code,
+    user.org_group_name, user.org_group_name,
+  );
+  return !!access;
+}
+async function _denyEtlOrPass(req, res) {
+  const db = require('../database-oracle').db;
+  const jobId = Number(req.params.id);
+  if (!Number.isFinite(jobId)) { res.status(400).json({ error: 'Invalid ETL job id' }); return false; }
+  if (!(await canManageEtlJob(db, jobId, req.user))) {
+    console.warn(`[ETL] user_id=${req.user.id} denied access to job_id=${jobId}`);
+    res.status(403).json({ error: '無權操作此 ETL job' });
+    return false;
+  }
+  return true;
+}
+
 // GET /api/dashboard/etl/jobs
 router.get('/etl/jobs', requireDesigner, async (req, res) => {
   try {
@@ -1610,6 +1660,7 @@ router.post('/etl/jobs', requireDesigner, async (req, res) => {
 
 // PUT /api/dashboard/etl/jobs/:id
 router.put('/etl/jobs/:id', requireDesigner, async (req, res) => {
+  if (!(await _denyEtlOrPass(req, res))) return;
   try {
     const db = require('../database-oracle').db;
     const { scheduleToCron, scheduleEtlJob } = require('../services/dashboardService');
@@ -1657,6 +1708,7 @@ router.put('/etl/jobs/:id', requireDesigner, async (req, res) => {
 
 // DELETE /api/dashboard/etl/jobs/:id
 router.delete('/etl/jobs/:id', requireDesigner, async (req, res) => {
+  if (!(await _denyEtlOrPass(req, res))) return;
   try {
     const db = require('../database-oracle').db;
     const { dropVectorStorePartition } = require('../database-oracle');
@@ -1671,6 +1723,7 @@ router.delete('/etl/jobs/:id', requireDesigner, async (req, res) => {
 
 // POST /api/dashboard/etl/jobs/:id/run — 立即執行
 router.post('/etl/jobs/:id/run', requireDesigner, async (req, res) => {
+  if (!(await _denyEtlOrPass(req, res))) return;
   try {
     const { runEtlJob } = require('../services/dashboardService');
     runEtlJob(Number(req.params.id)).catch(e => console.error('[ETL] manual run error:', e.message));
@@ -1682,6 +1735,7 @@ router.post('/etl/jobs/:id/run', requireDesigner, async (req, res) => {
 
 // POST /api/dashboard/etl/jobs/:id/cancel — 取消執行中的 ETL job
 router.post('/etl/jobs/:id/cancel', requireDesigner, async (req, res) => {
+  if (!(await _denyEtlOrPass(req, res))) return;
   try {
     const { cancelEtlJob } = require('../services/dashboardService');
     cancelEtlJob(Number(req.params.id));
@@ -1693,6 +1747,7 @@ router.post('/etl/jobs/:id/cancel', requireDesigner, async (req, res) => {
 
 // GET /api/dashboard/etl/jobs/:id/logs
 router.get('/etl/jobs/:id/logs', requireDesigner, async (req, res) => {
+  if (!(await _denyEtlOrPass(req, res))) return;
   try {
     const db = require('../database-oracle').db;
     const logs = await db.prepare(
