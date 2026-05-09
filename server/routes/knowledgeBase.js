@@ -109,9 +109,21 @@ const UPLOAD_BASE = process.env.UPLOAD_DIR
   : path.join(__dirname, '../uploads');
 
 // Multer storage: save to uploads/kb/<kb_id>/
+const { isNumericId, ensureWithinRoot } = require('../utils/pathSafety');
+
 const storage = multer.diskStorage({
   destination(req, _file, cb) {
-    const dir = path.join(UPLOAD_BASE, 'kb', req.params.id || 'tmp');
+    // \u9632 path traversal:req.params.id \u5fc5\u9808\u662f\u7d14\u6578\u5b57 KB id\u3002
+    // \u653b\u64ca\u8005\u9001 :id='../../etc' \u904e\u53bb\u6703 escape \u51fa UPLOAD_BASE/kb/ \u5beb\u5230\u4efb\u610f\u76ee\u9304\u3002
+    const id = req.params.id;
+    if (id !== undefined && !isNumericId(String(id))) {
+      return cb(new Error('Invalid KB id'));
+    }
+    const dir = path.join(UPLOAD_BASE, 'kb', id || 'tmp');
+    // Double check:\u5373\u4f7f\u4e0a\u9762\u6f0f\u7db2,resolve \u5f8c\u7684 dir \u5fc5\u9808\u4ecd\u5728 UPLOAD_BASE/kb \u4e4b\u4e0b
+    if (!ensureWithinRoot(path.join(UPLOAD_BASE, 'kb'), dir)) {
+      return cb(new Error('Path escape detected'));
+    }
     fs.mkdirSync(dir, { recursive: true });
     cb(null, dir);
   },

@@ -2063,11 +2063,18 @@ router.post('/topics/:id/icon', requireDesigner, async (req, res) => {
     const multer = require('multer');
     const path = require('path');
     const { UPLOAD_DIR: _ud } = require('../config/paths');
+    const { isNumericId, safeExtension } = require('../utils/pathSafety');
+    const SAFE_IMG_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
+    if (!isNumericId(String(req.params.id || ''))) return res.status(400).json({ error: 'Invalid topic id' });
     const uploadDir = require('path').join(_ud, 'dashboard_icons');
     require('fs').mkdirSync(uploadDir, { recursive: true });
     const storage = multer.diskStorage({
       destination: uploadDir,
-      filename: (req, file, cb) => cb(null, `topic_${req.params.id}_${Date.now()}${path.extname(file.originalname)}`)
+      // 副檔名走 whitelist(防 .svg / .html 等 stored XSS 載體;mimetype 可被偽造)
+      filename: (req, file, cb) => {
+        const ext = safeExtension(file.originalname, SAFE_IMG_EXTS) || '.png';
+        cb(null, `topic_${req.params.id}_${Date.now()}${ext}`);
+      }
     });
     const upload = multer({ storage, limits: { fileSize: 2 * 1024 * 1024 }, fileFilter: (req, file, cb) => {
       if (file.mimetype.startsWith('image/')) cb(null, true);
@@ -2090,11 +2097,16 @@ router.post('/upload-logo', async (req, res) => {
     const multer = require('multer');
     const path = require('path');
     const { UPLOAD_DIR: _ud } = require('../config/paths');
+    const { safeExtension } = require('../utils/pathSafety');
+    const SAFE_IMG_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
     const uploadDir = path.join(_ud, 'dashboard_logos');
     require('fs').mkdirSync(uploadDir, { recursive: true });
     const storage = multer.diskStorage({
       destination: uploadDir,
-      filename: (req, file, cb) => cb(null, `logo_${req.user.id}_${Date.now()}${path.extname(file.originalname)}`),
+      filename: (req, file, cb) => {
+        const ext = safeExtension(file.originalname, SAFE_IMG_EXTS) || '.png';
+        cb(null, `logo_${req.user.id}_${Date.now()}${ext}`);
+      },
     });
     const upload = multer({
       storage,
@@ -2118,11 +2130,16 @@ router.post('/upload-wallpaper', async (req, res) => {
     const multer = require('multer');
     const path = require('path');
     const { UPLOAD_DIR: _ud } = require('../config/paths');
+    const { safeExtension } = require('../utils/pathSafety');
+    const SAFE_IMG_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
     const uploadDir = path.join(_ud, 'dashboard_wallpapers');
     require('fs').mkdirSync(uploadDir, { recursive: true });
     const storage = multer.diskStorage({
       destination: uploadDir,
-      filename: (req, file, cb) => cb(null, `wp_${req.user.id}_${Date.now()}${path.extname(file.originalname)}`),
+      filename: (req, file, cb) => {
+        const ext = safeExtension(file.originalname, SAFE_IMG_EXTS) || '.png';
+        cb(null, `wp_${req.user.id}_${Date.now()}${ext}`);
+      },
     });
     const upload = multer({
       storage,

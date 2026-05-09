@@ -547,6 +547,9 @@ router.delete('/:id/shares/:shareId', async (req, res) => {
 });
 
 // ─── POST /:id/slides/:index/thumbnail  Upload slide preview image ────────────
+const { isNumericId: _isNumericId, safeExtension: _safeExtension } = require('../utils/pathSafety');
+const ALLOWED_THUMB_EXTS = ['.png', '.jpg', '.jpeg', '.webp'];
+
 const thumbnailUpload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => {
@@ -555,8 +558,13 @@ const thumbnailUpload = multer({
       cb(null, dir);
     },
     filename: (req, file, cb) => {
-      const ext = (file.originalname.split('.').pop() || 'png').toLowerCase();
-      cb(null, `${req.params.id}_slide${req.params.index}.${ext}`);
+      // 防 path traversal:id/index 必須純數字,否則 filename 內含 ../ 會 escape thumbnails 目錄
+      if (!_isNumericId(String(req.params.id || '')) || !_isNumericId(String(req.params.index || ''))) {
+        return cb(new Error('Invalid id or index'));
+      }
+      // 副檔名必須在 whitelist(防偽 mime + .svg 等 XSS 載體)
+      const ext = _safeExtension(file.originalname, ALLOWED_THUMB_EXTS) || '.png';
+      cb(null, `${req.params.id}_slide${req.params.index}${ext}`);
     },
   }),
   limits: { fileSize: 10 * 1024 * 1024 },
