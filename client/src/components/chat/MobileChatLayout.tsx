@@ -782,7 +782,9 @@ export default function MobileChatLayout() {
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+              // 手機慣例:Enter 換行(走預設),送出靠右側送出按鈕。軟鍵盤無 Shift,
+              // 攔 Enter 會讓使用者沒辦法換行。Ctrl/Cmd+Enter 保留給外接鍵盤 power user。
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing) {
                 e.preventDefault()
                 handleSendWithErp(inputText, attachments)
               }

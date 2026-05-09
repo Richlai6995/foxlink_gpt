@@ -2719,31 +2719,66 @@ router.delete('/saved-queries/:id/shares/:shareId', requireDashboard, async (req
 });
 
 // GET /saved-queries/param-values — 取得某 schema 欄位的 distinct 值（供參數下拉使用）
+//
+// 2026-05-09 SQLi hardening:
+//   - column_name / filter_column 走 identifier whitelist(Oracle bind 不支援 identifier)
+//   - filter_value / search 改 bind 變數(`:p_xxx`)取代 string interpolation
+//   - table_name / source_sql 從 DB 信任源,加長度上限 + identifier whitelist
+//   - ERP read-only proxy 已擋 DML,本層再防 SELECT injection 拿到 leak
 router.get('/saved-queries/param-values', requireDashboard, async (req, res) => {
   const { db } = require('../database-oracle');
   const { getPoolBySourceId } = require('../services/dashboardService');
-  let sql = null; // 宣告在 try 外，catch block 才能引用
-  let sourceDbId = null; // LOV 要走 schema 的來源 DB,不可硬用 ERP
+  let sql = null;
+  let sourceDbId = null;
+  // SQL identifier 白名單(Oracle 一般 unquoted identifier:首字母 + 字母/數字/底線,長度 30)
+  // 允許 schema.table 點號(table_name 用),不允許 column 用點號
+  const IDENT_RE       = /^[A-Za-z][A-Za-z0-9_]{0,29}$/;
+  const TABLE_IDENT_RE = /^[A-Za-z][A-Za-z0-9_]{0,29}(\.[A-Za-z][A-Za-z0-9_]{0,29})?$/;
   try {
     const { schema_id, column_name, fetch_values_sql, search, filter_column, filter_value } = req.query;
     console.log('[param-values] req:', { schema_id, column_name, has_fetch_sql: !!fetch_values_sql, filter_column, filter_value });
     if (!column_name) return res.status(400).json({ error: '欄位名稱必填' });
+    if (!IDENT_RE.test(String(column_name))) return res.status(400).json({ error: '欄位名稱格式錯誤' });
+    if (filter_column && !IDENT_RE.test(String(filter_column))) return res.status(400).json({ error: 'filter_column 格式錯誤' });
 
+    const binds = {};
     sql = fetch_values_sql || null;
-    const searchFilter = search ? search.trim() : '';
+    const searchFilter = search ? String(search).trim() : '';
     const limit = searchFilter ? 100 : 200;
-    // 父參數 cascade filter
-    const cascadeClause = (filter_column && filter_value)
-      ? ` AND ${filter_column.toUpperCase()} = '${String(filter_value).replace(/'/g, "''")}'`
-      : '';
+    // 父參數 cascade filter — filter_column 已通過 IDENT_RE,filter_value 改 bind
+    let cascadeClause = '';
+    if (filter_column && filter_value !== undefined && filter_value !== null && filter_value !== '') {
+      cascadeClause = ` AND ${String(filter_column).toUpperCase()} = :p_filter_value`;
+      binds.p_filter_value = String(filter_value);
+    }
     if (!sql && schema_id) {
       const schemaDef = await db.prepare('SELECT table_name, source_sql, source_type, source_db_id FROM ai_schema_definitions WHERE id=?').get(schema_id);
       if (!schemaDef) return res.status(404).json({ error: 'Schema 不存在' });
       sourceDbId = schemaDef.source_db_id ?? schemaDef.SOURCE_DB_ID ?? null;
-      const col = column_name.toUpperCase();
-      const source = schemaDef.source_type === 'sql' ? `(${schemaDef.source_sql})` : schemaDef.table_name;
-      const likeClause = searchFilter ? ` AND UPPER(${col}) LIKE UPPER('%${searchFilter.replace(/'/g, "''")}%')` : '';
-      sql = `SELECT DISTINCT ${col} AS val FROM ${source} WHERE ${col} IS NOT NULL${likeClause}${cascadeClause} ORDER BY 1 FETCH FIRST ${limit} ROWS ONLY`;
+      const col = String(column_name).toUpperCase();
+      let source;
+      if (schemaDef.source_type === 'sql') {
+        // source_sql 由 admin 在 schema 設定時填入,server-trusted。但加防呆:
+        // 1. 長度上限避免 enormous SQL 拖死 server
+        // 2. ERP read-only proxy 仍會 assertErpReadOnly 阻擋 DML
+        const ss = String(schemaDef.source_sql || '').trim();
+        if (ss.length > 8192) return res.status(400).json({ error: 'source_sql 過長' });
+        source = `(${ss})`;
+      } else {
+        const tableName = String(schemaDef.table_name || '');
+        if (!TABLE_IDENT_RE.test(tableName)) {
+          console.warn(`[param-values] schema ${schema_id} table_name 格式異常: ${tableName}`);
+          return res.status(400).json({ error: 'schema 設定異常' });
+        }
+        source = tableName;
+      }
+      // search LIKE 改 bind(避免 % / _ / ' 等 wildcard escape 漏網)
+      let likeClause = '';
+      if (searchFilter) {
+        likeClause = ` AND UPPER(${col}) LIKE UPPER(:p_search)`;
+        binds.p_search = `%${searchFilter}%`;
+      }
+      sql = `SELECT DISTINCT ${col} AS val FROM ${source} WHERE ${col} IS NOT NULL${likeClause}${cascadeClause} ORDER BY 1 FETCH FIRST ${Number(limit) || 200} ROWS ONLY`;
     } else if (sql && cascadeClause) {
       // fetch_values_sql 模式：包成子查詢加 cascade filter
       sql = `SELECT * FROM (${sql}) WHERE 1=1${cascadeClause}`;
@@ -2757,11 +2792,11 @@ router.get('/saved-queries/param-values', requireDashboard, async (req, res) => 
     }
     if (!sql) return res.status(400).json({ error: '無法組建查詢' });
 
-    console.log('[param-values] SQL:', sql, 'sourceDbId:', sourceDbId);
+    console.log('[param-values] SQL:', sql, 'binds:', binds, 'sourceDbId:', sourceDbId);
     const erpPool = await getPoolBySourceId(sourceDbId, db);
     const conn = await erpPool.getConnection();
     try {
-      const result = await conn.execute(sql, [], { outFormat: require('oracledb').OUT_FORMAT_OBJECT });
+      const result = await conn.execute(sql, binds, { outFormat: require('oracledb').OUT_FORMAT_OBJECT });
       const rows = (result.rows || []).map(r => {
         const keys = Object.keys(r);
         const val = r.VAL ?? r[keys[0]];

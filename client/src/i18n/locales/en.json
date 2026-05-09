@@ -56,7 +56,7 @@
       "newChat": "New chat",
       "newChatDefaultTitle": "New chat",
       "deleteConfirm": "Delete this chat?",
-      "inputPlaceholder": "Type a message…",
+      "inputPlaceholder": "Type a message… (Enter for new line, tap send)",
       "selectModel": "Select model",
       "noModels": "No models available",
       "welcomeTitle": "Start a new chat",
