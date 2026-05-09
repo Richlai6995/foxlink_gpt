@@ -31,9 +31,30 @@ const redis = require('../services/redisClient');
 // ── RP(Relying Party)config ────────────────────────────────────────────────
 // rpID 必須是 effective domain(沒有 port、沒有 protocol);origin 完整含 https://
 const RP_NAME = process.env.WEBAUTHN_RP_NAME || 'Cortex';
+
+// Strict mode(2026-05-09 fix #5):啟用後 RP_ID / ORIGIN 必須由 env 明確設定,
+// 不再從 Host / X-Forwarded-Host 推導(防攻擊者偽造 header 讓 server 把 challenge
+// 綁到攻擊者 domain)。預設 false 沿用現狀 — prod 應設為 true。
+const WEBAUTHN_STRICT = process.env.WEBAUTHN_STRICT === 'true';
+
+// Startup log — 一次印出本 process WebAuthn 設定,方便 ops 確認
+{
+  const rpIdEnv = process.env.WEBAUTHN_RP_ID || '(unset → fallback to host header)';
+  const originEnv = process.env.WEBAUTHN_ORIGIN || '(unset → fallback to host header)';
+  console.log(`[WebAuthn] RP_ID=${rpIdEnv} | ORIGIN=${originEnv} | strict=${WEBAUTHN_STRICT}`);
+  if (WEBAUTHN_STRICT && !process.env.WEBAUTHN_RP_ID) {
+    console.warn('[WebAuthn] ⚠️  STRICT 模式啟用但 WEBAUTHN_RP_ID 未設,所有 WebAuthn 端點將回 500');
+  }
+}
+
 function getRpId(req) {
-  // 優先 env 設定;否則從 Host header 推
+  // 優先 env 設定
   if (process.env.WEBAUTHN_RP_ID) return process.env.WEBAUTHN_RP_ID;
+  // strict 模式拒絕 fallback,讓 endpoint catch 轉 500
+  if (WEBAUTHN_STRICT) {
+    throw new Error('WebAuthn strict mode: WEBAUTHN_RP_ID env 必須設定');
+  }
+  // legacy fallback:從 host header 推(會被 X-Forwarded-Host 偽造影響,不安全)
   const host = (req.headers['x-forwarded-host'] || req.headers.host || '').split(':')[0];
   return host || 'localhost';
 }
@@ -46,6 +67,9 @@ function getOrigin(req) {
   if (process.env.WEBAUTHN_ORIGIN) {
     const list = process.env.WEBAUTHN_ORIGIN.split(',').map(s => s.trim()).filter(Boolean);
     return list.length > 1 ? list : list[0];
+  }
+  if (WEBAUTHN_STRICT) {
+    throw new Error('WebAuthn strict mode: WEBAUTHN_ORIGIN env 必須設定');
   }
   const proto = (req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0].trim();
   const host = req.headers['x-forwarded-host'] || req.headers.host || '';

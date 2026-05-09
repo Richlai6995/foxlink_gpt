@@ -50,29 +50,24 @@ function isInternal(ip, cidrs) {
   return cidrs.some(cidr => isInCIDR(ip, cidr));
 }
 
-// ── Login rate limiter (full mode) ──────────────────────────────────
+// ── Login rate limiter (full mode) — Redis-backed,跨 pod 共享 ────────
+// 改用 redisClient.incrSharedValue(2026-05-09)。原本用 module-level Map,
+// K8s 多 pod 部署下 N pods × max/分鐘 = 攻擊者實際得到 N×max,失去 rate limit 意義。
+// Redis 模式下 SET 第一次寫入時設 60s TTL,後續 INCR 不重設,精確 sliding-window。
+// fail-open:Redis 出錯時放行 + warn(避免 Redis 抖動把全公司擋外)。
+let _redis = null;
+const getRedis = () => _redis || (_redis = require('../services/redisClient'));
 
-const loginAttempts = new Map(); // ip → { count, resetAt }
-
-function checkLoginRate(ip, max) {
+async function checkLoginRate(ip, max) {
   if (!max) return true;
-  const now = Date.now();
-  const entry = loginAttempts.get(ip);
-  if (!entry || now > entry.resetAt) {
-    loginAttempts.set(ip, { count: 1, resetAt: now + 60_000 });
-    return true;
+  try {
+    const n = await getRedis().incrSharedValue(`auth:rate:login:${ip}`, 60);
+    return n <= max;
+  } catch (e) {
+    console.warn(`[AccessControl] login rate check failed (allow): ${e.message}`);
+    return true;  // fail-open
   }
-  entry.count++;
-  return entry.count <= max;
 }
-
-// Periodic cleanup — prevent memory leak
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, entry] of loginAttempts) {
-    if (now > entry.resetAt) loginAttempts.delete(ip);
-  }
-}, 5 * 60_000).unref();
 
 // ── Middleware factory ───────────────────────────────────────────────
 
@@ -157,7 +152,7 @@ function createAccessControl() {
     //     注意:這裡 IP 仍當外網對待(MFA、isRequestInternal=false 都照舊),不會跳過 MFA。
     if (externalAllowedIps.length && externalAllowedIps.some(cidr => isInCIDR(ip, cidr))) {
       if (req.path === '/api/auth/login' && req.method === 'POST') {
-        if (!checkLoginRate(ip, loginRateMax)) {
+        if (!(await checkLoginRate(ip, loginRateMax))) {
           console.warn(`[AccessControl] login rate limit hit (allowlisted) | ip=${ip}`);
           return res.status(429).json({ error: 'Too many login attempts, try again later' });
         }
@@ -170,7 +165,7 @@ function createAccessControl() {
       case 'full':
         // Login brute-force protection
         if (req.path === '/api/auth/login' && req.method === 'POST') {
-          if (!checkLoginRate(ip, loginRateMax)) {
+          if (!(await checkLoginRate(ip, loginRateMax))) {
             console.warn(`[AccessControl] login rate limit hit | ip=${ip}`);
             return res.status(429).json({ error: 'Too many login attempts, try again later' });
           }

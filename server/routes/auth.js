@@ -286,14 +286,17 @@ router.get('/sso/login', async (req, res) => {
   }
   try {
     const cfg = await getSsoConfig();
-    // SSO_BASE_URL 優先;未設則沿用 APP_BASE_URL。用途:WAF 443 / 內部 8443 並存時,
-    // SSO redirect_uri 必須跟 SSO server 註冊清單逐字元一致(否則 invalid_client)。
-    const ssoBase = process.env.SSO_BASE_URL || process.env.APP_BASE_URL;
+    // OIDC state(2026-05-09 fix #6):防 login CSRF — 攻擊者誘導 victim 走攻擊者的
+    // SSO 流程,把 victim session 綁到攻擊者帳號。state 寫進 Redis 5 min,
+    // callback 驗對得上才繼續,並消費掉(one-shot)。
+    const state = uuidv4();
+    await redis.setSharedValue(`sso:state:${state}`, '1', 300);
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: process.env.SSO_CLIENT_ID,
-      redirect_uri: `${ssoBase}/api/auth/sso/callback`,
+      redirect_uri: `${process.env.APP_BASE_URL}/api/auth/sso/callback`,
       scope: process.env.SSO_SCOPE || 'openid profile email',
+      state,
     });
     res.redirect(`${cfg.authorization_endpoint}?${params}`);
   } catch (e) {
@@ -304,7 +307,7 @@ router.get('/sso/login', async (req, res) => {
 
 // GET /api/auth/sso/callback — exchange code for token, get userinfo, create session
 router.get('/sso/callback', async (req, res) => {
-  const { code, error: ssoError } = req.query;
+  const { code, state, error: ssoError } = req.query;
   const baseUrl = process.env.APP_BASE_URL || '';
 
   if (!isSsoEnabled()) {
@@ -315,13 +318,27 @@ router.get('/sso/callback', async (req, res) => {
     return res.redirect(`${baseUrl}/login?sso_error=${encodeURIComponent(ssoError || 'SSO 登入失敗')}`);
   }
 
+  // OIDC state 驗證(2026-05-09 fix #6):state 必須對應 /sso/login 寫入的 Redis key,
+  // 用過即丟(one-shot,防 replay)。沒帶 state / 對不上 → 拒登,當 CSRF 處理。
+  if (!state || typeof state !== 'string') {
+    console.warn(`[SSO] callback missing state, ip=${getClientIp(req)}`);
+    return res.redirect(`${baseUrl}/login?sso_error=${encodeURIComponent('SSO state 缺失,請重新登入')}`);
+  }
+  const stateKey = `sso:state:${state}`;
+  const stateValid = await redis.getSharedValue(stateKey);
+  if (!stateValid) {
+    console.warn(`[SSO] callback invalid/expired state=${state.slice(0,8)}..., ip=${getClientIp(req)}`);
+    return res.redirect(`${baseUrl}/login?sso_error=${encodeURIComponent('SSO 流程已過期或無效,請重新登入')}`);
+  }
+  // 消費掉:無論後續成功失敗,這個 state 都不能再用
+  try { await redis.getStore().del(stateKey); } catch (_) {}
+
   try {
     const cfg = await getSsoConfig();
 
     // 1. Exchange authorization code for tokens
     // 必須跟 /sso/login 階段送出去的 redirect_uri 完全一致,否則 invalid_client / invalid_grant
-    const ssoBase = process.env.SSO_BASE_URL || process.env.APP_BASE_URL;
-    const redirectUri = `${ssoBase}/api/auth/sso/callback`;
+    const redirectUri = `${process.env.APP_BASE_URL}/api/auth/sso/callback`;
     const basicAuth = Buffer.from(`${process.env.SSO_CLIENT_ID}:${process.env.SSO_CLIENT_SECRET}`).toString('base64');
     console.log('[SSO] Token exchange → endpoint:', cfg.token_endpoint, 'redirect_uri:', redirectUri);
 
