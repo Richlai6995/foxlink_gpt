@@ -251,6 +251,25 @@ function tryParseError(text) {
 // Log SSO config status at startup
 console.log(`[SSO] Enabled: ${isSsoEnabled()}, Issuer: ${process.env.SSO_ISSUER || '(not set)'}, ClientID: ${process.env.SSO_CLIENT_ID ? '(set)' : '(not set)'}`);
 
+// 動態判斷這次 request 的 base URL — 內網 8443 / 外網 443 並存,redirect_uri 要對齊
+// 進來的 host,SSO 才能 redirect 回得來(內網不通 443,外網不通 8443)。
+// 安全:用 APP_ALLOWED_BASE_URLS env 做 allowlist(逗號分隔),不在清單內就 fallback APP_BASE_URL,
+// 防 host header 偽造產生 open redirect 風險。
+function resolveSsoBaseUrl(req) {
+  const proto = String(req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http')).split(',')[0].trim();
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  if (!host) return process.env.APP_BASE_URL || null;
+  const candidate = `${proto}://${host}`;
+  const allowedRaw = process.env.APP_ALLOWED_BASE_URLS || process.env.APP_BASE_URL || '';
+  const allowed = allowedRaw.split(',').map((s) => s.trim().replace(/\/$/, '')).filter(Boolean);
+  if (allowed.length === 0) return candidate;
+  if (!allowed.includes(candidate)) {
+    console.warn(`[SSO] base URL "${candidate}" not in allowlist, fallback to APP_BASE_URL`);
+    return process.env.APP_BASE_URL || null;
+  }
+  return candidate;
+}
+
 // ── Login Options(公開,前端進 Login 頁時打,決定 UI 顯示什麼)──────
 // SSO 不會 bypass MFA(callback 完成後一律過 proceedOrChallenge),所以
 // 內外網都顯示 SSO 按鈕。MFA 仍由 mfa_required(外網 + MFA_ENABLED)獨立決定。
@@ -279,18 +298,24 @@ router.get('/sso/login', async (req, res) => {
   // 等同其他登入路徑,沒有 MFA bypass 風險。SSO IdP 走 https://sso.foxlink.com.tw 公開 host。
   try {
     const cfg = await getSsoConfig();
-    // OIDC state(2026-05-09 fix #6):防 login CSRF — 攻擊者誘導 victim 走攻擊者的
-    // SSO 流程,把 victim session 綁到攻擊者帳號。state 寫進 Redis 5 min,
-    // callback 驗對得上才繼續,並消費掉(one-shot)。
+    // 動態 base:user 從哪個 host 進來就 redirect 回哪個(8443 / 443 並存)
+    const base = resolveSsoBaseUrl(req);
+    if (!base) {
+      return res.redirect(`/login?sso_error=${encodeURIComponent('SSO base URL 解析失敗')}`);
+    }
+    const redirectUri = `${base}/api/auth/sso/callback`;
+    // OIDC state(2026-05-09 fix #6):防 login CSRF。一併把 base 存進 state value,
+    // callback 才能用同一個 base 換 token(redirect_uri 必須跟 authorize 階段逐字一致)。
     const state = uuidv4();
-    await redis.setSharedValue(`sso:state:${state}`, '1', 300);
+    await redis.setSharedValue(`sso:state:${state}`, JSON.stringify({ base }), 300);
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: process.env.SSO_CLIENT_ID,
-      redirect_uri: `${process.env.APP_BASE_URL}/api/auth/sso/callback`,
+      redirect_uri: redirectUri,
       scope: process.env.SSO_SCOPE || 'openid profile email',
       state,
     });
+    console.log('[SSO] login → redirect_uri:', redirectUri);
     res.redirect(`${cfg.authorization_endpoint}?${params}`);
   } catch (e) {
     console.error('[SSO] login redirect error:', e.message);
@@ -325,6 +350,12 @@ router.get('/sso/callback', async (req, res) => {
   }
   // 消費掉:無論後續成功失敗,這個 state 都不能再用
   try { await redis.getStore().del(stateKey); } catch (_) {}
+  // 解析 state value 拿 /sso/login 當時用的 base(舊格式 '1' fallback APP_BASE_URL)
+  let stateBase = null;
+  try {
+    const parsed = JSON.parse(stateValid);
+    if (parsed && typeof parsed.base === 'string') stateBase = parsed.base;
+  } catch (_) { /* legacy '1' */ }
 
   try {
     const cfg = await getSsoConfig();
@@ -334,7 +365,8 @@ router.get('/sso/callback', async (req, res) => {
     // Foxlink SSO(FoxlinkSSO-Api.html /oauth/token spec)只支援 client_secret_post:
     // client_id / client_secret 必須在 form body,Authorization Basic header 不認。
     // 之前 commit e833398 改成 Basic auth 是踩雷 → 這裡走回 form body 才是對的。
-    const redirectUri = `${process.env.APP_BASE_URL}/api/auth/sso/callback`;
+    const tokenBase = stateBase || resolveSsoBaseUrl(req) || process.env.APP_BASE_URL;
+    const redirectUri = `${tokenBase}/api/auth/sso/callback`;
     console.log('[SSO] Token exchange → endpoint:', cfg.token_endpoint, 'redirect_uri:', redirectUri);
 
     const tokenResp = await fetch(cfg.token_endpoint, {
