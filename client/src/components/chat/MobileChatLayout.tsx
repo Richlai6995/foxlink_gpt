@@ -25,7 +25,7 @@ import { useAdminOverride } from '../../context/AdminOverrideContext'
 import { useFeedbackNotifications } from '../../hooks/useFeedbackNotifications'
 import i18n, { SUPPORTED_LANGUAGES, type LangCode } from '../../i18n'
 import type { ChatSession, ChatMessage, LlmModel, ModelType, GeneratedFile } from '../../types'
-// import MicButton from '../MicButton'  // 2026-05-09 暫時隱藏 mic(輸入法自帶語音較好用),恢復時取消註解 + 把 row 2 內被註解的 MicButton JSX 還原
+import MicButton from '../MicButton'
 
 interface SkillItem {
   id: number
@@ -751,8 +751,7 @@ export default function MobileChatLayout() {
           style={{ minHeight: '44px' }}
         />
 
-        {/* Row 2:控制列 — [+] [模型▼] [⚙] ... [▶ send]
-            Mic 暫時隱藏(用輸入法自帶語音輸入,原 MicButton 留 import 不刪以便日後恢復)*/}
+        {/* Row 2:控制列 — [+] [模型▼] [⚙] [🎤] ... [▶ send] */}
         <div className="flex items-center gap-1 mt-2">
           <button
             onClick={() => setPlusOpen(true)}
@@ -782,6 +781,20 @@ export default function MobileChatLayout() {
               </span>
             )}
           </button>
+          <MicButton
+            source="chat"
+            disabled={streaming}
+            size={18}
+            className="w-10 h-10 flex items-center justify-center rounded-full text-slate-600 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40 flex-shrink-0"
+            onTranscript={(text) => {
+              if (!text) return
+              setInputText((prev) => {
+                const sep = prev && !prev.endsWith(' ') && !prev.endsWith('\n') ? ' ' : ''
+                return prev + sep + text
+              })
+              setTimeout(() => inputRef.current?.focus(), 50)
+            }}
+          />
           <div className="flex-1" />
           {streaming ? (
             <button
