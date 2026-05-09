@@ -184,7 +184,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [])
 
   const loginWithSsoToken = useCallback(async (ssoToken: string) => {
-    const res = await api.get(`/auth/sso/user?token=${ssoToken}`)
+    // 用 Authorization header 取代 query string,避免 token 進 server access log
+    const res = await api.get('/auth/sso/user', {
+      headers: { Authorization: `Bearer ${ssoToken}` },
+    })
     const { token: t, user: u } = res.data
     finalizeSession(t, u)
   }, [finalizeSession])

@@ -501,8 +501,15 @@ router.get('/sso/callback', async (req, res) => {
 
 // GET /api/auth/sso/user — frontend calls this after receiving sso_token to get user profile
 router.get('/sso/user', async (req, res) => {
-  const token = req.query.token;
+  // [2026-05-09 fix #8] 優先讀 Authorization header,降級才 fallback query token
+  // (過渡期相容:client AuthContext 已改 header,但保留 query token 給舊版 client)
+  const authHeader = req.headers.authorization;
+  let token = null;
+  if (authHeader?.startsWith('Bearer ')) token = authHeader.split(' ')[1];
+  else if (req.query.token) token = req.query.token;
   if (!token) return res.status(400).json({ error: 'Missing token' });
+  // 不 cache 此 endpoint,避免 token-attached response 被 proxy 看到
+  res.set('Cache-Control', 'private, no-store');
   const session = await redis.getSession(token);
   if (!session) return res.status(401).json({ error: 'Invalid token' });
   try {
@@ -912,7 +919,13 @@ const createSessionAndRedirect = async (res, user, baseUrl) => {
   // baseUrl 由 caller(proceedOrChallenge)從 request 動態判斷後傳入,
   // 才能對齊 8443 / 443 並存的多 origin 架構。沒傳就 fallback APP_BASE_URL。
   const target = baseUrl || process.env.APP_BASE_URL || '';
-  res.redirect(`${target}/login?sso_token=${sessionToken}`);
+  // [2026-05-09 fix #8] sso_token 移到 hash fragment(`#`)而非 query(`?`):
+  //   - hash 不送 server(nginx access log 不會留 token)
+  //   - hash 不進 Referer header(避免外連洩漏)
+  //   - browser history 仍有,但 client 拿到後立刻 history.replaceState 清掉
+  // 加 Cache-Control 雙保險(避免 browser/proxy 快取整個 redirect response)
+  res.set('Cache-Control', 'private, no-store, no-cache, must-revalidate');
+  res.redirect(`${target}/login#sso_token=${sessionToken}`);
 };
 
 const createSession = async (res, user) => {

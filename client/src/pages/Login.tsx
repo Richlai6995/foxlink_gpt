@@ -90,10 +90,15 @@ export default function Login() {
     setShowLangMenu(false)
   }
 
-  // Handle SSO callback: ?sso_token=xxx | ?sso_error=xxx | ?mfa_challenge=xxx (互斥,server 永不同時帶)
+  // Handle SSO callback:
+  //   sso_token   → hash fragment (#sso_token=xxx) — 不送 server,不進 referer
+  //   sso_error / mfa_challenge / masked_email → query (?xxx) — 不敏感
+  // 過渡期 fallback:同時讀 query sso_token,讓舊的 redirect URL 暫時相容(下版可砍)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    const ssoToken = params.get('sso_token')
+    // hash 形式為 '#sso_token=xxx&...',去頭 '#' 後可當 query parse
+    const hashParams = new URLSearchParams((window.location.hash || '').replace(/^#/, ''))
+    const ssoToken = hashParams.get('sso_token') || params.get('sso_token')
     const ssoError = params.get('sso_error')
     const mfaChallenge = params.get('mfa_challenge')
     const masked = params.get('masked_email') || ''
@@ -111,6 +116,7 @@ export default function Login() {
       window.history.replaceState({}, '', '/login')
     } else if (ssoToken) {
       setSsoLoading(true)
+      // 立刻清掉 hash + query,避免 token 留在 browser history / 被 user 不小心 share URL
       window.history.replaceState({}, '', '/login')
       loginWithSsoToken(ssoToken).catch((err) => {
         setError(err?.message || 'SSO 登入失敗')
