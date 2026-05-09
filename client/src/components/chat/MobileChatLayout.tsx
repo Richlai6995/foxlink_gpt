@@ -25,7 +25,7 @@ import { useAdminOverride } from '../../context/AdminOverrideContext'
 import { useFeedbackNotifications } from '../../hooks/useFeedbackNotifications'
 import i18n, { SUPPORTED_LANGUAGES, type LangCode } from '../../i18n'
 import type { ChatSession, ChatMessage, LlmModel, ModelType, GeneratedFile } from '../../types'
-import MicButton from '../MicButton'
+// import MicButton from '../MicButton'  // 2026-05-09 暫時隱藏 mic(輸入法自帶語音較好用),恢復時取消註解 + 把 row 2 內被註解的 MicButton JSX 還原
 
 interface SkillItem {
   id: number
@@ -625,44 +625,22 @@ export default function MobileChatLayout() {
 
   return (
     <div className="fixed inset-0 flex flex-col bg-slate-50 overflow-hidden">
-      {/* Topbar — pt-safe 撐瀏海;固定 inner row 56px */}
+      {/* Topbar — Gemini 風簡化:只留漢堡 + 標題,模型 / 設定 / 新對話 全下放底部
+          減少忽上忽下操作,讓對話內容能充分展開 */}
       <header className="bg-white border-b border-slate-200 pt-safe">
         <div className="flex items-center gap-2 px-3 h-14">
-        <button
-          onClick={() => setDrawerOpen(true)}
-          aria-label={t('mobile.chat.openSidebar')}
-          className="w-11 h-11 -ml-1 flex items-center justify-center rounded-lg hover:bg-slate-100 active:bg-slate-200 text-slate-700"
-        >
-          <Menu size={20} />
-        </button>
-        <button
-          onClick={() => setModelPickerOpen(true)}
-          className="flex-1 min-w-0 flex flex-col items-start gap-0 px-2 py-1 rounded-lg hover:bg-slate-50 active:bg-slate-100"
-        >
-          <span className="text-sm font-medium text-slate-800 truncate w-full text-left">{currentTitle}</span>
-          <span className="text-[11px] text-slate-500 inline-flex items-center gap-0.5 truncate max-w-full">
-            <Sparkles size={10} className="text-blue-500 flex-shrink-0" /> {currentModelName} <ChevronDown size={10} />
+          <button
+            onClick={() => setDrawerOpen(true)}
+            aria-label={t('mobile.chat.openSidebar')}
+            className="w-11 h-11 -ml-1 flex items-center justify-center rounded-lg hover:bg-slate-100 active:bg-slate-200 text-slate-700"
+          >
+            <Menu size={20} />
+          </button>
+          <span className="flex-1 min-w-0 text-sm font-medium text-slate-800 truncate text-center px-2">
+            {currentTitle}
           </span>
-        </button>
-        <button
-          onClick={handleNewChat}
-          aria-label={t('mobile.chat.newChat')}
-          className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-100 active:bg-slate-200 text-slate-700"
-        >
-          <Plus size={20} />
-        </button>
-        <button
-          onClick={() => setMenuOpen(true)}
-          aria-label={t('mobile.chat.menuLabel')}
-          className="relative w-11 h-11 -mr-1 flex items-center justify-center rounded-lg hover:bg-slate-100 active:bg-slate-200 text-slate-700"
-        >
-          <Settings size={18} />
-          {feedbackUnread > 0 && (
-            <span className="absolute top-1 right-1 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-[10px] text-white font-medium flex items-center justify-center">
-              {feedbackUnread > 99 ? '99+' : feedbackUnread}
-            </span>
-          )}
-        </button>
+          {/* 右側留 spacer 讓中間標題視覺置中 — 對齊 Topbar 漢堡按鈕寬度 */}
+          <div className="w-11 h-11 -mr-1 flex-shrink-0" aria-hidden="true" />
         </div>
       </header>
 
@@ -745,55 +723,66 @@ export default function MobileChatLayout() {
             ))}
           </div>
         )}
-        <div className="flex items-end gap-1.5">
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept={buildAcceptAttr()}
-            onChange={handleFilePick}
-            className="hidden"
-          />
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={buildAcceptAttr()}
+          onChange={handleFilePick}
+          className="hidden"
+        />
+
+        {/* Row 1:textarea 全寬。max-h-40 讓多行更舒適,超出才 scroll */}
+        <textarea
+          ref={inputRef}
+          value={inputText}
+          onChange={(e) => setInputText(e.target.value)}
+          onKeyDown={(e) => {
+            // 手機慣例:Enter 換行(走預設),送出靠下方按鈕。軟鍵盤無 Shift,
+            // 攔 Enter 會讓使用者沒辦法換行。Ctrl/Cmd+Enter 保留給外接鍵盤 power user。
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing) {
+              e.preventDefault()
+              handleSendWithErp(inputText, attachments)
+            }
+          }}
+          placeholder={t('mobile.chat.inputPlaceholder')}
+          rows={1}
+          className="w-full resize-none border border-slate-200 rounded-2xl px-4 py-3 max-h-40 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-300"
+          style={{ minHeight: '44px' }}
+        />
+
+        {/* Row 2:控制列 — [+] [模型▼] [⚙] ... [▶ send]
+            Mic 暫時隱藏(用輸入法自帶語音輸入,原 MicButton 留 import 不刪以便日後恢復)*/}
+        <div className="flex items-center gap-1 mt-2">
           <button
             onClick={() => setPlusOpen(true)}
             disabled={streaming}
             aria-label={t('mobile.chat.attachFile')}
-            className="w-11 h-11 flex items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40 flex-shrink-0"
+            className="w-10 h-10 flex items-center justify-center rounded-full text-slate-600 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40 flex-shrink-0"
           >
             <Plus size={20} />
           </button>
-          <MicButton
-            source="chat"
-            disabled={streaming}
-            size={18}
-            className="w-11 h-11 flex items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40 flex-shrink-0"
-            onTranscript={(text) => {
-              if (!text) return
-              setInputText((prev) => {
-                const sep = prev && !prev.endsWith(' ') && !prev.endsWith('\n') ? ' ' : ''
-                return prev + sep + text
-              })
-              // 聚焦回 textarea 方便繼續編輯
-              setTimeout(() => inputRef.current?.focus(), 50)
-            }}
-          />
-          <textarea
-            ref={inputRef}
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            onKeyDown={(e) => {
-              // 手機慣例:Enter 換行(走預設),送出靠右側送出按鈕。軟鍵盤無 Shift,
-              // 攔 Enter 會讓使用者沒辦法換行。Ctrl/Cmd+Enter 保留給外接鍵盤 power user。
-              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing) {
-                e.preventDefault()
-                handleSendWithErp(inputText, attachments)
-              }
-            }}
-            placeholder={t('mobile.chat.inputPlaceholder')}
-            rows={1}
-            className="flex-1 resize-none border border-slate-200 rounded-2xl px-4 py-3 max-h-32 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-300"
-            style={{ minHeight: '44px' }}
-          />
+          <button
+            onClick={() => setModelPickerOpen(true)}
+            className="min-w-0 max-w-[55%] inline-flex items-center gap-1 px-2.5 h-9 rounded-full text-xs text-slate-700 bg-slate-100 hover:bg-slate-200 active:bg-slate-300"
+          >
+            <Sparkles size={12} className="text-blue-500 flex-shrink-0" />
+            <span className="truncate">{currentModelName}</span>
+            <ChevronDown size={12} className="flex-shrink-0 text-slate-400" />
+          </button>
+          <button
+            onClick={() => setMenuOpen(true)}
+            aria-label={t('mobile.chat.menuLabel')}
+            className="relative w-10 h-10 flex items-center justify-center rounded-full text-slate-600 hover:bg-slate-100 active:bg-slate-200 flex-shrink-0"
+          >
+            <Settings size={18} />
+            {feedbackUnread > 0 && (
+              <span className="absolute top-0.5 right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-[10px] text-white font-medium flex items-center justify-center">
+                {feedbackUnread > 99 ? '99+' : feedbackUnread}
+              </span>
+            )}
+          </button>
+          <div className="flex-1" />
           {streaming ? (
             <button
               onClick={handleStop}
