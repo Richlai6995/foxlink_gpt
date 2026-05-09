@@ -33,6 +33,49 @@ function requireAdmin(req, res) {
   return true;
 }
 
+/**
+ * 驗 user 對 ERP tool 是否有存取權(2026-05-09 fix horizontal escalation)。
+ * Tool 透過 proxy_skill 共享:看 skills.is_public / owner / skill_access。
+ * 沒 proxy_skill_id(從未 publish)= 只有 admin 能用。
+ */
+async function canUserAccessErpTool(db, toolId, user) {
+  if (user.role === 'admin') return true;
+  const tool = await db.prepare(`
+    SELECT t.id, t.proxy_skill_id, s.owner_user_id, s.is_public, s.is_admin_approved
+    FROM erp_tools t
+    LEFT JOIN skills s ON s.id = t.proxy_skill_id
+    WHERE t.id = ? AND t.enabled = 1
+  `).get(toolId);
+  if (!tool) return false;
+  // 沒 proxy_skill = 還沒發布(admin only)
+  if (!tool.proxy_skill_id && !tool.PROXY_SKILL_ID) return false;
+  if ((tool.is_public || tool.IS_PUBLIC) === 1 && (tool.is_admin_approved ?? tool.IS_ADMIN_APPROVED) === 1) return true;
+  if ((tool.owner_user_id || tool.OWNER_USER_ID) === user.id) return true;
+  // skill_access grantee 比對(對齊 GET list endpoint 的邏輯)
+  const skillId = tool.proxy_skill_id || tool.PROXY_SKILL_ID;
+  const access = await db.prepare(`
+    SELECT 1 FROM skill_access sa WHERE sa.skill_id = ? AND (
+      (sa.grantee_type = 'user'          AND sa.grantee_id = TO_CHAR(?))
+      OR (sa.grantee_type = 'role'       AND sa.grantee_id = TO_CHAR(?))
+      OR (sa.grantee_type = 'dept'       AND sa.grantee_id = ? AND ? IS NOT NULL)
+      OR (sa.grantee_type = 'profit_center' AND sa.grantee_id = ? AND ? IS NOT NULL)
+      OR (sa.grantee_type = 'org_section'   AND sa.grantee_id = ? AND ? IS NOT NULL)
+      OR (sa.grantee_type = 'factory'    AND sa.grantee_id = ? AND ? IS NOT NULL)
+      OR (sa.grantee_type = 'org_group'  AND sa.grantee_id = ? AND ? IS NOT NULL)
+    ) FETCH FIRST 1 ROWS ONLY
+  `).get(
+    skillId,
+    user.id,
+    user.role_id ?? '',
+    user.dept_code, user.dept_code,
+    user.profit_center, user.profit_center,
+    user.org_section, user.org_section,
+    user.factory_code, user.factory_code,
+    user.org_group_name, user.org_group_name,
+  );
+  return !!access;
+}
+
 function parseJson(s, fallback) {
   if (!s) return fallback;
   if (typeof s !== 'string') return s;
@@ -787,6 +830,15 @@ router.post('/:id/execute', async (req, res) => {
   const db = getDb();
   try {
     const toolId = Number(req.params.id);
+    if (!Number.isFinite(toolId)) return res.status(400).json({ error: 'Invalid tool id' });
+
+    // [2026-05-09 fix] 驗 user 對此 tool 有 access。
+    // 修補前任何登入 user 都能直打 toolId 執行 admin-only 工具(horizontal escalation)。
+    if (!(await canUserAccessErpTool(db, toolId, req.user))) {
+      console.warn(`[ErpTool] user_id=${req.user.id} (${req.user.username}) denied access to tool_id=${toolId}`);
+      return res.status(403).json({ error: '無權使用此工具' });
+    }
+
     const { inputs, trigger_source, session_id, confirmation_token, include_full, dry_run } = req.body || {};
     const result = await executor.execute(db, toolId, inputs || {}, req.user, {
       trigger_source: trigger_source || 'manual_form',
