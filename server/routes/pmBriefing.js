@@ -1284,10 +1284,13 @@ router.get('/metals-share', verifyToken, verifyPmUser, async (req, res) => {
     `).all(bookId);
 
     // Resolve grantee_name(同 admin endpoint pattern)
+    // 注意:resolver 需要 (rows, lang, db) 3 參數,漏 db 會 silent fail → 只剩代碼
     try {
       const { resolveGranteeNamesInRows, getLangFromReq } = require('../services/granteeNameResolver');
-      await resolveGranteeNamesInRows(rows, getLangFromReq(req));
-    } catch (_) {}
+      await resolveGranteeNamesInRows(rows, getLangFromReq(req), db);
+    } catch (e) {
+      console.warn('[PmBriefing] /metals-share resolveGranteeNames 失敗:', e.message);
+    }
 
     res.json(rows);
   } catch (e) {
