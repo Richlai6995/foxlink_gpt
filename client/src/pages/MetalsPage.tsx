@@ -54,8 +54,10 @@ export default function MetalsPage() {
   const [primaryBase, setPrimaryBase] = useState('CU')
   const [primaryPrecious, setPrimaryPrecious] = useState('AU')
   const [showAi, setShowAi] = useState(false)
-  // 基準日期 — 預設今天,可切歷史日方便對舊資料 / debug
-  const [viewDate, setViewDate] = useState<string>(() => new Date().toISOString().slice(0, 10))
+  // 基準日期 — 初始空,首次載 prices 後自動設成 DB 最新有資料那天
+  // (今天可能 scrape 還沒跑,陽性 viewDate 用今天會撈不到資料 → chart 永遠空)
+  const [viewDate, setViewDate] = useState<string>('')
+  const [viewDateInited, setViewDateInited] = useState(false)
 
   // 初始載入:偏好 + 是否有採購完整版權限
   useEffect(() => {
@@ -80,7 +82,17 @@ export default function MetalsPage() {
     setLoadingPrices(true)
     const params: Record<string, string> = {}
     if (viewDate) params.as_of = viewDate
-    api.get('/metals/prices', { params }).then(r => setPrices(r.data || [])).finally(() => setLoadingPrices(false))
+    api.get('/metals/prices', { params }).then(r => {
+      const list = r.data || []
+      setPrices(list)
+      // 首次載入完成 — 自動設 viewDate 為 DB 最新一天(避免今天 scrape 還沒跑時 chart 全空)
+      if (!viewDateInited) {
+        const dates = list.map((p: any) => String(p.as_of_date || '').slice(0, 10)).filter(Boolean).sort()
+        const maxDate = dates[dates.length - 1]
+        if (maxDate) setViewDate(maxDate)
+        setViewDateInited(true)
+      }
+    }).finally(() => setLoadingPrices(false))
   }, [denied, loadingInit, viewDate])
 
   const downloadXlsx = async () => {
@@ -100,9 +112,16 @@ export default function MetalsPage() {
   }
 
   const todayStr = new Date().toISOString().slice(0, 10)
-  const isToday = viewDate === todayStr
+  // 「最新有資料日」— 取 prices 最大 as_of_date,沒資料 fallback today
+  const latestDataDate = useMemo(() => {
+    const dates = prices.map((p: any) => String(p.as_of_date || '').slice(0, 10)).filter(Boolean).sort()
+    return dates[dates.length - 1] || todayStr
+  }, [prices, todayStr])
+  const isLatest = !viewDate || viewDate === latestDataDate
   const stepDate = (delta: number) => {
-    const d = new Date(viewDate + 'T00:00:00')
+    const base = viewDate || latestDataDate
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(base)) return
+    const d = new Date(base + 'T00:00:00')
     d.setDate(d.getDate() + delta)
     setViewDate(d.toISOString().slice(0, 10))
   }
@@ -145,23 +164,24 @@ export default function MetalsPage() {
           >‹</button>
           <input
             type="date"
-            value={viewDate}
+            value={viewDate || latestDataDate}
             max={todayStr}
-            onChange={e => setViewDate(e.target.value || todayStr)}
+            onChange={e => setViewDate(e.target.value || latestDataDate)}
             className="bg-transparent text-xs font-mono text-slate-700 focus:outline-none"
             style={{ width: 110 }}
           />
           <button
             onClick={() => stepDate(1)}
-            disabled={isToday}
+            disabled={(viewDate || latestDataDate) >= todayStr}
             className="px-1.5 py-0.5 text-xs text-slate-600 hover:bg-white rounded disabled:opacity-30"
             title="後一天"
           >›</button>
-          {!isToday && (
+          {!isLatest && (
             <button
-              onClick={() => setViewDate(todayStr)}
+              onClick={() => setViewDate(latestDataDate)}
               className="ml-1 px-2 py-0.5 text-[10px] rounded bg-amber-600 text-white hover:bg-amber-700"
-            >今</button>
+              title={`回到 DB 最新有資料日 ${latestDataDate}`}
+            >最新</button>
           )}
         </div>
 
