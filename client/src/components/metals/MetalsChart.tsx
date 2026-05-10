@@ -98,7 +98,11 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
           return [code, pts] as const
         })
         .catch(err => {
-          console.error(`[MetalsChart] ${code} timeseries 失敗:`, err?.response?.status, err?.response?.data || err?.message)
+          // JSON.stringify 確保 error message 不會在 console 顯示成 'Object'
+          const status = err?.response?.status
+          const body = err?.response?.data
+          const bodyStr = body ? JSON.stringify(body) : (err?.message || String(err))
+          console.error(`[MetalsChart] ${code} timeseries 失敗: status=${status} body=${bodyStr}`)
           return [code, []] as const
         })
     )).then(results => {

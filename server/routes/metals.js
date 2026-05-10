@@ -192,75 +192,50 @@ router.get('/prices/timeseries', verifyToken, verifyMetalsAccess, async (req, re
   try {
     const db = require('../database-oracle').db;
     const metal = String(req.query.metal || '').trim();
-    const days = Math.min(Math.max(Number(req.query.days || 180), 1), 3650);
+    const daysRaw = Number(req.query.days || 180);
+    const days = Math.min(Math.max(Number.isFinite(daysRaw) ? daysRaw : 180, 1), 3650);
     const endDate = String(req.query.end_date || '').trim();
     if (!metal) return res.status(400).json({ error: 'metal required' });
 
+    // 完全照抄 pmBriefing.js 既有 working pattern,**不做** end_date 條件分支。
+    // 若 caller 給 end_date 就用它當「當前日」往回算 days,否則用 SYSDATE。
+    // 用同一條 SQL(with 一個 binding 條件)避免雙分支隱藏 bug。
     const validEnd = /^\d{4}-\d{2}-\d{2}$/.test(endDate) ? endDate : null;
+    const sql = validEnd
+      ? `SELECT TO_CHAR(as_of_date, 'YYYY-MM-DD') AS d,
+                AVG(price_usd) AS p
+         FROM pm_price_history
+         WHERE UPPER(metal_code) = UPPER(?)
+           AND as_of_date >= TO_DATE(?, 'YYYY-MM-DD') - ?
+           AND as_of_date <  TO_DATE(?, 'YYYY-MM-DD') + 1
+           AND price_usd IS NOT NULL
+         GROUP BY as_of_date
+         ORDER BY as_of_date`
+      : `SELECT TO_CHAR(as_of_date, 'YYYY-MM-DD') AS d,
+                AVG(price_usd) AS p
+         FROM pm_price_history
+         WHERE UPPER(metal_code) = UPPER(?)
+           AND as_of_date >= TRUNC(SYSDATE) - ?
+           AND price_usd IS NOT NULL
+         GROUP BY as_of_date
+         ORDER BY as_of_date`;
+    const binds = validEnd ? [metal, validEnd, days, validEnd] : [metal, days];
 
-    // 改用 `as_of_date < end_day + 1` 的半開區間,以確保即使 as_of_date 帶時分秒
-    // (e.g. '2026-05-10 18:00:00')也包含進來。<= TO_DATE('2026-05-10') 會被 Oracle
-    // 解讀成 <= '2026-05-10 00:00:00',會把當天 18:00 那筆排掉。
-    // GROUP BY / ORDER BY 用原始 as_of_date 欄位 — 對齊 pmBriefing 既有 working pattern。
-    // 之前用 TO_CHAR(as_of_date, 'YYYY-MM-DD') 在某些 Oracle 版本會炸 ORA-00923。
-    let sql, binds;
-    if (validEnd) {
-      sql = `
-        SELECT TO_CHAR(as_of_date, 'YYYY-MM-DD') AS date,
-               AVG(price_usd) AS price
-        FROM pm_price_history
-        WHERE UPPER(metal_code) = UPPER(?)
-          AND as_of_date >= TO_DATE(?, 'YYYY-MM-DD') - ?
-          AND as_of_date <  TO_DATE(?, 'YYYY-MM-DD') + 1
-          AND price_usd IS NOT NULL
-        GROUP BY as_of_date
-        ORDER BY as_of_date
-      `;
-      binds = [metal, validEnd, days, validEnd];
-    } else {
-      sql = `
-        SELECT TO_CHAR(as_of_date, 'YYYY-MM-DD') AS date,
-               AVG(price_usd) AS price
-        FROM pm_price_history
-        WHERE UPPER(metal_code) = UPPER(?)
-          AND as_of_date >= TRUNC(SYSDATE) - ?
-          AND price_usd IS NOT NULL
-        GROUP BY as_of_date
-        ORDER BY as_of_date
-      `;
-      binds = [metal, days];
+    console.log(`[Metals] timeseries metal=${metal} days=${days} end=${validEnd || 'today'} binds=${JSON.stringify(binds)}`);
+
+    let rows;
+    try {
+      rows = await db.prepare(sql).all(...binds);
+    } catch (sqlErr) {
+      console.error('[Metals] timeseries SQL 失敗:', sqlErr?.message, '\nSQL:', sql, '\nBinds:', binds);
+      return res.status(500).json({ error: sqlErr?.message || 'SQL error', sql_preview: sql.replace(/\s+/g, ' ').slice(0, 300) });
     }
 
-    const rows = await db.prepare(sql).all(...binds);
-
-    // Diagnostic — 0 筆時撈該金屬整個 DB 的概況,辨別是「日期區間沒涵蓋」還是「金屬根本沒資料」
-    if (rows.length === 0) {
-      try {
-        const total = await db.prepare(`
-          SELECT COUNT(*) AS cnt,
-                 TO_CHAR(MIN(as_of_date), 'YYYY-MM-DD') AS min_d,
-                 TO_CHAR(MAX(as_of_date), 'YYYY-MM-DD') AS max_d
-          FROM pm_price_history
-          WHERE UPPER(metal_code) = UPPER(?) AND price_usd IS NOT NULL
-        `).get(metal);
-        const cnt = total?.cnt ?? total?.CNT ?? 0;
-        const minD = total?.min_d ?? total?.MIN_D ?? '—';
-        const maxD = total?.max_d ?? total?.MAX_D ?? '—';
-        console.warn(
-          `[Metals] timeseries metal=${metal} days=${days} end=${validEnd || 'today'} → 0 rows. ` +
-          `DB 全部:cnt=${cnt} min=${minD} max=${maxD}` +
-          (Number(cnt) > 0 ? ' (有資料但落在區間外 — 切到 max 日試試)' : ' (DB 此 metal_code 真的 0 筆)')
-        );
-      } catch (e) {
-        console.warn('[Metals] timeseries diagnostic 失敗:', e.message);
-      }
-    } else {
-      console.log(`[Metals] timeseries metal=${metal} days=${days} end=${validEnd || 'today'} → ${rows.length} rows`);
-    }
+    console.log(`[Metals] timeseries → ${rows.length} rows`);
 
     res.json(rows.map(r => ({
-      date: r.date || r.DATE,
-      price: Number(r.price ?? r.PRICE),
+      date: r.d || r.D,
+      price: Number(r.p ?? r.P),
     })));
   } catch (e) {
     console.error('[Metals] /prices/timeseries error:', e);
