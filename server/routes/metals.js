@@ -201,6 +201,8 @@ router.get('/prices/timeseries', verifyToken, verifyMetalsAccess, async (req, re
     // 改用 `as_of_date < end_day + 1` 的半開區間,以確保即使 as_of_date 帶時分秒
     // (e.g. '2026-05-10 18:00:00')也包含進來。<= TO_DATE('2026-05-10') 會被 Oracle
     // 解讀成 <= '2026-05-10 00:00:00',會把當天 18:00 那筆排掉。
+    // GROUP BY / ORDER BY 用原始 as_of_date 欄位 — 對齊 pmBriefing 既有 working pattern。
+    // 之前用 TO_CHAR(as_of_date, 'YYYY-MM-DD') 在某些 Oracle 版本會炸 ORA-00923。
     let sql, binds;
     if (validEnd) {
       sql = `
@@ -211,8 +213,8 @@ router.get('/prices/timeseries', verifyToken, verifyMetalsAccess, async (req, re
           AND as_of_date >= TO_DATE(?, 'YYYY-MM-DD') - ?
           AND as_of_date <  TO_DATE(?, 'YYYY-MM-DD') + 1
           AND price_usd IS NOT NULL
-        GROUP BY TO_CHAR(as_of_date, 'YYYY-MM-DD')
-        ORDER BY TO_CHAR(as_of_date, 'YYYY-MM-DD')
+        GROUP BY as_of_date
+        ORDER BY as_of_date
       `;
       binds = [metal, validEnd, days, validEnd];
     } else {
@@ -223,8 +225,8 @@ router.get('/prices/timeseries', verifyToken, verifyMetalsAccess, async (req, re
         WHERE UPPER(metal_code) = UPPER(?)
           AND as_of_date >= TRUNC(SYSDATE) - ?
           AND price_usd IS NOT NULL
-        GROUP BY TO_CHAR(as_of_date, 'YYYY-MM-DD')
-        ORDER BY TO_CHAR(as_of_date, 'YYYY-MM-DD')
+        GROUP BY as_of_date
+        ORDER BY as_of_date
       `;
       binds = [metal, days];
     }
