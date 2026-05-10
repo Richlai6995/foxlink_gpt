@@ -36,15 +36,15 @@ const RANGE_LABEL: Record<RangeKey, string> = {
   'custom': '自訂',
 }
 
-const ALL_INDICATORS: { key: IndicatorKey; label: string; sub?: boolean }[] = [
-  { key: 'MA20',   label: 'MA20' },
-  { key: 'MA60',   label: 'MA60(季)' },
-  { key: 'MA120',  label: 'MA120(半年)' },
-  { key: 'MA240',  label: 'MA240(年)' },
-  { key: 'EMA20',  label: 'EMA20' },
-  { key: 'BOLL',   label: 'BOLL 布林' },
-  { key: 'RSI14',  label: 'RSI(副圖)', sub: true },
-  { key: 'MACD',   label: 'MACD(副圖)', sub: true },
+const ALL_INDICATORS: { key: IndicatorKey; label: string; minPts: number; sub?: boolean }[] = [
+  { key: 'MA20',   label: 'MA20',         minPts: 20 },
+  { key: 'MA60',   label: 'MA60(季)',     minPts: 60 },
+  { key: 'MA120',  label: 'MA120(半年)',  minPts: 120 },
+  { key: 'MA240',  label: 'MA240(年)',    minPts: 240 },
+  { key: 'EMA20',  label: 'EMA20',        minPts: 20 },
+  { key: 'BOLL',   label: 'BOLL 布林',    minPts: 20 },
+  { key: 'RSI14',  label: 'RSI(副圖)',    minPts: 15, sub: true },
+  { key: 'MACD',   label: 'MACD(副圖)',   minPts: 35, sub: true },
 ]
 
 const METAL_COLORS: Record<string, string> = {
@@ -133,6 +133,17 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
   const totalLines = 1 + overlay.length
   const useLogScale = totalLines >= 3  // 多金屬時自動 log scale
 
+  // X 軸時間範圍鎖定:[end - days, end]
+  // 不論 DB 資料多寡,切換時間區間都看得到 X 軸 scale 變化(否則 ECharts 會 auto-fit 資料)
+  const { xAxisMin, xAxisMax } = useMemo(() => {
+    const endDate = viewDate && /^\d{4}-\d{2}-\d{2}$/.test(viewDate)
+      ? new Date(viewDate + 'T23:59:59')
+      : new Date()
+    const max = endDate.getTime()
+    const min = max - days * 86400000
+    return { xAxisMin: min, xAxisMax: max }
+  }, [days, viewDate])
+
   // ECharts option
   const option = useMemo(() => {
     const allMetals = [primaryMetal, ...overlay]
@@ -178,10 +189,10 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
 
     const xAxes = hasSub
       ? [
-          { type: 'time', gridIndex: 0, axisLabel: { fontSize: 10 } },
-          { type: 'time', gridIndex: 1, axisLabel: { fontSize: 10 } },
+          { type: 'time', gridIndex: 0, min: xAxisMin, max: xAxisMax, axisLabel: { fontSize: 10 } },
+          { type: 'time', gridIndex: 1, min: xAxisMin, max: xAxisMax, axisLabel: { fontSize: 10 } },
         ]
-      : [{ type: 'time', axisLabel: { fontSize: 10 } }]
+      : [{ type: 'time', min: xAxisMin, max: xAxisMax, axisLabel: { fontSize: 10 } }]
 
     const yAxes: any[] = hasSub
       ? [
@@ -209,7 +220,7 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
       ],
       series: [...mainPriceSeries, ...subSeriesArr],
     }
-  }, [primaryMetal, overlay.join(','), seriesByMetal, indMain, indSub, useLogScale, hasSub])
+  }, [primaryMetal, overlay.join(','), seriesByMetal, indMain, indSub, useLogScale, hasSub, xAxisMin, xAxisMax])
 
   const headerCls = theme === 'precious'
     ? 'bg-gradient-to-r from-emerald-100 to-green-50 border-emerald-200 text-emerald-900'
@@ -239,6 +250,12 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
             >{m.code}</button>
           ))}
         </div>
+        <span
+          className="text-[10px] opacity-80 ml-2 px-1.5 py-0.5 rounded bg-white/60"
+          title={`DB 內 ${primaryMetal} 在此區間共 ${primaryPoints.length} 筆`}
+        >
+          {primaryPoints.length} 筆 / {days} 天
+        </span>
         <span className="text-[10px] opacity-70 ml-auto">右鍵 = 疊加比較(最多 2 條)</span>
       </div>
       <div className="p-2 flex-1 flex flex-col">
@@ -264,24 +281,31 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
           </div>
         )}
         <div className="ml-auto flex items-center gap-1 flex-wrap">
-          {ALL_INDICATORS.map(ind => (
-            <label
-              key={ind.key}
-              className={`flex items-center gap-1 px-1.5 py-0.5 text-[11px] rounded cursor-pointer ${
-                indicators.includes(ind.key)
-                  ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                  : 'text-slate-500 hover:bg-slate-50 border border-transparent'
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={indicators.includes(ind.key)}
-                onChange={() => toggleIndicator(ind.key)}
-                className="scale-90"
-              />
-              {ind.label}
-            </label>
-          ))}
+          {ALL_INDICATORS.map(ind => {
+            const enough = primaryPoints.length >= ind.minPts
+            const checked = indicators.includes(ind.key)
+            return (
+              <label
+                key={ind.key}
+                className={`flex items-center gap-1 px-1.5 py-0.5 text-[11px] rounded ${enough ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'} ${
+                  checked
+                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                    : 'text-slate-500 hover:bg-slate-50 border border-transparent'
+                }`}
+                title={enough ? '' : `需要至少 ${ind.minPts} 筆資料(目前 ${primaryPoints.length} 筆)`}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={!enough}
+                  onChange={() => enough && toggleIndicator(ind.key)}
+                  className="scale-90"
+                />
+                {ind.label}
+                {!enough && <span className="text-[9px] text-slate-400">(資料不足)</span>}
+              </label>
+            )
+          })}
         </div>
       </div>
 
