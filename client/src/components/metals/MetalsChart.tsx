@@ -175,10 +175,11 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
         yAxisIndex: 0,
       })
     }
-    // 主圖技術指標
-    for (const s of indMain) mainPriceSeries.push({ ...s, yAxisIndex: 0 })
-    // 副圖技術指標(yAxisIndex 1)
-    const subSeriesArr: any[] = indSub.map(s => ({ ...s }))
+    // 主圖技術指標(grid 0)
+    for (const s of indMain) mainPriceSeries.push({ ...s, xAxisIndex: 0, yAxisIndex: 0 })
+    // 副圖技術指標(grid 1)— xAxisIndex 跟 yAxisIndex 都必須是 1,
+    // 否則 series 跨兩個 grid,ECharts reset 時讀 axis.type 會炸 'Cannot read of undefined'
+    const subSeriesArr: any[] = indSub.map(s => ({ ...s, xAxisIndex: 1, yAxisIndex: 1 }))
 
     const grids = hasSub
       ? [
