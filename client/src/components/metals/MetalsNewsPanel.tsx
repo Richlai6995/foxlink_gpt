@@ -78,34 +78,33 @@ export default function MetalsNewsPanel({ viewDate }: Props) {
           news.length === 0 ? (
             <div className="text-xs text-slate-400 text-center py-4">今日尚無新聞</div>
           ) : (
-            <div className="space-y-2">
+            // 緊湊版:每則一列(title 一行 + meta 一行),不 show summary 預覽 → 同空間多顯示 N 倍新聞
+            <div className="divide-y">
               {news.map(n => (
                 <a
                   key={n.id}
                   href={n.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="block px-2 py-1.5 rounded border border-slate-200 hover:border-blue-300 hover:bg-blue-50/30 transition group"
+                  className="block px-2 py-1.5 hover:bg-blue-50/40 transition group"
+                  title={n.summary || ''}
                 >
-                  <div className="flex items-start gap-1">
-                    <span className="text-xs font-medium text-slate-800 line-clamp-2 flex-1 group-hover:text-blue-700">{n.title}</span>
-                    <ExternalLink size={10} className="text-slate-400 mt-0.5 flex-shrink-0" />
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs font-medium text-slate-800 truncate flex-1 group-hover:text-blue-700">{n.title}</span>
+                    <ExternalLink size={10} className="text-slate-300 flex-shrink-0" />
                   </div>
-                  <div className="flex items-center gap-1.5 mt-1 text-[10px] text-slate-500 flex-wrap">
-                    {n.source && <span className="truncate max-w-[140px]">{n.source}</span>}
+                  <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mt-0.5">
+                    {n.source && <span className="truncate max-w-[100px]">{n.source}</span>}
                     {n.related_metals && <span className="font-mono text-slate-600">{n.related_metals}</span>}
                     {n.sentiment_label && (
-                      <span className={`px-1 rounded ${
+                      <span className={`px-1 rounded text-[9px] ${
                         n.sentiment_label.includes('positive') ? 'bg-emerald-50 text-emerald-700'
                         : n.sentiment_label.includes('negative') ? 'bg-red-50 text-red-700'
                         : 'bg-slate-100 text-slate-600'
                       }`}>{n.sentiment_label}</span>
                     )}
-                    <span className="ml-auto text-slate-400">{(n.scraped_at || n.published_at || '').slice(5, 16).replace('T', ' ')}</span>
+                    <span className="ml-auto text-slate-400 flex-shrink-0">{(n.scraped_at || n.published_at || '').slice(5, 16).replace('T', ' ')}</span>
                   </div>
-                  {n.summary && (
-                    <div className="text-[11px] text-slate-600 mt-1 line-clamp-2 leading-snug">{n.summary}</div>
-                  )}
                 </a>
               ))}
             </div>

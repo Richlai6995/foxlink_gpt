@@ -102,9 +102,13 @@ router.get('/prices', verifyToken, verifyMetalsAccess, async (req, res) => {
       : '';
     const params = metalsCsv ? metalsCsv.split(',') : [];
 
-    // 1) 每金屬最新一筆(基準日 = as_of,沒給 = 今天)
-    // 用 NVL(TO_DATE(?, ...), TRUNC(SYSDATE)) 統一支援空字串 / 給定日期
-    const asOfBind = asOf || null;
+    // 基準日 SQL fragment — 給定就 TO_DATE,沒給就 TRUNC(SYSDATE)
+    // 用 TRUNC(as_of_date) 比較避 DATE 帶時分秒被 <= 'YYYY-MM-DD' 排掉的雷
+    // (e.g. as_of_date='2026-05-10 18:00:00' 對 <= TO_DATE('2026-05-10') 是 false)
+    const validAsOf = /^\d{4}-\d{2}-\d{2}$/.test(asOf) ? asOf : null;
+    const baseDateExpr = validAsOf ? `TO_DATE(?, 'YYYY-MM-DD')` : `TRUNC(SYSDATE)`;
+    const dateBinds = validAsOf ? [validAsOf, validAsOf] : [];
+
     const latestRows = await db.prepare(`
       SELECT * FROM (
         SELECT UPPER(metal_code) AS metal_code, metal_name, price_usd, day_change_pct,
@@ -112,13 +116,13 @@ router.get('/prices', verifyToken, verifyMetalsAccess, async (req, res) => {
                as_of_date AS as_of_date_raw, source,
                ROW_NUMBER() OVER (PARTITION BY UPPER(metal_code) ORDER BY as_of_date DESC) AS rn
         FROM pm_price_history
-        WHERE as_of_date <= NVL(TO_DATE(?, 'YYYY-MM-DD'), TRUNC(SYSDATE))
-          AND as_of_date >= NVL(TO_DATE(?, 'YYYY-MM-DD'), TRUNC(SYSDATE)) - 60
+        WHERE TRUNC(as_of_date) <= ${baseDateExpr}
+          AND TRUNC(as_of_date) >= ${baseDateExpr} - 60
           AND price_usd IS NOT NULL
           ${filter}
       ) WHERE rn = 1
       ORDER BY metal_code
-    `).all(asOfBind, asOfBind, ...params);
+    `).all(...dateBinds, ...params);
 
     // 2) 對每金屬撈 -7d / -30d 最近一筆,算漲跌
     const result = [];
@@ -183,18 +187,24 @@ router.get('/prices/timeseries', verifyToken, verifyMetalsAccess, async (req, re
     const endDate = String(req.query.end_date || '').trim();
     if (!metal) return res.status(400).json({ error: 'metal required' });
 
-    const endBind = endDate || null;
-    const rows = await db.prepare(`
-      SELECT TO_CHAR(as_of_date, 'YYYY-MM-DD') AS date,
+    const validEnd = /^\d{4}-\d{2}-\d{2}$/.test(endDate) ? endDate : null;
+    const baseDateExpr = validEnd ? `TO_DATE(?, 'YYYY-MM-DD')` : `TRUNC(SYSDATE)`;
+    const dateBinds = validEnd ? [validEnd, validEnd] : [];
+
+    // 用 TRUNC(as_of_date) 比較,避免 DATE 帶時分秒被排除
+    const sql = `
+      SELECT TO_CHAR(TRUNC(as_of_date), 'YYYY-MM-DD') AS date,
              AVG(price_usd) AS price
       FROM pm_price_history
       WHERE UPPER(metal_code) = UPPER(?)
-        AND as_of_date <= NVL(TO_DATE(?, 'YYYY-MM-DD'), TRUNC(SYSDATE))
-        AND as_of_date >= NVL(TO_DATE(?, 'YYYY-MM-DD'), TRUNC(SYSDATE)) - ?
+        AND TRUNC(as_of_date) <= ${baseDateExpr}
+        AND TRUNC(as_of_date) >= ${baseDateExpr} - ?
         AND price_usd IS NOT NULL
-      GROUP BY as_of_date
-      ORDER BY as_of_date
-    `).all(metal, endBind, endBind, days);
+      GROUP BY TRUNC(as_of_date)
+      ORDER BY TRUNC(as_of_date)
+    `;
+    const rows = await db.prepare(sql).all(metal, ...dateBinds, days);
+    console.log(`[Metals] timeseries metal=${metal} days=${days} end=${validEnd || 'today'} → ${rows.length} rows`);
     res.json(rows.map(r => ({
       date: r.date || r.DATE,
       price: Number(r.price ?? r.PRICE),
@@ -213,7 +223,9 @@ router.get('/macro', verifyToken, verifyMetalsAccess, async (req, res) => {
   try {
     const db = require('../database-oracle').db;
     const asOf = String(req.query.as_of || '').trim();
-    const asOfBind = asOf || null;
+    const validAsOf = /^\d{4}-\d{2}-\d{2}$/.test(asOf) ? asOf : null;
+    const baseDateExpr = validAsOf ? `TO_DATE(?, 'YYYY-MM-DD')` : `TRUNC(SYSDATE)`;
+    const dateBinds = validAsOf ? [validAsOf, validAsOf] : [];
     const rows = await db.prepare(`
       SELECT * FROM (
         SELECT indicator_code, indicator_name, value, unit, source,
@@ -221,12 +233,12 @@ router.get('/macro', verifyToken, verifyMetalsAccess, async (req, res) => {
                LAG(value) OVER (PARTITION BY indicator_code ORDER BY as_of_date) AS prev_value,
                ROW_NUMBER() OVER (PARTITION BY indicator_code ORDER BY as_of_date DESC) AS rn
         FROM pm_macro_history
-        WHERE as_of_date <= NVL(TO_DATE(?, 'YYYY-MM-DD'), TRUNC(SYSDATE))
-          AND as_of_date >= NVL(TO_DATE(?, 'YYYY-MM-DD'), TRUNC(SYSDATE)) - 14
+        WHERE TRUNC(as_of_date) <= ${baseDateExpr}
+          AND TRUNC(as_of_date) >= ${baseDateExpr} - 14
           AND value IS NOT NULL
       ) WHERE rn = 1
       ORDER BY indicator_code
-    `).all(asOfBind, asOfBind);
+    `).all(...dateBinds);
     const norm = rows.map(r => {
       const val = Number(r.value ?? r.VALUE);
       const prev = Number(r.prev_value ?? r.PREV_VALUE);
@@ -256,7 +268,7 @@ router.get('/news', verifyToken, verifyMetalsAccess, async (req, res) => {
     const todayOnly = !date && String(req.query.today || '1') === '1';
     const where = [];
     const params = [];
-    if (date) {
+    if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
       // 那天 scraped 的(00:00 ~ 隔天 00:00)
       where.push(`scraped_at >= TO_DATE(?, 'YYYY-MM-DD') AND scraped_at < TO_DATE(?, 'YYYY-MM-DD') + 1`);
       params.push(date, date);
@@ -457,13 +469,15 @@ router.get('/export.xlsx', verifyToken, verifyMetalsAccess, async (req, res) => 
     const ExcelJS = require('exceljs');
     const metalsCsv = req.query.metals;
     const asOf = String(req.query.as_of || '').trim();
-    const asOfBind = asOf || null;
+    const validAsOf = /^\d{4}-\d{2}-\d{2}$/.test(asOf) ? asOf : null;
+    const baseDateExpr = validAsOf ? `TO_DATE(?, 'YYYY-MM-DD')` : `TRUNC(SYSDATE)`;
+    const dateBinds = validAsOf ? [validAsOf, validAsOf] : [];
     const filter = metalsCsv
       ? `AND UPPER(metal_code) IN (${metalsCsv.split(',').map(() => 'UPPER(?)').join(',')})`
       : '';
     const params = metalsCsv ? metalsCsv.split(',') : [];
 
-    // Sheet 1: 金屬報價 — 重用 /prices 邏輯但 inline 算
+    // Sheet 1: 金屬報價
     const latestRows = await db.prepare(`
       SELECT * FROM (
         SELECT UPPER(metal_code) AS metal_code, metal_name, price_usd, day_change_pct,
@@ -471,13 +485,13 @@ router.get('/export.xlsx', verifyToken, verifyMetalsAccess, async (req, res) => 
                as_of_date AS as_of_date_raw, source,
                ROW_NUMBER() OVER (PARTITION BY UPPER(metal_code) ORDER BY as_of_date DESC) AS rn
         FROM pm_price_history
-        WHERE as_of_date <= NVL(TO_DATE(?, 'YYYY-MM-DD'), TRUNC(SYSDATE))
-          AND as_of_date >= NVL(TO_DATE(?, 'YYYY-MM-DD'), TRUNC(SYSDATE)) - 60
+        WHERE TRUNC(as_of_date) <= ${baseDateExpr}
+          AND TRUNC(as_of_date) >= ${baseDateExpr} - 60
           AND price_usd IS NOT NULL
           ${filter}
       ) WHERE rn = 1
       ORDER BY metal_code
-    `).all(asOfBind, asOfBind, ...params);
+    `).all(...dateBinds, ...params);
 
     const priceRows = [];
     for (const r of latestRows) {
@@ -522,12 +536,12 @@ router.get('/export.xlsx', verifyToken, verifyMetalsAccess, async (req, res) => 
                LAG(value) OVER (PARTITION BY indicator_code ORDER BY as_of_date) AS prev_value,
                ROW_NUMBER() OVER (PARTITION BY indicator_code ORDER BY as_of_date DESC) AS rn
         FROM pm_macro_history
-        WHERE as_of_date <= NVL(TO_DATE(?, 'YYYY-MM-DD'), TRUNC(SYSDATE))
-          AND as_of_date >= NVL(TO_DATE(?, 'YYYY-MM-DD'), TRUNC(SYSDATE)) - 14
+        WHERE TRUNC(as_of_date) <= ${baseDateExpr}
+          AND TRUNC(as_of_date) >= ${baseDateExpr} - 14
           AND value IS NOT NULL
       ) WHERE rn = 1
       ORDER BY indicator_code
-    `).all(asOfBind, asOfBind);
+    `).all(...dateBinds);
 
     // Build workbook
     const wb = new ExcelJS.Workbook();
