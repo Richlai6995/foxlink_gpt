@@ -9,7 +9,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import ReactECharts from 'echarts-for-react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Maximize2, Minimize2 } from 'lucide-react'
 import api from '../../lib/api'
 import { buildIndicatorSeries, type IndicatorKey, type PricePoint } from '../../lib/metalsIndicators'
 
@@ -69,6 +69,15 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
   const [customFrom, setCustomFrom] = useState<string>('')
   const [customTo, setCustomTo] = useState<string>('')
   const [indicators, setIndicators] = useState<IndicatorKey[]>([])
+  const [isFullscreen, setIsFullscreen] = useState(false)
+
+  // ESC 退出全螢幕
+  useEffect(() => {
+    if (!isFullscreen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsFullscreen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [isFullscreen])
 
   // points: { metalCode → PricePoint[] }
   const [seriesByMetal, setSeriesByMetal] = useState<Record<string, PricePoint[]>>({})
@@ -229,8 +238,12 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
 
   const primaryBtnCls = theme === 'precious' ? 'bg-emerald-600 text-white' : 'bg-amber-600 text-white'
 
+  const wrapperCls = isFullscreen
+    ? 'fixed inset-0 z-50 bg-white flex flex-col overflow-hidden shadow-2xl'
+    : 'bg-white border rounded-lg flex flex-col overflow-hidden'
+
   return (
-    <div className="bg-white border rounded-lg flex flex-col overflow-hidden">
+    <div className={wrapperCls}>
       {/* 標題色帶 + 金屬選擇 */}
       <div className={`px-3 py-1.5 border-b ${headerCls} flex items-center gap-2 flex-wrap`}>
         <h3 className="text-sm font-bold">{title}</h3>
@@ -258,6 +271,13 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
           {primaryPoints.length} 筆 / {days} 天
         </span>
         <span className="text-[10px] opacity-70 ml-auto">右鍵 = 疊加比較(最多 2 條)</span>
+        <button
+          onClick={() => setIsFullscreen(v => !v)}
+          className="ml-1 p-1 rounded hover:bg-white/60 text-slate-700"
+          title={isFullscreen ? '退出全螢幕(Esc)' : '全螢幕展開'}
+        >
+          {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+        </button>
       </div>
       <div className="p-2 flex-1 flex flex-col">
 
@@ -310,8 +330,11 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
         </div>
       </div>
 
-      {/* Chart */}
-      <div className="relative" style={{ height: hasSub ? 360 : 280 }}>
+      {/* Chart — fullscreen 時 flex-1 撐滿剩餘空間,否則固定高 */}
+      <div
+        className={`relative ${isFullscreen ? 'flex-1 min-h-0' : ''}`}
+        style={isFullscreen ? undefined : { height: hasSub ? 360 : 280 }}
+      >
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center bg-white/60 z-10">
             <Loader2 className="animate-spin text-slate-400" size={20} />
@@ -322,7 +345,13 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
             無 {primaryMetal} 資料(該區間無報價)
           </div>
         ) : (
-          <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge={true} />
+          // key 變化強制 re-mount,確保 fullscreen 切換時 ECharts 重新算 layout
+          <ReactECharts
+            key={isFullscreen ? 'fs' : 'norm'}
+            option={option}
+            style={{ height: '100%', width: '100%' }}
+            notMerge={true}
+          />
         )}
       </div>
       </div>
