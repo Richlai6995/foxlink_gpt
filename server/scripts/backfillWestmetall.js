@@ -38,6 +38,20 @@ const METALS_FILTER = metalsArg
   ? new Set(metalsArg.split('=')[1].split(',').map(s => s.trim().toUpperCase()))
   : null;
 
+// --force-range=YYYY-MM-DD:YYYY-MM-DD
+// 指定區間先 DELETE 該 metal 的 row,再從 Westmetall 重新塞。
+// 用於修壞資料(scrape 寫錯單位等)— 直接「蓋掉」舊資料。
+const forceRangeArg = args.find(a => a.startsWith('--force-range='));
+let FORCE_RANGE = null;
+if (forceRangeArg) {
+  const v = forceRangeArg.split('=')[1] || '';
+  const parts = v.split(':');
+  if (parts.length !== 2 || !/^\d{4}-\d{2}-\d{2}$/.test(parts[0]) || !/^\d{4}-\d{2}-\d{2}$/.test(parts[1])) {
+    console.error('--force-range 格式必須 YYYY-MM-DD:YYYY-MM-DD'); process.exit(1);
+  }
+  FORCE_RANGE = { from: parts[0], to: parts[1] };
+}
+
 const METALS = [
   { code: 'CU', name: '銅', field: 'LME_Cu_cash' },
   { code: 'AL', name: '鋁', field: 'LME_Al_cash' },
@@ -171,6 +185,29 @@ async function backfillOne(metal) {
   console.log(`\n══ ${metal.code} ${metal.name} ══`);
   console.log(`URL: ${sourceUrl}`);
 
+  // 0. FORCE RANGE — 把指定區間 DELETE 再 backfill(修壞資料用)
+  if (FORCE_RANGE) {
+    if (DRY_RUN) {
+      const cntRow = await db.prepare(`
+        SELECT COUNT(*) AS cnt FROM pm_price_history
+        WHERE UPPER(metal_code) = UPPER(?)
+          AND as_of_date >= TO_DATE(?, 'YYYY-MM-DD')
+          AND as_of_date <= TO_DATE(?, 'YYYY-MM-DD')
+      `).get(metal.code, FORCE_RANGE.from, FORCE_RANGE.to);
+      const cnt = Number(cntRow?.cnt ?? cntRow?.CNT ?? 0);
+      console.log(`[${metal.code}] --force-range ${FORCE_RANGE.from}~${FORCE_RANGE.to} 會刪 ${cnt} 筆(dry-run skip)`);
+    } else {
+      const r = await db.prepare(`
+        DELETE FROM pm_price_history
+        WHERE UPPER(metal_code) = UPPER(?)
+          AND as_of_date >= TO_DATE(?, 'YYYY-MM-DD')
+          AND as_of_date <= TO_DATE(?, 'YYYY-MM-DD')
+      `).run(metal.code, FORCE_RANGE.from, FORCE_RANGE.to);
+      const deleted = r?.rowsAffected ?? r?.changes ?? 0;
+      console.log(`[${metal.code}] --force-range ${FORCE_RANGE.from}~${FORCE_RANGE.to} 刪掉 ${deleted} 筆`);
+    }
+  }
+
   // 1. fetch
   let html;
   try {
@@ -217,9 +254,25 @@ async function backfillOne(metal) {
 
   // 5. INSERT — 順序跑(對 4500 row 約 30 秒,可接受;executeMany 改進有空再做)
   let inserted = 0, duplicates = 0, errors = 0;
+
+  // newRows[0] 的 prev 從 DB 撈該 metal 早於該日的最新一筆,
+  // 確保 incremental fill 的銜接 row day_change_pct 也正確
   let prevCash = null;
-  // 為了 day_change_pct 正確,計算前一筆 cash 應該包含「DB 已有的 row」對應該日的前一日
-  // 簡化版:只用本次 backfill series 內的 prev — boundary 銜接 DB row 那邊允許 null
+  try {
+    const firstDate = newRows[0].date;
+    const prevRow = await db.prepare(`
+      SELECT price_usd FROM (
+        SELECT price_usd FROM pm_price_history
+        WHERE UPPER(metal_code) = UPPER(?)
+          AND as_of_date < TO_DATE(?, 'YYYY-MM-DD')
+          AND price_usd IS NOT NULL
+        ORDER BY as_of_date DESC
+      ) WHERE ROWNUM = 1
+    `).get(metal.code, firstDate);
+    const p = Number(prevRow?.price_usd ?? prevRow?.PRICE_USD);
+    if (Number.isFinite(p) && p > 0) prevCash = p;
+  } catch (_) { /* 沒前一筆就 null,首筆 day_change 給 null */ }
+
   for (let i = 0; i < newRows.length; i++) {
     const r = newRows[i];
     try {
