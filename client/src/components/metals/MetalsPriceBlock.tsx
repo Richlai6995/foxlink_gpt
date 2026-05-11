@@ -53,8 +53,8 @@ export default function MetalsPriceBlock({ title, rows, metalsAllowed, loading, 
       </div>
 
       {/* 欄位標題小提示 */}
-      <div className="grid items-center gap-1 px-2 py-1 text-[9px] text-slate-400 border-b bg-slate-50/50"
-        style={{ gridTemplateColumns: '46px 1fr 80px 50px 50px 50px' }}>
+      <div className="grid items-center gap-0.5 px-1.5 py-1 text-[9px] text-slate-400 border-b bg-slate-50/50"
+        style={{ gridTemplateColumns: '34px minmax(0,1fr) 64px 42px 42px 42px' }}>
         <span>代碼</span>
         <span></span>
         <span className="text-right">USD</span>
@@ -75,10 +75,10 @@ export default function MetalsPriceBlock({ title, rows, metalsAllowed, loading, 
             <button
               key={code}
               onClick={() => onSelect(code)}
-              className={`w-full grid items-center gap-1 px-2 py-1.5 text-xs border-b last:border-b-0 transition ${
+              className={`w-full grid items-center gap-0.5 px-1.5 py-1.5 text-xs border-b last:border-b-0 transition ${
                 isSelected ? (theme === 'precious' ? 'bg-emerald-50' : 'bg-amber-50') : 'hover:bg-slate-50'
               } ${noData ? 'opacity-50' : ''}`}
-              style={{ gridTemplateColumns: '46px 1fr 80px 50px 50px 50px' }}
+              style={{ gridTemplateColumns: '34px minmax(0,1fr) 64px 42px 42px 42px' }}
               title={`${code} 資料日期 ${r.as_of_date || '—'}${r.source ? ' / ' + r.source : ''}`}
             >
               <span className="font-mono font-bold text-slate-800 text-left">{code}</span>
