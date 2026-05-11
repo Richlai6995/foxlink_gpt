@@ -67,6 +67,7 @@ cd client && npm run dev    # frontend → localhost:5173 (proxy → 3007)
 | `llm-performance-optimization.md` | LLM 效能優化（streaming、genConfig、AOAI 相容性） |
 | `response-optimization.md` | 回應速度優化（Webex webhook/websocket + 網頁版 Phase 2） |
 | `webex-webhook-firewall-setup.md` | Webex Webhook 防火牆與 Nginx 設定（網管操作文件） |
+| `webex-waf-troubleshoot.md` | **Webex Webhook 被 Akamai WAF 擋下排查 SOP**(probe 抓 Reference # / WAF admin 工單範本 / 驗證流程) |
 | `erp-tools-design.md` | ERP FUNCTION/PROCEDURE 工具化設計（LLM tool-calling + 手動 + Inject） |
 | `kb-retrieval-architecture-v2.md` | **KB 檢索 v2 架構實作紀錄**（Phase 1/2/3a/3b/3c + 踩坑 + config 索引） |
 | `gemini-sdk-migration-plan.md` | **Gemini SDK 遷移計畫**：`@google-cloud/vertexai` → `@google/genai`（獨立 session 處理） |
