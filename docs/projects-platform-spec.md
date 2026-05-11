@@ -4559,6 +4559,7 @@ CREATE TABLE admin_testing_sessions (
 - **CIO 競品分析簡報**:[projects-platform-vs-market-cio.md](./projects-platform-vs-market-cio.md) — 22 張(市場分析 + Build vs Buy + 5 年 TCO + Vendor Lock-in + Q&A)
 - **⭐ 解耦架構設計**:[projects-platform-decoupling-architecture.md](./projects-platform-decoupling-architecture.md) — 保護既有 Cortex 不被影響的 5 層解耦設計(Code / Schema / Deploy / Runtime / 監控)+ 5 條硬規則 + Rollback 機制 + 演進策略
 - **⭐ 實作 Roadmap**:[projects-platform-implementation-roadmap.md](./projects-platform-implementation-roadmap.md) — Phase 0 Scaffolding 已完成 + Phase 1 切 12 sprint 開發計畫
+- **⭐ Internal Admin 規劃**:[projects-platform-internal-admin-plan.md](./projects-platform-internal-admin-plan.md) — Sidebar 可見性演進(Phase 0 admin only → GA role-based)+ 10 個 Internal Admin 子頁規劃 + 不擠進 Cortex 主 admin
 
 ### 既有 Cortex 文件
 - 舊規格書:[quote-system-spec.md](./quote-system-spec.md)(v0.3.5)— 仍可作報價特化邏輯參考
