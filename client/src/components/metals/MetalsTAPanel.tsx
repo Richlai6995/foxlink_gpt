@@ -21,11 +21,18 @@ interface Props {
   indicators: string[]         // ['MA20','MA60','RSI14'...]
 }
 
+type ModelPreset = 'flash' | 'pro'
+
 export default function MetalsTAPanel({ isOpen, onClose, metal, days, viewDate, indicators }: Props) {
   const [answer, setAnswer] = useState('')
   const [error, setError] = useState('')
   const [streaming, setStreaming] = useState(false)
-  const [meta, setMeta] = useState<{ bars?: number; input_tokens?: number; output_tokens?: number } | null>(null)
+  const [meta, setMeta] = useState<{ bars?: number; input_tokens?: number; output_tokens?: number; model?: string; preset?: string } | null>(null)
+  // 預設 Flash 快;Pro 慢但分析更全面。從 localStorage 記住上次選擇
+  const [modelPreset, setModelPreset] = useState<ModelPreset>(
+    () => (localStorage.getItem('metals_ta_model') as ModelPreset) || 'flash'
+  )
+  useEffect(() => { localStorage.setItem('metals_ta_model', modelPreset) }, [modelPreset])
   const abortRef = useRef<AbortController | null>(null)
   const scrollerRef = useRef<HTMLDivElement | null>(null)
 
@@ -42,7 +49,7 @@ export default function MetalsTAPanel({ isOpen, onClose, metal, days, viewDate, 
           'Content-Type': 'application/json',
           'Authorization': token ? `Bearer ${token}` : '',
         },
-        body: JSON.stringify({ metal, days, end_date: viewDate || undefined, indicators }),
+        body: JSON.stringify({ metal, days, end_date: viewDate || undefined, indicators, model: modelPreset }),
         signal: abortRef.current.signal,
       })
       if (!resp.ok || !resp.body) {
@@ -77,6 +84,8 @@ export default function MetalsTAPanel({ isOpen, onClose, metal, days, viewDate, 
                   bars: payload.bars_analyzed,
                   input_tokens: payload.input_tokens,
                   output_tokens: payload.output_tokens,
+                  model: payload.model,
+                  preset: payload.preset,
                 })
               } else if (event === 'error') {
                 setError(payload.error || '未知錯誤')
@@ -136,6 +145,21 @@ export default function MetalsTAPanel({ isOpen, onClose, metal, days, viewDate, 
           <h3 className="text-sm font-bold text-slate-800">AI 技術分析(TA)</h3>
           <span className="text-[10px] text-slate-500 ml-1">{metal} · {days}天 · {indicators.length || 0} 指標</span>
           <div className="ml-auto flex items-center gap-1">
+            {/* 模型選擇 */}
+            <div className="flex items-center text-[10px] border rounded overflow-hidden">
+              <button
+                onClick={() => setModelPreset('flash')}
+                disabled={streaming}
+                className={`px-2 py-1 ${modelPreset === 'flash' ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'} disabled:opacity-40`}
+                title="Flash:快(~3 秒),適合一般 TA 解讀"
+              >Flash</button>
+              <button
+                onClick={() => setModelPreset('pro')}
+                disabled={streaming}
+                className={`px-2 py-1 ${modelPreset === 'pro' ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'} disabled:opacity-40`}
+                title="Pro:慢(~15-30 秒)但分析更全面、會推理"
+              >Pro</button>
+            </div>
             <button
               onClick={run}
               disabled={streaming}
@@ -158,6 +182,9 @@ export default function MetalsTAPanel({ isOpen, onClose, metal, days, viewDate, 
           <span>結束日 <b className="font-mono text-slate-700">{viewDate || '今日'}</b></span>
           <span>指標 <b className="text-slate-700">{indicators.length ? indicators.join(', ') : '(無)'}</b></span>
           {meta?.bars != null && <span>分析 <b className="text-slate-700">{meta.bars}</b> 筆</span>}
+          {meta?.model && (
+            <span title={`preset=${meta.preset}`}>模型 <b className="font-mono text-slate-700">{meta.model}</b></span>
+          )}
         </div>
 
         {/* Body */}

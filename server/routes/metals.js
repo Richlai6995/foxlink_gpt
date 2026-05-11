@@ -387,6 +387,19 @@ const METALS_AI_SYSTEM_INSTRUCTION = `你是 Foxlink 集團「金屬市場分析
 5. 引用資料時用「根據今日報價/宏觀/新聞」等明確表述,不要捏造數字。
 6. 回應簡潔 — 一般 user 不要太長篇大論,4-8 行為佳,必要時加表格或條列。`;
 
+// 把 caller 給的 model preset / 名稱 resolve 成實際 API model 名,
+// 並回傳「resolved name + 哪個 env var」讓前端顯示
+function resolveLlmModel(input) {
+  const FLASH = process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview';
+  const PRO = process.env.GEMINI_MODEL_PRO || 'gemini-3-pro-preview';
+  const s = String(input || '').trim().toLowerCase();
+  if (s === 'pro' || s === 'gemini-pro') return { name: PRO, preset: 'pro' };
+  if (s === 'flash' || s === 'gemini-flash') return { name: FLASH, preset: 'flash' };
+  // 直接指定全名(白名單:只允許含 'gemini' / 'gpt' 的 string,防注入)
+  if (s && /^[a-z0-9-_.]+$/i.test(s) && /gemini|gpt/.test(s)) return { name: s, preset: 'custom' };
+  return { name: FLASH, preset: 'flash' };  // 預設
+}
+
 router.post('/ai-analyze', verifyToken, verifyMetalsAccess, async (req, res) => {
   try {
     const db = require('../database-oracle').db;
@@ -466,7 +479,9 @@ router.post('/ai-analyze', verifyToken, verifyMetalsAccess, async (req, res) => 
     const fullSystem = `${METALS_AI_SYSTEM_INSTRUCTION}\n\n---\n以下是當前資料快照(供你回答用,不要重複貼出來,引用即可):\n\n${ragContext}`;
 
     // 2) 呼叫 streamChat,session-only — history=[], 無 file
-    const apiModel = process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview';
+    const resolved = resolveLlmModel(req.body?.model);
+    const apiModel = resolved.name;
+    console.log(`[Metals/ai-analyze] model=${apiModel} (preset=${resolved.preset})`);
     const userParts = [{ text: question }];
 
     let totalText = '';
@@ -489,6 +504,8 @@ router.post('/ai-analyze', verifyToken, verifyMetalsAccess, async (req, res) => 
       send('done', {
         input_tokens: result?.inputTokens || 0,
         output_tokens: result?.outputTokens || 0,
+        model: apiModel,
+        preset: resolved.preset,
       });
     } catch (e) {
       console.error('[Metals] /ai-analyze stream error:', e);
@@ -619,7 +636,9 @@ ${ctxJson}
 
     // 4) streamChat
     const { streamChat } = require('../services/gemini');
-    const apiModel = process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview';
+    const resolvedTA = resolveLlmModel(req.body?.model);
+    const apiModel = resolvedTA.name;
+    console.log(`[Metals/TA] model=${apiModel} (preset=${resolvedTA.preset})`);
     const userParts = [{ text: `請給 ${metal} 當前的技術分析摘要。` }];
 
     let totalText = '';
@@ -643,6 +662,8 @@ ${ctxJson}
         input_tokens: result?.inputTokens || 0,
         output_tokens: result?.outputTokens || 0,
         bars_analyzed: ctx.stats?.bars || 0,
+        model: apiModel,
+        preset: resolvedTA.preset,
       });
     } catch (e) {
       console.error('[Metals] /ai-ta-analyze stream error:', e);

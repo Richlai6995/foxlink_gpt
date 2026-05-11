@@ -12,9 +12,12 @@ interface QA {
   answer: string
   done: boolean
   error?: string
+  model?: string
 }
 
 const STORAGE_TOKEN_KEY = 'token'
+
+type ModelPreset = 'flash' | 'pro'
 
 interface Props {
   isOpen: boolean
@@ -25,6 +28,10 @@ export default function MetalsAiPanel({ isOpen, onClose }: Props) {
   const [input, setInput] = useState('')
   const [qa, setQa] = useState<QA[]>([])
   const [streaming, setStreaming] = useState(false)
+  const [modelPreset, setModelPreset] = useState<ModelPreset>(
+    () => (localStorage.getItem('metals_ai_model') as ModelPreset) || 'flash'
+  )
+  useEffect(() => { localStorage.setItem('metals_ai_model', modelPreset) }, [modelPreset])
   const abortRef = useRef<AbortController | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const scrollerRef = useRef<HTMLDivElement | null>(null)
@@ -73,7 +80,7 @@ export default function MetalsAiPanel({ isOpen, onClose }: Props) {
           'Content-Type': 'application/json',
           'Authorization': token ? `Bearer ${token}` : '',
         },
-        body: JSON.stringify({ question: q }),
+        body: JSON.stringify({ question: q, model: modelPreset }),
         signal: abortRef.current.signal,
       })
       if (!resp.ok || !resp.body) {
@@ -110,7 +117,7 @@ export default function MetalsAiPanel({ isOpen, onClose }: Props) {
               } else if (event === 'done') {
                 setQa(prev => {
                   const next = [...prev]
-                  next[idx] = { ...next[idx], done: true }
+                  next[idx] = { ...next[idx], done: true, model: payload.model }
                   return next
                 })
               } else if (event === 'error') {
@@ -173,6 +180,21 @@ export default function MetalsAiPanel({ isOpen, onClose }: Props) {
           <h3 className="text-sm font-bold text-slate-800">AI 分析</h3>
           <span className="text-[10px] text-slate-500">問金屬/新聞/趨勢/宏觀</span>
           <div className="ml-auto flex items-center gap-1">
+            {/* 模型選擇 */}
+            <div className="flex items-center text-[10px] border rounded overflow-hidden">
+              <button
+                onClick={() => setModelPreset('flash')}
+                disabled={streaming}
+                className={`px-2 py-1 ${modelPreset === 'flash' ? 'bg-amber-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'} disabled:opacity-40`}
+                title="Flash:快(~3 秒)"
+              >Flash</button>
+              <button
+                onClick={() => setModelPreset('pro')}
+                disabled={streaming}
+                className={`px-2 py-1 ${modelPreset === 'pro' ? 'bg-amber-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'} disabled:opacity-40`}
+                title="Pro:慢但分析更全面(~15-30 秒)"
+              >Pro</button>
+            </div>
             {qa.length > 0 && (
               <button
                 onClick={clear}
@@ -215,6 +237,9 @@ export default function MetalsAiPanel({ isOpen, onClose }: Props) {
                 {!item.done && <span className="inline-block w-1 h-3 bg-amber-500 animate-pulse ml-1" />}
                 {item.error && <span className="text-red-600 mt-1 block">⚠ {item.error}</span>}
               </div>
+              {item.done && item.model && (
+                <div className="text-[9px] text-slate-400 font-mono mt-0.5">— {item.model}</div>
+              )}
             </div>
           ))}
         </div>
