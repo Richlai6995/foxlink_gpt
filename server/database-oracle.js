@@ -3692,6 +3692,19 @@ async function runMigrations(db) {
     }
   } catch (e) { console.warn('[Migration] metal_code UPPERCASE normalization:', e.message); }
 
+  // ─── 2026-05-11 user 決定停用預測功能 — forecast_timeseries_llm skill 設 is_active=0 ──
+  // server.js 那邊 autoSeedForecastSkill 也註解掉了,避免重啟把 is_active 改回 1。
+  // idempotent:沒 row 也不會炸,有 row 才更新
+  try {
+    const r = await db.prepare(
+      `UPDATE skills SET is_active = 0 WHERE name = 'forecast_timeseries_llm' AND is_active = 1`
+    ).run();
+    const cnt = r?.rowsAffected ?? r?.changes ?? 0;
+    if (cnt > 0) console.log(`[Migration] 停用 forecast_timeseries_llm skill — ${cnt} row`);
+  } catch (e) {
+    console.warn('[Migration] disable forecast skill 失敗:', e.message);
+  }
+
   // ─── pm_chart_annotations — 使用者在 chart 上的手寫標註(水平線 / 趨勢線 / 文字)─
   await createTable('PM_CHART_ANNOTATIONS', `CREATE TABLE pm_chart_annotations (
     id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

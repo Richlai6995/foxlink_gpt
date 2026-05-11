@@ -622,15 +622,15 @@ app.get('/api/version', (req, res) => {
       }
     });
 
-    // Auto-seed builtin forecast skill (forecast_timeseries_llm)
-    setImmediate(async () => {
-      try {
-        const { autoSeedForecastSkill } = require('./services/forecastSkillSeed');
-        await autoSeedForecastSkill(db);
-      } catch (e) {
-        console.error('[ForecastSkillSeed] Failed:', e.message);
-      }
-    });
+    // 2026-05-11 user 決定停用預測功能 — auto-seed 不再跑(避免每次重啟把 is_active=0 改回 1)
+    // setImmediate(async () => {
+    //   try {
+    //     const { autoSeedForecastSkill } = require('./services/forecastSkillSeed');
+    //     await autoSeedForecastSkill(db);
+    //   } catch (e) {
+    //     console.error('[ForecastSkillSeed] Failed:', e.message);
+    //   }
+    // });
 
     // Auto-seed Excel 精確查詢 code skill (DuckDB SQL on uploaded xlsx)
     setImmediate(async () => {

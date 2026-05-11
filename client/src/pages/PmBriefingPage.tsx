@@ -674,9 +674,7 @@ function DataHealthPanel() {
       match: '每日金屬日報',
       describe: d => ({
         status: d.data.daily_report.latest_date
-          ? `最新日報: ${d.data.daily_report.latest_date}` + (d.data.forecast.today_rows > 0
-              ? `,今日預測 ${d.data.forecast.today_metals}/${d.data.forecast.target_metals} 金屬(${d.data.forecast.total} 筆累計)`
-              : ',今日尚未出 forecast')
+          ? `最新日報: ${d.data.daily_report.latest_date}`
           : '尚無日報',
         ok: !!d.data.daily_report.latest_date && d.data.daily_report.latest_date >= d.today,
       }),
@@ -1559,23 +1557,15 @@ function PriceHistoryTab({ focusedMetals }: { focusedMetals: string[] }) {
           </div>
         )}
 
-        {/* 圖表疊加層 toggles + chart(資料表下方,2026-04-28 user 要求順序)*/}
+        {/* 圖表疊加層 toggles + chart(資料表下方,2026-04-28 user 要求順序)
+            2026-05-11 user 決定停用預測功能 — 拿掉「AI 預測線」+「信心區間」checkbox,只留採購點 */}
         <div className="bg-white border rounded px-4 py-2 flex items-center gap-3 flex-wrap text-xs">
           <span className="text-slate-500 font-medium">📊 圖表疊加層:</span>
-          <label className={`inline-flex items-center gap-1 px-2 py-1 rounded cursor-pointer ${showForecast ? 'bg-blue-100 text-blue-700' : 'bg-slate-50 text-slate-500'}`}>
-            <input type="checkbox" checked={showForecast} onChange={e => setShowForecast(e.target.checked)} />
-            AI 預測線
-          </label>
-          <label className={`inline-flex items-center gap-1 px-2 py-1 rounded cursor-pointer ${showBand ? 'bg-blue-100 text-blue-700' : 'bg-slate-50 text-slate-500'}`}>
-            <input type="checkbox" checked={showBand} onChange={e => setShowBand(e.target.checked)} disabled={!showForecast} />
-            信心區間(80%)
-          </label>
           <label className={`inline-flex items-center gap-1 px-2 py-1 rounded cursor-pointer ${showPurchase ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-50 text-slate-500'}`}>
             <input type="checkbox" checked={showPurchase} onChange={e => setShowPurchase(e.target.checked)} />
             實際採購點(by month)
           </label>
           <span className="ml-auto text-[10px] text-slate-400">
-            {showForecast && Object.values(forecastMap).every(arr => arr.length === 0) && '⚠️ forecast_history 無資料 '}
             {showPurchase && Object.values(purchaseMap).every(arr => arr.length === 0) && '⚠️ pm_purchase_history 無資料(需 ERP sync 啟用)'}
           </span>
         </div>
@@ -1589,9 +1579,9 @@ function PriceHistoryTab({ focusedMetals }: { focusedMetals: string[] }) {
         ) : (
           <PriceChart
             aggregated={aggregated}
-            forecastMap={showForecast ? forecastMap : {}}
+            forecastMap={{}}
             purchaseMap={showPurchase ? purchaseMap : {}}
-            showBand={showForecast && showBand}
+            showBand={false}
           />
         )}
       </div>
@@ -1772,7 +1762,6 @@ function MetricsCards({ metals, metricsMap }: { metals: string[]; metricsMap: Re
   const primary = metals[0]
   const m = metricsMap[primary] || {}
   const timing = m.timing_pct
-  const mape = m.mape_30d
   const dos = m.days_of_supply
 
   const fmtPct = (v: any) => {
@@ -1781,7 +1770,6 @@ function MetricsCards({ metals, metricsMap }: { metals: string[]; metricsMap: Re
     return `${n > 0 ? '+' : ''}${n.toFixed(2)}%`
   }
   const timingColor = timing == null ? 'text-slate-400' : timing < 0 ? 'text-emerald-600' : 'text-red-600'
-  const mapeColor = mape == null ? 'text-slate-400' : mape < 5 ? 'text-emerald-600' : mape < 15 ? 'text-amber-600' : 'text-red-600'
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -1792,13 +1780,7 @@ function MetricsCards({ metals, metricsMap }: { metals: string[]; metricsMap: Re
           {primary} 我們均價 vs 市場月均 — {timing == null ? '無資料' : timing < 0 ? '✓ 比市場便宜' : '⚠ 高於市場均'}
         </div>
       </div>
-      <div className="bg-white border rounded p-4">
-        <div className="text-xs text-slate-500 mb-1">🎯 AI 預測準度(30 天)</div>
-        <div className={`text-2xl font-mono font-bold ${mapeColor}`}>{mape == null ? '—' : `${Number(mape).toFixed(2)}%`}</div>
-        <div className="text-[11px] text-slate-400 mt-1">
-          {primary} MAPE · {Number(m.mape_samples || 0)} 樣本 · {mape == null ? '無資料' : mape < 5 ? '✓ 高準確' : mape < 15 ? '~ 可接受' : '⚠ 不可信'}
-        </div>
-      </div>
+      {/* 2026-05-11 user 決定停用預測功能 — 拿掉 AI 預測準度 KPI card */}
       <div className="bg-white border rounded p-4">
         <div className="text-xs text-slate-500 mb-1">📦 庫存週轉天數</div>
         <div className={`text-2xl font-mono font-bold ${dos == null ? 'text-slate-400' : dos < 30 ? 'text-amber-600' : dos < 90 ? 'text-emerald-600' : 'text-blue-600'}`}>
