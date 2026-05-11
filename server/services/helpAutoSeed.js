@@ -18,8 +18,10 @@ const nvarchar = (s) => (s == null ? null : { val: String(s), type: oracledb.DB_
 const SEED_MODULES = [
   // Cortex 主說明書(舊 helpSeedData.js,維持原 export shape)
   { path: '../data/helpSeedData', bookCode: 'cortex' },
-  // 貴金屬分析平台說明書(新 seed)
+  // 貴金屬分析平台說明書(採購完整版 /pm/briefing)
   { path: '../data/pmHelpSeedData', bookCode: 'precious-metals' },
+  // 金屬情報精簡版說明書(一般 user /metals)
+  { path: '../data/metalsLiteHelpSeedData', bookCode: 'metals-public' },
 ];
 
 async function ensureBook(db, { code, name, description, icon, isSpecial, sortOrder, lastModified }) {
