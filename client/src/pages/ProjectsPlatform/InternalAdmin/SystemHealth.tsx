@@ -79,7 +79,7 @@ export default function SystemHealthPage() {
           {Object.entries(data.feature_flag).map(([key, val]) => (
             <div key={key} className="flex justify-between text-sm py-1.5 px-3 bg-slate-900/50 rounded">
               <span className="text-slate-400 font-mono text-xs">{key}</span>
-              <span className="text-cyan-300 font-mono text-xs">{String(val)}</span>
+              <span className="text-sky-300 font-mono text-xs">{String(val)}</span>
             </div>
           ))}
         </div>
@@ -106,7 +106,7 @@ export default function SystemHealthPage() {
           <div className="space-y-1">
             {data.plugins.map((p) => (
               <div key={p.type_code} className="flex items-center gap-4 text-sm py-1.5 px-3 bg-slate-900/50 rounded">
-                <span className="text-cyan-300 font-mono">{p.type_code}</span>
+                <span className="text-sky-300 font-mono">{p.type_code}</span>
                 <span className="text-slate-500">{p.default_channels} channels</span>
                 <span className="text-slate-500">{p.default_stages} stages</span>
               </div>
@@ -121,7 +121,7 @@ export default function SystemHealthPage() {
           {Object.entries(data.sprint_progress).map(([sprint, status]) => (
             <div key={sprint} className="flex justify-between text-sm py-1.5 px-3 bg-slate-900/50 rounded">
               <span className="text-slate-400">{sprint}</span>
-              <span className={status.includes('completed') ? 'text-emerald-300' : 'text-slate-500'}>
+              <span className={status.includes('completed') ? 'text-green-300' : 'text-slate-500'}>
                 {status}
               </span>
             </div>
@@ -138,11 +138,11 @@ export default function SystemHealthPage() {
 
 function Card({ label, value, color }: { label: string; value: string; color?: string }) {
   const colorClass = color === 'emerald'
-    ? 'text-emerald-300'
+    ? 'text-green-300'
     : color === 'red'
     ? 'text-red-300'
     : color === 'cyan'
-    ? 'text-cyan-300'
+    ? 'text-sky-300'
     : 'text-slate-200'
   return (
     <div className="p-3 bg-slate-800/50 border border-slate-700 rounded">
@@ -155,7 +155,7 @@ function Card({ label, value, color }: { label: string; value: string; color?: s
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="bg-slate-800/30 rounded-lg p-4 border border-slate-700">
-      <h3 className="text-sm font-semibold text-cyan-200 mb-3">{title}</h3>
+      <h3 className="text-sm font-semibold text-sky-200 mb-3">{title}</h3>
       {children}
     </div>
   )

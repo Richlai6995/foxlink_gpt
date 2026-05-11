@@ -15,10 +15,10 @@ import NewProjectDialog from './NewProjectDialog'
 
 const LIFECYCLE_BADGE: Record<string, { label: string; cls: string }> = {
   DRAFT:    { label: '草稿',     cls: 'bg-slate-700/40 text-slate-300 border-slate-600/50' },
-  ACTIVE:   { label: '進行中',   cls: 'bg-emerald-700/30 text-emerald-300 border-emerald-700/50' },
+  ACTIVE:   { label: '進行中',   cls: 'bg-green-700/30 text-green-300 border-green-700/50' },
   PAUSED:   { label: '暫停',     cls: 'bg-amber-700/30 text-amber-300 border-amber-700/50' },
   CLOSED:   { label: '已結案',   cls: 'bg-slate-800 text-slate-400 border-slate-700' },
-  REOPENED: { label: '重啟',     cls: 'bg-cyan-700/30 text-cyan-300 border-cyan-700/50' },
+  REOPENED: { label: '重啟',     cls: 'bg-sky-700/30 text-sky-300 border-sky-700/50' },
 }
 
 const IMPORTANCE_DOT: Record<string, string> = {
@@ -72,7 +72,7 @@ export default function ProjectsList() {
       <div className="flex flex-wrap items-center gap-3">
         <button
           onClick={() => setShowNew(true)}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-cyan-700 hover:bg-cyan-600 text-white text-sm rounded transition"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-sky-700 hover:bg-sky-600 text-white text-sm rounded transition"
         >
           <Plus size={14} /> 建立專案
         </button>
@@ -144,7 +144,7 @@ export default function ProjectsList() {
                   onClick={() => navigate(`/projects-platform/projects/${p.id}`)}
                   className="border-t border-slate-700/50 hover:bg-slate-700/30 cursor-pointer transition"
                 >
-                  <td className="px-4 py-2.5 font-mono text-cyan-300">{p.project_code}</td>
+                  <td className="px-4 py-2.5 font-mono text-sky-300">{p.project_code}</td>
                   <td className="px-4 py-2.5 text-slate-300">{p.type_code}</td>
                   <td className="px-4 py-2.5 text-slate-200">{p.data_payload?.title || '—'}</td>
                   <td className="px-4 py-2.5">

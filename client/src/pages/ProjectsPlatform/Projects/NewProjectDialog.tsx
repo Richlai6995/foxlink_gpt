@@ -65,7 +65,7 @@ export default function NewProjectDialog({ types, onClose, onCreated }: Props) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-cyan-300">建立新專案</h2>
+          <h2 className="text-lg font-semibold text-sky-300">建立新專案</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-200">
             <X size={18} />
           </button>
@@ -171,7 +171,7 @@ export default function NewProjectDialog({ types, onClose, onCreated }: Props) {
           <button
             onClick={submit}
             disabled={!valid || submitting}
-            className="px-4 py-1.5 bg-cyan-700 hover:bg-cyan-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm rounded transition"
+            className="px-4 py-1.5 bg-sky-700 hover:bg-sky-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm rounded transition"
           >
             {submitting ? '建立中…' : '建立'}
           </button>

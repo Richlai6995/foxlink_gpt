@@ -20,7 +20,7 @@ const MSG_STYLE: Record<MessageType, { dot: string; bg: string; label: string; e
   NORMAL:     { dot: 'bg-slate-500',  bg: 'bg-slate-800/40',     label: '一般' },
   PROGRESS:   { dot: 'bg-blue-500',   bg: 'bg-blue-900/20',      label: '進度', emoji: '📊' },
   BLOCKER:    { dot: 'bg-red-500',    bg: 'bg-red-900/30',       label: '卡關', emoji: '🚨' },
-  DECISION:   { dot: 'bg-emerald-500',bg: 'bg-emerald-900/25',   label: '決議', emoji: '✅' },
+  DECISION:   { dot: 'bg-green-500',bg: 'bg-green-900/25',   label: '決議', emoji: '✅' },
   AI_INSIGHT: { dot: 'bg-purple-500', bg: 'bg-purple-900/25',    label: 'AI',   emoji: '🤖' },
   SYSTEM:     { dot: 'bg-slate-600',  bg: 'bg-slate-900/60',     label: '系統', emoji: '⚙' },
 }
@@ -186,7 +186,7 @@ export default function WarRoom({ projectId, channel }: Props) {
                   )}
                   {m.is_pinned ? <Pin size={11} className="text-amber-400" /> : null}
                   {m.synced_to_announcement ? (
-                    <span className="text-[10px] text-cyan-400 inline-flex items-center gap-0.5">
+                    <span className="text-[10px] text-sky-400 inline-flex items-center gap-0.5">
                       <Sparkles size={10} /> 同步公告
                     </span>
                   ) : null}
@@ -241,7 +241,7 @@ export default function WarRoom({ projectId, channel }: Props) {
             )
           })}
           {(['BLOCKER', 'DECISION', 'AI_INSIGHT'] as MessageType[]).includes(msgType) && (
-            <span className="ml-auto text-[11px] text-cyan-400">
+            <span className="ml-auto text-[11px] text-sky-400">
               <Sparkles size={11} className="inline" /> 自動同步到 #announcement
             </span>
           )}
@@ -258,12 +258,12 @@ export default function WarRoom({ projectId, channel }: Props) {
             }}
             placeholder={isAnnouncement ? '⚠ announcement 只 PM/admin 可發,被擋會 toast' : '輸入訊息(Cmd/Ctrl+Enter 送出)'}
             rows={2}
-            className="flex-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded text-sm text-slate-100 resize-none focus:outline-none focus:border-cyan-600"
+            className="flex-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded text-sm text-slate-100 resize-none focus:outline-none focus:border-sky-600"
           />
           <button
             onClick={post}
             disabled={!input.trim() || posting}
-            className="px-3 py-2 bg-cyan-700 hover:bg-cyan-600 disabled:opacity-50 text-white rounded text-sm transition inline-flex items-center gap-1"
+            className="px-3 py-2 bg-sky-700 hover:bg-sky-600 disabled:opacity-50 text-white rounded text-sm transition inline-flex items-center gap-1"
           >
             <Send size={14} />
             {posting ? '送出中…' : '送出'}

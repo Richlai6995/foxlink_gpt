@@ -44,9 +44,9 @@ const CHANNEL_ICON: Record<string, any> = {
 
 const STAGE_STATUS_COLOR: Record<string, string> = {
   PENDING:        'text-slate-500 bg-slate-800/60',
-  ACTIVE:         'text-cyan-300 bg-cyan-900/30',
+  ACTIVE:         'text-sky-300 bg-sky-900/30',
   READY_FOR_GATE: 'text-amber-300 bg-amber-900/30',
-  DONE:           'text-emerald-300 bg-emerald-900/30',
+  DONE:           'text-green-300 bg-green-900/30',
   SKIPPED:        'text-slate-600 bg-slate-800/40',
 }
 
@@ -103,7 +103,7 @@ export default function ProjectDetail() {
   if (err) {
     return (
       <div className="p-6 max-w-3xl mx-auto">
-        <button onClick={() => navigate('/projects-platform')} className="text-sm text-cyan-400 hover:underline mb-3">
+        <button onClick={() => navigate('/projects-platform')} className="text-sm text-sky-400 hover:underline mb-3">
           ← 回專案列表
         </button>
         <div className="p-4 bg-red-900/20 border border-red-800 rounded text-red-300 text-sm">{err}</div>
@@ -130,7 +130,7 @@ export default function ProjectDetail() {
             <ArrowLeft size={14} /> 列表
           </button>
           <div className="h-4 w-px bg-slate-700" />
-          <span className="font-mono text-sm text-cyan-300">{project.project_code}</span>
+          <span className="font-mono text-sm text-sky-300">{project.project_code}</span>
           <span className="text-sm text-slate-500">·</span>
           <span className="text-sm text-slate-200">{project.data_payload?.title || '—'}</span>
           <span className="text-xs px-2 py-0.5 bg-slate-700 rounded text-slate-300">{project.type_code}</span>
@@ -138,7 +138,7 @@ export default function ProjectDetail() {
           <div className="ml-auto flex items-center gap-2">
             <span className={`text-xs px-2 py-0.5 rounded border ${
               project.lifecycle_status === 'ACTIVE'
-                ? 'bg-emerald-700/30 text-emerald-300 border-emerald-700/50'
+                ? 'bg-green-700/30 text-green-300 border-green-700/50'
                 : project.lifecycle_status === 'PAUSED'
                 ? 'bg-amber-700/30 text-amber-300 border-amber-700/50'
                 : project.lifecycle_status === 'CLOSED'
@@ -184,7 +184,7 @@ export default function ProjectDetail() {
                 key={c.id}
                 onClick={() => setActiveChannelId(c.id)}
                 className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm transition ${
-                  isActive ? 'bg-cyan-900/40 text-cyan-200' : 'text-slate-300 hover:bg-slate-800/60'
+                  isActive ? 'bg-sky-900/40 text-sky-200' : 'text-slate-300 hover:bg-slate-800/60'
                 }`}
               >
                 <Icon size={14} className="shrink-0 opacity-70" />
@@ -222,7 +222,7 @@ export default function ProjectDetail() {
             <button
               onClick={() => setShowRightPane(showRightPane === 'stages' ? null : 'stages')}
               className={`flex-1 px-3 py-2 text-xs flex items-center justify-center gap-1.5 transition ${
-                showRightPane === 'stages' ? 'bg-slate-800 text-cyan-300' : 'text-slate-400 hover:bg-slate-800/60'
+                showRightPane === 'stages' ? 'bg-slate-800 text-sky-300' : 'text-slate-400 hover:bg-slate-800/60'
               }`}
             >
               <ListChecks size={13} /> Stages ({project.stages.length})
@@ -230,7 +230,7 @@ export default function ProjectDetail() {
             <button
               onClick={() => setShowRightPane(showRightPane === 'members' ? null : 'members')}
               className={`flex-1 px-3 py-2 text-xs flex items-center justify-center gap-1.5 transition ${
-                showRightPane === 'members' ? 'bg-slate-800 text-cyan-300' : 'text-slate-400 hover:bg-slate-800/60'
+                showRightPane === 'members' ? 'bg-slate-800 text-sky-300' : 'text-slate-400 hover:bg-slate-800/60'
               }`}
             >
               <Users size={13} /> Members ({project.members.length})

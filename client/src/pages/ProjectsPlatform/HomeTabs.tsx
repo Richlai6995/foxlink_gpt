@@ -28,7 +28,7 @@ export default function HomeTabs() {
         {/* Header */}
         <div className="mb-6">
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-cyan-300">📁 專案管理平台</h1>
+            <h1 className="text-2xl font-bold text-sky-300">📁 專案管理平台</h1>
             <span className="px-2 py-0.5 text-xs bg-amber-500/20 text-amber-300 rounded">
               beta · Sprint 2
             </span>
@@ -73,7 +73,7 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
       onClick={onClick}
       className={`px-4 py-2 text-sm transition ${
         active
-          ? 'border-b-2 border-cyan-400 text-cyan-300'
+          ? 'border-b-2 border-sky-400 text-sky-300'
           : 'text-slate-400 hover:text-slate-200'
       }`}
     >

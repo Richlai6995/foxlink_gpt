@@ -55,15 +55,15 @@ export default function ProjectsPlatformPage() {
             {v.reason === 'not-admin-not-pilot' && (
               <>
                 <p>• Phase 0 只給 admin 看到此功能(visibility evolution plan §A.3)</p>
-                <p>• 改用 admin 帳號登入(server/.env 的 <code className="text-cyan-400">DEFAULT_ADMIN_ACCOUNT</code>)</p>
-                <p>• 或請 admin 把你的 user_id 加進 server/.env 的 <code className="text-cyan-400">PILOT_USERS</code></p>
+                <p>• 改用 admin 帳號登入(server/.env 的 <code className="text-sky-400">DEFAULT_ADMIN_ACCOUNT</code>)</p>
+                <p>• 或請 admin 把你的 user_id 加進 server/.env 的 <code className="text-sky-400">PILOT_USERS</code></p>
               </>
             )}
             {v.reason === 'api-error' && (
               <>
-                <p>• server 沒啟用 module:檢查 server/.env 是否設 <code className="text-cyan-400">ENABLE_PROJECTS_PLATFORM=true</code></p>
+                <p>• server 沒啟用 module:檢查 server/.env 是否設 <code className="text-sky-400">ENABLE_PROJECTS_PLATFORM=true</code></p>
                 <p>• 改完 .env 後必須重啟 server</p>
-                <p>• 確認 server log 有出現 <code className="text-cyan-400">[Route] /api/projects (projects-platform v0.4) OK</code></p>
+                <p>• 確認 server log 有出現 <code className="text-sky-400">[Route] /api/projects (projects-platform v0.4) OK</code></p>
               </>
             )}
             {v.reason === 'no-user' && <p>• 尚未登入</p>}

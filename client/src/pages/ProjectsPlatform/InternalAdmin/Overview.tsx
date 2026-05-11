@@ -53,14 +53,14 @@ export default function InternalAdminOverview() {
 
       {data.sections.map((sec) => (
         <div key={sec.title} className="bg-slate-800/50 rounded-lg p-5 border border-slate-700">
-          <h2 className="text-lg font-semibold text-cyan-200 mb-3">{sec.title}</h2>
+          <h2 className="text-lg font-semibold text-sky-200 mb-3">{sec.title}</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {sec.items.map((item) => (
               <div
                 key={item.key}
                 className={`p-3 rounded border flex items-center justify-between transition ${
                   item.enabled
-                    ? 'bg-emerald-900/20 border-emerald-700/50 hover:border-emerald-500 cursor-pointer'
+                    ? 'bg-green-900/20 border-green-700/50 hover:border-green-500 cursor-pointer'
                     : 'bg-slate-900/50 border-slate-700/50 opacity-60'
                 }`}
               >
@@ -74,7 +74,7 @@ export default function InternalAdminOverview() {
                   </div>
                 </div>
                 {item.enabled && (
-                  <span className="text-xs text-emerald-300">已啟用</span>
+                  <span className="text-xs text-green-300">已啟用</span>
                 )}
                 {!item.enabled && (
                   <span className="text-xs text-slate-500">待 sprint</span>
@@ -87,15 +87,15 @@ export default function InternalAdminOverview() {
 
       <div className="mt-8 p-4 bg-slate-800/30 border border-slate-700/50 rounded text-xs text-slate-500">
         對應規格書:
-        <a className="text-cyan-400 hover:underline ml-1" href="/docs/projects-platform-spec.md" target="_blank">
+        <a className="text-sky-400 hover:underline ml-1" href="/docs/projects-platform-spec.md" target="_blank">
           projects-platform-spec.md
         </a>
         {' · '}
-        <a className="text-cyan-400 hover:underline" href="/docs/projects-platform-implementation-roadmap.md" target="_blank">
+        <a className="text-sky-400 hover:underline" href="/docs/projects-platform-implementation-roadmap.md" target="_blank">
           implementation-roadmap.md
         </a>
         {' · '}
-        <a className="text-cyan-400 hover:underline" href="/docs/projects-platform-internal-admin-plan.md" target="_blank">
+        <a className="text-sky-400 hover:underline" href="/docs/projects-platform-internal-admin-plan.md" target="_blank">
           internal-admin-plan.md
         </a>
       </div>
