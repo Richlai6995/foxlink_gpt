@@ -297,21 +297,19 @@ app.get('/api/version', (req, res) => {
       console.error('[FeedbackSLA] Failed to start:', e.message);
     }
 
-    // Phase 5 Track B: PM Forecast 校驗每日 cron(每 24h 跑一次,server 啟動 60s 後首跑)
-    try {
-      const { startAccuracyCron } = require('./services/pmForecastAccuracyService');
-      startAccuracyCron();
-    } catch (e) {
-      console.error('[PmAccuracy] Failed to start:', e.message);
-    }
-
-    // Phase 5 Track B-4: PM Prompt Self-Improve cron(每天檢查,只在月初 1 號實際跑)
-    try {
-      const { startSelfImproveCron } = require('./services/pmPromptSelfImproveService');
-      startSelfImproveCron();
-    } catch (e) {
-      console.error('[PmSelfImprove] Failed to start:', e.message);
-    }
+    // ── 2026-05-11 user 反饋:預測功能(7 天)效益有限,且 pmForecastAccuracyService
+    // 的 ORA-00932 一直噴 log。整段停掉(cron 不啟、UI 隱、DB/服務檔保留)。
+    //
+    // try {
+    //   const { startAccuracyCron } = require('./services/pmForecastAccuracyService');
+    //   startAccuracyCron();
+    // } catch (e) { console.error('[PmAccuracy] Failed to start:', e.message); }
+    //
+    // try {
+    //   const { startSelfImproveCron } = require('./services/pmPromptSelfImproveService');
+    //   startSelfImproveCron();
+    // } catch (e) { console.error('[PmSelfImprove] Failed to start:', e.message); }
+    console.log('[PM] Forecast accuracy / prompt self-improve cron 已停用(2026-05-11 user 決定)');
 
     // Phase 5 Track C-3: PM Webex Push cron(每分鐘檢查訂閱觸發)
     try {

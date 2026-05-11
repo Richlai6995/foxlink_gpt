@@ -92,7 +92,7 @@ export default function PmBriefingPage() {
         </button>
         <Sparkles size={18} className="text-amber-500" />
         <h1 className="text-lg font-bold text-slate-800">貴金屬情報</h1>
-        <span className="text-xs text-slate-400">採購每日一站式資料 — 報價 / 新聞 / AI 報告 / Prompt 審核</span>
+        <span className="text-xs text-slate-400">採購每日一站式資料 — 報價 / 新聞 / AI 報告</span>
         <div className="ml-auto flex items-center gap-2">
           <button
             onClick={() => setShowPrefs(true)}
@@ -133,12 +133,12 @@ export default function PmBriefingPage() {
 
       {/* Tabs */}
       <div className="bg-white border-b border-t flex items-center gap-1 px-4">
+        {/* 2026-05-11 user 決定:預測功能(7 天)效益有限,Prompt 審核 tab 拿掉 */}
         {([
           { id: 'news',    label: '新聞列表', icon: <Newspaper size={14} /> },
           { id: 'history', label: '歷史價格', icon: <BarChart3 size={14} /> },
           { id: 'weekly',  label: '週報',     icon: <BarChart3 size={14} /> },
           { id: 'monthly', label: '月報',     icon: <FileText size={14} /> },
-          { id: 'review',  label: 'Prompt 審核', icon: <Sparkles size={14} />, badge: reviewPendingCount },
         ] as { id: Tab; label: string; icon: React.ReactNode; badge?: number }[]).map(s => (
           <button
             key={s.id}
@@ -160,7 +160,7 @@ export default function PmBriefingPage() {
         {tab === 'history' && <PriceHistoryTab focusedMetals={Array.from(focusedSet)} />}
         {tab === 'weekly'  && <ReportsTab type="weekly" />}
         {tab === 'monthly' && <ReportsTab type="monthly" />}
-        {tab === 'review'  && <PmReviewQueueView embedded onPendingCountChange={setReviewPendingCount} />}
+        {/* {tab === 'review' && <PmReviewQueueView embedded onPendingCountChange={setReviewPendingCount} />} — 2026-05-11 預測功能停用 */}
       </div>
 
       {showPrefs && <PrefsModal prefs={prefs} onClose={() => setShowPrefs(false)} onSaved={(p) => { setPrefs(p); setShowPrefs(false) }} />}
@@ -1396,13 +1396,8 @@ function PriceHistoryTab({ focusedMetals }: { focusedMetals: string[] }) {
     }
     const fcAll: any = {}, puAll: any = {}, mtAll: any = {}
     Promise.all(metals.map(metal => Promise.all([
-      api.get('/pm/briefing/forecast-overlay', { params: { metal, from, to } })
-        .then(r => fcAll[metal] = (r.data || []).map((x: any) => ({
-          target_date: x.target_date || x.TARGET_DATE,
-          mean:  Number(x.predicted_mean ?? x.PREDICTED_MEAN),
-          lower: x.predicted_lower != null ? Number(x.predicted_lower) : null,
-          upper: x.predicted_upper != null ? Number(x.predicted_upper) : null,
-        }))).catch(() => fcAll[metal] = []),
+      // 2026-05-11 user 決定停用預測功能 — 不再 fetch forecast-overlay,fcAll 永遠空陣列
+      Promise.resolve().then(() => { fcAll[metal] = [] }),
       api.get('/pm/briefing/purchase-overlay', { params: { metal, from, to } })
         .then(r => puAll[metal] = (r.data || []).map((x: any) => ({
           purchase_month: x.purchase_month || x.PURCHASE_MONTH,

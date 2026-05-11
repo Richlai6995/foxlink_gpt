@@ -101,11 +101,8 @@ export default function Sidebar({
       const metals = list.find((b: any) => b.code === 'metals-public')
       setHasPmAccess(!!pm)
       setHasMetalsLite(!!metals)
-      if (pm) {
-        api.get('/pm/review/queue', { params: { status: 'pending' } })
-          .then(rr => setPmReviewPending((rr.data || []).length))
-          .catch(() => setPmReviewPending(0))
-      }
+      // 2026-05-11 user 決定停用預測功能 — review queue 不再用,固定 0 不顯示 badge
+      setPmReviewPending(0)
     }).catch(() => { setHasPmAccess(false); setHasMetalsLite(false) })
   }, [])
   const [hoveredId, setHoveredId] = useState<string | null>(null)
