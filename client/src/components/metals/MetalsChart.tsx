@@ -122,6 +122,15 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
       await reloadAnnotations()
     } catch (e) { console.warn('刪除失敗', e) }
   }
+  const updateAnnotation = async (id: number, data: any, color?: string, note?: string) => {
+    try {
+      await api.put(`/metals/annotations/${id}`, { data, color, note })
+      await reloadAnnotations()
+    } catch (e: any) {
+      alert('更新失敗:' + (e?.response?.data?.error || e?.message))
+    }
+  }
+  const [editingAnn, setEditingAnn] = useState<Annotation | null>(null)
   const clearAllAnnotations = async () => {
     if (!confirm(`清除 ${primaryMetal} 的所有標註?(無法復原)`)) return
     try {
@@ -304,19 +313,21 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
       if (ann.ann_type === 'horizontal') {
         const y = ann.data?.y
         if (!Number.isFinite(y)) continue
+        const lw = Number(ann.data?.lineWidth) || 1.2
         mainPriceSeries.push({
           type: 'line', data: [], silent: true, xAxisIndex: 0, yAxisIndex: 0,
           markLine: {
             symbol: 'none', silent: false,
             data: [{ yAxis: y, name: `H#${ann.id}` }],
             label: { formatter: ann.note || y.toFixed(2), position: 'insideEndTop', fontSize: 10 },
-            lineStyle: { color: ann.color || '#f59e0b', width: 1.2, type: 'dashed' },
+            lineStyle: { color: ann.color || '#f59e0b', width: lw, type: 'dashed' },
           },
         })
       } else if (ann.ann_type === 'trendline') {
         const p1 = ann.data?.p1
         const p2 = ann.data?.p2
         if (!Array.isArray(p1) || !Array.isArray(p2)) continue
+        const lw = Number(ann.data?.lineWidth) || 1.5
         mainPriceSeries.push({
           type: 'line', data: [], silent: true, xAxisIndex: 0, yAxisIndex: 0,
           markLine: {
@@ -326,20 +337,43 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
               { coord: [p2[0], p2[1]] },
             ]],
             label: { show: false },
-            lineStyle: { color: ann.color || '#3b82f6', width: 1.5 },
+            lineStyle: { color: ann.color || '#3b82f6', width: lw },
           },
         })
       } else if (ann.ann_type === 'text') {
         const at = ann.data?.at
         const text = ann.data?.text || ''
+        const fontSize = Number(ann.data?.fontSize) || 12
+        const textColor = ann.data?.textColor || '#ffffff'
+        const bgColor = ann.color || '#10b981'
         if (!Array.isArray(at) || !text) continue
+        // 估算文字框尺寸:中英混合每字約 fontSize × 1 寬,左右各留 8px 內距;
+        // 高度 fontSize × 1.6 + 8px 內距。讓文字真的進得去(原本 pin 太小看不到)
+        const charWidthApprox = text.split('').reduce((sum, c) => sum + (/[一-鿿＀-￿]/.test(c) ? fontSize : fontSize * 0.6), 0)
+        const boxW = Math.max(charWidthApprox + 16, 32)
+        const boxH = fontSize * 1.6 + 8
         mainPriceSeries.push({
           type: 'line', data: [], silent: true, xAxisIndex: 0, yAxisIndex: 0,
           markPoint: {
-            symbol: 'pin', symbolSize: 30, silent: false,
-            data: [{ coord: [at[0], at[1]], value: '', name: `X#${ann.id}` }],
-            label: { show: true, formatter: text, fontSize: 11, color: '#fff', fontWeight: 'bold' },
-            itemStyle: { color: ann.color || '#10b981' },
+            symbol: 'roundRect',
+            symbolSize: [boxW, boxH],
+            symbolKeepAspect: false,
+            silent: false,
+            data: [{ coord: [at[0], at[1]], name: `X#${ann.id}` }],
+            label: {
+              show: true,
+              formatter: text,
+              fontSize,
+              color: textColor,
+              fontWeight: 'bold',
+            },
+            itemStyle: {
+              color: bgColor,
+              borderColor: '#ffffff',
+              borderWidth: 1,
+              shadowBlur: 4,
+              shadowColor: 'rgba(0,0,0,0.2)',
+            },
           },
         })
       }
@@ -522,7 +556,7 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
           <>
             <span className="ml-2 text-slate-400">|</span>
             <span className="text-slate-600">已有 <b>{annotations.length}</b> 個</span>
-            <AnnotationsDropdown annotations={annotations} onDelete={deleteAnnotation} />
+            <AnnotationsDropdown annotations={annotations} onDelete={deleteAnnotation} onEdit={setEditingAnn} />
             <button
               onClick={clearAllAnnotations}
               className="flex items-center gap-1 px-2 py-0.5 rounded border border-rose-200 text-rose-600 hover:bg-rose-50"
@@ -576,6 +610,177 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
         viewDate={viewDate}
         indicators={indicators}
       />
+
+      {/* 編輯標註 modal */}
+      {editingAnn && (
+        <AnnotationEditModal
+          annotation={editingAnn}
+          onClose={() => setEditingAnn(null)}
+          onSave={async (data, color, note) => {
+            await updateAnnotation(editingAnn.id, data, color, note)
+            setEditingAnn(null)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── Annotation 編輯 modal ────────────────────────────────────────────────────
+function AnnotationEditModal({
+  annotation, onClose, onSave,
+}: {
+  annotation: Annotation
+  onClose: () => void
+  onSave: (data: any, color?: string, note?: string) => Promise<void>
+}) {
+  const initData = annotation.data || {}
+  const [color, setColor] = useState(annotation.color || (
+    annotation.ann_type === 'horizontal' ? '#f59e0b'
+    : annotation.ann_type === 'trendline' ? '#3b82f6'
+    : '#10b981'
+  ))
+  const [note, setNote] = useState(annotation.note || '')
+  // 各 type 專屬欄位
+  const [y, setY] = useState<number>(Number(initData.y) || 0)
+  const [p1Date, setP1Date] = useState<string>(initData.p1?.[0] || '')
+  const [p1Y, setP1Y] = useState<number>(Number(initData.p1?.[1]) || 0)
+  const [p2Date, setP2Date] = useState<string>(initData.p2?.[0] || '')
+  const [p2Y, setP2Y] = useState<number>(Number(initData.p2?.[1]) || 0)
+  const [lineWidth, setLineWidth] = useState<number>(Number(initData.lineWidth) || (annotation.ann_type === 'trendline' ? 1.5 : 1.2))
+  const [text, setText] = useState<string>(initData.text || '')
+  const [textDate, setTextDate] = useState<string>(initData.at?.[0] || '')
+  const [textY, setTextY] = useState<number>(Number(initData.at?.[1]) || 0)
+  const [fontSize, setFontSize] = useState<number>(Number(initData.fontSize) || 12)
+  const [textColor, setTextColor] = useState(initData.textColor || '#ffffff')
+  const [saving, setSaving] = useState(false)
+
+  const submit = async () => {
+    setSaving(true)
+    try {
+      let data: any
+      if (annotation.ann_type === 'horizontal') {
+        if (!Number.isFinite(y)) { alert('y 必須是數字'); setSaving(false); return }
+        data = { y, lineWidth }
+      } else if (annotation.ann_type === 'trendline') {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(p1Date) || !/^\d{4}-\d{2}-\d{2}$/.test(p2Date)) {
+          alert('日期格式必須 YYYY-MM-DD'); setSaving(false); return
+        }
+        data = { p1: [p1Date, p1Y], p2: [p2Date, p2Y], lineWidth }
+      } else if (annotation.ann_type === 'text') {
+        if (!text.trim()) { alert('文字內容不可空'); setSaving(false); return }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(textDate)) { alert('日期格式必須 YYYY-MM-DD'); setSaving(false); return }
+        data = { at: [textDate, textY], text: text.trim(), fontSize, textColor }
+      } else {
+        data = annotation.data
+      }
+      await onSave(data, color, note)
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-white rounded-lg p-4 w-[400px] max-w-[90vw] shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-2 mb-3">
+          <Type size={14} className="text-slate-700" />
+          <span className="font-semibold text-sm">
+            編輯{annotation.ann_type === 'horizontal' ? '水平線' : annotation.ann_type === 'trendline' ? '趨勢線' : '文字標註'}
+          </span>
+          <button onClick={onClose} className="ml-auto text-slate-400 hover:text-slate-700">✕</button>
+        </div>
+
+        <div className="space-y-3 text-xs">
+          {/* HORIZONTAL */}
+          {annotation.ann_type === 'horizontal' && (
+            <>
+              <FormRow label="價位(USD)">
+                <input
+                  type="number" step="any"
+                  value={y} onChange={e => setY(Number(e.target.value))}
+                  className="w-full border rounded px-2 py-1 font-mono"
+                />
+              </FormRow>
+              <FormRow label="說明文字(顯示在線旁)">
+                <input
+                  type="text" value={note} maxLength={200}
+                  onChange={e => setNote(e.target.value)}
+                  placeholder="例如:成本警戒線"
+                  className="w-full border rounded px-2 py-1"
+                />
+              </FormRow>
+            </>
+          )}
+
+          {/* TRENDLINE */}
+          {annotation.ann_type === 'trendline' && (
+            <>
+              <FormRow label="第 1 點 日期">
+                <input type="date" value={p1Date} onChange={e => setP1Date(e.target.value)} className="w-full border rounded px-2 py-1 font-mono" />
+              </FormRow>
+              <FormRow label="第 1 點 價位">
+                <input type="number" step="any" value={p1Y} onChange={e => setP1Y(Number(e.target.value))} className="w-full border rounded px-2 py-1 font-mono" />
+              </FormRow>
+              <FormRow label="第 2 點 日期">
+                <input type="date" value={p2Date} onChange={e => setP2Date(e.target.value)} className="w-full border rounded px-2 py-1 font-mono" />
+              </FormRow>
+              <FormRow label="第 2 點 價位">
+                <input type="number" step="any" value={p2Y} onChange={e => setP2Y(Number(e.target.value))} className="w-full border rounded px-2 py-1 font-mono" />
+              </FormRow>
+            </>
+          )}
+
+          {/* TEXT */}
+          {annotation.ann_type === 'text' && (
+            <>
+              <FormRow label="文字內容">
+                <input type="text" value={text} maxLength={100} onChange={e => setText(e.target.value)} className="w-full border rounded px-2 py-1" />
+              </FormRow>
+              <FormRow label="日期">
+                <input type="date" value={textDate} onChange={e => setTextDate(e.target.value)} className="w-full border rounded px-2 py-1 font-mono" />
+              </FormRow>
+              <FormRow label="價位 Y">
+                <input type="number" step="any" value={textY} onChange={e => setTextY(Number(e.target.value))} className="w-full border rounded px-2 py-1 font-mono" />
+              </FormRow>
+              <FormRow label="字級">
+                <input type="range" min={9} max={24} value={fontSize} onChange={e => setFontSize(Number(e.target.value))} className="w-full" />
+                <span className="ml-2 font-mono text-slate-600">{fontSize}px</span>
+              </FormRow>
+              <FormRow label="文字色">
+                <input type="color" value={textColor} onChange={e => setTextColor(e.target.value)} className="w-12 h-7" />
+              </FormRow>
+            </>
+          )}
+
+          {/* 線 / 字 共用色 + 線寬 */}
+          <FormRow label={annotation.ann_type === 'text' ? '背景色' : '線色'}>
+            <input type="color" value={color} onChange={e => setColor(e.target.value)} className="w-12 h-7" />
+          </FormRow>
+          {(annotation.ann_type === 'horizontal' || annotation.ann_type === 'trendline') && (
+            <FormRow label="線寬">
+              <input type="range" min={0.5} max={5} step={0.5} value={lineWidth} onChange={e => setLineWidth(Number(e.target.value))} className="w-full" />
+              <span className="ml-2 font-mono text-slate-600">{lineWidth}px</span>
+            </FormRow>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 mt-4 pt-3 border-t">
+          <button onClick={onClose} className="px-3 py-1 text-xs text-slate-600 hover:bg-slate-100 rounded">取消</button>
+          <button
+            onClick={submit}
+            disabled={saving}
+            className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50"
+          >{saving ? '儲存中…' : '儲存'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function FormRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2">
+      <label className="text-slate-600 w-24 flex-shrink-0">{label}</label>
+      <div className="flex-1 flex items-center">{children}</div>
     </div>
   )
 }
@@ -595,7 +800,13 @@ function ToolBtn({ active, onClick, icon, label }: { active: boolean; onClick: (
 }
 
 // ─── 標註管理 dropdown ─────────────────────────────────────────────────────
-function AnnotationsDropdown({ annotations, onDelete }: { annotations: Annotation[]; onDelete: (id: number) => void }) {
+function AnnotationsDropdown({
+  annotations, onDelete, onEdit,
+}: {
+  annotations: Annotation[]
+  onDelete: (id: number) => void
+  onEdit: (ann: Annotation) => void
+}) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
@@ -613,17 +824,24 @@ function AnnotationsDropdown({ annotations, onDelete }: { annotations: Annotatio
         className="flex items-center gap-1 px-2 py-0.5 rounded border border-slate-200 text-slate-600 hover:bg-slate-100"
       >📋 列表</button>
       {open && (
-        <div className="absolute top-full left-0 mt-1 bg-white border rounded shadow-lg p-2 z-30 w-[280px] max-h-[300px] overflow-y-auto">
-          <div className="text-[10px] text-slate-500 mb-1">{annotations.length} 個標註</div>
+        <div className="absolute top-full left-0 mt-1 bg-white border rounded shadow-lg p-2 z-30 w-[300px] max-h-[320px] overflow-y-auto">
+          <div className="text-[10px] text-slate-500 mb-1">{annotations.length} 個標註(點 ✏️ 編輯)</div>
           {annotations.map(ann => {
             let desc = ''
             if (ann.ann_type === 'horizontal') desc = `H 線 @ ${ann.data?.y?.toFixed(2)}`
             else if (ann.ann_type === 'trendline') desc = `趨勢 ${ann.data?.p1?.[0]?.slice(5)} → ${ann.data?.p2?.[0]?.slice(5)}`
             else if (ann.ann_type === 'text') desc = `「${(ann.data?.text || '').slice(0, 14)}」@ ${ann.data?.at?.[0]?.slice(5)}`
+            const swatch = ann.color || (ann.ann_type === 'horizontal' ? '#f59e0b' : ann.ann_type === 'trendline' ? '#3b82f6' : '#10b981')
             return (
               <div key={ann.id} className="flex items-center gap-1 text-[11px] py-1 border-b last:border-b-0">
+                <span className="inline-block w-2.5 h-2.5 rounded-sm border border-slate-300" style={{ background: swatch }} />
                 <span className="flex-1 truncate" title={desc}>{desc}</span>
                 <span className="text-slate-400 text-[9px]">{ann.created_at?.slice(5) || ''}</span>
+                <button
+                  onClick={() => { onEdit(ann); setOpen(false) }}
+                  className="text-blue-500 hover:text-blue-700 px-1"
+                  title="編輯內容/顏色/大小"
+                >✏️</button>
                 <button
                   onClick={() => { onDelete(ann.id); setOpen(false) }}
                   className="text-rose-500 hover:text-rose-700 px-1"

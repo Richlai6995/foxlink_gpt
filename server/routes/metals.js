@@ -1018,6 +1018,29 @@ router.post('/annotations', verifyToken, verifyMetalsAccess, async (req, res) =>
   }
 });
 
+router.put('/annotations/:id', verifyToken, verifyMetalsAccess, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid id' });
+    const { data, color, note } = req.body || {};
+    if (!data || typeof data !== 'object') return res.status(400).json({ error: 'data required (object)' });
+    const dataJson = JSON.stringify(data);
+    if (dataJson.length > 4000) return res.status(400).json({ error: 'data too large' });
+    const r = await db.prepare(`
+      UPDATE pm_chart_annotations
+      SET data_json = ?, color = ?, note = ?
+      WHERE id = ? AND user_id = ?
+    `).run(dataJson, color || null, note ? String(note).slice(0, 200) : null, id, req.user.id);
+    const cnt = r?.rowsAffected ?? r?.changes ?? 0;
+    if (!cnt) return res.status(404).json({ error: 'not found or not owned' });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[Metals] PUT /annotations/:id error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.delete('/annotations/:id', verifyToken, verifyMetalsAccess, async (req, res) => {
   try {
     const db = require('../database-oracle').db;
