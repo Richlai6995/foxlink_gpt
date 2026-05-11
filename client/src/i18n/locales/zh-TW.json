@@ -1132,7 +1132,7 @@
       "parseModeTextOnly": "純文字",
       "parseModeFormatAware": "格式感知",
       "dropZoneText": "拖曳或點擊上傳文件",
-      "dropZoneHint": "支援 PDF · DOCX/DOC · PPTX/PPT · XLSX/XLS · TXT · CSV · JPG · PNG · GIF · WEBP（最大 200 MB）",
+      "dropZoneHint": "支援 PDF · Office · Email(EML) · 圖片 · 純文字 · 程式碼／設定／Log（單檔最大 200 MB，詳見「上傳檔案」說明頁）",
       "uploading": "上傳中...",
       "uploadFailed": "上傳失敗",
       "loading": "載入中...",
