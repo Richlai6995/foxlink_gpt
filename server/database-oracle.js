@@ -3692,6 +3692,43 @@ async function runMigrations(db) {
     }
   } catch (e) { console.warn('[Migration] metal_code UPPERCASE normalization:', e.message); }
 
+  // ─── pm_price_history dedupe + UNIQUE (metal_code, as_of_date) ──────────────
+  // backfill 之前先確保不會重複塞。idempotent — 既加過 constraint 就 skip。
+  // 步驟:
+  //   1. 找 (metal_code, as_of_date) 重複組,保留 MAX(id) 那筆刪其餘
+  //   2. 加 UNIQUE constraint(ORA-02261 / 00955 已存在則 skip)
+  try {
+    const dupRow = await db.prepare(`
+      SELECT COUNT(*) AS cnt FROM (
+        SELECT 1 FROM pm_price_history
+        GROUP BY metal_code, as_of_date HAVING COUNT(*) > 1
+      )
+    `).get();
+    const dupGroups = Number(dupRow?.cnt ?? dupRow?.CNT ?? 0);
+    if (dupGroups > 0) {
+      const r = await db.prepare(`
+        DELETE FROM pm_price_history WHERE id NOT IN (
+          SELECT MAX(id) FROM pm_price_history GROUP BY metal_code, as_of_date
+        )
+      `).run();
+      const deleted = r?.rowsAffected ?? r?.changes ?? 0;
+      console.log(`[Migration] pm_price_history dedupe: ${dupGroups} 組重複 → 刪掉 ${deleted} 筆舊 row(保留每組 MAX(id))`);
+    }
+    try {
+      await db.prepare(
+        `ALTER TABLE pm_price_history ADD CONSTRAINT uq_pm_price_md UNIQUE (metal_code, as_of_date)`
+      ).run();
+      console.log('[Migration] pm_price_history 加 UNIQUE (metal_code, as_of_date)');
+    } catch (e) {
+      // ORA-02261 such unique key already exists / ORA-00955 name in use
+      if (e.errorNum !== 2261 && e.errorNum !== 955) {
+        console.warn('[Migration] uq_pm_price_md 加 UNIQUE 失敗:', e.message);
+      }
+    }
+  } catch (e) {
+    console.warn('[Migration] pm_price_history dedupe/UNIQUE 流程錯誤:', e.message);
+  }
+
   // ─── Idempotent cleanup:把仍指向 'metal_price_history' 的 stale row 清掉 ───
   // (rename block 只在 oldExists>0 && newExists===0 才跑;若環境曾並存兩 table、
   //  或先 seed 了 pm_price_history 再 rename,ai_schema_definitions /
