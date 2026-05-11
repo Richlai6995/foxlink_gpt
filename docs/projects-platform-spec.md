@@ -1436,7 +1436,41 @@ confidentialityMiddleware (§4.1)
 | 對外 API(Future) | 推送前過 middleware,scrub 後送出 |
 | Bot context | INPUT 流經 middleware 轉換,再進 LLM(§12.4) |
 
-### 10.7 原 quote-system v0.3.5 內容對照
+### 10.7 解耦架構設計(保護既有 Cortex 不被影響)
+
+> **詳細設計另開檔案**:[projects-platform-decoupling-architecture.md](./projects-platform-decoupling-architecture.md)
+
+#### 10.7.1 5 層解耦策略總覽
+
+| 層級 | 策略 | 風險 |
+|---|---|---|
+| **Code** | 獨立 `server/projects-platform/` namespace + `/api/projects/*` mount | 🟢 低 |
+| **Schema** | 全新表 `project_*` / `qp_*` 前綴;**僅 1 張既有表加 column**(`ticket_messages`)| 🟡 中(滾動安全) |
+| **Deploy** | 同 Cortex Pod 同 process;**Feature flag** `ENABLE_PROJECTS_PLATFORM` | 🟢 低 |
+| **Runtime** | 嚴格 try/catch;exception 不冒泡;LLM rate limiter | 🟢 低 |
+| **監控** | Log prefix `[projects-platform]` + 獨立 Loki dashboard | 🟢 低 |
+
+#### 10.7.2 5 條硬規則(Code Review 必檢查)
+
+1. **不直接 ALTER Cortex 既有 schema**(除 `ticket_messages` 加 column 已規劃)
+2. **不直接動 Cortex 既有 route handler 程式碼**
+3. **共用 service 只 import 不修改**(geminiClient / kbRetrieval / smtp 等)
+4. **新平台 exception 不冒泡出 namespace 邊界**
+5. **共用資源(LLM token / DB pool / Redis)走 rate limiter**
+
+#### 10.7.3 ✅ 採取「整合 Module」而非「Microservice」
+
+- Phase 1-3 走同 process(充分共用 Cortex 基礎建設,deploy 簡單)
+- Phase 4 才評估是否要拆 microservice(看實際 traffic / 規模)
+
+#### 10.7.4 Rollback 機制
+
+- Env 改 `ENABLE_PROJECTS_PLATFORM=false` + rolling restart(< 5 min 內完成)
+- 不需要 DB rollback(新表留著無傷,ALTER column 留著也無感)
+
+→ 詳細啟動 Checklist + 演進策略 + 風險矩陣 見 [projects-platform-decoupling-architecture.md](./projects-platform-decoupling-architecture.md)。
+
+### 10.8 原 quote-system v0.3.5 內容對照
 
 | v0.3.5 章節 | v0.4 處理 |
 |---|---|
@@ -4523,6 +4557,7 @@ CREATE TABLE admin_testing_sessions (
 - **主管簡報完整版**:[projects-platform-executive-deck.md](./projects-platform-executive-deck.md) — 29 張 v2(架構 / 流程 / 功能 / 時程 / 效益)
 - **主管簡報 2 頁總結**:[projects-platform-executive-summary.md](./projects-platform-executive-summary.md) — 1 頁功能 + 1 頁流程 v2
 - **CIO 競品分析簡報**:[projects-platform-vs-market-cio.md](./projects-platform-vs-market-cio.md) — 22 張(市場分析 + Build vs Buy + 5 年 TCO + Vendor Lock-in + Q&A)
+- **⭐ 解耦架構設計**:[projects-platform-decoupling-architecture.md](./projects-platform-decoupling-architecture.md) — 保護既有 Cortex 不被影響的 5 層解耦設計(Code / Schema / Deploy / Runtime / 監控)+ 5 條硬規則 + Rollback 機制 + 演進策略
 
 ### 既有 Cortex 文件
 - 舊規格書:[quote-system-spec.md](./quote-system-spec.md)(v0.3.5)— 仍可作報價特化邏輯參考
