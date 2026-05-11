@@ -387,17 +387,47 @@ const METALS_AI_SYSTEM_INSTRUCTION = `你是 Foxlink 集團「金屬市場分析
 5. 引用資料時用「根據今日報價/宏觀/新聞」等明確表述,不要捏造數字。
 6. 回應簡潔 — 一般 user 不要太長篇大論,4-8 行為佳,必要時加表格或條列。`;
 
-// 把 caller 給的 model preset / 名稱 resolve 成實際 API model 名,
-// 並回傳「resolved name + 哪個 env var」讓前端顯示
-function resolveLlmModel(input) {
+// 把 caller 給的 model key/preset/全名 resolve 成實際 API model 名。
+// 優先序:llm_models.key 查表 → 'flash'/'pro' env shortcut → 全名 whitelist → fallback Pro
+async function resolveLlmModel(input, db) {
   const FLASH = process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview';
   const PRO = process.env.GEMINI_MODEL_PRO || 'gemini-3-pro-preview';
-  const s = String(input || '').trim().toLowerCase();
-  if (s === 'pro' || s === 'gemini-pro') return { name: PRO, preset: 'pro' };
-  if (s === 'flash' || s === 'gemini-flash') return { name: FLASH, preset: 'flash' };
-  // 直接指定全名(白名單:只允許含 'gemini' / 'gpt' 的 string,防注入)
-  if (s && /^[a-z0-9-_.]+$/i.test(s) && /gemini|gpt/.test(s)) return { name: s, preset: 'custom' };
-  return { name: FLASH, preset: 'flash' };  // 預設
+  const s = String(input || '').trim();
+  // 空 → 預設 Pro
+  if (!s) return { name: PRO, key: 'pro', source: 'default' };
+
+  // 1. preset shortcut(向下相容舊 localStorage 的 'flash'/'pro')
+  const sLower = s.toLowerCase();
+  if (sLower === 'pro' || sLower === 'gemini-pro') return { name: PRO, key: 'pro', source: 'env' };
+  if (sLower === 'flash' || sLower === 'gemini-flash') return { name: FLASH, key: 'flash', source: 'env' };
+
+  // 2. llm_models 查表:用 key 或 api_model match
+  try {
+    const row = await db.prepare(`
+      SELECT key, api_model FROM llm_models
+      WHERE is_active = 1
+        AND (model_role IS NULL OR model_role = 'chat')
+        AND (key = ? OR LOWER(api_model) = LOWER(?))
+      FETCH FIRST 1 ROWS ONLY
+    `).get(s, s);
+    if (row) {
+      return {
+        name: row.api_model || row.API_MODEL,
+        key: row.key || row.KEY,
+        source: 'llm_models',
+      };
+    }
+  } catch (e) {
+    console.warn('[Metals/resolveLlmModel] llm_models lookup 失敗:', e.message);
+  }
+
+  // 3. 全名 whitelist(防 SQLi / 防亂塞)
+  if (/^[a-z0-9-_.]+$/i.test(s) && /gemini|gpt/.test(s)) {
+    return { name: s, key: s, source: 'direct' };
+  }
+
+  // 4. fallback Pro
+  return { name: PRO, key: 'pro', source: 'fallback' };
 }
 
 router.post('/ai-analyze', verifyToken, verifyMetalsAccess, async (req, res) => {
@@ -479,9 +509,9 @@ router.post('/ai-analyze', verifyToken, verifyMetalsAccess, async (req, res) => 
     const fullSystem = `${METALS_AI_SYSTEM_INSTRUCTION}\n\n---\n以下是當前資料快照(供你回答用,不要重複貼出來,引用即可):\n\n${ragContext}`;
 
     // 2) 呼叫 streamChat,session-only — history=[], 無 file
-    const resolved = resolveLlmModel(req.body?.model);
+    const resolved = await resolveLlmModel(req.body?.model, db);
     const apiModel = resolved.name;
-    console.log(`[Metals/ai-analyze] model=${apiModel} (preset=${resolved.preset})`);
+    console.log(`[Metals/ai-analyze] model=${apiModel} (key=${resolved.key}, source=${resolved.source})`);
     const userParts = [{ text: question }];
 
     let totalText = '';
@@ -505,7 +535,7 @@ router.post('/ai-analyze', verifyToken, verifyMetalsAccess, async (req, res) => 
         input_tokens: result?.inputTokens || 0,
         output_tokens: result?.outputTokens || 0,
         model: apiModel,
-        preset: resolved.preset,
+        model_key: resolved.key,
       });
     } catch (e) {
       console.error('[Metals] /ai-analyze stream error:', e);
@@ -636,9 +666,9 @@ ${ctxJson}
 
     // 4) streamChat
     const { streamChat } = require('../services/gemini');
-    const resolvedTA = resolveLlmModel(req.body?.model);
+    const resolvedTA = await resolveLlmModel(req.body?.model, db);
     const apiModel = resolvedTA.name;
-    console.log(`[Metals/TA] model=${apiModel} (preset=${resolvedTA.preset})`);
+    console.log(`[Metals/TA] model=${apiModel} (key=${resolvedTA.key}, source=${resolvedTA.source})`);
     const userParts = [{ text: `請給 ${metal} 當前的技術分析摘要。` }];
 
     let totalText = '';
@@ -663,7 +693,7 @@ ${ctxJson}
         output_tokens: result?.outputTokens || 0,
         bars_analyzed: ctx.stats?.bars || 0,
         model: apiModel,
-        preset: resolvedTA.preset,
+        model_key: resolvedTA.key,
       });
     } catch (e) {
       console.error('[Metals] /ai-ta-analyze stream error:', e);

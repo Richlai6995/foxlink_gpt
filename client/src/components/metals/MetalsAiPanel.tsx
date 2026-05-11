@@ -5,7 +5,8 @@
  * 改成 drawer 是為了騰出右欄空間給新聞顯示(2026-05-10 user 反饋)
  */
 import { Sparkles, Send, RefreshCw, Loader2, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import api from '../../lib/api'
 
 interface QA {
   question: string
@@ -15,23 +16,52 @@ interface QA {
   model?: string
 }
 
-const STORAGE_TOKEN_KEY = 'token'
+interface LlmModelOption {
+  key: string
+  name: string
+  api_model: string
+  description?: string
+  provider_type?: string
+}
 
-type ModelPreset = 'flash' | 'pro'
+const STORAGE_TOKEN_KEY = 'token'
 
 interface Props {
   isOpen: boolean
   onClose: () => void
 }
 
+// 從 model 清單挑「預設選誰」— 優先 Pro,排除 image/embed/rerank/tts/stt
+function pickDefaultModelKey(models: LlmModelOption[]): string {
+  if (!models || models.length === 0) return 'pro'
+  const isExcluded = (s: string) => /image|embed|rerank|tts|stt/i.test(s)
+  const pros = models.filter(m => /pro/i.test(m.key + ' ' + m.name) && !isExcluded(m.key + ' ' + m.name))
+  if (pros.length > 0) return pros[0].key
+  const firstChat = models.find(m => !isExcluded(m.key + ' ' + m.name))
+  return firstChat?.key || models[0].key
+}
+
 export default function MetalsAiPanel({ isOpen, onClose }: Props) {
   const [input, setInput] = useState('')
   const [qa, setQa] = useState<QA[]>([])
   const [streaming, setStreaming] = useState(false)
-  const [modelPreset, setModelPreset] = useState<ModelPreset>(
-    () => (localStorage.getItem('metals_ai_model') as ModelPreset) || 'flash'
-  )
-  useEffect(() => { localStorage.setItem('metals_ai_model', modelPreset) }, [modelPreset])
+  const [models, setModels] = useState<LlmModelOption[]>([])
+  const [modelKey, setModelKey] = useState<string>(() => localStorage.getItem('metals_ai_model') || '')
+  useEffect(() => { if (modelKey) localStorage.setItem('metals_ai_model', modelKey) }, [modelKey])
+
+  useEffect(() => {
+    api.get('/chat/models').then(r => {
+      const list = Array.isArray(r.data) ? r.data : []
+      const chatOnly = list.filter((m: LlmModelOption) => !/image|embed|rerank|tts|stt/i.test((m.key || '') + ' ' + (m.name || '')))
+      setModels(chatOnly)
+      if (!modelKey || !chatOnly.find((m: LlmModelOption) => m.key === modelKey)) {
+        setModelKey(pickDefaultModelKey(chatOnly))
+      }
+    }).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const selectedModel = useMemo(() => models.find(m => m.key === modelKey), [models, modelKey])
   const abortRef = useRef<AbortController | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const scrollerRef = useRef<HTMLDivElement | null>(null)
@@ -80,7 +110,7 @@ export default function MetalsAiPanel({ isOpen, onClose }: Props) {
           'Content-Type': 'application/json',
           'Authorization': token ? `Bearer ${token}` : '',
         },
-        body: JSON.stringify({ question: q, model: modelPreset }),
+        body: JSON.stringify({ question: q, model: modelKey }),
         signal: abortRef.current.signal,
       })
       if (!resp.ok || !resp.body) {
@@ -180,21 +210,19 @@ export default function MetalsAiPanel({ isOpen, onClose }: Props) {
           <h3 className="text-sm font-bold text-slate-800">AI 分析</h3>
           <span className="text-[10px] text-slate-500">問金屬/新聞/趨勢/宏觀</span>
           <div className="ml-auto flex items-center gap-1">
-            {/* 模型選擇 */}
-            <div className="flex items-center text-[10px] border rounded overflow-hidden">
-              <button
-                onClick={() => setModelPreset('flash')}
-                disabled={streaming}
-                className={`px-2 py-1 ${modelPreset === 'flash' ? 'bg-amber-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'} disabled:opacity-40`}
-                title="Flash:快(~3 秒)"
-              >Flash</button>
-              <button
-                onClick={() => setModelPreset('pro')}
-                disabled={streaming}
-                className={`px-2 py-1 ${modelPreset === 'pro' ? 'bg-amber-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'} disabled:opacity-40`}
-                title="Pro:慢但分析更全面(~15-30 秒)"
-              >Pro</button>
-            </div>
+            {/* 模型選擇 — 從 LLM 模型設定撈 chat 角色的全部模型 */}
+            <select
+              value={modelKey}
+              onChange={e => setModelKey(e.target.value)}
+              disabled={streaming || models.length === 0}
+              className="text-[10px] border rounded px-1.5 py-1 bg-white text-slate-700 max-w-[160px] disabled:opacity-40"
+              title={selectedModel?.description || selectedModel?.api_model || '選擇 LLM 模型'}
+            >
+              {models.length === 0 && <option value="">載入中…</option>}
+              {models.map(m => (
+                <option key={m.key} value={m.key}>{m.name}</option>
+              ))}
+            </select>
             {qa.length > 0 && (
               <button
                 onClick={clear}

@@ -8,9 +8,18 @@
  * - chart 設定變(換金屬/換區間/勾指標)→ 點重新分析按鈕重打
  */
 import { Sparkles, RefreshCw, Loader2, X, AlertCircle } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import api from '../../lib/api'
 
 const STORAGE_TOKEN_KEY = 'token'
+
+interface LlmModelOption {
+  key: string
+  name: string
+  api_model: string
+  description?: string
+  provider_type?: string
+}
 
 interface Props {
   isOpen: boolean
@@ -21,20 +30,46 @@ interface Props {
   indicators: string[]         // ['MA20','MA60','RSI14'...]
 }
 
-type ModelPreset = 'flash' | 'pro'
+// 從 model 清單挑「預設選誰」— 優先 key/name 含 'Pro' 但不含 image/embed/rerank/tts/stt
+function pickDefaultModelKey(models: LlmModelOption[]): string {
+  if (!models || models.length === 0) return 'pro'
+  const isExcluded = (s: string) => /image|embed|rerank|tts|stt/i.test(s)
+  const pros = models.filter(m => /pro/i.test(m.key + ' ' + m.name) && !isExcluded(m.key + ' ' + m.name))
+  if (pros.length > 0) return pros[0].key
+  const firstChat = models.find(m => !isExcluded(m.key + ' ' + m.name))
+  return firstChat?.key || models[0].key
+}
 
 export default function MetalsTAPanel({ isOpen, onClose, metal, days, viewDate, indicators }: Props) {
   const [answer, setAnswer] = useState('')
   const [error, setError] = useState('')
   const [streaming, setStreaming] = useState(false)
-  const [meta, setMeta] = useState<{ bars?: number; input_tokens?: number; output_tokens?: number; model?: string; preset?: string } | null>(null)
-  // 預設 Flash 快;Pro 慢但分析更全面。從 localStorage 記住上次選擇
-  const [modelPreset, setModelPreset] = useState<ModelPreset>(
-    () => (localStorage.getItem('metals_ta_model') as ModelPreset) || 'flash'
-  )
-  useEffect(() => { localStorage.setItem('metals_ta_model', modelPreset) }, [modelPreset])
+  const [meta, setMeta] = useState<{ bars?: number; input_tokens?: number; output_tokens?: number; model?: string; model_key?: string } | null>(null)
+  // 可用模型清單 from /api/chat/models(server 已 filter role='chat' || NULL)
+  const [models, setModels] = useState<LlmModelOption[]>([])
+  // user 選擇的 model key,localStorage 持久
+  const [modelKey, setModelKey] = useState<string>(() => localStorage.getItem('metals_ta_model') || '')
+  useEffect(() => { if (modelKey) localStorage.setItem('metals_ta_model', modelKey) }, [modelKey])
+
+  // 首次載入抓 model 清單
+  useEffect(() => {
+    api.get('/chat/models').then(r => {
+      const list = Array.isArray(r.data) ? r.data : []
+      // 進一步過濾掉 image/embed/rerank/tts/stt(雖然 server 應該已 filter,雙保險)
+      const chatOnly = list.filter((m: LlmModelOption) => !/image|embed|rerank|tts|stt/i.test((m.key || '') + ' ' + (m.name || '')))
+      setModels(chatOnly)
+      // 若 user 還沒選或 key 不在清單,設預設
+      if (!modelKey || !chatOnly.find((m: LlmModelOption) => m.key === modelKey)) {
+        setModelKey(pickDefaultModelKey(chatOnly))
+      }
+    }).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const abortRef = useRef<AbortController | null>(null)
   const scrollerRef = useRef<HTMLDivElement | null>(null)
+
+  const selectedModel = useMemo(() => models.find(m => m.key === modelKey), [models, modelKey])
 
   const run = async () => {
     if (streaming) return
@@ -49,7 +84,7 @@ export default function MetalsTAPanel({ isOpen, onClose, metal, days, viewDate, 
           'Content-Type': 'application/json',
           'Authorization': token ? `Bearer ${token}` : '',
         },
-        body: JSON.stringify({ metal, days, end_date: viewDate || undefined, indicators, model: modelPreset }),
+        body: JSON.stringify({ metal, days, end_date: viewDate || undefined, indicators, model: modelKey }),
         signal: abortRef.current.signal,
       })
       if (!resp.ok || !resp.body) {
@@ -85,7 +120,7 @@ export default function MetalsTAPanel({ isOpen, onClose, metal, days, viewDate, 
                   input_tokens: payload.input_tokens,
                   output_tokens: payload.output_tokens,
                   model: payload.model,
-                  preset: payload.preset,
+                  model_key: payload.model_key,
                 })
               } else if (event === 'error') {
                 setError(payload.error || '未知錯誤')
@@ -145,21 +180,19 @@ export default function MetalsTAPanel({ isOpen, onClose, metal, days, viewDate, 
           <h3 className="text-sm font-bold text-slate-800">AI 技術分析(TA)</h3>
           <span className="text-[10px] text-slate-500 ml-1">{metal} · {days}天 · {indicators.length || 0} 指標</span>
           <div className="ml-auto flex items-center gap-1">
-            {/* 模型選擇 */}
-            <div className="flex items-center text-[10px] border rounded overflow-hidden">
-              <button
-                onClick={() => setModelPreset('flash')}
-                disabled={streaming}
-                className={`px-2 py-1 ${modelPreset === 'flash' ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'} disabled:opacity-40`}
-                title="Flash:快(~3 秒),適合一般 TA 解讀"
-              >Flash</button>
-              <button
-                onClick={() => setModelPreset('pro')}
-                disabled={streaming}
-                className={`px-2 py-1 ${modelPreset === 'pro' ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'} disabled:opacity-40`}
-                title="Pro:慢(~15-30 秒)但分析更全面、會推理"
-              >Pro</button>
-            </div>
+            {/* 模型選擇 — 從 LLM 模型設定撈 chat 角色的全部模型 */}
+            <select
+              value={modelKey}
+              onChange={e => setModelKey(e.target.value)}
+              disabled={streaming || models.length === 0}
+              className="text-[10px] border rounded px-1.5 py-1 bg-white text-slate-700 max-w-[160px] disabled:opacity-40"
+              title={selectedModel?.description || selectedModel?.api_model || '選擇 LLM 模型'}
+            >
+              {models.length === 0 && <option value="">載入中…</option>}
+              {models.map(m => (
+                <option key={m.key} value={m.key}>{m.name}</option>
+              ))}
+            </select>
             <button
               onClick={run}
               disabled={streaming}
@@ -183,7 +216,7 @@ export default function MetalsTAPanel({ isOpen, onClose, metal, days, viewDate, 
           <span>指標 <b className="text-slate-700">{indicators.length ? indicators.join(', ') : '(無)'}</b></span>
           {meta?.bars != null && <span>分析 <b className="text-slate-700">{meta.bars}</b> 筆</span>}
           {meta?.model && (
-            <span title={`preset=${meta.preset}`}>模型 <b className="font-mono text-slate-700">{meta.model}</b></span>
+            <span title={`key=${meta.model_key}`}>模型 <b className="font-mono text-slate-700">{meta.model}</b></span>
           )}
         </div>
 
