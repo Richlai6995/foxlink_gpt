@@ -851,6 +851,107 @@ router.get('/export.xlsx', verifyToken, verifyMetalsAccess, async (req, res) => 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// CHART ANNOTATIONS — 使用者手寫標註(水平線 / 趨勢線 / 文字)
+// 持久化 per (user, metal),不分享給別 user
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ANN_TYPES = new Set(['horizontal', 'trendline', 'text']);
+
+router.get('/annotations', verifyToken, verifyMetalsAccess, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const metal = String(req.query.metal || '').trim();
+    if (!metal) return res.status(400).json({ error: 'metal required' });
+    const rows = await db.prepare(`
+      SELECT id, metal_code, ann_type, data_json, color, note,
+             TO_CHAR(created_at, 'YYYY-MM-DD HH24:MI') AS created_at
+      FROM pm_chart_annotations
+      WHERE user_id = ? AND UPPER(metal_code) = UPPER(?)
+      ORDER BY id DESC
+    `).all(req.user.id, metal);
+    // parse data_json
+    const out = rows.map(r => {
+      let data = null;
+      try { data = JSON.parse(r.data_json || r.DATA_JSON || '{}'); } catch (_) {}
+      return {
+        id: r.id || r.ID,
+        metal_code: r.metal_code || r.METAL_CODE,
+        ann_type: r.ann_type || r.ANN_TYPE,
+        data,
+        color: r.color || r.COLOR,
+        note: r.note || r.NOTE,
+        created_at: r.created_at || r.CREATED_AT,
+      };
+    });
+    res.json({ rows: out });
+  } catch (e) {
+    console.error('[Metals] GET /annotations error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/annotations', verifyToken, verifyMetalsAccess, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { metal, ann_type, data, color, note } = req.body || {};
+    if (!metal) return res.status(400).json({ error: 'metal required' });
+    if (!ANN_TYPES.has(ann_type)) return res.status(400).json({ error: 'invalid ann_type' });
+    if (!data || typeof data !== 'object') return res.status(400).json({ error: 'data required (object)' });
+    const dataJson = JSON.stringify(data);
+    if (dataJson.length > 4000) return res.status(400).json({ error: 'data too large' });
+
+    await db.prepare(`
+      INSERT INTO pm_chart_annotations (user_id, metal_code, ann_type, data_json, color, note)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      req.user.id, String(metal).toUpperCase(), ann_type, dataJson,
+      color || null,
+      note ? String(note).slice(0, 200) : null
+    );
+    const newRow = await db.prepare(`
+      SELECT id FROM pm_chart_annotations
+      WHERE user_id = ? AND UPPER(metal_code) = UPPER(?)
+      ORDER BY id DESC FETCH FIRST 1 ROWS ONLY
+    `).get(req.user.id, metal);
+    res.json({ ok: true, id: newRow?.id ?? newRow?.ID ?? null });
+  } catch (e) {
+    console.error('[Metals] POST /annotations error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.delete('/annotations/:id', verifyToken, verifyMetalsAccess, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid id' });
+    const r = await db.prepare(`
+      DELETE FROM pm_chart_annotations WHERE id = ? AND user_id = ?
+    `).run(id, req.user.id);
+    const cnt = r?.rowsAffected ?? r?.changes ?? 0;
+    if (!cnt) return res.status(404).json({ error: 'not found or not owned' });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /annotations?metal=CU — 清空該金屬全部標註
+router.delete('/annotations', verifyToken, verifyMetalsAccess, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const metal = String(req.query.metal || '').trim();
+    if (!metal) return res.status(400).json({ error: 'metal required' });
+    const r = await db.prepare(`
+      DELETE FROM pm_chart_annotations WHERE user_id = ? AND UPPER(metal_code) = UPPER(?)
+    `).run(req.user.id, metal);
+    res.json({ ok: true, deleted: r?.rowsAffected ?? r?.changes ?? 0 });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // USER PREFERENCES — 共用 pm_user_preferences
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -7,12 +7,24 @@
  * - 副圖 RSI / MACD 自動切第二 grid,X 軸對齊主圖
  * - 多金屬 (>3 條主線) 自動 log scale 避 PB vs SN 量級擠壓
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ReactECharts from 'echarts-for-react'
-import { Loader2, Maximize2, Minimize2, Sparkles } from 'lucide-react'
+import { Loader2, Maximize2, Minimize2, Sparkles, Minus, TrendingUp, Type, Trash2, MousePointer2 } from 'lucide-react'
 import api from '../../lib/api'
 import { buildIndicatorSeries, type IndicatorKey, type PricePoint } from '../../lib/metalsIndicators'
 import MetalsTAPanel from './MetalsTAPanel'
+
+type DrawTool = 'none' | 'horizontal' | 'trendline' | 'text'
+
+interface Annotation {
+  id: number
+  metal_code: string
+  ann_type: 'horizontal' | 'trendline' | 'text'
+  data: any
+  color?: string
+  note?: string
+  created_at?: string
+}
 
 export interface MetalDef {
   code: string
@@ -73,10 +85,104 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showTA, setShowTA] = useState(false)
 
-  // ESC 退出全螢幕
+  // ─── 標註(annotations)─────────────────────────────────────────────
+  const [annotations, setAnnotations] = useState<Annotation[]>([])
+  const [activeTool, setActiveTool] = useState<DrawTool>('none')
+  const [trendlineFirst, setTrendlineFirst] = useState<[string, number] | null>(null)
+  const chartRef = useRef<any>(null)
+  // 用 ref 保留最新 state,供 zr.on('click') 內部 closure 讀
+  const activeToolRef = useRef<DrawTool>(activeTool)
+  const trendlineFirstRef = useRef<[string, number] | null>(null)
+  useEffect(() => { activeToolRef.current = activeTool }, [activeTool])
+  useEffect(() => { trendlineFirstRef.current = trendlineFirst }, [trendlineFirst])
+
+  // 載 annotations(換金屬時 reload)
+  const reloadAnnotations = useCallback(async () => {
+    if (!primaryMetal) return
+    try {
+      const r = await api.get('/metals/annotations', { params: { metal: primaryMetal } })
+      setAnnotations(r.data?.rows || [])
+    } catch (e) {
+      console.warn('[MetalsChart] reloadAnnotations 失敗:', e)
+    }
+  }, [primaryMetal])
+  useEffect(() => { reloadAnnotations() }, [reloadAnnotations])
+
+  const addAnnotation = async (annType: Annotation['ann_type'], data: any, color?: string) => {
+    try {
+      await api.post('/metals/annotations', { metal: primaryMetal, ann_type: annType, data, color })
+      await reloadAnnotations()
+    } catch (e: any) {
+      alert('儲存標註失敗:' + (e?.response?.data?.error || e?.message))
+    }
+  }
+  const deleteAnnotation = async (id: number) => {
+    try {
+      await api.delete(`/metals/annotations/${id}`)
+      await reloadAnnotations()
+    } catch (e) { console.warn('刪除失敗', e) }
+  }
+  const clearAllAnnotations = async () => {
+    if (!confirm(`清除 ${primaryMetal} 的所有標註?(無法復原)`)) return
+    try {
+      await api.delete('/metals/annotations', { params: { metal: primaryMetal } })
+      await reloadAnnotations()
+    } catch (e: any) { alert('清除失敗:' + e?.message) }
+  }
+
+  // chart 點擊處理:依當前 tool 把畫面座標轉成 data 座標,然後存
+  const onChartReady = useCallback((chart: any) => {
+    chartRef.current = chart
+    const zr = chart.getZr?.()
+    if (!zr) return
+    const handler = (ev: any) => {
+      const tool = activeToolRef.current
+      if (tool === 'none') return
+      const offsetX = ev.offsetX
+      const offsetY = ev.offsetY
+      // 只在主圖 grid (gridIndex 0) 區域內才接 click
+      const coord = chart.convertFromPixel({ gridIndex: 0 }, [offsetX, offsetY])
+      if (!coord || !Number.isFinite(coord[1])) return
+      const xTime = coord[0]
+      const yValue = coord[1]
+      // xTime 是 timestamp(time axis),轉 YYYY-MM-DD
+      const date = new Date(xTime).toISOString().slice(0, 10)
+
+      if (tool === 'horizontal') {
+        addAnnotation('horizontal', { y: Number(yValue.toFixed(4)) })
+        setActiveTool('none')
+      } else if (tool === 'text') {
+        const text = window.prompt('輸入標註文字')
+        if (text && text.trim()) {
+          addAnnotation('text', { at: [date, Number(yValue.toFixed(4))], text: text.trim() })
+        }
+        setActiveTool('none')
+      } else if (tool === 'trendline') {
+        const first = trendlineFirstRef.current
+        if (!first) {
+          setTrendlineFirst([date, Number(yValue.toFixed(4))])
+        } else {
+          addAnnotation('trendline', { p1: first, p2: [date, Number(yValue.toFixed(4))] })
+          setTrendlineFirst(null)
+          setActiveTool('none')
+        }
+      }
+    }
+    zr.on('click', handler)
+    // cleanup 在 chart re-mount 時 ECharts 自己處理 zr;不額外 off
+  }, [primaryMetal])  // primaryMetal 變 → addAnnotation closure 也要更新
+
+  // ESC 退出全螢幕 / 取消畫圖
   useEffect(() => {
-    if (!isFullscreen) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsFullscreen(false) }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (activeToolRef.current !== 'none') {
+        setActiveTool('none')
+        setTrendlineFirst(null)
+      } else if (isFullscreen) {
+        setIsFullscreen(false)
+      }
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [isFullscreen])
@@ -192,6 +298,63 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
     // 否則 series 跨兩個 grid,ECharts reset 時讀 axis.type 會炸 'Cannot read of undefined'
     const subSeriesArr: any[] = indSub.map(s => ({ ...s, xAxisIndex: 1, yAxisIndex: 1 }))
 
+    // ─── 標註(horizontal / trendline / text)→ markLine + markPoint ───
+    // 每個標註用獨立 silent series 攜帶,避免互相干擾
+    for (const ann of annotations) {
+      if (ann.ann_type === 'horizontal') {
+        const y = ann.data?.y
+        if (!Number.isFinite(y)) continue
+        mainPriceSeries.push({
+          type: 'line', data: [], silent: true, xAxisIndex: 0, yAxisIndex: 0,
+          markLine: {
+            symbol: 'none', silent: false,
+            data: [{ yAxis: y, name: `H#${ann.id}` }],
+            label: { formatter: ann.note || y.toFixed(2), position: 'insideEndTop', fontSize: 10 },
+            lineStyle: { color: ann.color || '#f59e0b', width: 1.2, type: 'dashed' },
+          },
+        })
+      } else if (ann.ann_type === 'trendline') {
+        const p1 = ann.data?.p1
+        const p2 = ann.data?.p2
+        if (!Array.isArray(p1) || !Array.isArray(p2)) continue
+        mainPriceSeries.push({
+          type: 'line', data: [], silent: true, xAxisIndex: 0, yAxisIndex: 0,
+          markLine: {
+            symbol: 'none', silent: false,
+            data: [[
+              { coord: [p1[0], p1[1]], name: `T#${ann.id}` },
+              { coord: [p2[0], p2[1]] },
+            ]],
+            label: { show: false },
+            lineStyle: { color: ann.color || '#3b82f6', width: 1.5 },
+          },
+        })
+      } else if (ann.ann_type === 'text') {
+        const at = ann.data?.at
+        const text = ann.data?.text || ''
+        if (!Array.isArray(at) || !text) continue
+        mainPriceSeries.push({
+          type: 'line', data: [], silent: true, xAxisIndex: 0, yAxisIndex: 0,
+          markPoint: {
+            symbol: 'pin', symbolSize: 30, silent: false,
+            data: [{ coord: [at[0], at[1]], value: '', name: `X#${ann.id}` }],
+            label: { show: true, formatter: text, fontSize: 11, color: '#fff', fontWeight: 'bold' },
+            itemStyle: { color: ann.color || '#10b981' },
+          },
+        })
+      }
+    }
+
+    // 趨勢線繪製中:第一點已點下,顯示一個小 dot 提示
+    if (trendlineFirst && activeTool === 'trendline') {
+      mainPriceSeries.push({
+        type: 'scatter', data: [[trendlineFirst[0], trendlineFirst[1]]], silent: true,
+        xAxisIndex: 0, yAxisIndex: 0, symbolSize: 10,
+        itemStyle: { color: '#3b82f6', borderColor: '#fff', borderWidth: 2 },
+        z: 100,
+      })
+    }
+
     const grids = hasSub
       ? [
           { left: 60, right: 30, top: 30, height: '60%' },
@@ -232,7 +395,7 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
       ],
       series: [...mainPriceSeries, ...subSeriesArr],
     }
-  }, [primaryMetal, overlay.join(','), seriesByMetal, indMain, indSub, useLogScale, hasSub, xAxisMin, xAxisMax])
+  }, [primaryMetal, overlay.join(','), seriesByMetal, indMain, indSub, useLogScale, hasSub, xAxisMin, xAxisMax, annotations, trendlineFirst, activeTool])
 
   const headerCls = theme === 'precious'
     ? 'bg-gradient-to-r from-emerald-100 to-green-50 border-emerald-200 text-emerald-900'
@@ -339,6 +502,44 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
         </div>
       </div>
 
+      {/* Drawing tools toolbar — 標註(水平線 / 趨勢線 / 文字)*/}
+      <div className="flex items-center gap-1 px-2 py-1 border-b bg-slate-50 text-[10px] text-slate-500 flex-wrap">
+        <span className="font-medium text-slate-600 mr-1">標註:</span>
+        <ToolBtn active={activeTool === 'none'} onClick={() => { setActiveTool('none'); setTrendlineFirst(null) }} icon={<MousePointer2 size={11} />} label="選取" />
+        <ToolBtn active={activeTool === 'horizontal'} onClick={() => setActiveTool(activeTool === 'horizontal' ? 'none' : 'horizontal')} icon={<Minus size={11} />} label="水平線" />
+        <ToolBtn
+          active={activeTool === 'trendline'}
+          onClick={() => {
+            const next = activeTool === 'trendline' ? 'none' : 'trendline'
+            setActiveTool(next)
+            if (next !== 'trendline') setTrendlineFirst(null)
+          }}
+          icon={<TrendingUp size={11} />}
+          label={`趨勢線${trendlineFirst ? '(再點第 2 點)' : ''}`}
+        />
+        <ToolBtn active={activeTool === 'text'} onClick={() => setActiveTool(activeTool === 'text' ? 'none' : 'text')} icon={<Type size={11} />} label="文字" />
+        {annotations.length > 0 && (
+          <>
+            <span className="ml-2 text-slate-400">|</span>
+            <span className="text-slate-600">已有 <b>{annotations.length}</b> 個</span>
+            <AnnotationsDropdown annotations={annotations} onDelete={deleteAnnotation} />
+            <button
+              onClick={clearAllAnnotations}
+              className="flex items-center gap-1 px-2 py-0.5 rounded border border-rose-200 text-rose-600 hover:bg-rose-50"
+              title="清除所有標註"
+            ><Trash2 size={11} /> 清除全部</button>
+          </>
+        )}
+        {activeTool !== 'none' && (
+          <span className="ml-auto text-amber-600">
+            {activeTool === 'horizontal' && '👆 點 chart 任一處放水平線'}
+            {activeTool === 'text' && '👆 點 chart 任一處放文字'}
+            {activeTool === 'trendline' && !trendlineFirst && '👆 點 chart 第 1 點'}
+            {activeTool === 'trendline' && trendlineFirst && '👆 再點第 2 點完成連線(Esc 取消)'}
+          </span>
+        )}
+      </div>
+
       {/* Chart — fullscreen 時 flex-1 撐滿剩餘空間,否則固定高 */}
       <div
         className={`relative ${isFullscreen ? 'flex-1 min-h-0' : ''}`}
@@ -358,8 +559,9 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
           <ReactECharts
             key={isFullscreen ? 'fs' : 'norm'}
             option={option}
-            style={{ height: '100%', width: '100%' }}
+            style={{ height: '100%', width: '100%', cursor: activeTool !== 'none' ? 'crosshair' : 'default' }}
             notMerge={true}
+            onChartReady={onChartReady}
           />
         )}
       </div>
@@ -374,6 +576,65 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
         viewDate={viewDate}
         indicators={indicators}
       />
+    </div>
+  )
+}
+
+// ─── 標註工具列按鈕 ──────────────────────────────────────────────────────────
+function ToolBtn({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border ${
+        active ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
+      }`}
+    >
+      {icon} {label}
+    </button>
+  )
+}
+
+// ─── 標註管理 dropdown ─────────────────────────────────────────────────────
+function AnnotationsDropdown({ annotations, onDelete }: { annotations: Annotation[]; onDelete: (id: number) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    setTimeout(() => document.addEventListener('click', handler), 0)
+    return () => document.removeEventListener('click', handler)
+  }, [open])
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(v => !v) }}
+        className="flex items-center gap-1 px-2 py-0.5 rounded border border-slate-200 text-slate-600 hover:bg-slate-100"
+      >📋 列表</button>
+      {open && (
+        <div className="absolute top-full left-0 mt-1 bg-white border rounded shadow-lg p-2 z-30 w-[280px] max-h-[300px] overflow-y-auto">
+          <div className="text-[10px] text-slate-500 mb-1">{annotations.length} 個標註</div>
+          {annotations.map(ann => {
+            let desc = ''
+            if (ann.ann_type === 'horizontal') desc = `H 線 @ ${ann.data?.y?.toFixed(2)}`
+            else if (ann.ann_type === 'trendline') desc = `趨勢 ${ann.data?.p1?.[0]?.slice(5)} → ${ann.data?.p2?.[0]?.slice(5)}`
+            else if (ann.ann_type === 'text') desc = `「${(ann.data?.text || '').slice(0, 14)}」@ ${ann.data?.at?.[0]?.slice(5)}`
+            return (
+              <div key={ann.id} className="flex items-center gap-1 text-[11px] py-1 border-b last:border-b-0">
+                <span className="flex-1 truncate" title={desc}>{desc}</span>
+                <span className="text-slate-400 text-[9px]">{ann.created_at?.slice(5) || ''}</span>
+                <button
+                  onClick={() => { onDelete(ann.id); setOpen(false) }}
+                  className="text-rose-500 hover:text-rose-700 px-1"
+                  title="刪除"
+                ><Trash2 size={10} /></button>
+              </div>
+            )
+          })}
+          {annotations.length === 0 && <div className="text-[10px] text-slate-400 py-2 text-center">尚無標註</div>}
+        </div>
+      )}
     </div>
   )
 }

@@ -3692,6 +3692,19 @@ async function runMigrations(db) {
     }
   } catch (e) { console.warn('[Migration] metal_code UPPERCASE normalization:', e.message); }
 
+  // ─── pm_chart_annotations — 使用者在 chart 上的手寫標註(水平線 / 趨勢線 / 文字)─
+  await createTable('PM_CHART_ANNOTATIONS', `CREATE TABLE pm_chart_annotations (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id       NUMBER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    metal_code    VARCHAR2(20) NOT NULL,
+    ann_type      VARCHAR2(20) NOT NULL,
+    data_json     CLOB NOT NULL,
+    color         VARCHAR2(20),
+    note          VARCHAR2(200),
+    created_at    TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_pmann_user_metal ON pm_chart_annotations(user_id, metal_code)`).run(); } catch (_) {}
+
   // ─── pm_price_history dedupe + UNIQUE (metal_code, as_of_date) ──────────────
   // backfill 之前先確保不會重複塞。idempotent — 既加過 constraint 就 skip。
   // 步驟:
