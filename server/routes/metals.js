@@ -525,9 +525,17 @@ router.post('/ai-analyze', verifyToken, verifyMetalsAccess, async (req, res) => 
       send('chunk', { text });
     };
 
+    // 寬鬆判斷 — 任何 azure / aoai 變體都當 Azure;另外 GPT 前綴的 api_model 也視為 Azure
+    // (避 DB 裡 provider_type 寫法不同就 fall-through 到 Gemini → Vertex 404)
+    const isAzure = !!resolved.row && (
+      /azure|aoai/i.test(String(resolved.provider_type || '')) ||
+      /^gpt[-_]/i.test(String(resolved.name || ''))
+    );
+    console.log(`[Metals/ai-analyze] route → ${isAzure ? 'Aoai (Azure OpenAI)' : 'Gemini'}`);
+
     try {
       let result;
-      if (resolved.provider_type === 'azure_openai' && resolved.row) {
+      if (isAzure) {
         const { streamChatAoai } = require('../services/llmService');
         result = await streamChatAoai(
           resolved.row,
@@ -696,9 +704,16 @@ ${ctxJson}
       send('chunk', { text });
     };
 
+    // 寬鬆判斷 — 同 /ai-analyze:任何 azure/aoai 變體 + gpt-* 都當 Azure
+    const isAzureTA = !!resolvedTA.row && (
+      /azure|aoai/i.test(String(resolvedTA.provider_type || '')) ||
+      /^gpt[-_]/i.test(String(resolvedTA.name || ''))
+    );
+    console.log(`[Metals/TA] route → ${isAzureTA ? 'Aoai (Azure OpenAI)' : 'Gemini'}`);
+
     try {
       let result;
-      if (resolvedTA.provider_type === 'azure' && resolvedTA.row) {
+      if (isAzureTA) {
         const { streamChatAoai } = require('../services/llmService');
         result = await streamChatAoai(
           resolvedTA.row,
