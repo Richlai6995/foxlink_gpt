@@ -164,25 +164,46 @@ export function buildIndicatorSeries(
   const zip = (vals: (number | null)[]): [string, number | null][] =>
     vals.map((v, i) => [dates[i], v])
 
+  // 重要:每個 line series 必須同時設 lineStyle.color + itemStyle.color
+  // 只設 lineStyle.color → legend 圖示用 ECharts 預設 palette 不會跟線一致(2026-05-11 bug)
+  const lineSeries = (
+    name: string,
+    data: [string, number | null][],
+    color: string,
+    opts: { width?: number; dashed?: boolean; yAxisIndex?: number; smooth?: boolean } = {},
+  ): IndicatorSeries => ({
+    name,
+    type: 'line',
+    data,
+    smooth: opts.smooth !== false,
+    symbol: 'none',
+    yAxisIndex: opts.yAxisIndex,
+    lineStyle: { width: opts.width ?? 1.2, type: opts.dashed ? 'dashed' : 'solid', color },
+    itemStyle: { color },  // 同色 → legend marker 與線一致
+  })
+
   for (const ind of indicators) {
-    if (ind === 'MA20') mainSeries.push({ name: 'MA20', type: 'line', data: zip(sma(close, 20)), smooth: true, symbol: 'none', lineStyle: { width: 1.2, color: INDICATOR_COLORS.MA20 } })
-    if (ind === 'MA60') mainSeries.push({ name: 'MA60(季)', type: 'line', data: zip(sma(close, 60)), smooth: true, symbol: 'none', lineStyle: { width: 1.2, color: INDICATOR_COLORS.MA60 } })
-    if (ind === 'MA120') mainSeries.push({ name: 'MA120(半年)', type: 'line', data: zip(sma(close, 120)), smooth: true, symbol: 'none', lineStyle: { width: 1.2, color: INDICATOR_COLORS.MA120 } })
-    if (ind === 'MA240') mainSeries.push({ name: 'MA240(年)', type: 'line', data: zip(sma(close, 240)), smooth: true, symbol: 'none', lineStyle: { width: 1.2, color: INDICATOR_COLORS.MA240 } })
-    if (ind === 'EMA20') mainSeries.push({ name: 'EMA20', type: 'line', data: zip(ema(close, 20)), smooth: true, symbol: 'none', lineStyle: { width: 1.2, type: 'dashed', color: INDICATOR_COLORS.EMA20 } })
+    if (ind === 'MA20') mainSeries.push(lineSeries('MA20', zip(sma(close, 20)), INDICATOR_COLORS.MA20))
+    if (ind === 'MA60') mainSeries.push(lineSeries('MA60(季)', zip(sma(close, 60)), INDICATOR_COLORS.MA60))
+    if (ind === 'MA120') mainSeries.push(lineSeries('MA120(半年)', zip(sma(close, 120)), INDICATOR_COLORS.MA120))
+    if (ind === 'MA240') mainSeries.push(lineSeries('MA240(年)', zip(sma(close, 240)), INDICATOR_COLORS.MA240))
+    if (ind === 'EMA20') mainSeries.push(lineSeries('EMA20', zip(ema(close, 20)), INDICATOR_COLORS.EMA20, { dashed: true }))
     if (ind === 'BOLL') {
       const b = bollinger(close, 20, 2)
-      mainSeries.push({ name: 'BOLL 上', type: 'line', data: zip(b.upper), smooth: true, symbol: 'none', lineStyle: { width: 1, type: 'dashed', color: INDICATOR_COLORS.BOLL } })
-      mainSeries.push({ name: 'BOLL 中', type: 'line', data: zip(b.middle), smooth: true, symbol: 'none', lineStyle: { width: 1, color: INDICATOR_COLORS.BOLL } })
-      mainSeries.push({ name: 'BOLL 下', type: 'line', data: zip(b.lower), smooth: true, symbol: 'none', lineStyle: { width: 1, type: 'dashed', color: INDICATOR_COLORS.BOLL } })
+      mainSeries.push(lineSeries('BOLL 上', zip(b.upper), INDICATOR_COLORS.BOLL, { width: 1, dashed: true }))
+      mainSeries.push(lineSeries('BOLL 中', zip(b.middle), INDICATOR_COLORS.BOLL, { width: 1 }))
+      mainSeries.push(lineSeries('BOLL 下', zip(b.lower), INDICATOR_COLORS.BOLL, { width: 1, dashed: true }))
     }
-    if (ind === 'RSI14') subSeries.push({ name: 'RSI14', type: 'line', data: zip(rsi(close, 14)), smooth: true, symbol: 'none', yAxisIndex: 1, lineStyle: { width: 1.5, color: INDICATOR_COLORS.RSI14 } })
+    if (ind === 'RSI14') subSeries.push(lineSeries('RSI14', zip(rsi(close, 14)), INDICATOR_COLORS.RSI14, { width: 1.5, yAxisIndex: 1 }))
     if (ind === 'MACD') {
       const m = macd(close)
-      subSeries.push({ name: 'MACD', type: 'line', data: zip(m.macd), smooth: false, symbol: 'none', yAxisIndex: 1, lineStyle: { width: 1.2, color: INDICATOR_COLORS.MACD } })
-      subSeries.push({ name: 'Signal', type: 'line', data: zip(m.signal), smooth: false, symbol: 'none', yAxisIndex: 1, lineStyle: { width: 1.2, type: 'dashed', color: '#f43f5e' } })
-      // histogram 用 bar 顯示
-      subSeries.push({ name: 'Hist', type: 'bar', data: zip(m.histogram), yAxisIndex: 1, itemStyle: { color: '#a3a3a3' } })
+      subSeries.push(lineSeries('MACD', zip(m.macd), INDICATOR_COLORS.MACD, { yAxisIndex: 1, smooth: false }))
+      subSeries.push(lineSeries('Signal', zip(m.signal), '#f43f5e', { yAxisIndex: 1, dashed: true, smooth: false }))
+      // histogram 用 bar(itemStyle.color 已是 bar 的填色,不用 lineStyle)
+      subSeries.push({
+        name: 'Hist', type: 'bar', data: zip(m.histogram), yAxisIndex: 1,
+        itemStyle: { color: '#a3a3a3' },
+      })
     }
   }
   return { mainSeries, subSeries }
