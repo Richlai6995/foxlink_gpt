@@ -49,6 +49,7 @@ const DOC_EXT = new Set([
   '.rst', '.adoc', '.asciidoc', '.org',
   '.tex', '.bib',
   '.csv', '.tsv', '.psv',
+  '.eml', // RFC 5322 email (mailparser → headers + body + attachment list)
 ]);
 
 const LOG_EXT = new Set([

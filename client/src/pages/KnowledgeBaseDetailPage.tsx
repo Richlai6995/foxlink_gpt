@@ -5,7 +5,7 @@ import {
   Upload, Trash2, RefreshCw, CheckCircle, XCircle, Clock,
   AlertCircle, Globe, Lock, ChevronDown, ChevronUp, Plus, X,
   User, Building2, Layers, BookOpen, Save, Target, Image, History,
-  Pencil, Check,
+  Pencil, Check, Mail,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import api from '../lib/api'
@@ -16,6 +16,9 @@ import UserPicker from '../components/common/UserPicker'
 import ShareGranteePicker from '../components/common/ShareGranteePicker'
 import type { GranteeSelection as GranteeSelectionType } from '../types'
 import TagInput from '../components/common/TagInput'
+import { buildKbAcceptAttr } from '../lib/uploadFileTypes'
+
+const KB_ACCEPT_ATTR = buildKbAcceptAttr()
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -72,6 +75,7 @@ function DocIcon({ type }: { type: string }) {
   if (t === 'docx' || t === 'doc') return <FileText size={16} className="text-blue-400 flex-shrink-0" />
   if (t === 'pptx' || t === 'ppt') return <FileText size={16} className="text-orange-400 flex-shrink-0" />
   if (t === 'xlsx' || t === 'xls') return <FileText size={16} className="text-green-500 flex-shrink-0" />
+  if (t === 'eml') return <Mail size={16} className="text-sky-500 flex-shrink-0" />
   if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(t)) return <Image size={16} className="text-purple-400 flex-shrink-0" />
   return <FileText size={16} className="text-slate-400 flex-shrink-0" />
 }
@@ -450,7 +454,7 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
               ref={fileInputRef}
               type="file"
               multiple
-              accept=".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.txt,.md,.csv,.jpg,.jpeg,.png,.gif,.webp,.bmp"
+              accept={KB_ACCEPT_ATTR}
               className="hidden"
               onChange={(e) => handleUpload(e.target.files)}
             />

@@ -120,6 +120,17 @@ async function extractTextFromFile(filePath, mimeType, originalName) {
     // text/* or code/config/log files (extension-based fallback for empty/octet-stream mimes)
     const c = classifyUpload(originalName, mimeType);
     if (c.ok && c.kind === 'text') {
+      // .eml — RFC 5322 email. 直接 readFileSync 會把 base64 附件 + encoded-word
+      // headers 塞給 LLM,品質爛。用 mailparser 抽乾淨的 headers + body + attachment list。
+      if (c.ext === '.eml') {
+        try {
+          const { parseEml } = require('./emlParser');
+          const { text } = await parseEml(filePath);
+          return truncate(`[Email: ${originalName}]\n${text}`, originalName);
+        } catch (err) {
+          console.warn(`[Gemini] .eml parse failed for "${originalName}": ${err.message} — falling back to raw text`);
+        }
+      }
       // Jupyter notebook: extract only cell sources, skip base64 outputs
       if (c.ext === '.ipynb') {
         try {

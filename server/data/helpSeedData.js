@@ -1123,7 +1123,7 @@ const userSections = [
     "sort_order": 7,
     "icon": "Upload",
     "icon_color": "text-teal-500",
-    "last_modified": "2026-04-15",
+    "last_modified": "2026-05-11",
     "title": "上傳檔案",
     "sidebar_label": "上傳檔案",
     "blocks": [
@@ -1168,6 +1168,11 @@ const userSections = [
                 "Log / Diff",
                 "LOG、OUT、DIFF、PATCH",
                 "協助分析錯誤 log、Code Review diff"
+              ],
+              [
+                "Email",
+                "EML",
+                "RFC 5322 email 檔（Outlook / Thunderbird / Gmail 另存）。系統會自動解析 Subject / From / To / Date / 內文（HTML 自動轉純文字）並列出附件清單。**問答情境僅列附件檔名**，需要附件內容請另外上傳；KB 上傳則會遞迴展開附件內容（PDF/Word/Excel/圖片）一併索引。"
               ],
               [
                 "Jupyter Notebook",
@@ -3054,7 +3059,7 @@ const userSections = [
     "sort_order": 15,
     "icon": "Database",
     "icon_color": "text-teal-500",
-    "last_modified": "2026-04-22",
+    "last_modified": "2026-05-11",
     "title": "知識庫市集",
     "sidebar_label": "知識庫市集",
     "blocks": [
@@ -3123,7 +3128,51 @@ const userSections = [
         "blocks": [
           {
             "type": "para",
-            "text": "進入知識庫後，點選「文件」頁籤，拖曳或點選上傳區域選擇檔案。支援格式：**PDF · DOCX/DOC · PPTX/PPT · XLSX/XLS · TXT · CSV · JPG · PNG · GIF · WEBP**（單檔最大 200 MB）。舊版 Office 97-2003 格式（.doc/.ppt/.xls）也支援，系統會自動解析。"
+            "text": "進入知識庫後，點選「文件」頁籤，拖曳或點選上傳區域選擇檔案。**單檔最大 200 MB**。KB 上傳支援的格式對齊問答上傳（音訊除外，KB 暫無轉錄 pipeline）："
+          },
+          {
+            "type": "table",
+            "headers": [
+              "類型",
+              "支援格式",
+              "說明"
+            ],
+            "rows": [
+              [
+                "文件",
+                "PDF、DOCX/DOC、XLSX/XLS、PPTX/PPT、TXT、CSV、TSV、MD、RST、TEX",
+                "舊版 Office 97-2003（.doc/.ppt/.xls）也支援，系統自動解析"
+              ],
+              [
+                "圖片",
+                "JPG、PNG、GIF、WEBP、BMP",
+                "走 Gemini Vision OCR 將圖中文字向量化"
+              ],
+              [
+                "Email",
+                "EML",
+                "RFC 5322 email 檔。**KB 路徑會遞迴展開附件**（PDF / Word / Excel / PPTX / 圖片）一併抽文字並索引；嵌套 .eml 最多展開兩層；單一附件 > 50 MB、執行檔/壓縮檔/私鑰會跳過"
+              ],
+              [
+                "程式原始碼",
+                "PY、JS、TS、JAVA、GO、RS、PHP、RB、SWIFT、SQL、SH、HTML、CSS、VUE、XML、SVG 等 100+ 種",
+                "UTF-8 純文字讀取，直接向量化"
+              ],
+              [
+                "設定檔 / Log / Diff",
+                "YML、TOML、JSON、INI、CONF、ENV、LOG、OUT、DIFF、PATCH 等",
+                ""
+              ],
+              [
+                "無副檔名特殊檔",
+                "Dockerfile、Makefile、Jenkinsfile、Gemfile、Pipfile、Vagrantfile、Caddyfile、Brewfile、BUILD、WORKSPACE、.gitignore、.eslintrc 等",
+                "build／dev config，可直接上傳"
+              ]
+            ]
+          },
+          {
+            "type": "note",
+            "text": "**KB 不收**：音訊檔（MP3/WAV/M4A 等，無轉錄 pipeline，請改用問答上傳）、影片、執行檔、私鑰、壓縮檔。"
           },
           {
             "type": "steps",

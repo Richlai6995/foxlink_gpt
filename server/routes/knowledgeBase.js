@@ -33,6 +33,7 @@ const crypto   = require('crypto');
 const { verifyToken } = require('./auth');
 const { embedText, toVectorStr } = require('../services/kbEmbedding');
 const { parseDocument, chunkDocument } = require('../services/kbDocParser');
+const { classifyUpload } = require('../utils/uploadFileTypes');
 const { translateFields } = require('../services/translationService');
 const { resolveGranteeNamesInRows, getLangFromReq } = require('../services/granteeNameResolver');
 
@@ -138,10 +139,13 @@ const upload = multer({
   storage,
   limits: { fileSize: 200 * 1024 * 1024 }, // 200 MB hard limit
   fileFilter(_req, file, cb) {
-    const allowed = ['.pdf','.docx','.doc','.pptx','.ppt','.xlsx','.xls','.txt','.md','.csv',
-                     '.jpg','.jpeg','.png','.gif','.webp','.bmp'];
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, allowed.includes(ext));
+    // 對齊 chat 的 classifier(文字/代碼/config/log/eml/PDF/Office/圖片 都收)。
+    // 黑名單(exe/zip/key)+ 影片仍會在 classifyUpload 內擋掉。音訊 KB 不收(沒 transcribe pipeline)。
+    const name = Buffer.from(file.originalname, 'latin1').toString('utf8');
+    const c = classifyUpload(name, file.mimetype);
+    if (!c.ok) return cb(new Error(c.reason || '不支援的檔案格式'), false);
+    if (c.kind === 'audio') return cb(new Error('KB 暫不支援音訊檔(無轉錄 pipeline)'), false);
+    cb(null, true);
   },
 });
 

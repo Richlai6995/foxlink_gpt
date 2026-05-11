@@ -49,6 +49,7 @@ export const DOC_EXT = new Set<string>([
   '.rst', '.adoc', '.asciidoc', '.org',
   '.tex', '.bib',
   '.csv', '.tsv', '.psv',
+  '.eml', // RFC 5322 email (mailparser → headers + body + attachment list)
 ])
 
 export const LOG_EXT = new Set<string>([
@@ -222,6 +223,20 @@ export function buildAcceptAttr(): string {
   const mimes = [
     'image/*',
     'audio/*',
+    'application/pdf',
+    ...OFFICE_MIMES,
+    'text/*',
+  ]
+  const exts = [
+    ...CODE_EXT, ...CONFIG_EXT, ...DOC_EXT, ...LOG_EXT,
+  ]
+  return [...mimes, ...exts].join(',')
+}
+
+// KB upload variant — no audio (no transcription pipeline on KB side).
+export function buildKbAcceptAttr(): string {
+  const mimes = [
+    'image/*',
     'application/pdf',
     ...OFFICE_MIMES,
     'text/*',

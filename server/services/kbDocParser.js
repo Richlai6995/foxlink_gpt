@@ -589,9 +589,11 @@ async function parseExcel(filePath, ocrModel = null) {
  * @param {string} [fileType] file extension without dot, e.g. 'pdf'
  * @param {string|null} [ocrModel]
  * @param {string} [parseMode]  'text_only' (default) | 'format_aware'
+ * @param {string} [pdfOcrMode]
+ * @param {object} [opts]  { emlDepth?: number — 遞迴 .eml 內附件時的層數 }
  * @returns {Promise<{ text: string, ocrInputTokens: number, ocrOutputTokens: number }>}
  */
-async function parseDocument(filePath, fileType, ocrModel = null, parseMode = 'text_only', pdfOcrMode = 'off') {
+async function parseDocument(filePath, fileType, ocrModel = null, parseMode = 'text_only', pdfOcrMode = 'off', opts = {}) {
   const ext = (fileType || path.extname(filePath)).toLowerCase().replace(/^\./, '');
   const fa = parseMode === 'format_aware';
   switch (ext) {
@@ -601,6 +603,14 @@ async function parseDocument(filePath, fileType, ocrModel = null, parseMode = 't
     case 'xlsx': case 'xls': return fa ? parseExcelFormatAware(filePath, ocrModel) : parseExcel(filePath, ocrModel);
     case 'pptx': return await parsePptx(filePath, ocrModel);
     case 'ppt':  return await parsePpt(filePath, ocrModel); // legacy PPT 97-2003 via LibreOffice convert → pptx
+    case 'eml': {
+      const { parseEml } = require('./emlParser');
+      return await parseEml(filePath, {
+        parseAttachments: true,           // KB 路徑一律遞迴展開附件
+        ocrModel,
+        depth: opts.emlDepth || 0,        // 嵌套 eml 從 emlParser 帶 depth+1 進來
+      });
+    }
     case 'jpg': case 'jpeg': case 'png': case 'gif': case 'webp': case 'bmp': {
       const imgBuf = fs.readFileSync(filePath);
       const mime = (ext === 'jpg' || ext === 'jpeg') ? 'image/jpeg' : `image/${ext}`;
