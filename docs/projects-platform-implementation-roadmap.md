@@ -91,20 +91,28 @@ server/projects-platform/
 
 依優先序排序,每個 sprint 約 0.5 週。Cortex 既有 user 完全不受影響(feature flag = false 預設,Pilot 才開)。
 
-### Sprint 1 — Schema + 核心 CRUD(W1 前半)
+### ✅ Sprint 1 — Schema + 核心 CRUD(2026-05-11 完成)
 
-**目標**:能建專案、列表、查詳細(無 channel / task / form)
+**目標**:能建專案、列表、查詳細(無 task / form,channel 用預設清單建出來)
 
-**任務**:
-- migration 002:`project_channels` + `channel_participants`
-- migration 003:`project_stages` + `workflow_templates` + `workflow_template_stages`
-- migration 004:`project_tasks`(含 RACI + Dependency + Multi-PM 欄位)
-- `routes/projects.js`:GET 列表 / GET 詳細 / POST 建立(最小版,無 wizard)
-- `services/projectsService.js`:CRUD + lifecycle 狀態機
-- `middleware/projectAclMiddleware.js`:成員權限驗證
-- 單元測試 + 整合 Cortex 既有 auth
+**已完成**:
+- ✅ migration 002:`project_channels` + `channel_participants`(2 表)
+- ✅ migration 003:`project_stages` + `workflow_templates` + `workflow_template_stages`(3 表)
+- ✅ migration 004:`project_tasks`(RACI + Dependency + Multi-PM 欄位齊)
+- ✅ migration 005-seed:plugin registry → DB(QUOTE 8 stages / GENERAL 4 stages 自動同步)
+- ✅ `services/projectsService.js`:create / list / get / updateLifecycle(5-state 狀態機)
+- ✅ `middleware/projectAclMiddleware.js`:loadProject + requireProjectMember + requirePmOrAdmin
+- ✅ `routes/projects.js`:GET /types / GET /(列表) / POST /(建立) / GET /:id / POST /:id/lifecycle
+- ✅ plugin registry bootAll 正式 require QUOTE/GENERAL
+- ✅ mount `/projects` route 進 buildRouter
+- ✅ smoke test `server/scripts/smoke-projects-platform-sprint1.js` PASSED
+  - QUOTE 自動建 7 channels + 8 stages ✓
+  - GENERAL 自動建 2 channels + 4 stages ✓
+  - 5-state lifecycle DRAFT→ACTIVE→PAUSED→ACTIVE→CLOSED→REOPENED→ACTIVE ✓
+  - 非法轉移 CLOSED→ACTIVE 被擋 ✓
+  - 沿用 Cortex `verifyToken` middleware
 
-**Deliverable**:`POST /api/projects` 能建出最小 project + 自動建 announcement + general channel
+**Deliverable**:`POST /api/projects/projects` 能建出最小 project + 自動建預設 channels + stages + PM membership ✓
 
 ---
 

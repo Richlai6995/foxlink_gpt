@@ -25,6 +25,9 @@ function buildRouter() {
     return null;
   }
 
+  // 確保 plugins 已 boot(idempotent — 同 plugin 重複 register 會 override)
+  require('./plugins/registry').bootAll();
+
   const router = express.Router();
 
   // Error boundary middleware — 任何下游 throw 都被攔住
@@ -68,13 +71,15 @@ function buildRouter() {
   // Internal Admin(限 admin mode,middleware 內部再 require)
   router.use('/internal-admin', require('./routes/internalAdmin'));
 
-  // Route stubs — 後續 phase 1 開發逐個實作
-  // router.use('/projects', require('./routes/projects'));
-  // router.use('/projects/wizard', require('./routes/wizard'));
-  // router.use('/projects/:id/channels', require('./routes/channels'));
-  // router.use('/projects/:id/tasks', require('./routes/tasks'));
-  // router.use('/projects/:id/forms', require('./routes/forms'));
-  // router.use('/projects/dashboard', require('./routes/dashboard'));
+  // Sprint 1 — Projects CRUD
+  router.use('/projects', require('./routes/projects'));
+
+  // Route stubs — 後續 sprint 逐個實作
+  // router.use('/projects/wizard', require('./routes/wizard'));        // Sprint 9
+  // router.use('/projects/:id/channels', require('./routes/channels')); // Sprint 2
+  // router.use('/projects/:id/tasks', require('./routes/tasks'));       // Sprint 6
+  // router.use('/projects/:id/forms', require('./routes/forms'));       // Sprint 4
+  // router.use('/projects/dashboard', require('./routes/dashboard'));   // Sprint 8
 
   // Final 404 fallback for /api/projects/*
   router.use((req, res) => {
@@ -98,11 +103,17 @@ function buildRouter() {
 async function runMigrations(db) {
   if (!ENABLED) return;
   try {
-    const migration001 = require('./migrations/001_init');
-    await migration001(db);
+    // Plugin 必須先 boot — 005_seed 要從 registry 拉 plugin 資料
+    require('./plugins/registry').bootAll();
+
+    await require('./migrations/001_init')(db);
+    await require('./migrations/002_channels')(db);
+    await require('./migrations/003_workflow')(db);
+    await require('./migrations/004_tasks')(db);
+    await require('./migrations/005_seed')(db);
     console.log('[projects-platform] migrations ✓');
   } catch (e) {
-    console.error('[projects-platform] migrations failed:', e.message);
+    console.error('[projects-platform] migrations failed:', e.message, e.stack);
     // 不 throw — 讓 Cortex 主 migrations 繼續
   }
 }

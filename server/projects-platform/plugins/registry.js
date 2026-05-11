@@ -38,9 +38,9 @@ function list() {
  * Boot all known plugins(scaffold:只列 QUOTE / GENERAL,實際 require 等實作)
  */
 function bootAll() {
-  // try { register(require('./quote')); } catch (e) { log.warn('quote plugin load:', e.message); }
-  // try { register(require('./general')); } catch (e) { log.warn('general plugin load:', e.message); }
-  log.log(`booted ${list().length} plugins (scaffold,plugins/quote 等實際 require 待實作)`);
+  try { register(require('./quote')); } catch (e) { log.warn('quote plugin load:', e.message); }
+  try { register(require('./general')); } catch (e) { log.warn('general plugin load:', e.message); }
+  log.log(`booted ${list().length} plugins: ${list().join(', ')}`);
 }
 
 module.exports = {
