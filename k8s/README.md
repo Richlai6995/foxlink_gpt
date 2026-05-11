@@ -28,7 +28,8 @@ kubectl apply -f k8s/redis.yaml          # Token store
 kubectl apply -f k8s/deployment.yaml     # foxlink-gpt x3
 
 # Step 4: 對外流量
-kubectl apply -f k8s/ingress.yaml        # nginx-ingress
+kubectl apply -f k8s/ingress.yaml                                 # 應用 ingress 規則
+kubectl apply -f k8s/ingress-nginx-controller-service.yaml        # ingress-nginx controller LB:80/443/8443
 
 # Step 5: 監控（選配）
 kubectl apply -f k8s/uptime-kuma.yaml    # HTTP uptime monitor
@@ -42,6 +43,20 @@ kubectl get pods -n foxlink -w
 kubectl get pvc -n foxlink
 kubectl logs -n foxlink -l app=foxlink-gpt --tail=100 -f
 ```
+
+## Ingress 對外 port 架構(2026-05-11)
+
+K8s ingress-nginx controller(MetalLB LB IP `10.8.93.20`)同時 listen 三個 port:
+
+| Port | 對象 | 路徑 |
+|------|------|------|
+| 80   | HTTP redirect → HTTPS | (ingress 自動) |
+| 443  | 內網直連 + WAF 後端 | DNS 內網解到 `10.8.93.20`,外網 WAF 終結 TLS 後 forward 進來 |
+| 8443 | 內網舊書籤 / Webex webhook | 保留不下線,`WEBEX_PUBLIC_URL=https://flgpt.foxlink.com.tw:8443` |
+
+設定 source of truth:[`ingress-nginx-controller-service.yaml`](ingress-nginx-controller-service.yaml)。
+
+未來升級 ingress-nginx 後一定要再 apply 一次該檔(否則 443/8443 雙 port 設定會被官方 yaml 覆寫回單 443)。
 
 ## TODO 清單（部署前必填）
 

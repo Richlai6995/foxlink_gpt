@@ -275,3 +275,8 @@ docker-compose up -d --build
     - **動態降級 Studio**:[streamChat](server/services/gemini.js) 偵測到 `hasInlineData=true` 自動 override `provider: 'studio'`,避 Vertex gRPC 4MB inline 上限;新增 vision / audio / 大檔 handler 仍明確加 `provider: 'studio'` 當防呆(見 training.js 7 處、transcribeAudio)
     - **LLM 管理介面新增 Gemini model**:`api_model` 填 **Vertex global 認得的名字**(如 `gemini-3.1-pro-preview`、`gemini-2.5-flash`)
     - **Legacy 相容**:`GEMINI_PROVIDER` 仍可作 fallback(兩個細項 env 未設時沿用);`GEMINI_SDK` 未設 = old(向下相容)
+12. **Ingress 443 + 8443 雙 port 並存(2026-05-11)**:K8s ingress-nginx controller LB IP `10.8.93.20` 同時 listen 443 跟 8443,DNS 內網已 split-horizon 解到此 IP。
+    - 內網用 `https://flgpt.foxlink.com.tw`(443)直連、舊 `:8443` 書籤保留可用、外網經 WAF 終結 TLS 進來
+    - Source of truth:[k8s/ingress-nginx-controller-service.yaml](k8s/ingress-nginx-controller-service.yaml) — 未來重 apply 上游 ingress-nginx yaml 後務必再 apply 這份,否則 8443 消失
+    - 程式端 `APP_ALLOWED_BASE_URLS=https://flgpt.foxlink.com.tw,https://flgpt.foxlink.com.tw:8443`,SSO redirect_uri / WebAuthn origin 都動態判斷(見 [auth.js `resolveSsoBaseUrl`](server/routes/auth.js)),不需要對齊單一 host
+    - `WEBEX_PUBLIC_URL` 維持 `:8443`(Webex webhook 不要動)

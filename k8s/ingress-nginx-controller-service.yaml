@@ -1,0 +1,65 @@
+# ingress-nginx controller service — 內網 443 + 8443 雙 port 並存
+#
+# 為什麼這個檔案存在:ingress-nginx 是用 kubectl apply 裝的(非 helm),原始
+# upstream yaml 預設只 listen 80 + 443。我們環境因歷史因素先後改成:
+#   1. (原始)80 + 443       — helm chart 預設
+#   2. (歷史改動)80 + 8443  — 不知何時把 443 → 8443
+#   3. (2026-05-11)80 + 8443 + 443 — 加回 443,內網直接走 443 + 舊 8443 並存
+#
+# 內網 user 透過 DNS split-horizon 解析到 MetalLB LB IP `10.8.93.20`:
+#   - https://flgpt.foxlink.com.tw       → 10.8.93.20:443  (新增,內網直連)
+#   - https://flgpt.foxlink.com.tw:8443  → 10.8.93.20:8443 (保留,舊書籤)
+# 外網經 WAF 公網 IP → 終結 TLS → forward 到 K8s ingress(WAF 後端設定不在這)
+#
+# MetalLB 透過 metallb.universe.tf/ip-allocated-from-pool: flgpt-ip-pool 分配,
+# 同一個 service 多 port 共用同個 EXTERNAL-IP,不會額外吃 IP pool 額度。
+#
+# 套用方式:
+#   kubectl apply -f k8s/ingress-nginx-controller-service.yaml
+#
+# 風險:如果未來換 ingress-nginx 版本(目前 1.12.0)用官方 yaml 重 apply,
+# 會把這份蓋掉只剩 80 + 443 → 8443 那條會消失,內網舊書籤掛掉。重新 apply
+# 後請務必再 apply 這份。
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingress-nginx-controller
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/instance: ingress-nginx
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/part-of: ingress-nginx
+    app.kubernetes.io/version: 1.12.0
+spec:
+  type: LoadBalancer
+  ipFamilies:
+    - IPv4
+  ipFamilyPolicy: SingleStack
+  # externalTrafficPolicy=Local — 保留真實 client IP(L7 rate limit、auth audit 需要)
+  externalTrafficPolicy: Local
+  internalTrafficPolicy: Cluster
+  allocateLoadBalancerNodePorts: true
+  selector:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/instance: ingress-nginx
+    app.kubernetes.io/name: ingress-nginx
+  ports:
+    - name: http
+      appProtocol: http
+      port: 80
+      protocol: TCP
+      targetPort: http
+      nodePort: 30221
+    - name: https
+      appProtocol: https
+      port: 8443
+      protocol: TCP
+      targetPort: https
+      nodePort: 8443
+    - name: https-public
+      appProtocol: https
+      port: 443
+      protocol: TCP
+      targetPort: https
+      # nodePort 不 pin — 對外透過 LB IP:443 進來,nodePort 對使用者透明
