@@ -35,10 +35,11 @@ module.exports = [
     sort_order: 2,
     icon: 'User',
     icon_color: 'text-indigo-500',
-    last_modified: '2026-05-09',
+    last_modified: '2026-05-11',
     title: '登入與登出',
     sidebar_label: '登入與登出',
     blocks: [
+      { type: 'para', text: '**主要網址(2026-05-11 起)**:`https://flgpt.foxlink.com.tw`(內外網皆可使用同一網址)。內網舊書籤 `https://flgpt.foxlink.com.tw:8443` 仍可使用,不需立即更換。' },
       {
         type: 'subsection',
         title: 'Foxlink SSO 單一登入（AD 帳號適用）',
@@ -54,7 +55,7 @@ module.exports = [
             ],
           },
           { type: 'note', text: '**重要：SSO 僅適用於擁有 AD 帳號的正崴員工。**由系統管理員手動建立的本地帳號（如外部合作夥伴、特殊功能帳號）無法使用 SSO，必須以帳號密碼方式登入（見下方說明）。' },
-          { type: 'note', text: '**外網限制(2026-05 起):從公司外網(VPN 之外、出差、家用、手機 4G)連線時,SSO 按鈕會自動隱藏**,因為 SSO 流程跳過 Webex MFA 二階段驗證,從外網開放等於 MFA 形同虛設。外網請使用帳號密碼登入並完成 Webex / Email 雙通道驗證碼,30 天內同裝置免重認。' },
+          { type: 'note', text: '**內外網皆可用 SSO(2026-05-11 起)**:從公司外網(出差、家用、手機 4G)也可以走 SSO 登入。SSO 完成後,外網用戶仍會接著走 Webex / Email 雙通道驗證碼,跟帳密登入的安全等級一致,沒有 MFA bypass 風險。' },
           { type: 'tip', text: 'AD 帳號登入後如需修改密碼，請透過公司 AD 系統（如 Windows 網域）更改，Foxlink GPT to Cortex 的「修改密碼」功能僅限本地帳號使用。' },
         ],
       },
@@ -128,6 +129,73 @@ module.exports = [
             ],
           },
           { type: 'note', text: '**新版本通知**:當 IT 部署新功能,Cortex 會在右下角彈出「新版本可用」通知,點「更新」即可拿到最新版,**不需要清 cache 或重灌**。如果某次更新後沒看到新功能,通知 5 分鐘內會自動彈出,點一下即可。' },
+        ],
+      },
+      {
+        type: 'subsection',
+        title: '手機介面操作說明(2026-05 改版)',
+        blocks: [
+          { type: 'para', text: '為了讓對話內容能完整展開、減少操作時忽上忽下,手機介面 2026-05 改成 **Gemini App 風格**:上方 Topbar 大幅精簡,常用控制項全部下放到輸入區下方的「控制列」,跟輸入框一起放在底部。' },
+          {
+            type: 'subsection',
+            title: '畫面分區',
+            blocks: [
+              {
+                type: 'list',
+                items: [
+                  '**上方 Topbar**:只剩 ☰ 漢堡(開歷史對話)+ 標題',
+                  '**中央區域**:對話內容,佔最大空間',
+                  '**底部輸入區(Row 1)**:輸入框全寬,可多行(最多 5 行,內容更多自動 scroll)',
+                  '**底部控制列(Row 2)**:`[+]` `[模型 ▼]` `[⚙]` `[🎤]` … `[▶ 送出]`',
+                ],
+              },
+            ],
+          },
+          {
+            type: 'subsection',
+            title: '控制列每個按鈕用途',
+            blocks: [
+              {
+                type: 'list',
+                items: [
+                  '**`[+]` 加號**:開啟「附件 / 工具」面板,可上傳檔案、選 MCP 工具、知識庫、技能',
+                  '**`[模型 ▼]`**:切換 LLM 模型(Gemini 3 Pro / Flash / Azure GPT-5 等)',
+                  '**`[⚙]` 齒輪**:設定選單(切語言 / 我的裝置 / 主題 / 登出 等)。右上角紅點代表有未讀回饋',
+                  '**`[🎤]` 麥克風**:語音輸入(也可改用手機輸入法自帶的語音功能,二擇一)',
+                  '**`[▶]` 送出 / `[■]` 停止**:傳送訊息;AI 生成中改顯示停止鍵可中斷',
+                ],
+              },
+            ],
+          },
+          {
+            type: 'subsection',
+            title: '輸入框換行 / 送出',
+            blocks: [
+              {
+                type: 'list',
+                items: [
+                  '**手機軟鍵盤 Enter** → 換行(對齊 LINE / WhatsApp 慣例,不會誤觸送出)',
+                  '**送出** → 點右下角藍色 `[▶]` 按鈕',
+                  '**外接鍵盤 Ctrl/Cmd + Enter** → 送出(power user 快捷)',
+                ],
+              },
+              { type: 'tip', text: '輸入框 max 5 行,超出會自動出現捲軸,不會吃掉整個畫面。' },
+            ],
+          },
+          {
+            type: 'subsection',
+            title: '原本在 Topbar 的功能去哪了',
+            blocks: [
+              {
+                type: 'list',
+                items: [
+                  '**新對話** → 改在 ☰ 漢堡內的歷史對話側欄,頂端有「+ 新對話」按鈕',
+                  '**模型選擇** → 下放到控制列 `[模型 ▼]`',
+                  '**設定 / 登出** → 下放到控制列 `[⚙]` 選單內',
+                ],
+              },
+            ],
+          },
         ],
       },
       {

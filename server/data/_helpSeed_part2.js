@@ -1810,7 +1810,7 @@ module.exports = [
             type: 'subsection',
             title: '情境一：帳號未串連（找不到帳號）',
             blocks: [
-              { type: 'code', text: '⚠️ 無法串連 Foxlink GPT to Cortex 帳號，以下為可能原因：\n1. 尚未登入過網頁系統產生帳號，請先透過公司內網登入：https://flgpt.foxlink.com.tw:8443\n2. 可能帳號無 email 資訊\n3. 網路連線問題\n請檢查以上原因或是洽廠區資訊處理' },
+              { type: 'code', text: '⚠️ 無法串連 Foxlink GPT to Cortex 帳號，以下為可能原因：\n1. 尚未登入過網頁系統產生帳號，請先透過公司內網登入：https://flgpt.foxlink.com.tw\n2. 可能帳號無 email 資訊\n3. 網路連線問題\n請檢查以上原因或是洽廠區資訊處理' },
               {
                 type: 'list',
                 items: [
