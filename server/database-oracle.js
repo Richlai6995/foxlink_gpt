@@ -4643,6 +4643,16 @@ async function runMigrations(db) {
     try { await db.prepare(ddl).run(); console.log(`[Migration] ${name} created ✓`); }
     catch (e) { if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn(`[Migration] ${name}:`, e.message); }
   }
+
+  // ─── projects-platform migrations(Feature-flagged,§10.7 解耦設計)─────
+  // 預設 disabled,設 ENABLE_PROJECTS_PLATFORM=true 才跑
+  try {
+    const projectsPlatform = require('./projects-platform');
+    await projectsPlatform.runMigrations(db);
+  } catch (e) {
+    console.error('[projects-platform] migrations failed:', e.message);
+    // 不 throw — 既有 Cortex migrations 不受影響
+  }
 }
 
 // ─── Default DB Source migration ───────────────────────────────────────────────

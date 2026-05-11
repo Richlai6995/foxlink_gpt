@@ -224,6 +224,22 @@ app.get('/api/version', (req, res) => {
     app.use('/api/auth/webauthn', require('./routes/webauthn'));
     console.log('[Route] /api/auth/webauthn (passkey) OK');
 
+    // ─── projects-platform module(Feature-flagged,§10.7 解耦設計)─────────
+    // 預設 disabled,設 ENABLE_PROJECTS_PLATFORM=true 才啟用
+    try {
+      const projectsPlatform = require('./projects-platform');
+      const ppRouter = projectsPlatform.buildRouter();
+      if (ppRouter) {
+        app.use('/api/projects', ppRouter);
+        console.log('[Route] /api/projects (projects-platform v0.4) OK');
+        // workers 在 server boot 完成後啟動(不阻塞 listen)
+        process.nextTick(() => projectsPlatform.startWorkers());
+      }
+    } catch (e) {
+      console.error('[projects-platform] mount failed:', e.message);
+      // 不 throw — 既有 Cortex 不受影響
+    }
+
     // Autoscan user email domains → Webex allowed-domain whitelist
     // 每次啟動時掃描 users.email，union 進白名單（只加不刪，admin 手動加的會保留）
     try {
