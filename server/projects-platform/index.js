@@ -40,7 +40,18 @@ function buildRouter() {
       });
   });
 
-  // Health check
+  // 沿用 Cortex 既有 verifyToken auth middleware(共用 service,只 import 不修改)
+  const { verifyToken } = require('../routes/auth');
+  router.use(verifyToken);
+
+  // Inject sidebar visibility into req(每個 request 都跑)
+  const { injectVisibility, requireVisible } = require('./middleware/sidebarPermissionMiddleware');
+  router.use(injectVisibility);
+
+  // /me 路由不需 requireVisible(client 要拿 visibility info 判定 sidebar)
+  router.use('/me', require('./routes/me'));
+
+  // Health check(不限 admin,給外層 monitor 用)
   router.get('/_health', (req, res) => {
     res.json({
       module: 'projects-platform',
@@ -50,6 +61,12 @@ function buildRouter() {
       started_at: _started ? new Date().toISOString() : null,
     });
   });
+
+  // 其他 /api/projects/* 全部都要 visible(沒 visible 直接 403)
+  router.use(requireVisible);
+
+  // Internal Admin(限 admin mode,middleware 內部再 require)
+  router.use('/internal-admin', require('./routes/internalAdmin'));
 
   // Route stubs — 後續 phase 1 開發逐個實作
   // router.use('/projects', require('./routes/projects'));

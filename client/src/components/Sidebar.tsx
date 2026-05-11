@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, MessageSquare, Trash2, Pencil, Check, ChevronDown, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, KeyRound, X, Eye, EyeOff, GitFork, Sparkles, Database, Menu, ChevronUp, BarChart3, Globe, FileText, GraduationCap, BookOpen, TicketCheck, PanelLeftClose, PanelLeft, SquarePen, UserCog, Star, Smartphone } from 'lucide-react'
+import { Plus, MessageSquare, Trash2, Pencil, Check, ChevronDown, LogOut, Settings, Cpu, Zap, CalendarClock, HelpCircle, KeyRound, X, Eye, EyeOff, GitFork, Sparkles, Database, Menu, ChevronUp, BarChart3, Globe, FileText, GraduationCap, BookOpen, TicketCheck, PanelLeftClose, PanelLeft, SquarePen, UserCog, Star, Smartphone, FolderKanban } from 'lucide-react'
 import MyDevicesModal from './MyDevicesModal'
 import ImpersonateDialog from './ImpersonateDialog'
 import ThemePicker from './ThemePicker'
@@ -10,6 +10,7 @@ import api from '../lib/api'
 import { useTranslation } from 'react-i18next'
 import { SUPPORTED_LANGUAGES, type LangCode } from '../i18n'
 import { useFeedbackNotifications } from '../hooks/useFeedbackNotifications'
+import { useProjectsPlatformVisibility } from '../hooks/useProjectsPlatformVisibility'
 
 interface Props {
   sessions: ChatSession[]
@@ -65,6 +66,7 @@ export default function Sidebar({
   onToggleCollapse,
 }: Props) {
   const { user, logout, isAdmin, canSchedule, canCreateKb, canUseDashboard, canAccessTrainingDev, setLanguage, impersonation, exitImpersonate, refreshImpersonation } = useAuth()
+  const projectsPlatformVis = useProjectsPlatformVisibility()
   const [showImpersonate, setShowImpersonate] = useState(false)
   const [exitingImp, setExitingImp] = useState(false)
 
@@ -485,6 +487,14 @@ export default function Sidebar({
                 <button onClick={() => { setShowMenu(false); navigate('/admin') }}
                   className="w-full flex items-center gap-2 text-amber-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
                   <Settings size={13} /> {t('sidebar.systemAdmin')}
+                </button>
+              )}
+              {/* projects-platform (Phase 0 scaffold) — 預設只給 admin 看 */}
+              {projectsPlatformVis.can_see && (
+                <button onClick={() => { setShowMenu(false); navigate('/projects-platform') }}
+                  className="w-full flex items-center gap-2 text-cyan-400 hover:bg-slate-700 px-3 py-2.5 text-xs transition font-medium">
+                  <FolderKanban size={13} /> 專案管理
+                  <span className="ml-auto px-1.5 py-0.5 text-[9px] bg-amber-500/20 text-amber-300 rounded">beta</span>
                 </button>
               )}
               {canSchedule && (

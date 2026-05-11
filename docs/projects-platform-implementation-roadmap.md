@@ -7,9 +7,9 @@
 
 ---
 
-## ✅ Phase 0:Scaffolding 完成(2026-05-04)
+## ✅ Phase 0:Scaffolding 完成(2026-05-04)+ Sprint 0 補強(2026-05-04)
 
-### 0.1 已完成
+### 0.1 Phase 0 Scaffolding(2026-05-04 上午)
 
 - ✅ `server/projects-platform/` directory + namespace 規範
 - ✅ Feature flag `ENABLE_PROJECTS_PLATFORM` 邏輯
@@ -21,6 +21,46 @@
 - ✅ Server.js mount 點(`/api/projects`,feature-flagged)
 - ✅ database-oracle.js runMigrations hook
 - ✅ Smoke test PASSED(load / feature flag on/off)
+
+### 0.2 Sprint 0 補強(2026-05-04 下午)— 對齊 internal-admin-plan §G.1
+
+- ✅ `middleware/sidebarPermissionMiddleware.js`(4 階段演進判定)
+- ✅ `routes/internalAdmin.js`(/health + /overview + /system-health)
+- ✅ `routes/me.js`(/me/visibility 給 client sidebar 用)
+- ✅ 沿用 Cortex `verifyToken` auth middleware(只 import 不修改)
+- ✅ Client: `hooks/useProjectsPlatformVisibility.ts`
+- ✅ Client: `pages/ProjectsPlatform/index.tsx`(Overview + System Health 雙 tab)
+- ✅ Client: `pages/ProjectsPlatform/InternalAdmin/Overview.tsx`(子頁清單 + sprint roadmap)
+- ✅ Client: `pages/ProjectsPlatform/InternalAdmin/SystemHealth.tsx`(Feature flag / LLM queue / Plugins / 10s auto-refresh)
+- ✅ App.tsx 加 `/projects-platform/*` route(lazy + Suspense)
+- ✅ Sidebar.tsx 加 「📁 專案管理(beta)」 menu(只在 `can_see=true` 才顯示)
+- ✅ Smoke test PASSED(admin / normal user / no user 三場景)
+- ✅ TypeScript compile clean(我加的檔案 0 errors)
+
+### 0.3 部署 Sprint 0 補強後的效果
+
+```
+Cortex admin 登入:
+  → Sidebar 看到 "📁 專案管理(beta)" menu
+  → 點進去 → /projects-platform
+  → 看到 Internal Admin Overview(10 個子頁狀態列表)
+  → 切到 System Health tab(Feature flag / LLM Queue / Plugins / 10s auto-refresh)
+
+一般 user 登入:
+  → Sidebar 看不到 "專案管理" menu
+  → 直接訪問 /projects-platform → 自動 redirect 回 /chat
+  → API /api/projects/* 全部 403
+```
+
+### 0.4 啟用方式
+
+```bash
+# .env 加:
+ENABLE_PROJECTS_PLATFORM=true       # 啟用 module
+ENABLE_PROJECTS_WORKERS=true        # 啟用 workers(預設 = ENABLED)
+PROJECTS_PLATFORM_GA_MODE=false     # 預設 false(只給 admin 看)
+PILOT_USERS=                        # 預設空(Pilot 啟動時填 user_id list)
+```
 
 ### 0.2 檔案清單(2026-05-04)
 

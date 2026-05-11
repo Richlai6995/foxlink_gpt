@@ -35,6 +35,7 @@ const TrainingPage = lazy(() => import('./pages/TrainingPage'))
 const PmReviewQueuePage = lazy(() => import('./pages/PmReviewQueuePage'))
 const PmBriefingPage = lazy(() => import('./pages/PmBriefingPage'))
 const MetalsPage = lazy(() => import('./pages/MetalsPage'))
+const ProjectsPlatformPage = lazy(() => import('./pages/ProjectsPlatform'))
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth()
@@ -123,6 +124,7 @@ function AppRoutes() {
       <Route path="/pm/review" element={<ProtectedRoute><MobileGuard pageKey="pm"><Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400">Loading...</div>}><PmReviewQueuePage /></Suspense></MobileGuard></ProtectedRoute>} />
       <Route path="/pm/briefing" element={<ProtectedRoute><MobileGuard pageKey="pm"><Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400">Loading...</div>}><PmBriefingPage /></Suspense></MobileGuard></ProtectedRoute>} />
       <Route path="/metals" element={<ProtectedRoute><MobileGuard pageKey="metals"><Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400">Loading...</div>}><MetalsPage /></Suspense></MobileGuard></ProtectedRoute>} />
+      <Route path="/projects-platform/*" element={<ProtectedRoute><MobileGuard pageKey="projects-platform"><Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-900 text-slate-400">Loading...</div>}><ProjectsPlatformPage /></Suspense></MobileGuard></ProtectedRoute>} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="*" element={<Navigate to={isAuthenticated ? '/chat' : '/login'} replace />} />
     </Routes>
