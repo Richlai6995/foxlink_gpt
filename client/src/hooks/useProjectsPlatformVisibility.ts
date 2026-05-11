@@ -14,7 +14,7 @@ import { useAuth } from '../context/AuthContext'
 
 type Visibility = {
   can_see: boolean
-  mode: 'admin' | 'pilot' | 'user' | 'hidden'
+  mode: 'admin' | 'pilot' | 'user' | 'hidden' | 'loading'
   reason?: string
   features?: {
     internal_admin?: boolean
@@ -22,13 +22,17 @@ type Visibility = {
     projects_list?: boolean
     wizard?: boolean
   }
+  user?: { id: number; username: string; role: string } | null
+  /** debug-only:API call 失敗時的 raw error */
+  api_error?: string
 }
 
-const HIDDEN: Visibility = { can_see: false, mode: 'hidden' }
+const HIDDEN:  Visibility = { can_see: false, mode: 'hidden',  reason: 'no-user' }
+const LOADING: Visibility = { can_see: false, mode: 'loading', reason: 'pending' }
 
 export function useProjectsPlatformVisibility(): Visibility {
   const { isAuthenticated, token } = useAuth() as any
-  const [v, setV] = useState<Visibility>(HIDDEN)
+  const [v, setV] = useState<Visibility>(LOADING)
 
   useEffect(() => {
     if (!isAuthenticated || !token) {
@@ -36,20 +40,29 @@ export function useProjectsPlatformVisibility(): Visibility {
       return
     }
     let cancelled = false
+    setV(LOADING)
     fetch('/api/projects/me/visibility', {
       headers: { Authorization: `Bearer ${token}` },
     })
-      .then((r) => (r.ok ? r.json() : null))
+      .then(async (r) => {
+        if (!r.ok) {
+          const txt = await r.text().catch(() => '')
+          throw new Error(`HTTP ${r.status}: ${txt.slice(0, 200)}`)
+        }
+        return r.json()
+      })
       .then((data) => {
         if (cancelled) return
         if (data && typeof data.can_see === 'boolean') {
           setV(data)
         } else {
-          setV(HIDDEN)
+          setV({ ...HIDDEN, reason: 'invalid-response', api_error: JSON.stringify(data).slice(0, 200) })
         }
       })
-      .catch(() => {
-        if (!cancelled) setV(HIDDEN)
+      .catch((e) => {
+        if (!cancelled) {
+          setV({ ...HIDDEN, reason: 'api-error', api_error: String(e?.message || e) })
+        }
       })
     return () => { cancelled = true }
   }, [isAuthenticated, token])

@@ -34,6 +34,12 @@ router.get('/visibility', asyncHandler(async (req, res) => {
       projects_list:  v.can_see,
       wizard:         v.can_see && (v.mode === 'admin' || v.mode === 'pilot'),
     },
+    // 給診斷頁顯示用 — admin 可以照這個 id 抄進 PILOT_USERS
+    user: req.user ? {
+      id: req.user.id,
+      username: req.user.username,
+      role: req.user.role,
+    } : null,
   });
 }));
 
