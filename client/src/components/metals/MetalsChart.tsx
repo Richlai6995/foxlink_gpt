@@ -9,9 +9,10 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import ReactECharts from 'echarts-for-react'
-import { Loader2, Maximize2, Minimize2 } from 'lucide-react'
+import { Loader2, Maximize2, Minimize2, Sparkles } from 'lucide-react'
 import api from '../../lib/api'
 import { buildIndicatorSeries, type IndicatorKey, type PricePoint } from '../../lib/metalsIndicators'
+import MetalsTAPanel from './MetalsTAPanel'
 
 export interface MetalDef {
   code: string
@@ -70,6 +71,7 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
   const [customTo, setCustomTo] = useState<string>('')
   const [indicators, setIndicators] = useState<IndicatorKey[]>([])
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [showTA, setShowTA] = useState(false)
 
   // ESC 退出全螢幕
   useEffect(() => {
@@ -272,6 +274,13 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
         </span>
         <span className="text-[10px] opacity-70 ml-auto">右鍵 = 疊加比較(最多 2 條)</span>
         <button
+          onClick={() => setShowTA(true)}
+          className="ml-1 flex items-center gap-1 px-2 py-0.5 text-[11px] rounded bg-violet-500 hover:bg-violet-600 text-white shadow-sm"
+          title="用當前 chart 配置產 AI 技術分析摘要"
+        >
+          <Sparkles size={11} /> AI TA
+        </button>
+        <button
           onClick={() => setIsFullscreen(v => !v)}
           className="ml-1 p-1 rounded hover:bg-white/60 text-slate-700"
           title={isFullscreen ? '退出全螢幕(Esc)' : '全螢幕展開'}
@@ -355,6 +364,16 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
         )}
       </div>
       </div>
+
+      {/* AI TA drawer */}
+      <MetalsTAPanel
+        isOpen={showTA}
+        onClose={() => setShowTA(false)}
+        metal={primaryMetal}
+        days={days}
+        viewDate={viewDate}
+        indicators={indicators}
+      />
     </div>
   )
 }

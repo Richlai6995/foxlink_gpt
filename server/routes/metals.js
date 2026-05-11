@@ -134,26 +134,36 @@ router.get('/prices', verifyToken, verifyMetalsAccess, async (req, res) => {
     `).all(...priceBinds, ...params);
 
     // 2) 對每金屬撈 -7d / -30d 最近一筆,算漲跌
+    //
+    // 2 個 bug fix(2026-05-11):
+    //   (a) 之前用 r.as_of_date_raw 結果 lowercaseKeys 把 JS Date → ISO 字串,
+    //       oracledb bind 跟 DATE 欄比較 implicit cast 失敗 → query throw → catch NaN → UI 「—」
+    //       改用 r.as_of_date(本來就是 'YYYY-MM-DD' 字串)+ TO_DATE(?, 'YYYY-MM-DD')
+    //   (b) 上界 `<= asOfRaw`(沒減 offset)→ 永遠回最新 row,不是 N 天前
+    //       改 `<= TO_DATE - offset` 才是真的 N 天前
     const result = [];
     for (const r of latestRows) {
       const code = r.metal_code || r.METAL_CODE;
       const latestPrice = Number(r.price_usd ?? r.PRICE_USD);
-      const asOfRaw = r.as_of_date_raw || r.AS_OF_DATE_RAW;
+      const asOfStr = r.as_of_date || r.AS_OF_DATE;  // 'YYYY-MM-DD' 字串
 
       const fetchPriceAt = async (offset) => {
         try {
           const row = await db.prepare(`
             SELECT price_usd FROM (
               SELECT price_usd FROM pm_price_history
-              WHERE UPPER(metal_code) = ?
-                AND as_of_date <= ?
-                AND as_of_date >= ? - ?
+              WHERE UPPER(metal_code) = UPPER(?)
+                AND as_of_date <= TO_DATE(?, 'YYYY-MM-DD') - ?
+                AND as_of_date >= TO_DATE(?, 'YYYY-MM-DD') - ?
                 AND price_usd IS NOT NULL
               ORDER BY as_of_date DESC
             ) WHERE ROWNUM = 1
-          `).get(code, asOfRaw, asOfRaw, offset + 7); // 找 [offset, offset+7] 區間最近一筆
+          `).get(code, asOfStr, offset, asOfStr, offset + 7); // [asOf-offset-7, asOf-offset]
           return Number(row?.price_usd ?? row?.PRICE_USD);
-        } catch (_) { return NaN; }
+        } catch (e) {
+          console.warn(`[Metals] fetchPriceAt ${code} offset=${offset} 失敗:`, e.message);
+          return NaN;
+        }
       };
 
       // 7 / 30 天前
@@ -497,6 +507,160 @@ router.post('/ai-analyze', verifyToken, verifyMetalsAccess, async (req, res) => 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// AI TA — 技術分析建議(streaming SSE)
+// 跟 /ai-analyze 差別:這邊吃 chart 當前 context(metal/days/indicators),
+// 後端算 indicator 摘要餵 LLM,專門產 TA 解讀(非泛用問答)。
+// ─────────────────────────────────────────────────────────────────────────────
+
+const METALS_TA_SYSTEM_INSTRUCTION = `你是 Foxlink 集團「金屬技術分析(TA)助理」。
+
+任務:根據使用者目前看的 chart 配置(金屬 / 時間區間 / 勾的技術指標),
+給「**當前形態描述 + 短期關注訊號**」,作為採購情報參考。
+
+規則:
+1. **只描述形態,不給投資建議**:
+   - 描述:多頭 / 空頭 / 盤整 / 突破 / 跌破 / 超買 / 超賣 / 黃金交叉 / 死亡交叉
+   - 不可說:「建議買進」「建議賣出」「建議避險」等指令性語句
+2. **強制引用具體數值**:每個結論都要對應到我提供的 indicator 數值(MA20=X / RSI=Y 等),不能憑空講。
+3. **結構化輸出**(markdown):
+   - **整體趨勢**(基於 close vs MAs 的相對位置)
+   - **動能信號**(RSI / MACD)
+   - **關鍵價位**(近 30 天 high/low、各 MA 當前位置)
+   - **短期關注**(若有 cross / 突破 / 跌破事件)
+4. **強制結尾**附這句:「⚠ TA 是輔助參考,**非投資建議**,實際採購決策請依採購主管 / 銀行專員建議。」
+5. **語氣中立**:不誇大、不恐嚇。回應簡潔 — 整段 200-400 字為佳。`;
+
+router.post('/ai-ta-analyze', verifyToken, verifyMetalsAccess, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { buildLlmContext } = require('../services/metalsIndicatorCalc');
+
+    const metal = String(req.body?.metal || '').trim();
+    const days = Math.min(Math.max(Number(req.body?.days || 180), 30), 3650);
+    const endDate = String(req.body?.end_date || '').trim();
+    const indicators = Array.isArray(req.body?.indicators) ? req.body.indicators : [];
+
+    if (!metal) return res.status(400).json({ error: 'metal required' });
+    const validEnd = /^\d{4}-\d{2}-\d{2}$/.test(endDate) ? endDate : null;
+
+    // SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+    const send = (event, payload) => {
+      try {
+        res.write(`event: ${event}\n`);
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      } catch (_) {}
+    };
+
+    // 1) 撈歷史價格 — 跟 timeseries 同邏輯
+    let priceRows;
+    try {
+      if (validEnd) {
+        priceRows = await db.prepare(`
+          SELECT TO_CHAR(as_of_date, 'YYYY-MM-DD') AS d, price_usd AS p
+          FROM pm_price_history
+          WHERE UPPER(metal_code) = UPPER(?)
+            AND as_of_date >= TO_DATE(?, 'YYYY-MM-DD') - ?
+            AND as_of_date <  TO_DATE(?, 'YYYY-MM-DD') + 1
+            AND price_usd IS NOT NULL
+          ORDER BY as_of_date
+        `).all(metal, validEnd, days, validEnd);
+      } else {
+        priceRows = await db.prepare(`
+          SELECT TO_CHAR(as_of_date, 'YYYY-MM-DD') AS d, price_usd AS p
+          FROM pm_price_history
+          WHERE UPPER(metal_code) = UPPER(?)
+            AND as_of_date >= TRUNC(SYSDATE) - ?
+            AND price_usd IS NOT NULL
+          ORDER BY as_of_date
+        `).all(metal, days);
+      }
+    } catch (e) {
+      send('error', { error: 'DB query failed: ' + e.message });
+      return res.end();
+    }
+
+    if (!priceRows || priceRows.length === 0) {
+      send('error', { error: `DB 沒有 ${metal} 在這區間的資料,先 backfill 或換時間區間` });
+      return res.end();
+    }
+
+    // 2) 算 indicator context(LLM 餵料)
+    const prices = priceRows.map(r => ({
+      date: r.d || r.D,
+      price: Number(r.p ?? r.P),
+    })).filter(p => Number.isFinite(p.price));
+
+    const ctx = buildLlmContext(prices, indicators);
+    console.log(`[Metals/TA] metal=${metal} days=${days} bars=${ctx.stats?.bars} indicators=${indicators.join(',') || '(none)'}`);
+
+    // 3) 組 prompt:把 ctx 序列化餵 LLM
+    const ctxJson = JSON.stringify(ctx, null, 2);
+    const indKeys = indicators.length > 0 ? indicators.join(', ') : '(無 — 只看純價格趨勢)';
+    const fullSystem = `${METALS_TA_SYSTEM_INSTRUCTION}
+
+---
+使用者當前 chart 配置:
+- 金屬:${metal}
+- 時間區間:${days} 天 (${prices[0]?.date} ~ ${prices[prices.length - 1]?.date})
+- 使用者勾的指標:${indKeys}
+
+以下是 server 端算好的 indicator context(供你引用,**不要重複貼出來**,選對應使用者勾的指標解讀):
+
+\`\`\`json
+${ctxJson}
+\`\`\`
+
+請依規則 1-5 給 TA 解讀。`;
+
+    // 4) streamChat
+    const { streamChat } = require('../services/gemini');
+    const apiModel = process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview';
+    const userParts = [{ text: `請給 ${metal} 當前的技術分析摘要。` }];
+
+    let totalText = '';
+    const onChunk = (text) => {
+      if (!text) return;
+      totalText += text;
+      send('chunk', { text });
+    };
+
+    try {
+      const result = await streamChat(
+        apiModel,
+        [],
+        userParts,
+        onChunk,
+        fullSystem,
+        true,  // disableSearch
+        { reasoning_effort: 'low', max_output_tokens: 2048 }
+      );
+      send('done', {
+        input_tokens: result?.inputTokens || 0,
+        output_tokens: result?.outputTokens || 0,
+        bars_analyzed: ctx.stats?.bars || 0,
+      });
+    } catch (e) {
+      console.error('[Metals] /ai-ta-analyze stream error:', e);
+      send('error', { error: e.message });
+    } finally {
+      res.end();
+    }
+  } catch (e) {
+    console.error('[Metals] /ai-ta-analyze error:', e);
+    if (!res.headersSent) {
+      res.status(500).json({ error: e.message });
+    } else {
+      try { res.end(); } catch (_) {}
+    }
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // XLSX EXPORT — 3 sheet:金屬報價 / 宏觀數據 / 說明
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -542,21 +706,24 @@ router.get('/export.xlsx', verifyToken, verifyMetalsAccess, async (req, res) => 
     for (const r of latestRows) {
       const code = r.metal_code || r.METAL_CODE;
       const latestPrice = Number(r.price_usd ?? r.PRICE_USD);
-      const asOfRaw = r.as_of_date_raw || r.AS_OF_DATE_RAW;
+      const asOfStr = r.as_of_date || r.AS_OF_DATE;  // 同 /prices,改用 string 'YYYY-MM-DD'
       const fetchPriceAt = async (offset) => {
         try {
           const row = await db.prepare(`
             SELECT price_usd FROM (
               SELECT price_usd FROM pm_price_history
-              WHERE UPPER(metal_code) = ?
-                AND as_of_date <= ?
-                AND as_of_date >= ? - ?
+              WHERE UPPER(metal_code) = UPPER(?)
+                AND as_of_date <= TO_DATE(?, 'YYYY-MM-DD') - ?
+                AND as_of_date >= TO_DATE(?, 'YYYY-MM-DD') - ?
                 AND price_usd IS NOT NULL
               ORDER BY as_of_date DESC
             ) WHERE ROWNUM = 1
-          `).get(code, asOfRaw, asOfRaw, offset + 7);
+          `).get(code, asOfStr, offset, asOfStr, offset + 7);
           return Number(row?.price_usd ?? row?.PRICE_USD);
-        } catch (_) { return NaN; }
+        } catch (e) {
+          console.warn(`[Metals/xlsx] fetchPriceAt ${code} offset=${offset} 失敗:`, e.message);
+          return NaN;
+        }
       };
       const price7 = await fetchPriceAt(7);
       const price30 = await fetchPriceAt(30);
