@@ -114,8 +114,39 @@ bash server/scripts/probe-waf-webhook.sh
 - ingress 規則:[k8s/ingress-webhook.yaml](../k8s/ingress-webhook.yaml) — K8s 層只接收 POST `/api/webex/webhook`
 - 防火牆 / WAF 設定參考:[docs/webex-webhook-firewall-setup.md](webex-webhook-firewall-setup.md)
 
-## 7. 歷史紀錄
+## 7. 常見坑 — 規則沒包全
 
-| 日期 | 事件 | Reference 範本 |
+### 7.1 OWASP bypass 不等於 Bot Manager bypass
+
+Akamai 安全層分多層,**bypass OWASP CRS 不會自動 bypass Bot Manager**。常見症狀:
+
+| 測試方式 | 結果 | 意思 |
+|--|--|--|
+| 從家用 IP curl(預設 UA `curl/8.x`)| 200 OK | OWASP 過了 |
+| 從家用 IP curl + `User-Agent: ...CiscoSparkBot...` | **403 + Reference #** | Bot Manager 用 UA 擋下 |
+| Webex 雲端真實流量 | 沒紀錄(silent drop) | UA + Cloud IP 雙因素都中 |
+
+**驗證指令**(從外網跑兩次比對):
+
+```bash
+# 預設 UA — 通常會通
+bash server/scripts/probe-waf-webhook.sh
+
+# 模擬 Webex UA — 應該 403(2026-05-11 證實)
+bash server/scripts/probe-waf-webhook.sh "" "Mozilla/5.0 (compatible; CiscoSparkBot)"
+```
+
+### 7.2 Reference # 被 HTML-encode 抓不到
+
+Akamai 有時把 `Reference #` 在 HTML 內 encode 成 `Reference&#32;&#35;`,簡單 grep 抓不到。probe 腳本已更新(2026-05-11)先 sed decode 再 grep。手動檢查用:
+
+```bash
+sed -e 's/&#46;/./g' -e 's/&#32;/ /g' -e 's/&#35;/#/g' response.html | grep "Reference #"
+```
+
+## 8. 歷史紀錄
+
+| 日期 | 事件 | Reference |
 |------|------|----------|
-| 2026-05-11 | 內網 443 上線後 Webex webhook 仍不通,確認是 Akamai WAF 擋下 | `#18.140985cb.1778248578.414e4bb` |
+| 2026-05-11 | 內網 443 上線後 Webex webhook 仍不通,確認 Akamai OWASP 擋 | `#18.140985cb.1778248578.414e4bb` |
+| 2026-05-11 | OWASP bypass 後手動 curl 200 OK,**但 Webex 雲端仍進不來** → 證實 Bot Manager 對 `CiscoSparkBot` UA 過濾 | `#18.f7463af.1778490819.76a333a6` |

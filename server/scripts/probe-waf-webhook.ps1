@@ -23,10 +23,12 @@ $body | Out-File -Encoding ascii -NoNewline $tmpBody
 
 $tmpOut = [System.IO.Path]::GetTempFileName()
 try {
+  # UA 模擬 Webex 雲端真實 UA(2026-05-11 證實 Akamai 對 CiscoSparkBot UA 過濾)
+  $ua = "Mozilla/5.0 (compatible; CiscoSparkBot)"
   & curl.exe -sS -i -X POST $Url `
     -H "Content-Type: application/json" `
     -H "X-Spark-Signature: abc123fakeprobehash" `
-    -H "User-Agent: webex-probe/1.0" `
+    -H "User-Agent: $ua" `
     --data-binary "@$tmpBody" `
     --compressed 2>&1 | Out-File -Encoding utf8 $tmpOut
 
@@ -36,7 +38,9 @@ try {
   Get-Content $tmpOut -Head 8
   Write-Host ""
 
-  $ref = [regex]::Match($raw, "Reference #[0-9a-f.]+").Value
+  # Akamai 有時把 Reference # HTML-encode 成 &#32;&#35; — 先 decode 再 match
+  $decoded = $raw -replace '&#46;', '.' -replace '&#32;', ' ' -replace '&#35;', '#'
+  $ref = [regex]::Match($decoded, "Reference #[0-9a-f.]+").Value
   $status = ([regex]::Match($raw, "HTTP/[\d.]+\s+(\d+)").Groups[1].Value)
 
   if ($ref) {

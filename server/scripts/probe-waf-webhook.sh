@@ -18,13 +18,17 @@ echo "[probe] POST $URL"
 echo "[probe] 從外網(家裡 / 4G)執行才有意義 — 內網直連 K8s 不過 WAF"
 echo ""
 
+# UA 預設模擬 Webex 雲端真實 UA(更準確還原 Webex 被擋的情境)
+# 想用 curl 預設 UA 跑通透測試,傳 1 個參數:bash probe.sh "" "curl/8.0"
+UA="${2:-Mozilla/5.0 (compatible; CiscoSparkBot)}"
+
 # 假 webhook payload(內容無所謂,只是要觸發 POST + JSON)
 BODY='{"id":"test-probe","name":"waf_probe","resource":"messages","event":"created","data":{"id":"x","personEmail":"probe@example.com"}}'
 
 curl -sS -X POST "$URL" \
   -H "Content-Type: application/json" \
   -H "X-Spark-Signature: abc123fakeprobehash" \
-  -H "User-Agent: webex-probe/1.0" \
+  -H "User-Agent: $UA" \
   -d "$BODY" \
   -i > "$OUT" 2>&1 || true
 
@@ -32,7 +36,9 @@ echo "=== HTTP response head ==="
 head -5 "$OUT"
 echo ""
 
-REF=$(grep -oE "Reference #[0-9a-f.]+" "$OUT" || true)
+# Akamai 有時把 Reference # HTML-encode 成 Reference&#32;&#35; — 先 decode 再 grep
+DECODED=$(sed -e 's/&#46;/./g' -e 's/&#32;/ /g' -e 's/&#35;/#/g' "$OUT")
+REF=$(echo "$DECODED" | grep -oE "Reference #[0-9a-f.]+" | head -1 || true)
 if [ -n "$REF" ]; then
   echo "=== WAF 擋下 ✗  Reference 已抓到 ==="
   echo "$REF"
