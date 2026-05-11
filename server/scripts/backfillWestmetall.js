@@ -26,9 +26,10 @@
 try { require('dotenv').config({ path: require('path').join(__dirname, '../.env') }); }
 catch (_) { /* K8s pod 沒 dotenv */ }
 
-let db;
-try { db = require('../database-oracle').db; }
-catch (_) { db = require('/app/database-oracle').db; }
+let oracleDb;
+try { oracleDb = require('../database-oracle'); }
+catch (_) { oracleDb = require('/app/database-oracle'); }
+let db = null;  // 在 main() 開頭 await init() 後賦值
 
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');
@@ -244,6 +245,11 @@ async function backfillOne(metal) {
   console.log(`Westmetall 歷史 backfill  ${DRY_RUN ? '(DRY-RUN)' : '(LIVE)'}`);
   console.log(`金屬:${METALS.map(m => m.code).join(', ')}`);
   console.log('═'.repeat(60));
+
+  // Oracle pool 初始化(同 server.js 啟動流程)
+  console.log('Oracle pool 初始化中…');
+  db = await oracleDb.init();
+  console.log('Oracle pool ready');
 
   const summary = [];
   for (const metal of METALS) {
