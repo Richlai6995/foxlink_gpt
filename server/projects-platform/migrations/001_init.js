@@ -157,24 +157,16 @@ module.exports = async function migrate001(db) {
   );
 
   // ==========================================================================
-  // 4. ⭐ ALTER ticket_messages — 加 channel-related columns(唯一動到既有表)
-  //    對應解耦設計 §B.2 + spec §13.1.1
-  //    全部加 default,既有 feedback ticket 完全不受影響。
+  // 4. 訊息表決策(2026-05-11 Sprint 2 修正)
+  //
+  // 設計文件原寫「reuse ticket_messages」,但 Cortex 實際表叫 feedback_messages,
+  // 而且 schema 不適合(ticket_id NOT NULL FK)。Sprint 2 改為新建 project_messages
+  // 表(migration 006)— 真正符合解耦規則 1「不動既有 Cortex schema」。
+  //
+  // 此處留註不執行任何 ALTER,避免 ORA-00942 噪音。
   // ==========================================================================
-  await addCol('TICKET_MESSAGES', 'CHANNEL_ID',              'NUMBER');
-  await addCol('TICKET_MESSAGES', 'MESSAGE_TYPE',            'VARCHAR2(20) DEFAULT \'NORMAL\'');
-  await addCol('TICKET_MESSAGES', 'IS_PINNED',               'NUMBER(1) DEFAULT 0');
-  await addCol('TICKET_MESSAGES', 'PINNED_BY',               'NUMBER');
-  await addCol('TICKET_MESSAGES', 'PINNED_AT',               'TIMESTAMP');
-  await addCol('TICKET_MESSAGES', 'REQUIRES_READ_RECEIPT',   'NUMBER(1) DEFAULT 0');
-  await addCol('TICKET_MESSAGES', 'SYNCED_TO_ANNOUNCEMENT',  'NUMBER(1) DEFAULT 0');
-  await addCol('TICKET_MESSAGES', 'DELETED_AT',              'TIMESTAMP');
-  await addCol('TICKET_MESSAGES', 'DELETED_BY',              'NUMBER');
-  await addCol('TICKET_MESSAGES', 'DELETION_MODE',           'VARCHAR2(20)');
-  await addCol('TICKET_MESSAGES', 'DELETION_REASON',         'VARCHAR2(500)');
-  await addCol('TICKET_MESSAGES', 'CONTENT_HASH',            'VARCHAR2(64)');
 
   log.log('001_init migration ✓');
 
-  // 後續 migrations 加在這:002_channels.js / 003_tasks.js / 004_forms.js / 005_workflow.js / ...
+  // 後續 migrations:002_channels / 003_workflow / 004_tasks / 005_seed / 006_messages
 };

@@ -19,8 +19,14 @@ const { asyncHandler } = require('../middleware/errorBoundary');
 const { loadProject, requirePmOrAdmin } = require('../middleware/projectAclMiddleware');
 const projectsService = require('../services/projectsService');
 const pluginRegistry = require('../plugins/registry');
+const channelsRoutes = require('./channels');
 
 const router = express.Router();
+
+// Sprint 2 — channel/message routes(scoped under project)
+//   GET /:projectId/channels, POST /:projectId/channels, /dm, /:cid/archive,
+//   /:cid/participants, /:cid/read, /:cid/messages, /:cid/messages/pinned
+router.use('/:projectId/channels', channelsRoutes.projectScoped);
 
 function getDb() {
   return require('../../database-oracle').db;

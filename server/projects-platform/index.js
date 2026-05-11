@@ -71,12 +71,14 @@ function buildRouter() {
   // Internal Admin(限 admin mode,middleware 內部再 require)
   router.use('/internal-admin', require('./routes/internalAdmin'));
 
-  // Sprint 1 — Projects CRUD
+  // Sprint 1 — Projects CRUD(含 Sprint 2 channels nested under /:id/channels)
   router.use('/projects', require('./routes/projects'));
+
+  // Sprint 2 — message-scoped routes(/messages/:mid/...)
+  router.use('/messages', require('./routes/channels').messageScoped);
 
   // Route stubs — 後續 sprint 逐個實作
   // router.use('/projects/wizard', require('./routes/wizard'));        // Sprint 9
-  // router.use('/projects/:id/channels', require('./routes/channels')); // Sprint 2
   // router.use('/projects/:id/tasks', require('./routes/tasks'));       // Sprint 6
   // router.use('/projects/:id/forms', require('./routes/forms'));       // Sprint 4
   // router.use('/projects/dashboard', require('./routes/dashboard'));   // Sprint 8
@@ -111,6 +113,7 @@ async function runMigrations(db) {
     await require('./migrations/003_workflow')(db);
     await require('./migrations/004_tasks')(db);
     await require('./migrations/005_seed')(db);
+    await require('./migrations/006_messages')(db);
     console.log('[projects-platform] migrations ✓');
   } catch (e) {
     console.error('[projects-platform] migrations failed:', e.message, e.stack);

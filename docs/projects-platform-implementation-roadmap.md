@@ -116,22 +116,36 @@ server/projects-platform/
 
 ---
 
-### Sprint 2 — Multi-Channel 戰情會議室(W1 後半 ~ W2 前半)
+### ✅ Sprint 2 — Multi-Channel 戰情會議室(2026-05-11 完成,WebSocket 留 Sprint 後段)
 
-**目標**:Slack-like 多 channel + 訊息流
+**目標**:Slack-like 多 channel + 訊息流(REST + polling demo)
 
-**任務**:
-- migration 005:確認 ticket_messages 加的欄位都 ready
-- `routes/channels.js`:CRUD channel + invite/remove participants
-- `services/channelService.js`:7 default channels 自動建立邏輯
-- WebSocket 整合(沿用既有 ticket_messages WebSocket)
-- 訊息色語言邏輯(NORMAL / PROGRESS / BLOCKER / DECISION / AI_INSIGHT)
-- Pin / 已讀回執 機制
-- DM 1:1 私聊(channel_type = 'dm')
-- 訊息刪除(標準 + emergency purge)
-- super_user self-join 機制(走既有 `project_super_users` 表)
+**設計決定(2026-05-11 修正)**:
+- 原寫「reuse ticket_messages」誤判 — Cortex 實際表叫 `feedback_messages` 且 schema 不適合
+- 改為**新建 `project_messages` 表**(migration 006),真正符合解耦規則 1「不動既有 Cortex schema」
+- migration 001 移除錯誤的 `ALTER TICKET_MESSAGES x12`(原本全部 ORA-00942 被靜默吞掉)
 
-**Deliverable**:7 channels 可運作 + DM + 訊息色語言 + Pin
+**已完成**:
+- ✅ migration 006:`project_messages` + `project_message_read_receipts`(2 表)
+- ✅ `services/channelsService.js`:listForProject / listForUser / create / findOrCreateDM / archive / participants / markRead
+- ✅ `services/messagesService.js`:post / list / pin / unpin / softDelete / emergencyPurge / read receipts
+- ✅ 訊息色語言:NORMAL / PROGRESS / BLOCKER / DECISION / AI_INSIGHT / SYSTEM
+- ✅ **自動同步 announcement**:BLOCKER / DECISION / AI_INSIGHT 自動以 SYSTEM 訊息 post 到 announcement channel(含原 channel 參照 + 連結)
+- ✅ Pin / Unpin + listPinned + 權限:author / PM / admin
+- ✅ DM 1:1 私聊(`channel_type='dm'`,`name='dm:lo+hi'` idempotent)
+- ✅ 訊息刪除雙模式:`standard` soft / `emergency_purge` 抹除 content(需 reason,PM/admin only)
+- ✅ Read receipt(`requires_read_receipt=1` 才寫,UNIQUE 防重)
+- ✅ `routes/channels.js`:project-scoped + message-scoped REST API
+- ✅ announcement channel 禁止一般人發訊息(只 PM/admin)
+- ✅ archive default channel 被擋
+- ✅ smoke test `smoke-projects-platform-sprint2.js` PASSED(22 個 case)
+
+**留 Sprint 後段**:
+- ⏳ WebSocket / SSE 即時推送(Phase 1 demo 先用 polling)
+- ⏳ Topic channel 動態拉群(Sprint 6 跟 task 一起做)
+- ⏳ super_user self-join(走既有 `project_super_users` 表,Sprint 11 整理身份時做)
+
+**Deliverable**:7 channels REST API 全運作 + DM + 訊息色語言 + Pin + Soft/Purge delete ✓
 
 ---
 
