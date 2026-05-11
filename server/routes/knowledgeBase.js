@@ -110,14 +110,15 @@ const UPLOAD_BASE = process.env.UPLOAD_DIR
   : path.join(__dirname, '../uploads');
 
 // Multer storage: save to uploads/kb/<kb_id>/
-const { isNumericId, ensureWithinRoot } = require('../utils/pathSafety');
+const { isSafeId, ensureWithinRoot } = require('../utils/pathSafety');
 
 const storage = multer.diskStorage({
   destination(req, _file, cb) {
-    // \u9632 path traversal:req.params.id \u5fc5\u9808\u662f\u7d14\u6578\u5b57 KB id\u3002
-    // \u653b\u64ca\u8005\u9001 :id='../../etc' \u904e\u53bb\u6703 escape \u51fa UPLOAD_BASE/kb/ \u5beb\u5230\u4efb\u610f\u76ee\u9304\u3002
+    // \u9632 path traversal:KB id \u662f UUID(alphanumeric + `_-`),\u4e0d\u662f\u7d14\u6578\u5b57\u3002
+    // \u653b\u64ca\u8005\u9001 :id='../../etc' \u904e\u53bb\u6703 escape \u51fa UPLOAD_BASE/kb/ \u5beb\u5230\u4efb\u610f\u76ee\u9304,
+    // \u6240\u4ee5\u7528 isSafeId(alphanumeric + `_-`)\u9a57\u8b49,\u64cb\u659c\u7dda/\u9ede/\u53cd\u659c\u7dda\u3002
     const id = req.params.id;
-    if (id !== undefined && !isNumericId(String(id))) {
+    if (id !== undefined && !isSafeId(String(id))) {
       return cb(new Error('Invalid KB id'));
     }
     const dir = path.join(UPLOAD_BASE, 'kb', id || 'tmp');
