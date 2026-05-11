@@ -9,7 +9,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ReactECharts from 'echarts-for-react'
-import { Loader2, Maximize2, Minimize2, Sparkles, Minus, TrendingUp, Type, Trash2, MousePointer2 } from 'lucide-react'
+import { Loader2, Maximize2, Minimize2, Sparkles, Minus, TrendingUp, Type, Trash2, MousePointer2, PencilLine } from 'lucide-react'
 import api from '../../lib/api'
 import { buildIndicatorSeries, type IndicatorKey, type PricePoint } from '../../lib/metalsIndicators'
 import MetalsTAPanel from './MetalsTAPanel'
@@ -84,6 +84,8 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
   const [indicators, setIndicators] = useState<IndicatorKey[]>([])
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showTA, setShowTA] = useState(false)
+  // 標註工具列預設收起,點筆 icon 才展開 — 一般 user 不常用,展開會壓縮 indicator 列空間
+  const [showAnnotationToolbar, setShowAnnotationToolbar] = useState(false)
 
   // ─── 標註(annotations)─────────────────────────────────────────────
   const [annotations, setAnnotations] = useState<Annotation[]>([])
@@ -507,6 +509,19 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
             <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} className="border rounded px-1 py-0.5 text-xs" />
           </div>
         )}
+        {/* 標註工具列 toggle — 預設收起,展開後第二列才出現 */}
+        <button
+          onClick={() => setShowAnnotationToolbar(v => !v)}
+          className={`flex items-center gap-1 px-2 py-0.5 text-[11px] rounded border ${
+            showAnnotationToolbar || annotations.length > 0
+              ? 'bg-amber-50 text-amber-700 border-amber-300'
+              : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
+          }`}
+          title={showAnnotationToolbar ? '收起標註工具' : '展開標註工具(水平線/趨勢線/文字)'}
+        >
+          <PencilLine size={11} />
+          {annotations.length > 0 && <span className="font-mono">{annotations.length}</span>}
+        </button>
         <div className="ml-auto flex items-center gap-1 flex-wrap">
           {ALL_INDICATORS.map(ind => {
             const enough = primaryPoints.length >= ind.minPts
@@ -536,7 +551,8 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
         </div>
       </div>
 
-      {/* Drawing tools toolbar — 標註(水平線 / 趨勢線 / 文字)*/}
+      {/* Drawing tools toolbar — 預設收起,點筆 icon 才展開 */}
+      {showAnnotationToolbar && (
       <div className="flex items-center gap-1 px-2 py-1 border-b bg-slate-50 text-[10px] text-slate-500 flex-wrap">
         <span className="font-medium text-slate-600 mr-1">標註:</span>
         <ToolBtn active={activeTool === 'none'} onClick={() => { setActiveTool('none'); setTrendlineFirst(null) }} icon={<MousePointer2 size={11} />} label="選取" />
@@ -573,6 +589,7 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
           </span>
         )}
       </div>
+      )}
 
       {/* Chart — fullscreen 時 flex-1 撐滿剩餘空間,否則固定高 */}
       <div
