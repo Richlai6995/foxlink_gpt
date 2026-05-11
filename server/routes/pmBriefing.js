@@ -552,7 +552,7 @@ router.get('/news', verifyToken, verifyPmUser, async (req, res) => {
              (SELECT 1 FROM pm_news_pins p WHERE p.news_id = n.id AND p.user_id = ? FETCH FIRST 1 ROWS ONLY) AS is_pinned
       FROM pm_news n
       ${where}
-      ORDER BY GREATEST(NVL(n.scraped_at, n.published_at), NVL(n.published_at, n.scraped_at)) DESC NULLS LAST
+      ORDER BY COALESCE(n.published_at, n.scraped_at) DESC NULLS LAST, n.id DESC
       OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
     `).all(req.user.id, ...params, offset, size);
 

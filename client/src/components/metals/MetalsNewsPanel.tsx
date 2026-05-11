@@ -103,7 +103,12 @@ export default function MetalsNewsPanel({ viewDate }: Props) {
                         : 'bg-slate-100 text-slate-600'
                       }`}>{n.sentiment_label}</span>
                     )}
-                    <span className="ml-auto text-slate-400 flex-shrink-0">{(n.scraped_at || n.published_at || '').slice(5, 16).replace('T', ' ')}</span>
+                    <span
+                      className="ml-auto text-slate-400 flex-shrink-0"
+                      title={`發布 ${n.published_at || '—'} / 抓取 ${n.scraped_at || '—'}`}
+                    >
+                      {(n.published_at || n.scraped_at || '').slice(5, 16).replace('T', ' ')}
+                    </span>
                   </div>
                 </a>
               ))}

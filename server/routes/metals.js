@@ -331,7 +331,7 @@ router.get('/news', verifyToken, verifyMetalsAccess, async (req, res) => {
              summary, sentiment_label, related_metals
       FROM pm_news
       WHERE ${where.join(' AND ')}
-      ORDER BY GREATEST(NVL(scraped_at, published_at), NVL(published_at, scraped_at)) DESC NULLS LAST
+      ORDER BY COALESCE(published_at, scraped_at) DESC NULLS LAST, id DESC
       FETCH FIRST ? ROWS ONLY
     `).all(...params, limit);
     res.json({ rows, count: rows.length });
