@@ -387,24 +387,26 @@ const METALS_AI_SYSTEM_INSTRUCTION = `你是 Foxlink 集團「金屬市場分析
 5. 引用資料時用「根據今日報價/宏觀/新聞」等明確表述,不要捏造數字。
 6. 回應簡潔 — 一般 user 不要太長篇大論,4-8 行為佳,必要時加表格或條列。`;
 
-// 把 caller 給的 model key/preset/全名 resolve 成實際 API model 名。
-// 優先序:llm_models.key 查表 → 'flash'/'pro' env shortcut → 全名 whitelist → fallback Pro
+// 把 caller 給的 model key/preset/全名 resolve 成實際 API model 名 + provider_type + 整個 row。
+// 用 row 的 provider_type 在 endpoint 分流到 streamChat(Gemini)或 streamChatAoai(Azure)。
 async function resolveLlmModel(input, db) {
   const FLASH = process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview';
   const PRO = process.env.GEMINI_MODEL_PRO || 'gemini-3-pro-preview';
   const s = String(input || '').trim();
-  // 空 → 預設 Pro
-  if (!s) return { name: PRO, key: 'pro', source: 'default' };
-
-  // 1. preset shortcut(向下相容舊 localStorage 的 'flash'/'pro')
   const sLower = s.toLowerCase();
-  if (sLower === 'pro' || sLower === 'gemini-pro') return { name: PRO, key: 'pro', source: 'env' };
-  if (sLower === 'flash' || sLower === 'gemini-flash') return { name: FLASH, key: 'flash', source: 'env' };
+
+  // 1. preset shortcut(向下相容舊 localStorage 的 'flash'/'pro')— 一定走 Gemini
+  if (!s || sLower === 'pro' || sLower === 'gemini-pro') {
+    return { name: PRO, key: 'pro', source: 'env', provider_type: 'gemini', row: null };
+  }
+  if (sLower === 'flash' || sLower === 'gemini-flash') {
+    return { name: FLASH, key: 'flash', source: 'env', provider_type: 'gemini', row: null };
+  }
 
   // 2. llm_models 查表:用 key 或 api_model match
   try {
     const row = await db.prepare(`
-      SELECT key, api_model FROM llm_models
+      SELECT * FROM llm_models
       WHERE is_active = 1
         AND (model_role IS NULL OR model_role = 'chat')
         AND (key = ? OR LOWER(api_model) = LOWER(?))
@@ -415,19 +417,21 @@ async function resolveLlmModel(input, db) {
         name: row.api_model || row.API_MODEL,
         key: row.key || row.KEY,
         source: 'llm_models',
+        provider_type: (row.provider_type || row.PROVIDER_TYPE || 'gemini').toLowerCase(),
+        row,
       };
     }
   } catch (e) {
     console.warn('[Metals/resolveLlmModel] llm_models lookup 失敗:', e.message);
   }
 
-  // 3. 全名 whitelist(防 SQLi / 防亂塞)
+  // 3. 全名 whitelist(防 SQLi / 防亂塞)— 假設 gemini
   if (/^[a-z0-9-_.]+$/i.test(s) && /gemini|gpt/.test(s)) {
-    return { name: s, key: s, source: 'direct' };
+    return { name: s, key: s, source: 'direct', provider_type: 'gemini', row: null };
   }
 
   // 4. fallback Pro
-  return { name: PRO, key: 'pro', source: 'fallback' };
+  return { name: PRO, key: 'pro', source: 'fallback', provider_type: 'gemini', row: null };
 }
 
 router.post('/ai-analyze', verifyToken, verifyMetalsAccess, async (req, res) => {
@@ -508,10 +512,10 @@ router.post('/ai-analyze', verifyToken, verifyMetalsAccess, async (req, res) => 
     const ragContext = `=== 當前金屬報價 ===\n${priceContext || '(暫無資料)'}\n\n=== 宏觀指標 ===\n${macroContext || '(暫無資料)'}\n\n=== 近 2 日新聞 Top 10 ===\n${newsContext || '(暫無資料)'}`;
     const fullSystem = `${METALS_AI_SYSTEM_INSTRUCTION}\n\n---\n以下是當前資料快照(供你回答用,不要重複貼出來,引用即可):\n\n${ragContext}`;
 
-    // 2) 呼叫 streamChat,session-only — history=[], 無 file
+    // 2) Resolve model + 依 provider 分流 — Gemini 走 streamChat,Azure 走 streamChatAoai
     const resolved = await resolveLlmModel(req.body?.model, db);
     const apiModel = resolved.name;
-    console.log(`[Metals/ai-analyze] model=${apiModel} (key=${resolved.key}, source=${resolved.source})`);
+    console.log(`[Metals/ai-analyze] model=${apiModel} (key=${resolved.key}, provider=${resolved.provider_type})`);
     const userParts = [{ text: question }];
 
     let totalText = '';
@@ -522,20 +526,34 @@ router.post('/ai-analyze', verifyToken, verifyMetalsAccess, async (req, res) => 
     };
 
     try {
-      const result = await streamChat(
-        apiModel,
-        [], // history = empty (session-only)
-        userParts,
-        onChunk,
-        fullSystem,
-        true, // disableSearch — 我們已餵了 RAG,不需 google
-        { reasoning_effort: 'low', max_output_tokens: 2048 }
-      );
+      let result;
+      if (resolved.provider_type === 'azure' && resolved.row) {
+        const { streamChatAoai } = require('../services/llmService');
+        result = await streamChatAoai(
+          resolved.row,
+          [],
+          userParts,
+          onChunk,
+          fullSystem,
+          { max_output_tokens: 2048 }
+        );
+      } else {
+        result = await streamChat(
+          apiModel,
+          [],
+          userParts,
+          onChunk,
+          fullSystem,
+          true,  // disableSearch — RAG 已預塞
+          { reasoning_effort: 'low', max_output_tokens: 2048 }
+        );
+      }
       send('done', {
         input_tokens: result?.inputTokens || 0,
         output_tokens: result?.outputTokens || 0,
         model: apiModel,
         model_key: resolved.key,
+        provider_type: resolved.provider_type,
       });
     } catch (e) {
       console.error('[Metals] /ai-analyze stream error:', e);
@@ -664,11 +682,11 @@ ${ctxJson}
 
 請依規則 1-5 給 TA 解讀。`;
 
-    // 4) streamChat
+    // 4) Resolve model + 依 provider 分流
     const { streamChat } = require('../services/gemini');
     const resolvedTA = await resolveLlmModel(req.body?.model, db);
     const apiModel = resolvedTA.name;
-    console.log(`[Metals/TA] model=${apiModel} (key=${resolvedTA.key}, source=${resolvedTA.source})`);
+    console.log(`[Metals/TA] model=${apiModel} (key=${resolvedTA.key}, provider=${resolvedTA.provider_type})`);
     const userParts = [{ text: `請給 ${metal} 當前的技術分析摘要。` }];
 
     let totalText = '';
@@ -679,21 +697,35 @@ ${ctxJson}
     };
 
     try {
-      const result = await streamChat(
-        apiModel,
-        [],
-        userParts,
-        onChunk,
-        fullSystem,
-        true,  // disableSearch
-        { reasoning_effort: 'low', max_output_tokens: 2048 }
-      );
+      let result;
+      if (resolvedTA.provider_type === 'azure' && resolvedTA.row) {
+        const { streamChatAoai } = require('../services/llmService');
+        result = await streamChatAoai(
+          resolvedTA.row,
+          [],
+          userParts,
+          onChunk,
+          fullSystem,
+          { max_output_tokens: 2048 }
+        );
+      } else {
+        result = await streamChat(
+          apiModel,
+          [],
+          userParts,
+          onChunk,
+          fullSystem,
+          true,  // disableSearch
+          { reasoning_effort: 'low', max_output_tokens: 2048 }
+        );
+      }
       send('done', {
         input_tokens: result?.inputTokens || 0,
         output_tokens: result?.outputTokens || 0,
         bars_analyzed: ctx.stats?.bars || 0,
         model: apiModel,
         model_key: resolvedTA.key,
+        provider_type: resolvedTA.provider_type,
       });
     } catch (e) {
       console.error('[Metals] /ai-ta-analyze stream error:', e);
