@@ -527,7 +527,7 @@ router.post('/ai-analyze', verifyToken, verifyMetalsAccess, async (req, res) => 
 
     try {
       let result;
-      if (resolved.provider_type === 'azure' && resolved.row) {
+      if (resolved.provider_type === 'azure_openai' && resolved.row) {
         const { streamChatAoai } = require('../services/llmService');
         result = await streamChatAoai(
           resolved.row,
