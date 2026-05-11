@@ -1,7 +1,7 @@
 /**
  * Help page seed data — zh-TW (source of truth)
  * Auto-extracted from HelpPage.tsx
- * Generated: 2026-05-08
+ * Generated: 2026-05-11
  *
  * Block types: para, tip, note, table, steps, code, list, subsection, card_grid, comparison
  */
