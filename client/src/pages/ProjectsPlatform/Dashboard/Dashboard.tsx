@@ -23,7 +23,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
 import { api, type DashboardData, type StatusSummary, type SlaLight } from '../api'
-import { useCrumbs } from '../Shell/PlatformContext'
+import { useCrumbs, usePlatform } from '../Shell/PlatformContext'
 import WatchlistTooltip from './WatchlistTooltip'
 
 const SLA_STYLE: Record<SlaLight, { dot: string; bg: string; text: string; border: string; label: string }> = {
@@ -36,6 +36,7 @@ const SLA_STYLE: Record<SlaLight, { dot: string; bg: string; text: string; borde
 export default function Dashboard() {
   useCrumbs([{ label: '跨專案儀表板' }])
   const { token } = useAuth() as any
+  const { demoRole } = usePlatform()
   const navigate = useNavigate()
   const [data, setData] = useState<DashboardData | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -58,7 +59,7 @@ export default function Dashboard() {
   useEffect(() => {
     reload()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token])
+  }, [token, demoRole])
 
   if (err) {
     return <div className="p-4 bg-cortex-red-bg border border-red-200 rounded text-red-700 text-sm">無法載入儀表板:{err}</div>

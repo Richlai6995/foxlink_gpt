@@ -282,14 +282,62 @@ server/projects-platform/
 - ✅ Routes:`/projects-platform/admin/{form-templates|task-templates|notification-rules|connections|confidential-policies}`
 - ✅ Sidebar 5 個管理 link 啟用(只有「系統設定」still stub)
 
-### ⏳ Sprint E.2 — 後端串接(待做)
+### ✅ Sprint E.2 — 機密 displayStrategy 真實後端(2026-05-12 完成)
 
-- 機密欄位 `confidentialityMiddleware` 真實套 displayStrategy(目前前端 mock)
-- Form template CRUD(qp_form_templates migration 007-010)
-- Task template CRUD(沿用 Sprint 1 schema,UI 寫值進 DB)
-- Notification rule routing engine + Webex / Email gateway 串接
-- Connection CRUD + inboundResolver 真接 ERP / SQL
-- 6 角色 demo 真實串到後端(X-Demo-Role header 切換)
+**核心**:6 角色機密 demo 真實串到後端,不再前端 mock。
+
+- ✅ `middleware/confidentialityMiddleware.js`:4 顯示策略中央集中
+  - `applyStrategy(value, strategy)`:TIER / ALIAS / MASK / RANGE
+  - `maskProject(project, role)`:依 role 決定 mask 邏輯
+  - `maskProjects(list, role)`:批次
+  - `maskSummary(summary, role)`:Status SUMMARY mask
+  - `getDemoRole(req)`:從 `X-Demo-Role` header 推
+- ✅ 套用到 `routes/projects.js`:
+  - GET / list 套 mask
+  - GET /:id 對 CHAT_GUEST/OUTSIDER 機密案 → 403
+  - GET /:id 對 PARTICIPANT 等套 displayStrategy
+- ✅ 套用到 `routes/dashboard.js`:
+  - GET /summary/:id 套 mask
+  - POST /summary/batch 套 mask
+- ✅ Frontend `api.ts` 加 `_demoRole` 全域 + `X-Demo-Role` header
+- ✅ `PlatformContext.setDemoRole` 同步 + 觸發 reload event
+- ✅ ProjectsList / WarRoom / Dashboard 監聽 demoRole 變化 → 自動 reload
+- ✅ 6 角色行為(對齊 Demo 手冊 §10):
+  - HOST/OBSERVER/SUPER:全明文
+  - PARTICIPANT:走 displayStrategy
+  - CHAT_GUEST:機密案 form 403
+  - OUTSIDER:機密案全 403
+
+**Form/Task template CRUD / Connection inboundResolver / Notification routing engine** 留 Sprint G 後續(範圍大不在 Phase 1)
+
+---
+
+### ✅ Sprint F — AI 加速一覽 + KB 雙層 + Gemini 接真實 LLM(2026-05-12 完成)
+
+**目標**:對齊 PPT slide 21 + 18 + Demo 手冊 §8-9
+
+- ✅ `AiAccel/AiAcceleration.tsx`:AI 加速 10 項一覽頁
+  - Hero banner(navy → teal → purple gradient)+ LIVE/DEMO/TBD 計數
+  - ⭐ Wizard banner(30min → 5min)
+  - 必上 8 項 + 加分 2 項(每張卡含整合到哪些功能)
+  - Phase 2-4 roadmap + Phase 1 成本估算
+- ✅ `KB/KnowledgeBase.tsx`:Live KB + 沉澱 KB 雙層 toggle
+  - Live KB:5 mock chunks(chat/form/task/attach 4 種類型)
+  - 沉澱 KB:4 mock 結案案 + scrub 註記
+  - Archive Pipeline 5 步驟流程說明
+  - 範例 RAG 查詢 navy 卡
+- ✅ Sidebar「AI 加速 10」+「KB / 知識庫」link 啟用(不再 stub)
+- ✅ Routes:`/ai-acceleration` + `/kb`
+- ✅ **真接 Gemini Flash**(`ai/statusSummary.js`):
+  - `PROJECTS_PLATFORM_USE_LLM=true` 啟用
+  - 走 `llmQueue.withLLM` rate limit
+  - Prompt 對齊 三段式結構 + JSON 回傳
+  - 失敗自動 fallback 回 mock(永遠不破 demo)
+  - 預設 model:`gemini-flash`(可 `PROJECTS_PLATFORM_SUMMARY_MODEL` override)
+- ✅ Sprint 1 smoke test PASSED(backend regression OK)
+- ✅ TypeScript compile clean
+
+**Demo 操作劇本**:[docs/projects-platform-demo-script.md](./projects-platform-demo-script.md)— 9 個 Story / 30-45 min
 
 ---
 

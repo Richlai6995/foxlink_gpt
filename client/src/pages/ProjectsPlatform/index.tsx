@@ -21,6 +21,8 @@ import PlatformShell from './Shell/PlatformShell'
 import ProjectsList from './Projects/ProjectsList'
 import WarRoom from './WarRoom/WarRoom'
 import Dashboard from './Dashboard/Dashboard'
+import AiAcceleration from './AiAccel/AiAcceleration'
+import KnowledgeBase from './KB/KnowledgeBase'
 import FormTemplates from './Admin/FormTemplates'
 import TaskTemplates from './Admin/TaskTemplates'
 import NotificationRules from './Admin/NotificationRules'
@@ -101,6 +103,8 @@ export default function ProjectsPlatformPage() {
         <Routes>
           <Route index element={<ProjectsList />} />
           <Route path="dashboard" element={<Dashboard />} />
+          <Route path="ai-acceleration" element={<AiAcceleration />} />
+          <Route path="kb" element={<KnowledgeBase />} />
           <Route path="projects/:id" element={<WarRoom />} />
           <Route path="admin/form-templates" element={<FormTemplates />} />
           <Route path="admin/task-templates" element={<TaskTemplates />} />

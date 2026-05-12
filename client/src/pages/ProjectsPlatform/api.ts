@@ -16,6 +16,14 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Global demo role for X-Demo-Role header(機密 displayStrategy demo)
+ * Sprint E.2:RoleSwitcher 切換時透過 setApiDemoRole 設定 → 全 fetch 帶 header → 後端套 mask
+ */
+let _demoRole: string = 'HOST'
+export function setApiDemoRole(role: string) { _demoRole = role }
+export function getApiDemoRole(): string { return _demoRole }
+
 async function request<T = any>(
   token: string | null | undefined,
   method: string,
@@ -27,6 +35,7 @@ async function request<T = any>(
     method,
     headers: {
       Authorization: `Bearer ${token}`,
+      'X-Demo-Role': _demoRole,
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
     },
   }

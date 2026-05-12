@@ -12,6 +12,7 @@
 
 const express = require('express');
 const { asyncHandler } = require('../middleware/errorBoundary');
+const { getDemoRole, maskSummary } = require('../middleware/confidentialityMiddleware');
 const dashboardService = require('../services/dashboardService');
 const statusSummary = require('../ai/statusSummary');
 
@@ -31,7 +32,7 @@ router.get('/', asyncHandler(async (req, res) => {
 router.get('/summary/:projectId', asyncHandler(async (req, res) => {
   const summary = await statusSummary.getSummary(getDb(), Number(req.params.projectId));
   if (!summary) return res.status(404).json({ error: 'project not found' });
-  res.json({ summary });
+  res.json({ summary: maskSummary(summary, getDemoRole(req)) });
 }));
 
 // ─── POST /dashboard/summary/:projectId/refresh ──────────────────────
@@ -77,7 +78,8 @@ router.post('/summary/batch', asyncHandler(async (req, res) => {
     return res.status(400).json({ error: 'project_ids exceeds 50 per request' });
   }
   const summaries = await statusSummary.getSummariesForProjects(getDb(), ids);
-  res.json({ summaries });
+  const role = getDemoRole(req);
+  res.json({ summaries: summaries.map((s) => maskSummary(s, role)) });
 }));
 
 module.exports = router;

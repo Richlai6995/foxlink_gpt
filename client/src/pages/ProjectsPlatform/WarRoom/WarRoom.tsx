@@ -18,7 +18,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, MessageSquare, Kanban, FileText, Users, Lock, type LucideIcon } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
 import { api, type ProjectDetail } from '../api'
-import { useCrumbs } from '../Shell/PlatformContext'
+import { useCrumbs, usePlatform } from '../Shell/PlatformContext'
 import { LIFECYCLE_COLORS } from '../tokens'
 import StageRibbon from './StageRibbon'
 import ChatTab from './ChatTab'
@@ -37,6 +37,7 @@ const TABS: { key: Tab; label: string; icon: LucideIcon }[] = [
 export default function WarRoom() {
   const { id } = useParams<{ id: string }>()
   const { token } = useAuth() as any
+  const { demoRole } = usePlatform()
   const navigate = useNavigate()
   const [project, setProject] = useState<ProjectDetail | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -54,11 +55,13 @@ export default function WarRoom() {
   useEffect(() => {
     if (!id || !token) return
     let cancelled = false
+    setErr(null)
+    setProject(null)
     api.get<{ project: ProjectDetail }>(token, `/projects/${id}`)
       .then((r) => { if (!cancelled) setProject(r.project) })
       .catch((e) => { if (!cancelled) setErr(e.message) })
     return () => { cancelled = true }
-  }, [id, token])
+  }, [id, token, demoRole])  // demoRole 變 → 重拉(機密案 OUTSIDER 看 403)
 
   if (err) {
     return (

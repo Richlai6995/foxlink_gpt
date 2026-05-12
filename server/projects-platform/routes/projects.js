@@ -17,6 +17,7 @@
 const express = require('express');
 const { asyncHandler } = require('../middleware/errorBoundary');
 const { loadProject, requirePmOrAdmin } = require('../middleware/projectAclMiddleware');
+const { getDemoRole, maskProject, maskProjects } = require('../middleware/confidentialityMiddleware');
 const projectsService = require('../services/projectsService');
 const pluginRegistry = require('../plugins/registry');
 const channelsRoutes = require('./channels');
@@ -74,7 +75,10 @@ router.get('/', asyncHandler(async (req, res) => {
   const type_code = req.query.type_code || null;
 
   const projects = await projectsService.list(db, req.user, { limit, offset, status, type_code });
-  res.json({ projects, count: projects.length, limit, offset });
+  // 套機密 mask(依 X-Demo-Role / req.user.role)
+  const role = getDemoRole(req);
+  const masked = maskProjects(projects, role);
+  res.json({ projects: masked, count: masked.length, limit, offset, _viewer_role: role });
 }));
 
 // ─── POST /projects ─────────────────────────────────────────────────
@@ -135,7 +139,15 @@ router.get('/:projectId',
     const db = getDb();
     const detail = await projectsService.get(db, Number(req.params.projectId), req.user);
     if (!detail) return res.status(404).json({ error: 'not found' });
-    res.json({ project: detail });
+    const role = getDemoRole(req);
+    // CHAT_GUEST 機密案 → 403(對齊 demo §10)
+    if (role === 'CHAT_GUEST' && Number(detail.is_confidential) === 1) {
+      return res.status(403).json({ error: 'chat_guest cannot view confidential project form', _viewer_role: role });
+    }
+    if (role === 'OUTSIDER' && Number(detail.is_confidential) === 1) {
+      return res.status(403).json({ error: 'outsider cannot view confidential project', _viewer_role: role });
+    }
+    res.json({ project: maskProject(detail, role) });
   }),
 );
 

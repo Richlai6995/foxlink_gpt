@@ -17,7 +17,7 @@ import { useNavigate } from 'react-router-dom'
 import { Plus, Download, Search, Lock } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
 import { api, type Project, type ProjectType, type StatusSummary } from '../api'
-import { useCrumbs } from '../Shell/PlatformContext'
+import { useCrumbs, usePlatform } from '../Shell/PlatformContext'
 import ProjectCard from './ProjectCard'
 import WizardModal from '../Wizard/WizardModal'
 
@@ -34,6 +34,7 @@ const FILTER_CHIPS: { key: Filter; label: string; icon?: React.ReactNode }[] = [
 export default function ProjectsList() {
   useCrumbs([{ label: '我的專案' }])
   const { token } = useAuth() as any
+  const { demoRole } = usePlatform()
   const navigate = useNavigate()
   const [projects, setProjects] = useState<Project[]>([])
   const [_types, setTypes] = useState<ProjectType[]>([])
@@ -74,7 +75,7 @@ export default function ProjectsList() {
     api.get<{ types: ProjectType[] }>(token, '/projects/types').then((d) => setTypes(d.types || [])).catch(() => {})
     reload()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token])
+  }, [token, demoRole])  // demoRole 變 → reload(機密 mask 重新拉)
 
   const filtered = useMemo(() => {
     let xs = projects

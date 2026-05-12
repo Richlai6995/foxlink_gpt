@@ -11,6 +11,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { DemoRole } from '../tokens'
+import { setApiDemoRole } from '../api'
 
 type Crumb = { label: string; to?: string }
 
@@ -30,8 +31,18 @@ const PlatformCtx = createContext<Ctx | null>(null)
 
 export function PlatformProvider({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [demoRole, setDemoRole] = useState<DemoRole>('HOST')
+  const [demoRole, _setDemoRole] = useState<DemoRole>('HOST')
   const [crumbs, setCrumbs] = useState<Crumb[]>([])
+
+  // 同步 demo role 進 api 全局,然後 broadcast event 讓 active page reload
+  const setDemoRole = useCallback((r: DemoRole) => {
+    _setDemoRole(r)
+    setApiDemoRole(r)
+    window.dispatchEvent(new CustomEvent('projectsPlatformDemoRoleChange', { detail: { role: r } }))
+  }, [])
+
+  // 初始同步
+  useEffect(() => { setApiDemoRole(demoRole) }, [demoRole])
 
   // 鍵盤快捷鍵:M 切 sidebar、Esc 關
   useEffect(() => {
@@ -56,7 +67,7 @@ export function PlatformProvider({ children }: { children: React.ReactNode }) {
     setDemoRole,
     crumbs,
     setCrumbs,
-  }), [sidebarOpen, demoRole, crumbs])
+  }), [sidebarOpen, demoRole, crumbs, setDemoRole])
 
   return <PlatformCtx.Provider value={value}>{children}</PlatformCtx.Provider>
 }

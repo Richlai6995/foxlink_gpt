@@ -24,6 +24,22 @@ const log = makeLogger('ai/statusSummary');
 const SUMMARY_CACHE_TTL_MS = 30 * 60 * 1000; // 30 min(對齊 spec)
 const _cache = new Map(); // project_id → { generated_at, summary }
 
+/** Sprint F:設 PROJECTS_PLATFORM_USE_LLM=true 啟用真 LLM;預設 false 走 mock 保守省 token */
+const USE_LLM = process.env.PROJECTS_PLATFORM_USE_LLM === 'true';
+const LLM_MODEL = process.env.PROJECTS_PLATFORM_SUMMARY_MODEL || process.env.GEMINI_MODEL_FLASH || 'gemini-flash';
+
+// Lazy import(只有 USE_LLM=true 才碰 geminiClient)
+let _geminiClient = null;
+let _llmQueue = null;
+function _llm() {
+  if (!_geminiClient) _geminiClient = require('../../services/geminiClient');
+  return _geminiClient;
+}
+function _queue() {
+  if (!_llmQueue) _llmQueue = require('../services/llmQueue');
+  return _llmQueue;
+}
+
 /**
  * Generate(or get cached)summary
  *
@@ -116,7 +132,8 @@ async function getSummary(db, projectId, { force = false } = {}) {
   else if (activeStage) oneLiner = `Stage ${activeStage.stage_order} 進行中`;
   else oneLiner = `${project.lifecycle_status}`;
 
-  const summary = {
+  // Base summary(mock — 適合 fallback / cache base)
+  const baseSummary = {
     project_id: projectId,
     project_code: project.project_code,
     progress: progressParts.join(' · '),
@@ -129,13 +146,80 @@ async function getSummary(db, projectId, { force = false } = {}) {
     overdue_task_count: overdue.length,
     blocked_task_count: blocked.length,
     generated_at: new Date().toISOString(),
-    // Sprint F 換真 LLM 時加 _llm_model / _llm_token_cost 欄
     _mock: true,
   };
 
+  // 真 LLM(可選)— PROJECTS_PLATFORM_USE_LLM=true 才打,失敗 fallback 回 mock
+  let summary = baseSummary;
+  if (USE_LLM) {
+    try {
+      summary = await _llmEnrich(baseSummary, { project, stages, tasks, activeStage, risks, todos });
+    } catch (e) {
+      log.warn(`LLM summary failed for project ${projectId}, fallback to mock:`, e.message);
+      summary = baseSummary;
+    }
+  }
+
   _cache.set(projectId, summary);
-  log.log(`generated summary for project ${projectId} (${project.project_code})`);
+  log.log(`generated summary for project ${projectId} (${project.project_code}) · ${summary._mock ? 'mock' : 'llm'}`);
   return summary;
+}
+
+/**
+ * 用 Gemini Flash 把 mock 摘要升級成自然語言版
+ * 走 llmQueue rate-limit · 失敗會被 caller catch fallback
+ */
+async function _llmEnrich(base, ctx) {
+  const { project, stages, tasks, activeStage } = ctx;
+
+  const promptCtx = {
+    project_code:  base.project_code,
+    title:         project.data_payload?.title || project.project_code,
+    lifecycle:     project.lifecycle_status,
+    active_stage:  activeStage?.stage_code || null,
+    stage_progress: `${base.stage_progress_percent}%`,
+    stages: stages.map((s) => ({ code: s.stage_code, status: s.status })),
+    tasks_by_status: tasks.reduce((acc, t) => { acc[t.status] = (acc[t.status] || 0) + 1; return acc; }, {}),
+    blocker_reasons: tasks.filter((t) => t.status === 'BLOCKED' && t.blocker_reason).map((t) => t.blocker_reason),
+  };
+
+  const prompt = `你是專案管理 AI 助手 #21。基於以下專案資料,產出三段式中文摘要。
+規則:
+1. 進度(progress):一句話描述當前 stage + 完成度 + 在跑什麼
+2. 風險(risk):列 1-3 個風險(SLA、BLOCKER、客戶卡關),沒風險寫「無顯著風險」
+3. 待辦(todo):列接下來 24h 內要做什麼,沒事寫「依排程進行」
+4. one_liner:一句最重要的(優先 risk > todo > 進度)
+
+回傳 JSON 格式:
+{ "progress": "...", "risk": "...", "todo": "...", "one_liner": "..." }
+
+專案資料:
+${JSON.stringify(promptCtx, null, 2)}`;
+
+  const queue = _queue();
+  const result = await queue.withLLM(async () => {
+    const model = _llm().getGenerativeModel({ model: LLM_MODEL });
+    const resp = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    });
+    return _llm().extractText(resp);
+  });
+
+  // 嘗試解析 JSON,失敗 fallback 用 base
+  const text = String(result || '').trim();
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('LLM did not return JSON');
+  const parsed = JSON.parse(jsonMatch[0]);
+
+  return {
+    ...base,
+    progress:  parsed.progress  || base.progress,
+    risk:      parsed.risk      || base.risk,
+    todo:      parsed.todo      || base.todo,
+    one_liner: parsed.one_liner || base.one_liner,
+    _mock: false,
+    _llm_model: LLM_MODEL,
+  };
 }
 
 async function _isStageGate(db, projectId, stageCode) {
