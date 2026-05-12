@@ -38,9 +38,11 @@ const KEY_RATE    = (uid) => `2fa:rate:user:${uid}`;
 
 // ── Utilities ──────────────────────────────────────────────────────────
 
-/** 產 6 位 OTP — crypto.randomInt 不用 Math.random */
+/** 產 4 位 OTP — crypto.randomInt 不用 Math.random
+ *  (2026-05-12 從 6 位縮短為 4 位 — UX 訴求,代價是暴力試誤難度 100x 降到 10000 種組合,
+ *   仍受 max_attempts=3 + 5min TTL 保護,實質安全可控) */
 function generateOtp() {
-  return String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+  return String(crypto.randomInt(0, 10_000)).padStart(4, '0');
 }
 
 /** Mask email for UI — `r***@foxlink.com` */
@@ -59,9 +61,9 @@ function safeOtpEquals(a, b) {
   return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
-/** 6 位數字驗證 */
+/** 4 位數字驗證(2026-05-12 從 6 位改 4 位) */
 function isValidOtpFormat(code) {
-  return typeof code === 'string' && /^\d{6}$/.test(code);
+  return typeof code === 'string' && /^\d{4}$/.test(code);
 }
 
 /** uuid v4 格式驗證 */

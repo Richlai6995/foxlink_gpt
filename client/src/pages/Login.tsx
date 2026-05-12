@@ -183,8 +183,8 @@ export default function Login() {
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
-    if (!/^\d{6}$/.test(otpCode)) {
-      setError(t('login.mfa.invalidFormat', '驗證碼需為 6 位數字'))
+    if (!/^\d{4}$/.test(otpCode)) {
+      setError(t('login.mfa.invalidFormat', '驗證碼需為 4 位數字'))
       return
     }
     setOtpVerifying(true)
@@ -312,17 +312,17 @@ export default function Login() {
 
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">
-                  {t('login.mfa.codeLabel', '6 位數驗證碼')}
+                  {t('login.mfa.codeLabel', '4 位數驗證碼')}
                 </label>
                 <input
                   type="text"
                   inputMode="numeric"
-                  maxLength={6}
-                  pattern="\d{6}"
+                  maxLength={4}
+                  pattern="\d{4}"
                   value={otpCode}
                   onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
                   className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white text-center text-xl sm:text-2xl tracking-[0.4em] sm:tracking-[0.6em] font-mono placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition"
-                  placeholder="------"
+                  placeholder="----"
                   autoFocus
                   required
                 />

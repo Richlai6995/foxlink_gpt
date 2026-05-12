@@ -378,11 +378,14 @@ export function useVoiceInput(opts: UseVoiceInputOptions = {}) {
   }, [state, maxDuration, lang, preferBackendOnly, tickVolume, finalize, cleanup])
 
   // 使用者主動停止
+  // 2026-05-12 iOS 修正:改用 ref 判斷取代 closure 內的 state(stale closure 導致
+  // iOS 上點兩下後 state 還沒從 'requesting' 更新到 'recording',被 guard return 掉)
   const stop = useCallback(() => {
-    if (state !== 'recording') return
+    if (stopRequestedRef.current) return       // 已經在 stop 流程中,避免重複
+    if (!recorderRef.current) return           // 還沒 start 過
     stopRequestedRef.current = true
     finalize()
-  }, [state, finalize])
+  }, [finalize])
 
   // ESC 鍵停止
   useEffect(() => {

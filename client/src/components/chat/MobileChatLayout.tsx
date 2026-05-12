@@ -763,7 +763,9 @@ export default function MobileChatLayout() {
           style={{ minHeight: '44px' }}
         />
 
-        {/* Row 2:控制列 — [+] [模型▼] [⚙] [🎤] ... [▶ send] */}
+        {/* Row 2:控制列 — [+] [模型 icon] [⚙]    ── flex spacer ──    [🎤] [▶ send]
+            模型壓成單 icon 省空間;flex spacer 把 [⚙] 跟 [🎤] 拉開,避免錄音時
+            想停止 mic 但手指肥碰到齒輪誤按(2026-05-12 user 反映)*/}
         <div className="flex items-center gap-1 mt-2">
           <button
             onClick={() => setPlusOpen(true)}
@@ -775,11 +777,11 @@ export default function MobileChatLayout() {
           </button>
           <button
             onClick={() => setModelPickerOpen(true)}
-            className="min-w-0 max-w-[55%] inline-flex items-center gap-1 px-2.5 h-9 rounded-full text-xs t-text bg-[var(--t-bg-card-hover)] hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)]"
+            aria-label={`${t('mobile.chat.selectModel')} (${currentModelName})`}
+            title={currentModelName}
+            className="w-10 h-10 flex items-center justify-center rounded-full t-text-secondary hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)] flex-shrink-0"
           >
-            <Sparkles size={12} className="text-blue-500 flex-shrink-0" />
-            <span className="truncate">{currentModelName}</span>
-            <ChevronDown size={12} className="flex-shrink-0 t-text-dim" />
+            <Sparkles size={18} className="text-blue-500" />
           </button>
           <button
             onClick={() => setMenuOpen(true)}
@@ -793,10 +795,13 @@ export default function MobileChatLayout() {
               </span>
             )}
           </button>
+          {/* flex spacer:拉開齒輪跟 mic,避免錄音結束時誤按 ⚙ */}
+          <div className="flex-1" />
           <MicButton
             source="chat"
             disabled={streaming}
             size={18}
+            showInlineStatus={false}
             className="w-10 h-10 flex items-center justify-center rounded-full t-text-secondary hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)] disabled:opacity-40 flex-shrink-0"
             onTranscript={(text) => {
               if (!text) return
@@ -807,7 +812,6 @@ export default function MobileChatLayout() {
               setTimeout(() => inputRef.current?.focus(), 50)
             }}
           />
-          <div className="flex-1" />
           {streaming ? (
             <button
               onClick={handleStop}

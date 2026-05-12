@@ -177,7 +177,7 @@
     "mfa": {
       "title": "二階段驗證",
       "sentTo": "驗證碼已同時寄到 {{email}} 的 Webex 與 Email,任一收到輸入即可",
-      "codeLabel": "6 位數驗證碼",
+      "codeLabel": "4 位數驗證碼",
       "verify": "驗證",
       "verifying": "驗證中...",
       "resend": "重新發送",
@@ -186,7 +186,7 @@
       "expiresIn": "剩 {{time}} 過期",
       "expired": "驗證碼已過期,請重新登入",
       "invalid": "驗證碼錯誤",
-      "invalidFormat": "驗證碼需為 6 位數字",
+      "invalidFormat": "驗證碼需為 4 位數字",
       "attemptsLeft": "剩 {{n}} 次",
       "back": "返回登入",
       "resendFailed": "重新發送失敗"

@@ -481,7 +481,7 @@ const userSections = [
                 "title": "輸入帳號密碼後,系統判斷您不在內網範圍"
               },
               {
-                "title": "同時透過 Webex 私訊 + Email 寄出 6 位驗證碼",
+                "title": "同時透過 Webex 私訊 + Email 寄出 4 位驗證碼",
                 "desc": "5 分鐘內有效;同時告訴您「來源 IP」讓您確認是不是自己操作"
               },
               {

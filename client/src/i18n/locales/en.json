@@ -177,7 +177,7 @@
     "mfa": {
       "title": "Two-Factor Verification",
       "sentTo": "Code sent to {{email}} via Webex AND Email — use whichever arrives first",
-      "codeLabel": "6-digit code",
+      "codeLabel": "4-digit code",
       "verify": "Verify",
       "verifying": "Verifying...",
       "resend": "Resend",
@@ -186,7 +186,7 @@
       "expiresIn": "Expires in {{time}}",
       "expired": "Code expired, please log in again",
       "invalid": "Invalid code",
-      "invalidFormat": "Code must be 6 digits",
+      "invalidFormat": "Code must be 4 digits",
       "attemptsLeft": "{{n}} attempts left",
       "back": "Back to login",
       "resendFailed": "Failed to resend"

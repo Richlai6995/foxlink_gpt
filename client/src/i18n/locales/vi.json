@@ -177,7 +177,7 @@
     "mfa": {
       "title": "Xác thực hai yếu tố",
       "sentTo": "Mã đã gửi tới {{email}} qua Webex VÀ Email — dùng mã nhận được đầu tiên",
-      "codeLabel": "Mã 6 chữ số",
+      "codeLabel": "Mã 4 chữ số",
       "verify": "Xác thực",
       "verifying": "Đang xác thực...",
       "resend": "Gửi lại",
@@ -186,7 +186,7 @@
       "expiresIn": "Hết hạn sau {{time}}",
       "expired": "Mã đã hết hạn, vui lòng đăng nhập lại",
       "invalid": "Mã không đúng",
-      "invalidFormat": "Mã phải là 6 chữ số",
+      "invalidFormat": "Mã phải là 4 chữ số",
       "attemptsLeft": "Còn {{n}} lần",
       "back": "Quay lại đăng nhập",
       "resendFailed": "Gửi lại thất bại"
