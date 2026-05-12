@@ -543,8 +543,11 @@ router.put('/kb-public-requests/:id', async (req, res) => {
     if (!['approve', 'reject'].includes(action)) {
       return res.status(400).json({ error: 'action 必須是 approve 或 reject' });
     }
-    const kb = await db.prepare('SELECT id, public_status FROM knowledge_bases WHERE id=?').get(req.params.id);
+    const kb = await db.prepare('SELECT id, public_status, is_confidential FROM knowledge_bases WHERE id=?').get(req.params.id);
     if (!kb) return res.status(404).json({ error: '知識庫不存在' });
+    if (action === 'approve' && Number(kb.is_confidential) === 1) {
+      return res.status(403).json({ error: '保密知識庫無法核准為公開' });
+    }
 
     if (action === 'approve') {
       await db.prepare(`UPDATE knowledge_bases SET is_public=1, public_status='public', updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(req.params.id);

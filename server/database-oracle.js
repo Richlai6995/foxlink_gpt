@@ -543,6 +543,17 @@ async function runMigrations(db) {
   // 1) 每 KB 可覆寫檢索參數（backend / weights / fuzzy / synonym 等），JSON 存 CLOB
   await addCol('KNOWLEDGE_BASES', 'RETRIEVAL_CONFIG', 'CLOB');
 
+  // ── 保密 KB(2026-05-12)──
+  // is_confidential=1 → admin 看得到 list metadata 但拿不到內容/文件/chunks/檢索,
+  // 除非 admin 已是 owner 或在 kb_access 被授權。同時強制 is_public=0(互斥)。
+  await addCol('KNOWLEDGE_BASES', 'IS_CONFIDENTIAL', 'NUMBER(1) DEFAULT 0');
+
+  // ── 文件內嵌圖抽取(2026-05-12)──
+  // KB 預設要不要走 _ocrImagesInZip 持久化內嵌圖到 kb_images;
+  // 上傳文件時也可 per-upload 覆寫(form field extract_images)。
+  // 既有資料預設 1(維持當前行為),user 可在 KB 設定關閉(省 Gemini Flash token)。
+  await addCol('KNOWLEDGE_BASES', 'EXTRACT_EMBEDDED_IMAGES', 'NUMBER(1) DEFAULT 1');
+
   // 2) 系統級 KB 檢索預設值（JSON in value column）
   try {
     const existing = await db.prepare(
@@ -1213,6 +1224,43 @@ async function runMigrations(db) {
       CONSTRAINT uq_kb_thes_syn UNIQUE (thesaurus, term, related)
     )
   `);
+
+  // ── KB Images(2026-05-12)──────────────────────────────────────────────────
+  // 用途:
+  //   - source='manual'  → user 在 KB 圖庫 tab 單獨上傳的圖(走 vision caption + embed → 可檢索)
+  //   - source='doc_embed' → docx/pdf parser 自動抽出的內嵌圖,綁回對應 chunk(不另建 chunk)
+  // 重名:filename 保留顯示名(可重複);實際存檔用 id.ext,DB lookup 走 id。
+  // 權限:沿用 kb_id 對應 KB 的 getAccessibleKb,保密 KB 由 KB 層權限統管。
+  await createTable('KB_IMAGES', `CREATE TABLE kb_images (
+    id           VARCHAR2(36) PRIMARY KEY,
+    kb_id        VARCHAR2(36) NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+    doc_id       VARCHAR2(36),
+    chunk_id     VARCHAR2(36),
+    source       VARCHAR2(20) DEFAULT 'manual',
+    filename     VARCHAR2(500) NOT NULL,
+    stored_path  VARCHAR2(1000) NOT NULL,
+    mime_type    VARCHAR2(100),
+    file_size    NUMBER DEFAULT 0,
+    width        NUMBER,
+    height       NUMBER,
+    caption      CLOB,
+    created_by   NUMBER,
+    created_at   TIMESTAMP DEFAULT SYSTIMESTAMP,
+    updated_at   TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+  for (const [name, ddl] of [
+    ['kb_images_kb_idx',    'CREATE INDEX kb_images_kb_idx    ON kb_images(kb_id)'],
+    ['kb_images_doc_idx',   'CREATE INDEX kb_images_doc_idx   ON kb_images(doc_id)'],
+    ['kb_images_chunk_idx', 'CREATE INDEX kb_images_chunk_idx ON kb_images(chunk_id)'],
+  ]) {
+    try { await db.prepare(ddl).run(); console.log(`[Migration] ${name} created ✓`); }
+    catch (e) { if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn(`[Migration] ${name}:`, e.message); }
+  }
+  // caption 處理狀態(2026-05-12):processing | done | failed
+  // manual 圖 → 上傳後立刻 processing,vision caption 完寫 done(或 failed)
+  // doc_embed 圖 → 一進來就 done(OCR 文字就當 caption)
+  await addCol('KB_IMAGES', 'CAPTION_STATUS', "VARCHAR2(20) DEFAULT 'done'");
+  await addCol('KB_IMAGES', 'CAPTION_ERROR', 'VARCHAR2(1000)');
 
   // ── External API Keys ──────────────────────────────────────────────────────
   await createTable('API_KEYS', `CREATE TABLE api_keys (

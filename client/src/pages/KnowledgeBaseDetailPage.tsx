@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import KbImage from '../components/KbImage'
 import {
   ArrowLeft, Cpu, FileText, Settings, Share2, Search,
   Upload, Trash2, RefreshCw, CheckCircle, XCircle, Clock,
@@ -32,7 +33,7 @@ interface KnowledgeBase {
   parse_mode: string | null
   pdf_ocr_mode: string | null
   retrieval_config: string | null
-  is_public: number; is_confidential?: number; public_status: string
+  is_public: number; is_confidential?: number; extract_embedded_images?: number; public_status: string
   doc_count: number; chunk_count: number; total_size_bytes: number
   creator_id: number; creator_name: string; is_owner: boolean; can_edit: boolean
   can_view_content?: boolean
@@ -66,9 +67,9 @@ interface Grant {
 
 interface OrgOption { code?: string; name: string }
 
-type TabKey = 'docs' | 'settings' | 'share' | 'search' | 'history'
+type TabKey = 'docs' | 'images' | 'settings' | 'share' | 'search' | 'history'
 
-const TAB_KEYS: TabKey[] = ['docs', 'settings', 'share', 'search', 'history']
+const TAB_KEYS: TabKey[] = ['docs', 'images', 'settings', 'share', 'search', 'history']
 
 function DocIcon({ type }: { type: string }) {
   const t = (type || '').toLowerCase()
@@ -157,6 +158,7 @@ export default function KnowledgeBaseDetailPage() {
   const tabLabel = (key: TabKey) => {
     switch (key) {
       case 'docs':     return t('kb.detail.tabDocs')
+      case 'images':   return t('kb.detail.tabImages')
       case 'settings': return t('kb.detail.tabSettings')
       case 'share':    return t('kb.detail.tabShare')
       case 'search':   return t('kb.detail.tabSearch')
@@ -301,6 +303,7 @@ export default function KnowledgeBaseDetailPage() {
                   }`}
                 >
                   {key === 'docs'     && <FileText  size={14} className="inline mr-1.5" />}
+                  {key === 'images'   && <Image     size={14} className="inline mr-1.5" />}
                   {key === 'settings' && <Settings  size={14} className="inline mr-1.5" />}
                   {key === 'share'    && <Share2    size={14} className="inline mr-1.5" />}
                   {key === 'search'   && <Search    size={14} className="inline mr-1.5" />}
@@ -313,6 +316,7 @@ export default function KnowledgeBaseDetailPage() {
             {/* Tab content */}
             <div className="bg-white border border-slate-200 rounded-xl -mt-4 rounded-t-none border-t-0">
               {tab === 'docs'     && <DocumentsTab kb={kb} onRefresh={loadKb} isOwner={kb.can_edit || isAdmin} />}
+              {tab === 'images'   && <ImagesTab    kb={kb} isOwner={kb.can_edit || isAdmin} />}
               {tab === 'settings' && <SettingsTab  kb={kb} onSaved={loadKb} isOwner={kb.can_edit || isAdmin} />}
               {tab === 'share'    && <ShareTab     kb={kb} isOwner={kb.is_owner || isAdmin} />}
               {tab === 'search'   && <SearchTab    kb={kb} />}
@@ -334,6 +338,7 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
   const [uploading, setUploading] = useState(false)
   const [uploadParseMode, setUploadParseMode] = useState<string>('') // '' = use KB default
   const [uploadPdfOcrMode, setUploadPdfOcrMode] = useState<string>('') // '' = use KB default
+  const [uploadExtractImages, setUploadExtractImages] = useState<'' | 'true' | 'false'>('') // '' = use KB default
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [chunks, setChunks] = useState<KbChunk[]>([])
   const [chunksLoading, setChunksLoading] = useState(false)
@@ -384,6 +389,7 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
     Array.from(files).forEach((f) => fd.append('files', f))
     if (uploadParseMode) fd.append('parse_mode', uploadParseMode)
     if (uploadPdfOcrMode) fd.append('pdf_ocr_mode', uploadPdfOcrMode)
+    if (uploadExtractImages) fd.append('extract_images', uploadExtractImages)
     try {
       await api.post(`/kb/${kb.id}/documents`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
       await loadDocs()
@@ -459,6 +465,16 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
               <option value="off">{t('kb.settings.pdfOcr.off')}</option>
               <option value="auto">{t('kb.settings.pdfOcr.auto')}</option>
               <option value="force">{t('kb.settings.pdfOcr.force')}</option>
+            </select>
+            <span className="text-xs text-slate-500 whitespace-nowrap">{t('kb.docs.uploadExtractImagesLabel')}</span>
+            <select
+              value={uploadExtractImages}
+              onChange={(e) => setUploadExtractImages(e.target.value as '' | 'true' | 'false')}
+              className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="">{t('kb.docs.uploadExtractImagesDefault')}</option>
+              <option value="true">{t('kb.docs.uploadExtractImagesYes')}</option>
+              <option value="false">{t('kb.docs.uploadExtractImagesNo')}</option>
             </select>
           </div>
           <div
@@ -639,6 +655,7 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
   const [kbName,     setKbName]     = useState(kb.name)
   const [kbDesc,     setKbDesc]     = useState(kb.description ?? '')
   const [confidential, setConfidential] = useState<boolean>(Number(kb.is_confidential) === 1)
+  const [extractImages, setExtractImages] = useState<boolean>(Number(kb.extract_embedded_images) !== 0)
   const [strategy,   setStrategy]   = useState(kb.chunk_strategy)
   const [cfg,        setCfg]        = useState<Record<string, unknown>>(merged)
   const [retMode,    setRetMode]    = useState(kb.retrieval_mode)
@@ -729,6 +746,7 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
       }
       // 保密狀態只有 owner 可切換
       if (isCreatorOwner) payload.is_confidential = confidential
+      payload.extract_embedded_images = extractImages
       await api.put(`/kb/${kb.id}`, payload)
       setMsg(t('kb.settings.savedOk'))
       onSaved()
@@ -805,6 +823,27 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
               {confidential && (kb.is_public === 1 || kb.public_status === 'pending') && (
                 <p className="text-xs text-rose-600 mt-1">{t('kb.settings.confidentialWillResetPublic')}</p>
               )}
+            </div>
+          </label>
+        </div>
+      )}
+
+      {/* 內嵌圖抽取(owner / editor 可改)*/}
+      {isOwner && (
+        <div>
+          <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+            <Image size={15} className="text-blue-500" /> {t('kb.settings.extractImagesSection')}
+          </h3>
+          <label className={`flex items-start gap-2 p-3 border rounded-lg cursor-pointer transition ${extractImages ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-slate-50'}`}>
+            <input
+              type="checkbox"
+              checked={extractImages}
+              onChange={(e) => setExtractImages(e.target.checked)}
+              className="mt-0.5"
+            />
+            <div className="flex-1">
+              <div className="text-sm font-medium text-slate-700">{t('kb.settings.extractImagesLabel')}</div>
+              <p className="text-xs text-slate-500 mt-0.5">{t('kb.settings.extractImagesDesc')}</p>
             </div>
           </label>
         </div>
@@ -1591,6 +1630,292 @@ function QueryHistoryTab({ kbId }: { kbId: string }) {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+// ─── Images Tab ─────────────────────────────────────────────────────────────
+interface KbImageRow {
+  id: string
+  kb_id: string
+  doc_id: string | null
+  chunk_id: string | null
+  source: string
+  filename: string
+  mime_type: string
+  file_size: number
+  caption: string | null
+  caption_status: 'processing' | 'done' | 'failed' | null
+  caption_error: string | null
+  width: number | null
+  height: number | null
+  created_at: string
+}
+
+function ImagesTab({ kb, isOwner }: { kb: KnowledgeBase; isOwner: boolean }) {
+  const { t } = useTranslation()
+  const [images, setImages] = useState<KbImageRow[]>([])
+  const [loading, setLoading] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState('')
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editCaption, setEditCaption] = useState('')
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const load = async () => {
+    setLoading(true); setError('')
+    try {
+      const res = await api.get(`/kb/${kb.id}/images`)
+      setImages(Array.isArray(res.data) ? res.data : [])
+    } catch (e: any) {
+      setError(e.response?.data?.error || 'Load failed')
+    } finally { setLoading(false) }
+  }
+  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 有 processing 圖時自動 polling — 5 秒後 refresh 一次,看 caption 完成沒
+  useEffect(() => {
+    const hasProcessing = images.some((i) => i.caption_status === 'processing')
+    if (!hasProcessing) return
+    const timer = setTimeout(load, 5000)
+    return () => clearTimeout(timer)
+  }, [images]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    setUploading(true); setError('')
+    try {
+      const fd = new FormData()
+      Array.from(files).forEach((f) => fd.append('files', f))
+      await api.post(`/kb/${kb.id}/images`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      setTimeout(load, 600)
+    } catch (e: any) {
+      setError(e.response?.data?.error || t('kb.images.uploadFailed'))
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const saveCaption = async (id: string) => {
+    try {
+      await api.patch(`/kb/${kb.id}/images/${id}`, { caption: editCaption })
+      setEditingId(null)
+      load()
+    } catch (e: any) {
+      alert(e.response?.data?.error || t('kb.images.saveCaptionFailed'))
+    }
+  }
+
+  const handleDelete = async (img: KbImageRow) => {
+    if (!confirm(t('kb.images.deleteConfirm', { name: img.filename }))) return
+    try {
+      await api.delete(`/kb/${kb.id}/images/${img.id}`)
+      setImages((prev) => prev.filter((i) => i.id !== img.id))
+      setSelectedIds((prev) => { const s = new Set(prev); s.delete(img.id); return s })
+    } catch (e: any) {
+      alert(e.response?.data?.error || t('kb.images.deleteFailed'))
+    }
+  }
+
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) return
+    if (!confirm(t('kb.images.batchDeleteConfirm', { count: selectedIds.size }))) return
+    try {
+      const res = await api.post(`/kb/${kb.id}/images/batch-delete`, { ids: Array.from(selectedIds) })
+      const deleted = res.data?.deleted || 0
+      const failed = res.data?.failed || 0
+      if (failed > 0) alert(t('kb.images.batchDeleteResult', { deleted, failed }))
+      setSelectedIds(new Set())
+      load()
+    } catch (e: any) {
+      alert(e.response?.data?.error || t('kb.images.deleteFailed'))
+    }
+  }
+
+  const handleRetryCaption = async (img: KbImageRow) => {
+    try {
+      await api.post(`/kb/${kb.id}/images/${img.id}/retry-caption`)
+      // 立即 reflect 為 processing
+      setImages((prev) => prev.map((i) => i.id === img.id ? { ...i, caption_status: 'processing' as const, caption_error: null } : i))
+      setTimeout(load, 1500)
+    } catch (e: any) {
+      alert(e.response?.data?.error || t('kb.images.retryFailed'))
+    }
+  }
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const s = new Set(prev)
+      if (s.has(id)) s.delete(id); else s.add(id)
+      return s
+    })
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === images.length) setSelectedIds(new Set())
+    else setSelectedIds(new Set(images.map((i) => i.id)))
+  }
+
+  const statusBadge = (img: KbImageRow) => {
+    const s = img.caption_status || 'done'
+    if (s === 'processing') {
+      return <span className="bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded text-xs inline-flex items-center gap-0.5"><Clock size={9} className="animate-pulse" />{t('kb.images.statusProcessing')}</span>
+    }
+    if (s === 'failed') {
+      return <span className="bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded text-xs" title={img.caption_error || ''}>{t('kb.images.statusFailed')}</span>
+    }
+    return null
+  }
+
+  return (
+    <div className="p-5 space-y-4">
+      {/* Upload zone */}
+      {isOwner && (
+        <div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp,image/bmp"
+            multiple
+            onChange={(e) => handleUpload(e.target.files)}
+            className="hidden"
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="w-full border-2 border-dashed border-slate-300 hover:border-blue-400 rounded-xl py-8 flex flex-col items-center justify-center gap-2 transition disabled:opacity-50"
+          >
+            <Upload size={24} className="text-slate-400" />
+            <span className="text-sm text-slate-600">{uploading ? t('kb.images.uploading') : t('kb.images.uploadHint')}</span>
+            <span className="text-xs text-slate-400">{t('kb.images.uploadFormatHint')}</span>
+          </button>
+        </div>
+      )}
+
+      {/* Batch operations toolbar */}
+      {isOwner && images.length > 0 && (
+        <div className="flex items-center gap-2 text-xs">
+          <label className="flex items-center gap-1.5 cursor-pointer text-slate-600">
+            <input
+              type="checkbox"
+              checked={selectedIds.size > 0 && selectedIds.size === images.length}
+              ref={(el) => { if (el) el.indeterminate = selectedIds.size > 0 && selectedIds.size < images.length }}
+              onChange={toggleSelectAll}
+            />
+            {selectedIds.size === 0
+              ? t('kb.images.selectAll')
+              : t('kb.images.selectedCount', { count: selectedIds.size })}
+          </label>
+          {selectedIds.size > 0 && (
+            <button
+              onClick={handleBatchDelete}
+              className="ml-auto px-3 py-1 bg-rose-500 hover:bg-rose-600 text-white rounded flex items-center gap-1"
+            >
+              <Trash2 size={11} /> {t('kb.images.batchDelete', { count: selectedIds.size })}
+            </button>
+          )}
+        </div>
+      )}
+
+      {error && (
+        <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-600 px-3 py-2 rounded-lg text-sm">
+          <AlertCircle size={14} /> {error}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="text-center py-8 text-slate-400 text-sm">{t('kb.loading')}</div>
+      ) : images.length === 0 ? (
+        <div className="text-center py-12 text-slate-400 text-sm">{t('kb.images.empty')}</div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {images.map((img) => {
+            const isSelected = selectedIds.has(img.id)
+            return (
+            <div
+              key={img.id}
+              className={`relative border rounded-lg overflow-hidden bg-white transition ${isSelected ? 'border-blue-500 ring-2 ring-blue-200' : 'border-slate-200'}`}
+            >
+              {isOwner && (
+                <label className="absolute top-2 left-2 z-10 bg-white/90 rounded p-1 cursor-pointer shadow-sm">
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => toggleSelect(img.id)}
+                    className="block"
+                  />
+                </label>
+              )}
+              <div className="absolute top-2 right-2 z-10 flex gap-1">
+                {statusBadge(img)}
+              </div>
+              <div className="aspect-square bg-slate-50 flex items-center justify-center overflow-hidden">
+                <KbImage imageId={img.id} alt={img.filename} className="w-full h-full object-cover" />
+              </div>
+              <div className="p-3 space-y-2">
+                <div className="text-xs font-medium text-slate-700 truncate" title={img.filename}>{img.filename}</div>
+                <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <span>{(img.file_size / 1024).toFixed(1)} KB</span>
+                  {img.source === 'doc_embed' && <span className="bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded">{t('kb.images.sourceDocEmbed')}</span>}
+                </div>
+                {editingId === img.id ? (
+                  <div className="space-y-1.5">
+                    <textarea
+                      value={editCaption}
+                      onChange={(e) => setEditCaption(e.target.value)}
+                      rows={3}
+                      className="w-full text-xs border border-slate-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                      placeholder={t('kb.images.captionPlaceholder')}
+                    />
+                    <div className="flex gap-1">
+                      <button onClick={() => saveCaption(img.id)} className="flex-1 px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">{t('kb.settings.saveBtn')}</button>
+                      <button onClick={() => setEditingId(null)} className="px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 rounded">{t('kb.detail.back')}</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-xs text-slate-500 line-clamp-3 min-h-[3em]" title={img.caption || img.caption_error || ''}>
+                    {img.caption_status === 'processing' && !img.caption ? (
+                      <span className="italic text-yellow-600">{t('kb.images.statusProcessing')}...</span>
+                    ) : img.caption_status === 'failed' ? (
+                      <span className="italic text-rose-600">{img.caption_error || t('kb.images.captionFailedFallback')}</span>
+                    ) : (
+                      img.caption || <span className="italic text-slate-400">{t('kb.images.noCaption')}</span>
+                    )}
+                  </div>
+                )}
+                {isOwner && editingId !== img.id && (
+                  <div className="flex items-center gap-1 pt-1 border-t border-slate-100">
+                    {img.caption_status === 'failed' && img.source === 'manual' && (
+                      <button
+                        onClick={() => handleRetryCaption(img)}
+                        className="text-xs px-2 py-1 text-yellow-600 hover:bg-yellow-50 rounded flex items-center gap-1"
+                        title={t('kb.images.retryCaption')}
+                      >
+                        <RefreshCw size={11} />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => { setEditingId(img.id); setEditCaption(img.caption || '') }}
+                      className="flex-1 text-xs px-2 py-1 text-slate-600 hover:bg-slate-50 rounded flex items-center justify-center gap-1"
+                    >
+                      <Pencil size={11} /> {t('kb.images.editCaption')}
+                    </button>
+                    <button
+                      onClick={() => handleDelete(img)}
+                      className="text-xs px-2 py-1 text-rose-500 hover:bg-rose-50 rounded"
+                    >
+                      <Trash2 size={11} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

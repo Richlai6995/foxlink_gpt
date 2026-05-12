@@ -200,10 +200,36 @@ async function getSelfKbDeclarations(db, userId) {
 
     let kbs;
     if (user.role === 'admin') {
-      kbs = await db.prepare(
-        `SELECT id, name, description, tags, retrieval_mode, embedding_dims, top_k_return, score_threshold, retrieval_config
-         FROM knowledge_bases WHERE chunk_count > 0 ORDER BY name ASC`
-      ).all();
+      // admin 走「全部 KB」的捷徑,但**保密 KB(is_confidential=1)必須走 owner / kb_access** —
+      // 即使是 admin 也不能透過 chat tool 拿到保密內容。
+      kbs = await db.prepare(`
+        SELECT id, name, description, tags, retrieval_mode, embedding_dims, top_k_return, score_threshold, retrieval_config
+        FROM knowledge_bases
+        WHERE chunk_count > 0 AND (
+          is_confidential = 0
+          OR creator_id = ?
+          OR EXISTS (
+            SELECT 1 FROM kb_access ka WHERE ka.kb_id=knowledge_bases.id AND (
+              (ka.grantee_type='user'             AND ka.grantee_id=TO_CHAR(?))
+              OR (ka.grantee_type='role'          AND ka.grantee_id=TO_CHAR(?))
+              OR (ka.grantee_type='dept'          AND ka.grantee_id=? AND ? IS NOT NULL)
+              OR (ka.grantee_type='profit_center' AND ka.grantee_id=? AND ? IS NOT NULL)
+              OR (ka.grantee_type='org_section'   AND ka.grantee_id=? AND ? IS NOT NULL)
+              OR (ka.grantee_type='factory'       AND ka.grantee_id=? AND ? IS NOT NULL)
+              OR (ka.grantee_type='org_group'     AND ka.grantee_id=? AND ? IS NOT NULL)
+            )
+          )
+        )
+        ORDER BY name ASC
+      `).all(
+        userId,
+        userId, user.role_id,
+        user.dept_code, user.dept_code,
+        user.profit_center, user.profit_center,
+        user.org_section, user.org_section,
+        user.factory_code, user.factory_code,
+        user.org_group_name, user.org_group_name,
+      );
     } else {
       kbs = await db.prepare(`
         SELECT kb.id, kb.name, kb.description, kb.tags, kb.retrieval_mode, kb.embedding_dims, kb.top_k_return, kb.score_threshold, kb.retrieval_config
@@ -270,11 +296,39 @@ async function executeSelfKbSearch(db, kb, query, { userId, sessionId } = {}) {
     console.log(`[SelfKB] KB "${kb.name}" done in ${stats.elapsed_ms}ms results=${results.length} rerank=${rerankApplied}`);
     if (results.length === 0) return `[知識庫「${kb.name}」未找到相關內容]`;
 
+    // 蒐集 image chunks 的 image_id,供下方 imageHint 用
+    const imageRefs = [];
+    let metaDebugCount = 0; // 看到多少筆 chunk 有 metadata(debug)
     const chunks = results.map((r, i) => {
       const displayScore = r.rerank_score != null ? r.rerank_score.toFixed(3) : `${(r.score * 100).toFixed(0)}%`;
-      const context = r.parent_content ? `上下文：${r.parent_content.slice(0, 300)}\n\n片段：` : '';
-      return `[${i + 1}] 來源: ${r.filename} (相關度 ${displayScore})\n${context}${r.content}`;
+      const context = r.parent_content ? `上下文:${r.parent_content.slice(0, 300)}\n\n片段:` : '';
+
+      // 解析 metadata 抓 image_id;Oracle 欄位 case 不一定,fallback 大寫
+      const rawMeta = r.metadata ?? r.METADATA;
+      let imageIds = [];
+      if (rawMeta) {
+        metaDebugCount++;
+        try {
+          const meta = typeof rawMeta === 'string' ? JSON.parse(rawMeta) : rawMeta;
+          if (meta?.image_id) imageIds.push(meta.image_id);
+          if (Array.isArray(meta?.image_ids)) imageIds.push(...meta.image_ids);
+        } catch (e) {
+          console.warn('[SelfKB] metadata parse failed:', e.message, 'raw=', String(rawMeta).slice(0, 120));
+        }
+      }
+
+      const chunkType = r.chunk_type || r.CHUNK_TYPE;
+      if (chunkType === 'image' && imageIds.length > 0) {
+        const imgId = imageIds[0];
+        imageRefs.push({ id: imgId, score: displayScore });
+        return `[${i + 1}] [圖片資源 id=${imgId}] (相關度 ${displayScore})\n${r.content}`;
+      }
+      if (imageIds.length > 0) {
+        imageIds.forEach((id) => imageRefs.push({ id, score: displayScore }));
+      }
+      return `[${i + 1}] 來源: ${r.filename || '(無檔案)'} (相關度 ${displayScore})\n${context}${r.content}`;
     });
+    console.log(`[SelfKB][img-debug] kb="${kb.name}" chunks=${results.length} withMeta=${metaDebugCount} imageRefs=${imageRefs.length} ids=${JSON.stringify(imageRefs.map(x=>x.id).slice(0,5))}`);
 
     // 若套用了同義詞字典，告訴 LLM 這些詞是同一個實體，避免漏掉只寫另一種寫法的 chunk
     let synonymHint = '';
@@ -295,9 +349,41 @@ async function executeSelfKbSearch(db, kb, query, { userId, sessionId } = {}) {
         synonymHint = `\n\n【同義詞字典提示】下列詞彙為同一實體，回答時請**統合所有寫法對應的 chunks**，不要漏：\n${pairs.join('\n')}\n`;
       }
     }
-    const finalResult = `【來自知識庫「${kb.name}」的相關內容】${synonymHint}\n\n${chunks.join('\n\n---\n\n')}`;
+
+    // 圖片引用提示(2026-05-12):若 retrieval 命中圖片,告訴 LLM 如何在回答中嵌入該圖
+    let imageHint = '';
+    if (imageRefs.length > 0) {
+      const uniqIds = [...new Set(imageRefs.map((x) => x.id))];
+      // 範例用第一個 UUID 完整展示,避免 LLM 看「<完整 UUID>」當佔位符
+      const exampleId = uniqIds[0];
+      imageHint =
+        `═══ 可用圖片資源(必讀)═══\n` +
+        `下列 UUID 是可用於本次回答的圖片,使用者問題涉及操作畫面/截圖/示意圖時,請積極在回應中嵌入:\n\n` +
+        uniqIds.map((id, i) => `  圖${i + 1}: ${id}`).join('\n') + `\n\n` +
+        `**輸出格式(務必照抄,不要改 prefix)**:\n` +
+        `  \`![圖說文字](kb-img://${exampleId})\`\n\n` +
+        `規則:\n` +
+        `1. ✅ 想插圖時,從上面 UUID 挑一個,前面加 \`kb-img://\` 前綴\n` +
+        `2. ❌ 不可寫成 \`![xxx](image1.png)\`、\`![xxx](檔名.png)\`、純 UUID 沒前綴\n` +
+        `3. UUID 必須**完整 36 字元**抄上去,不要截斷、不要加空白\n` +
+        `4. 一張圖一次,不要重複嵌同一個 UUID\n`;
+    } else {
+      imageHint =
+        `═══ 圖片資源(必讀)═══\n` +
+        `本次檢索**沒有**找到可用圖片。即使 chunk 提到「圖」「截圖」「畫面」,也**禁止**在回應中輸出任何 markdown image 語法。\n` +
+        `若使用者要求圖,請明確告知:「該知識庫目前沒有對應的圖片資源」。\n`;
+    }
+
+    // imageHint **prepend 到 finalResult 最前**,LLM 第一眼就看到(置中後容易被埋)
+    const finalResult = `${imageHint}\n\n【來自知識庫「${kb.name}」的相關內容】${synonymHint}\n\n${chunks.join('\n\n---\n\n')}`;
     if (stats?.synonym_thesaurus) {
       console.log(`[SelfKB] thes=${stats.synonym_thesaurus} applied=${JSON.stringify(stats.synonyms_applied || [])} hint=${synonymHint ? 'YES' : 'NO'}`);
+    }
+    // Debug:把整段送進 LLM 的內容 dump 一份(取 query hash 避免 noise)
+    if (process.env.SELFKB_DEBUG_DUMP === '1') {
+      console.log(`[SelfKB][dump] kb="${kb.name}" finalResult len=${finalResult.length}`);
+      console.log(finalResult.slice(0, 3000));
+      console.log('...[truncated]...');
     }
     return finalResult;
   } catch (e) {
@@ -3173,6 +3259,11 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
               if (!alreadyHas) {
                 const kb = await db.prepare('SELECT * FROM knowledge_bases WHERE id=?').get(kbId);
                 if (kb) {
+                  // 保密 KB 不能透過 skill 強掛繞過權限 — 必須走 owner / kb_access
+                  if (Number(kb.is_confidential) === 1) {
+                    console.warn(`[Skill] KB append: blocked confidential KB "${kb.name}" (id=${kb.id}) — skill "${sk.name}" cannot force-add confidential KB`);
+                    continue;
+                  }
                   const declName = `selfkb_${kb.id}`;
                   selfKbDecls.push({ name: declName, description: `自建知識庫查詢「${kb.name}」。適用範疇：${(kb.description || '').slice(0, 200)}`, parameters: { type: 'object', properties: { query: { type: 'string', description: '查詢關鍵字' } }, required: ['query'] } });
                   skm[declName] = kb;
@@ -3821,6 +3912,15 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
 
       if (!docTemplateId && blockHeaders && blockHeaders.length > 0) {
         sendEvent({ type: 'status', message: `正在生成 ${blockHeaders.length} 個檔案...` });
+      }
+
+      // [SelfKB image debug] 永遠印 — 看 LLM 是不是有按格式輸出 kb-img://
+      {
+        const imgMatches = (text || '').match(/!\[[^\]]*\]\([^)]*\)/g) || [];
+        const hasKbImgHint = /kb-img:\/\//.test(text || '');
+        const hasUuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(text || '');
+        console.log(`[SelfKB][llm-output] markdownImgs=${imgMatches.length} hasKbImgPrefix=${hasKbImgHint} hasAnyUUID=${hasUuid} respLen=${(text||'').length}`);
+        imgMatches.slice(0, 5).forEach((m, i) => console.log(`  [img${i}] ${m}`));
       }
 
       // When a doc template is selected, skip free-form file generation entirely

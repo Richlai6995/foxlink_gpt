@@ -228,14 +228,30 @@ async function _ocrSinglePagePdf(pdfBytes, ocrModel, prompt) {
 }
 
 // Smart PDF parser — per-page text/OCR decision based on mode.
-async function parsePdfSmart(filePath, { ocrModel = null, pdfOcrMode = 'off', formatAware = false } = {}) {
+async function parsePdfSmart(filePath, { ocrModel = null, pdfOcrMode = 'off', formatAware = false, saveTo = null } = {}) {
   const buf = fs.readFileSync(filePath);
+
+  // Phase A:抽 PDF 內嵌圖(只抽 JPEG / DCTDecode,zero-decode 直接寫 .jpg)
+  // FlateDecode PNG 需要解壓 + encoding,先跳過(避免加 sharp 依賴)
+  let extractedImagePlaceholders = '';
+  if (saveTo?.db && saveTo?.kbId) {
+    try {
+      const imgs = await _extractPdfEmbeddedImages(buf, saveTo);
+      if (imgs.length > 0) {
+        extractedImagePlaceholders = '\n\n[文件內嵌圖片]\n' +
+          imgs.map((id) => `[圖片inline:${id}]`).join('\n');
+        console.log(`[KBParser] PDF extracted ${imgs.length} JPEG embedded images`);
+      }
+    } catch (e) {
+      console.warn('[KBParser] PDF image extract failed:', e.message);
+    }
+  }
 
   // Mode 'off' → fast pdf-parse text-layer only
   if (!pdfOcrMode || pdfOcrMode === 'off') {
     const pdfParse = require('pdf-parse');
     const data = await pdfParse(buf);
-    return { text: data.text || '', ocrInputTokens: 0, ocrOutputTokens: 0 };
+    return { text: (data.text || '') + extractedImagePlaceholders, ocrInputTokens: 0, ocrOutputTokens: 0 };
   }
 
   const prompt = formatAware ? PDF_PROMPT_FORMAT_AWARE : PDF_PROMPT_TEXT_ONLY;
@@ -295,7 +311,7 @@ async function parsePdfSmart(filePath, { ocrModel = null, pdfOcrMode = 'off', fo
 
   if (ocrPageCount === 0) {
     return {
-      text: pageInfo.map((p) => p.text).filter(Boolean).join('\n\n'),
+      text: pageInfo.map((p) => p.text).filter(Boolean).join('\n\n') + extractedImagePlaceholders,
       ocrInputTokens: 0,
       ocrOutputTokens: 0,
     };
@@ -307,7 +323,7 @@ async function parsePdfSmart(filePath, { ocrModel = null, pdfOcrMode = 'off', fo
   } catch (e) {
     console.warn(`[KBParser] pdf-lib load failed: ${e.message} — using text layer only`);
     return {
-      text: pageInfo.map((p) => p.text).filter(Boolean).join('\n\n'),
+      text: pageInfo.map((p) => p.text).filter(Boolean).join('\n\n') + extractedImagePlaceholders,
       ocrInputTokens: 0,
       ocrOutputTokens: 0,
     };
@@ -337,21 +353,26 @@ async function parsePdfSmart(filePath, { ocrModel = null, pdfOcrMode = 'off', fo
   })));
 
   return {
-    text: results.filter(Boolean).join('\n\n'),
+    text: results.filter(Boolean).join('\n\n') + extractedImagePlaceholders,
     ocrInputTokens,
     ocrOutputTokens,
   };
 }
 
 // Backwards-compatible wrapper — default mode='off' preserves the old fast path.
-async function parsePdf(filePath, ocrModel = null, pdfOcrMode = 'off') {
-  return parsePdfSmart(filePath, { ocrModel, pdfOcrMode, formatAware: false });
+async function parsePdf(filePath, ocrModel = null, pdfOcrMode = 'off', opts = {}) {
+  return parsePdfSmart(filePath, { ocrModel, pdfOcrMode, formatAware: false, saveTo: opts.saveTo || null });
 }
 
 // OCR all images in a zip archive that match pathRegex — in parallel (p-limit 20).
 // Returns image texts in archive's iteration order (stable within same zip).
+//
+// Phase A 擴充(2026-05-12)— 如 opts.saveTo 提供 { db, kbId, docId },會把每張圖
+// 持久化到 UPLOAD_BASE/kb/<kbId>/embedded/<uuid>.<ext> 並寫 kb_images row,
+// 並在 OCR 文字段落內加上 `[圖片inline:<imageId>]` 佔位符 — chunker 後處理時
+// 會把 imageId 抽到 chunk.metadata.image_ids,讓 chat 命中該 chunk 時能引用該圖。
 const IMG_OCR_CONCURRENCY = Number(process.env.KB_IMG_OCR_CONCURRENCY || 20);
-async function _ocrImagesInZip(zip, pathRegex, ocrModel) {
+async function _ocrImagesInZip(zip, pathRegex, ocrModel, opts = {}) {
   const targets = [];
   for (const [name, file] of Object.entries(zip.files)) {
     if (pathRegex.test(name) && /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(name)) {
@@ -365,6 +386,16 @@ async function _ocrImagesInZip(zip, pathRegex, ocrModel) {
   let ocrInputTokens = 0;
   let ocrOutputTokens = 0;
 
+  // 持久化準備(只有 saveTo 提供時才動)
+  const saveTo = opts.saveTo;
+  let crypto, UPLOAD_BASE, embedDir;
+  if (saveTo?.db && saveTo?.kbId) {
+    crypto = require('crypto');
+    UPLOAD_BASE = process.env.UPLOAD_DIR ? path.resolve(process.env.UPLOAD_DIR) : path.join(__dirname, '../uploads');
+    embedDir = path.join(UPLOAD_BASE, 'kb', saveTo.kbId, 'embedded');
+    try { fs.mkdirSync(embedDir, { recursive: true }); } catch (_) {}
+  }
+
   const texts = await Promise.all(targets.map(({ name, file }) => limit(async () => {
     try {
       const imgBuf = await file.async('nodebuffer');
@@ -373,7 +404,41 @@ async function _ocrImagesInZip(zip, pathRegex, ocrModel) {
       const { text: txt, inputTokens, outputTokens } = await imageToText(imgBuf, mime, ocrModel);
       ocrInputTokens += inputTokens;
       ocrOutputTokens += outputTokens;
-      return txt ? `[圖片文字]\n${txt}` : '';
+
+      let imageId = null;
+      if (saveTo && embedDir) {
+        try {
+          imageId = crypto.randomUUID();
+          const storedFilename = `${imageId}.${ext}`;
+          const absPath = path.join(embedDir, storedFilename);
+          fs.writeFileSync(absPath, imgBuf);
+          const relPath = path.posix.join('kb', saveTo.kbId, 'embedded', storedFilename);
+          // OCR 文字當 caption(空字串時就 null)— 之後 user 可在圖庫改
+          const caption = (txt || '').trim().slice(0, 500) || null;
+          await saveTo.db.prepare(`
+            INSERT INTO kb_images (id, kb_id, doc_id, chunk_id, source, filename, stored_path, mime_type, file_size, caption, created_by)
+            VALUES (?, ?, ?, NULL, 'doc_embed', ?, ?, ?, ?, ?, ?)
+          `).run(
+            imageId, saveTo.kbId, saveTo.docId || null,
+            path.basename(name), // 顯示用:原始 zip 內檔名(如 image1.png)
+            relPath,
+            mime,
+            imgBuf.length,
+            caption,
+            saveTo.userId || null,
+          );
+        } catch (e) {
+          console.warn(`[KBParser] persist embedded image ${name} failed:`, e.message);
+          imageId = null;
+        }
+      }
+
+      if (!txt && !imageId) return '';
+      const lines = [];
+      lines.push('[圖片文字]');
+      if (txt) lines.push(txt);
+      if (imageId) lines.push(`[圖片inline:${imageId}]`); // chunker 後處理會抽
+      return lines.join('\n');
     } catch (e) {
       console.warn(`[KBParser] image OCR ${name} failed: ${e.message}`);
       return '';
@@ -383,7 +448,90 @@ async function _ocrImagesInZip(zip, pathRegex, ocrModel) {
   return { imgTexts: texts.filter(Boolean), ocrInputTokens, ocrOutputTokens };
 }
 
-async function parseDocx(filePath, ocrModel = null) {
+// Phase A:抽 PDF 內嵌圖 — 只抽 DCTDecode (JPEG),zero-encode 直接寫 .jpg。
+// 回傳 [imageId, ...]。每張圖會建 kb_images row (source='doc_embed', caption_status='processing'),
+// 並背景跑 vision caption(序列,避免一份 100 張圖瞬間打爆 API)。
+async function _extractPdfEmbeddedImages(pdfBuf, saveTo) {
+  const { PDFDocument, PDFRawStream, PDFName } = require('pdf-lib');
+  const crypto = require('crypto');
+  const UPLOAD_BASE = process.env.UPLOAD_DIR ? path.resolve(process.env.UPLOAD_DIR) : path.join(__dirname, '../uploads');
+  const embedDir = path.join(UPLOAD_BASE, 'kb', saveTo.kbId, 'embedded');
+  try { fs.mkdirSync(embedDir, { recursive: true }); } catch (_) {}
+
+  let pdfDoc;
+  try {
+    pdfDoc = await PDFDocument.load(pdfBuf, { ignoreEncryption: true });
+  } catch (e) {
+    console.warn('[KBParser] pdf-lib load (image extract) failed:', e.message);
+    return [];
+  }
+
+  const context = pdfDoc.context;
+  const imageIds = [];
+  const captionQueue = [];
+
+  // 走所有 indirect objects,找 stream 且 /Subtype=/Image 且 Filter 含 DCTDecode
+  for (const [, obj] of context.enumerateIndirectObjects()) {
+    if (!(obj instanceof PDFRawStream)) continue;
+    const dict = obj.dict;
+    const subtype = dict.get(PDFName.of('Subtype'));
+    if (!subtype || String(subtype) !== '/Image') continue;
+    const filter = dict.get(PDFName.of('Filter'));
+    const filterStr = filter ? String(filter) : '';
+    if (!/DCT/.test(filterStr)) continue; // 只抽 JPEG 系列
+
+    const bytes = obj.contents;
+    if (!bytes || bytes.length === 0) continue;
+    // 過濾迷你圖(像是裝飾線、bullet < 2KB)
+    if (bytes.length < 2048) continue;
+
+    const imageId = crypto.randomUUID();
+    const storedFilename = `${imageId}.jpg`;
+    const absPath = path.join(embedDir, storedFilename);
+    try {
+      fs.writeFileSync(absPath, Buffer.from(bytes));
+      const relPath = path.posix.join('kb', saveTo.kbId, 'embedded', storedFilename);
+      await saveTo.db.prepare(`
+        INSERT INTO kb_images (id, kb_id, doc_id, chunk_id, source, filename, stored_path, mime_type, file_size, caption_status, created_by)
+        VALUES (?, ?, ?, NULL, 'doc_embed', ?, ?, 'image/jpeg', ?, 'processing', ?)
+      `).run(
+        imageId, saveTo.kbId, saveTo.docId || null,
+        `pdf-image-${imageIds.length + 1}.jpg`,
+        relPath,
+        bytes.length,
+        saveTo.userId || null,
+      );
+      imageIds.push(imageId);
+      captionQueue.push({ imageId, buffer: Buffer.from(bytes) });
+    } catch (e) {
+      console.warn(`[KBParser] PDF image persist failed: ${e.message}`);
+      try { fs.unlinkSync(absPath); } catch (_) {}
+    }
+  }
+
+  // 背景序列跑 caption(不 await,讓 parseDocument 趕快回)
+  // 用序列避免一份 100 張圖瞬間爆 API quota
+  if (captionQueue.length > 0) {
+    setImmediate(async () => {
+      for (const { imageId, buffer } of captionQueue) {
+        try {
+          const caption = await imageToText(buffer, 'image/jpeg', null);
+          const text = (caption?.text || '').trim().slice(0, 500);
+          await saveTo.db.prepare(`UPDATE kb_images SET caption=?, caption_status='done', updated_at=SYSTIMESTAMP WHERE id=?`)
+            .run(text || null, imageId).catch(() => {});
+        } catch (e) {
+          await saveTo.db.prepare(`UPDATE kb_images SET caption_status='failed', caption_error=?, updated_at=SYSTIMESTAMP WHERE id=?`)
+            .run(String(e.message || e).slice(0, 1000), imageId).catch(() => {});
+        }
+      }
+      console.log(`[KBParser] PDF embedded image captioning done (${captionQueue.length} images)`);
+    });
+  }
+
+  return imageIds;
+}
+
+async function parseDocx(filePath, ocrModel = null, opts = {}) {
   const JSZip = require('jszip');
   const buf = fs.readFileSync(filePath);
   const zip = await JSZip.loadAsync(buf);
@@ -392,8 +540,8 @@ async function parseDocx(filePath, ocrModel = null) {
   const docXml = await zip.file('word/document.xml')?.async('text');
   const mainText = await _stripDocxBodyXml(docXml);
 
-  // OCR images (parallel)
-  const { imgTexts, ocrInputTokens, ocrOutputTokens } = await _ocrImagesInZip(zip, /^word\/media\//i, ocrModel);
+  // OCR images (parallel) — 帶 saveTo 時會持久化進 kb_images
+  const { imgTexts, ocrInputTokens, ocrOutputTokens } = await _ocrImagesInZip(zip, /^word\/media\//i, ocrModel, opts);
 
   return {
     text: [mainText, ...imgTexts].filter(Boolean).join('\n\n'),
@@ -460,7 +608,7 @@ async function parsePpt(filePath, ocrModel = null) {
   }
 }
 
-async function parsePptx(filePath, ocrModel = null) {
+async function parsePptx(filePath, ocrModel = null, opts = {}) {
   const JSZip = require('jszip');
   const buf = fs.readFileSync(filePath);
   const zip = await JSZip.loadAsync(buf);
@@ -489,7 +637,7 @@ async function parsePptx(filePath, ocrModel = null) {
   }
 
   // OCR images (parallel)
-  const { imgTexts, ocrInputTokens, ocrOutputTokens } = await _ocrImagesInZip(zip, /^ppt\/media\//i, ocrModel);
+  const { imgTexts, ocrInputTokens, ocrOutputTokens } = await _ocrImagesInZip(zip, /^ppt\/media\//i, ocrModel, opts);
   parts.push(...imgTexts);
 
   return { text: parts.join('\n\n'), ocrInputTokens, ocrOutputTokens };
@@ -553,7 +701,7 @@ async function _stripDocxBodyXml(xml) {
   return t.replace(/ {2,}/g, ' ').trim();
 }
 
-async function parseExcel(filePath, ocrModel = null) {
+async function parseExcel(filePath, ocrModel = null, opts = {}) {
   const JSZip = require('jszip');
   const xlsx  = require('xlsx');
 
@@ -572,7 +720,7 @@ async function parseExcel(filePath, ocrModel = null) {
   try {
     const buf = fs.readFileSync(filePath);
     const zip = await JSZip.loadAsync(buf);
-    const r = await _ocrImagesInZip(zip, /^xl\/media\//i, ocrModel);
+    const r = await _ocrImagesInZip(zip, /^xl\/media\//i, ocrModel, opts);
     parts.push(...r.imgTexts);
     ocrInputTokens = r.ocrInputTokens;
     ocrOutputTokens = r.ocrOutputTokens;
@@ -596,12 +744,15 @@ async function parseExcel(filePath, ocrModel = null) {
 async function parseDocument(filePath, fileType, ocrModel = null, parseMode = 'text_only', pdfOcrMode = 'off', opts = {}) {
   const ext = (fileType || path.extname(filePath)).toLowerCase().replace(/^\./, '');
   const fa = parseMode === 'format_aware';
+  // Phase A:saveTo = { db, kbId, docId, userId } 提供時,zip-based parser 會把
+  // 內嵌圖持久化進 kb_images,並在 OCR 文字裡塞 `[圖片inline:<imageId>]` 佔位符。
+  const parseOpts = { saveTo: opts.saveTo };
   switch (ext) {
-    case 'pdf':  return fa ? parsePdfFormatAware(filePath, ocrModel, pdfOcrMode) : parsePdf(filePath, ocrModel, pdfOcrMode);
-    case 'docx': return fa ? parseDocxFormatAware(filePath, ocrModel) : parseDocx(filePath, ocrModel);
+    case 'pdf':  return fa ? parsePdfFormatAware(filePath, ocrModel, pdfOcrMode, parseOpts) : parsePdf(filePath, ocrModel, pdfOcrMode, parseOpts);
+    case 'docx': return fa ? parseDocxFormatAware(filePath, ocrModel, parseOpts) : parseDocx(filePath, ocrModel, parseOpts);
     case 'doc':  return await parseDoc(filePath); // legacy Word 97-2003 via word-extractor (pure JS)
-    case 'xlsx': case 'xls': return fa ? parseExcelFormatAware(filePath, ocrModel) : parseExcel(filePath, ocrModel);
-    case 'pptx': return await parsePptx(filePath, ocrModel);
+    case 'xlsx': case 'xls': return fa ? parseExcelFormatAware(filePath, ocrModel, parseOpts) : parseExcel(filePath, ocrModel, parseOpts);
+    case 'pptx': return await parsePptx(filePath, ocrModel, parseOpts);
     case 'ppt':  return await parsePpt(filePath, ocrModel); // legacy PPT 97-2003 via LibreOffice convert → pptx
     case 'eml': {
       const { parseEml } = require('./emlParser');
@@ -807,11 +958,11 @@ function chunkParentChild(text, cfg = {}) {
 
 // ─── Format-aware document parsers ───────────────────────────────────────────
 
-async function parsePdfFormatAware(filePath, ocrModel = null, pdfOcrMode = 'off') {
-  return parsePdfSmart(filePath, { ocrModel, pdfOcrMode, formatAware: true });
+async function parsePdfFormatAware(filePath, ocrModel = null, pdfOcrMode = 'off', opts = {}) {
+  return parsePdfSmart(filePath, { ocrModel, pdfOcrMode, formatAware: true, saveTo: opts.saveTo || null });
 }
 
-async function parseDocxFormatAware(filePath, ocrModel = null) {
+async function parseDocxFormatAware(filePath, ocrModel = null, opts = {}) {
   const JSZip = require('jszip');
   const buf = fs.readFileSync(filePath);
   const zip = await JSZip.loadAsync(buf);
@@ -833,7 +984,7 @@ async function parseDocxFormatAware(filePath, ocrModel = null) {
   }
 
   // OCR images (parallel)
-  const { imgTexts, ocrInputTokens, ocrOutputTokens } = await _ocrImagesInZip(zip, /^word\/media\//i, ocrModel);
+  const { imgTexts, ocrInputTokens, ocrOutputTokens } = await _ocrImagesInZip(zip, /^word\/media\//i, ocrModel, opts);
 
   return {
     text: [mainText, ...imgTexts].filter(Boolean).join('\n\n'),
@@ -842,7 +993,7 @@ async function parseDocxFormatAware(filePath, ocrModel = null) {
   };
 }
 
-async function parseExcelFormatAware(filePath, ocrModel = null) {
+async function parseExcelFormatAware(filePath, ocrModel = null, opts = {}) {
   const JSZip = require('jszip');
   const xlsx  = require('xlsx');
 
@@ -901,7 +1052,7 @@ async function parseExcelFormatAware(filePath, ocrModel = null) {
   // 4. OCR embedded images (parallel)
   let ocrInputTokens = 0, ocrOutputTokens = 0;
   try {
-    const r = await _ocrImagesInZip(zip, /^xl\/media\//i, ocrModel);
+    const r = await _ocrImagesInZip(zip, /^xl\/media\//i, ocrModel, opts);
     parts.push(...r.imgTexts);
     ocrInputTokens = r.ocrInputTokens;
     ocrOutputTokens = r.ocrOutputTokens;

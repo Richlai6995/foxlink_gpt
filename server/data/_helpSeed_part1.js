@@ -1746,11 +1746,11 @@ module.exports = [
     sort_order: 15,
     icon: 'Database',
     icon_color: 'text-teal-500',
-    last_modified: '2026-04-22',
+    last_modified: '2026-05-12',
     title: '知識庫市集',
     sidebar_label: '知識庫市集',
     blocks: [
-      { type: 'para', text: '知識庫市集讓您可以將企業內部文件向量化，建立專屬的語意搜尋資料庫。對話時掛載知識庫，AI 會先從知識庫檢索最相關的段落，再結合自身能力回答，大幅提升對特定領域文件（如 SOP、技術手冊、規格書）的回答準確度。' },
+      { type: 'para', text: '知識庫市集讓您可以將企業內部文件向量化，建立專屬的語意搜尋資料庫。對話時掛載知識庫，AI 會先從知識庫檢索最相關的段落，再結合自身能力回答，大幅提升對特定領域文件（如 SOP、技術手冊、規格書）的回答準確度。除了文件之外，也支援**圖片上傳**：AI 自動產生圖片描述讓圖能被檢索，並在對話回覆中自動嵌入相關圖片。' },
       {
         type: 'subsection',
         title: '前提條件',
@@ -1772,10 +1772,12 @@ module.exports = [
               { title: '選擇檢索模式', desc: '「向量檢索」：語意相似度；「全文檢索」：關鍵字比對；「混合檢索」：兩者結合（建議）' },
               { title: '選擇 OCR 模型（選填）', desc: '上傳文件時用來解析圖片/PDF 內圖片的 Gemini 模型，預設使用系統設定的 Flash 模型' },
               { title: '確認 PDF OCR 模式（預設「自動」）', desc: '「自動」= 每頁判斷：有文字層直接抽字（快）、沒文字層才 OCR（準）；多數情況維持預設即可。「強制」= 所有頁面都 OCR，最慢但最準' },
+              { title: '（選用）勾選「保密知識庫」', desc: '紅底 checkbox。勾選後此知識庫**不可申請公開**，且系統管理員預設**看不到內容**（僅看得到名稱），詳見下方「保密知識庫」一節' },
               { title: '點選「建立」，進入知識庫詳情頁' },
             ],
           },
           { type: 'tip', text: '**Embedding 維度已統一為 768**（v2 架構更新，建立表單不再顯示此選項）。所有知識庫使用相同維度以支援 Oracle 23 AI 的向量索引加速，對精度影響 < 2%。' },
+          { type: 'note', text: '建立後可在「分塊與檢索設定」頁籤調整「自動抽取文件內嵌圖片到圖庫」開關（預設啟用）。詳見下方「文件內嵌圖自動抽取」一節。' },
         ],
       },
       {
@@ -1787,11 +1789,49 @@ module.exports = [
             type: 'steps',
             items: [
               { title: '選取一或多個檔案上傳', desc: '多檔會循序處理，避免同時佔用 AI 配額' },
-              { title: '系統自動解析文字並進行 Embedding 向量化', desc: '圖片與 PDF 中的圖片會先 OCR 轉文字，再一起向量化' },
+              { title: '（選用）在上傳列調整本次參數', desc: '可覆寫「格式解析模式」「PDF OCR」「抽取圖」三個 KB 預設值，僅影響本次上傳' },
+              { title: '系統自動解析文字並進行 Embedding 向量化', desc: '圖片與 PDF 中的圖片會先 OCR 轉文字，再一起向量化；若啟用「抽取圖」，內嵌圖會額外存到圖庫供 AI 在對話中嵌入引用' },
               { title: '狀態變為綠色勾選代表處理完成', desc: '若出現紅色 ✗ 請查看錯誤訊息，常見原因：檔案格式不符或 AI 服務暫時中斷' },
             ],
           },
           { type: 'note', text: '大型文件（如含大量圖片的 DOCX）處理時間可能較長，頁面每隔幾秒會自動重新整理狀態，請耐心等待。' },
+        ],
+      },
+      {
+        type: 'subsection',
+        title: '保密知識庫（Confidential KB）',
+        blocks: [
+          { type: 'note', text: '保密知識庫用於存放敏感資料（薪資、人事、客戶機密、合約等）。即使是系統管理員，沒被擁有者主動分享前也**看不到內容**。' },
+          { type: 'para', text: '保密 KB 的特殊規則：' },
+          {
+            type: 'table',
+            headers: ['行為', '保密 KB', '一般 KB'],
+            rows: [
+              ['可否申請公開', '❌ 不可（強制擋下）', '✅ 可申請，管理員審核後生效'],
+              ['Admin 看 KB 列表', '✅ 看得到（顯示紅色「保密」badge）', '✅ 看得到'],
+              ['Admin 看內容/文件/搜尋', '❌ 顯示紅色警告頁，所有內容 API 回 404', '✅ 完整可看'],
+              ['Admin 編輯設定 / 上傳檔案', '❌ 必須被分享 edit 權才能編輯', '✅ 可編輯'],
+              ['Admin 在 chat 用 LLM 工具查詢', '❌ 不會出現在 tool 清單', '✅ 自動加入 tool 清單'],
+              ['一般使用者', '完全看不到（除非被分享）', '依分享 / 公開規則'],
+            ],
+          },
+          {
+            type: 'subsection',
+            title: '如何啟用 / 取消保密',
+            blocks: [
+              { type: 'para', text: '建立時：在建立 Modal 勾選「保密知識庫」checkbox。' },
+              { type: 'para', text: '建立後切換：進入「分塊與檢索設定」頁籤 → 上方「保密設定」區（**僅擁有者可見**）→ 勾 / 取消勾後 Save。' },
+              { type: 'tip', text: '從公開 KB 切換為保密 KB 時，系統會自動取消公開狀態（含 pending 申請）並彈出提示確認。切換動作會寫入 audit log（系統管理員可在審計日誌查到）。' },
+            ],
+          },
+          {
+            type: 'subsection',
+            title: '分享給管理員看內容',
+            blocks: [
+              { type: 'para', text: '保密 KB 仍可透過正常「共享設定」流程把使用權限給特定使用者（包括管理員）：進入詳情頁 → 「共享設定」頁籤 → 對 user/role/dept 等授權即可。被分享者就能看內容、用對話查詢。' },
+              { type: 'note', text: '保密 KB 的「申請公開」按鈕被擋下，請改用「共享」精準授權給需要的對象，不要試圖申請公開。' },
+            ],
+          },
         ],
       },
       {
@@ -1805,9 +1845,138 @@ module.exports = [
               { title: '點選頂部工具列的「知識庫」按鈕（綠色）' },
               { title: '在下拉選單中勾選一或多個要使用的知識庫，點「確認」' },
               { title: '發送訊息，AI 會先檢索知識庫再組合回答', desc: '回覆中如有引用文件段落，AI 通常會說明來源文件名稱' },
+              { title: '若檢索命中圖片（圖庫上傳的圖、文件內嵌圖），AI 會自動在回應中嵌入', desc: '使用 `![描述](kb-img://...)` 語法，前端自動 fetch 並渲染；點圖可放大' },
             ],
           },
           { type: 'tip', text: '可以同時掛載「自建知識庫」＋「API 連接器」＋「MCP 工具」，AI 會綜合所有來源回答。此外，若知識庫設有標籤（Tags），系統會透過 TAG 自動路由機制，根據訊息內容自動判斷是否啟用對應知識庫。' },
+          { type: 'note', text: '**圖片回應建議用 Gemini Pro 模型**：Flash 系列對「複製貼上 36 字元 UUID」的指令服從性較弱，常會省略或改寫圖片引用碼，導致圖出不來。當您預期 AI 會回圖時（如「附上操作畫面」「請給我看截圖」），請切換到 Pro 模型。' },
+        ],
+      },
+      {
+        type: 'subsection',
+        title: '圖庫（KB Images）',
+        blocks: [
+          { type: 'para', text: '每個知識庫除了文件之外，還有獨立的「圖庫」頁籤，用來管理圖片資源。圖片可以是手動上傳，也可以是上傳文件時自動抽取出的內嵌圖。AI 在對話中檢索命中圖片時會自動嵌入回應。' },
+          {
+            type: 'subsection',
+            title: '手動上傳圖片',
+            blocks: [
+              { type: 'para', text: '進入知識庫詳情 → 點選「圖庫」頁籤 → 拖曳或點選上傳區域。支援 **PNG / JPEG / GIF / WebP / BMP**，單張最大 **20 MB**，一次最多 10 張。' },
+              {
+                type: 'steps',
+                items: [
+                  { title: '上傳圖片', desc: '即時顯示在圖庫，右上角顯示黃色「AI 描述產生中」badge' },
+                  { title: '系統背景跑 Gemini Flash vision，產生 20-80 字描述 + OCR 文字' },
+                  { title: '描述完成後 badge 消失，圖卡顯示 caption 內容', desc: '頁面每 5 秒自動 polling，無需手動 refresh' },
+                  { title: '圖片自動建立一個 chunk 進入向量檢索', desc: 'caption + filename 一併 embed，AI 在對話中可以用語意搜尋找到此圖' },
+                ],
+              },
+              { type: 'tip', text: '若您已經知道圖片內容，可在上傳時的 form 直接給 caption 文字（會跳過 AI 自動產描述、節省 token）。' },
+            ],
+          },
+          {
+            type: 'subsection',
+            title: '編輯描述 / 重新檢索',
+            blocks: [
+              { type: 'para', text: '點圖卡的「編輯描述」按鈕，修改 caption 後 Save → 系統會自動重新 embed 該圖的 chunk，下次檢索就會用新 caption 比對。' },
+              { type: 'tip', text: '若 AI 在對話中總是找不到某張圖，先檢查圖卡顯示的 caption 是否充分描述圖片內容、是否包含使用者可能會用的關鍵字。' },
+            ],
+          },
+          {
+            type: 'subsection',
+            title: 'AI 描述失敗的處理',
+            blocks: [
+              { type: 'para', text: '若 Gemini Vision 配額不足、圖片損壞、或內容無法解析（純黑、純白、雜訊），圖卡會顯示紅色「AI 描述失敗」badge，描述區改顯示錯誤訊息。' },
+              {
+                type: 'steps',
+                items: [
+                  { title: '手動輸入描述', desc: '點「編輯描述」直接打字，即可救回該圖讓檢索可用' },
+                  { title: '或點 ↻ 重試按鈕（僅手動上傳圖才有）', desc: '系統會重新呼叫 vision API，若仍失敗請改用手動輸入' },
+                ],
+              },
+              { type: 'note', text: '文件內嵌圖（doc_embed）失敗時不能單獨重試 — 請改對該文件按「重新解析」（Documents 頁籤）讓整份重跑。' },
+            ],
+          },
+          {
+            type: 'subsection',
+            title: '批次刪除',
+            blocks: [
+              { type: 'para', text: '每張圖卡左上角有 checkbox，可勾選多張。工具列會自動顯示「已選 N 張」與紅色「刪除 N 張」按鈕（一次最多 200 張）。也可用工具列「全選」一次選取目前頁所有圖。' },
+              { type: 'tip', text: '刪除會同時清除實體檔、對應的 image chunk、以及 caption 失敗紀錄，無法復原。' },
+            ],
+          },
+        ],
+      },
+      {
+        type: 'subsection',
+        title: '文件內嵌圖自動抽取',
+        blocks: [
+          { type: 'para', text: '上傳 docx / pptx / xlsx / PDF 時，系統可以**自動把文件內嵌的圖片抽出來存到圖庫**，這樣 AI 在對話中命中該文件相關 chunk 時，就能順便把對應圖嵌入回應，不只給文字。' },
+          {
+            type: 'subsection',
+            title: '開關設定',
+            blocks: [
+              {
+                type: 'table',
+                headers: ['設定位置', '影響範圍', '說明'],
+                rows: [
+                  ['KB 設定 → 「文件圖片抽取」toggle', '該 KB 之後所有上傳的預設值', '預設「啟用」'],
+                  ['上傳列的「抽取圖」下拉', '單次上傳覆寫', '可選「依 KB 預設」/「本次抽取」/「本次跳過」'],
+                ],
+              },
+              { type: 'tip', text: '若 KB 預設關閉但這次想抽，反之亦然，用上傳列的「抽取圖」覆寫即可，不需先改 KB 設定再改回來。' },
+            ],
+          },
+          {
+            type: 'subsection',
+            title: '格式支援差異',
+            blocks: [
+              {
+                type: 'table',
+                headers: ['格式', '抽圖支援', '備註'],
+                rows: [
+                  ['DOCX', '✅ 完整（PNG/JPEG/GIF/BMP）', '從 `word/media/` 抽出原檔'],
+                  ['PPTX', '✅ 完整', '從 `ppt/media/` 抽出原檔'],
+                  ['XLSX', '✅ 完整', '從 `xl/media/` 抽出原檔'],
+                  ['PDF', '⚠️ 僅 JPEG（DCTDecode）', 'PNG / FlateDecode 圖目前跳過（避免 sharp 依賴）'],
+                  ['DOC / PPT / XLS (97-2003)', '❌ 不支援', '舊版 Office 二進位格式抽圖代價過高'],
+                ],
+              },
+              { type: 'note', text: 'PDF 限制說明：JPEG 印刷導出格式（產品 spec、報告書、簡報轉 PDF）通常都能抽到；純向量 PDF 或螢幕截圖 PDF（內部走 FlateDecode PNG）目前抽不到。若 PDF 圖很重要，建議改上傳原始 DOCX/PPTX 取代。' },
+            ],
+          },
+          {
+            type: 'subsection',
+            title: '抽出來的圖長什麼樣',
+            blocks: [
+              {
+                type: 'list',
+                items: [
+                  '在「圖庫」頁籤跟手動上傳圖一起列出，左上角藍色「**文件內嵌**」badge 區分來源',
+                  'filename 是 zip 內原始名（如 `image1.png`、`image8.png`）或 PDF 的 `pdf-image-N.jpg`',
+                  'PDF 抽圖初始 status 是 processing（後台序列跑 vision caption），數十秒後變 done',
+                  'docx / pptx / xlsx 抽圖直接用 OCR 文字當 caption，status 立刻 done',
+                  '圖會綁到對應的文件 chunk（metadata.image_ids），對話命中該 chunk 時自動帶圖',
+                ],
+              },
+              { type: 'tip', text: '若圖庫看起來都是 `image1.png` `image2.png` 不好分辨，建議在圖卡點「編輯描述」改 caption 加上自己的標記（如「ABC-100 產品照」），日後檢索 / 找圖都更方便。' },
+            ],
+          },
+          {
+            type: 'subsection',
+            title: '重新解析 / 刪除文件時的連動',
+            blocks: [
+              {
+                type: 'list',
+                items: [
+                  '對文件按「重新解析」→ 系統會先清除該文件**所有**舊的內嵌圖（含實體檔），再依當下 KB / per-upload 設定重新抽',
+                  '刪除文件 → 該文件的內嵌圖全部一併刪除（圖庫即時消失）',
+                  '手動上傳的圖（source = manual）不受文件動作影響',
+                ],
+              },
+              { type: 'note', text: '若您先關閉「抽取圖」上傳一份文件，之後又想要這份文件的圖，可以開啟設定後對該文件按「重新解析」補抽。' },
+            ],
+          },
         ],
       },
       {
@@ -1843,6 +2012,7 @@ module.exports = [
               ['edit（可編輯）', '被共享者可在市集中看到並進入此知識庫，可上傳文件、修改設定'],
             ],
           },
+          { type: 'note', text: '**保密 KB 共享規則**：保密 KB 的共享設定僅擁有者可管理（管理員也不能擅自 grant 給自己），且即使管理員想對保密 KB 操作，也必須先被擁有者主動分享 edit 權才能編輯。' },
         ],
       },
       {
@@ -1850,6 +2020,7 @@ module.exports = [
         title: '申請公開',
         blocks: [
           { type: 'para', text: '若希望全體員工都能看到並使用此知識庫，可在「共享設定」頁籤點選「申請設為公開」，送出申請後需等待系統管理員審核通過，審核後知識庫會對所有人開放（唯讀使用，不可編輯）。' },
+          { type: 'note', text: '**保密知識庫不可申請公開**：勾選保密的 KB，「申請設為公開」按鈕會被擋下並回應「保密知識庫不可申請公開,請先取消保密」。即使管理員端的核准 API 也會強制擋下保密 KB 變公開。' },
         ],
       },
       {
@@ -1861,6 +2032,8 @@ module.exports = [
             type: 'table',
             headers: ['參數', '說明', '建議值'],
             rows: [
+              ['保密設定（僅擁有者）', '勾選後此 KB 變保密 KB，詳見「保密知識庫」一節', '依需求'],
+              ['文件圖片抽取', '上傳 docx/pptx/xlsx/PDF 時是否自動把內嵌圖存到圖庫', '預設啟用'],
               ['分段識別符號', '用來切分段落的符號', '\\n\\n（空白行）'],
               ['分段最大長度', '每個 chunk 的字元上限', '512–1024'],
               ['重疊長度', '前後 chunk 共享的字元數，避免重要資訊被截斷', '50–100'],
@@ -1882,9 +2055,9 @@ module.exports = [
             type: 'table',
             headers: ['格式', '解析方式', '備註'],
             rows: [
-              ['PDF', 'pdf-parse 文字層 + Gemini OCR（有圖片時）', '掃描件需 OCR，速度較慢'],
-              ['DOCX / PPTX', 'JSZip 解壓縮 XML → 提取段落文字', '保留標題層級與段落結構'],
-              ['XLSX / CSV', '逐列讀取，保留欄標頭', '大型表格建議先分頁再上傳'],
+              ['PDF', 'pdf-parse 文字層 + Gemini OCR（有圖片時）+ JPEG 內嵌圖抽取', '掃描件需 OCR，速度較慢；JPEG 圖會抽到圖庫'],
+              ['DOCX / PPTX', 'JSZip 解壓縮 XML → 提取段落文字 + 內嵌圖抽取', '保留標題層級與段落結構；圖會抽到圖庫'],
+              ['XLSX / CSV', '逐列讀取，保留欄標頭', '大型表格建議先分頁再上傳；XLSX 內嵌圖也會抽'],
               ['TXT / MD', '直接讀取純文字', '保留換行結構'],
               ['JPG / PNG / WEBP / GIF', 'Gemini Vision OCR → 轉為文字 chunk', '圖片需設定 OCR 模型才會處理'],
             ],
@@ -1920,6 +2093,22 @@ module.exports = [
             ],
           },
           { type: 'tip', text: '建議每個知識庫設定 3~6 個精準標籤，涵蓋主題的不同說法（例如「SOP」和「標準作業程序」同時設定）。標籤設定後可回到對話測試，發現 AI 沒有用到預期知識庫時，可再回頭調整標籤。' },
+        ],
+      },
+      {
+        type: 'subsection',
+        title: '常見問題（FAQ）',
+        blocks: [
+          {
+            type: 'list',
+            items: [
+              '**Q: AI 為什麼不出圖？** A: 1) 確認使用 Gemini Pro 而非 Flash；2) 確認該 KB 圖庫真的有圖；3) 確認問題能命中含圖的 chunk（可用「召回測試」驗證）',
+              '**Q: 跨 KB 上傳同名圖會衝突嗎？** A: 不會。實體檔用 UUID 命名，filename 只是顯示用，跨 KB / 同 KB 重名都 OK',
+              '**Q: 保密 KB 內的圖管理員看得到嗎？** A: 看不到。`/api/kb/images/<id>` 也會被擋（除非管理員已被 owner 分享）',
+              '**Q: docx 已上傳，現在想抽圖怎麼辦？** A: 進該文件「重新解析」即可，系統會清舊資料 + 依當下設定抽圖',
+              '**Q: PDF 的 PNG 抽不到？** A: 目前 PDF 只支援 JPEG 抽圖。若 PDF 圖很重要，建議找原始 DOCX/PPTX 上傳取代',
+            ],
+          },
         ],
       },
     ],
