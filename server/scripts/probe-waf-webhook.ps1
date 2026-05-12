@@ -1,11 +1,12 @@
-# PowerShell 版本的 WAF probe — Windows 環境用
-# 從外網執行才有意義(內網直連 K8s 不過 WAF)
+# PowerShell WAF probe for Webex webhook path
+# Run from EXTERNAL network only (home / 4G). Internal network bypasses WAF.
 #
-# 使用:
+# Usage:
 #   PS> .\server\scripts\probe-waf-webhook.ps1
 #
-# 預期:WAF 回 HTTP 403 + HTML body 含 "Reference #...",
-#       腳本自動 grep 出來並把完整 response 印出
+# Output:
+#   HTTP 403 + Akamai Reference # -> WAF blocked, give Reference # to WAF admin
+#   HTTP 200/401/400              -> WAF passed (401/400 = backend rejects fake signature, still OK)
 
 param(
   [string]$Url = "https://flgpt.foxlink.com.tw/api/webex/webhook"
@@ -14,7 +15,7 @@ param(
 $ErrorActionPreference = 'Continue'
 
 Write-Host "[probe] POST $Url"
-Write-Host "[probe] 從外網執行才有意義(內網直連 K8s 不過 WAF)"
+Write-Host "[probe] Run from EXTERNAL network only. Internal bypasses WAF."
 Write-Host ""
 
 $body = '{"id":"test-probe","resource":"messages","event":"created","data":{"id":"x","personEmail":"probe@example.com"}}'
@@ -23,7 +24,7 @@ $body | Out-File -Encoding ascii -NoNewline $tmpBody
 
 $tmpOut = [System.IO.Path]::GetTempFileName()
 try {
-  # UA 模擬 Webex 雲端真實 UA(2026-05-11 證實 Akamai 對 CiscoSparkBot UA 過濾)
+  # Simulate Webex cloud real UA (2026-05-11 confirmed Akamai Bot Manager filters CiscoSparkBot UA)
   $ua = "Mozilla/5.0 (compatible; CiscoSparkBot)"
   & curl.exe -sS -i -X POST $Url `
     -H "Content-Type: application/json" `
@@ -38,28 +39,28 @@ try {
   Get-Content $tmpOut -Head 8
   Write-Host ""
 
-  # Akamai 有時把 Reference # HTML-encode 成 &#32;&#35; — 先 decode 再 match
+  # Akamai sometimes HTML-encodes Reference # as &#32;&#35; - decode first then match
   $decoded = $raw -replace '&#46;', '.' -replace '&#32;', ' ' -replace '&#35;', '#'
   $ref = [regex]::Match($decoded, "Reference #[0-9a-f.]+").Value
   $status = ([regex]::Match($raw, "HTTP/[\d.]+\s+(\d+)").Groups[1].Value)
 
   if ($ref) {
-    Write-Host "=== WAF 擋下 ✗  Reference 已抓到 ===" -ForegroundColor Red
+    Write-Host "=== WAF BLOCKED  Reference captured ===" -ForegroundColor Red
     Write-Host $ref -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "[probe] 把上面這串 Reference 給 WAF admin 查 Akamai console"
+    Write-Host "[probe] Send Reference above to WAF admin for Akamai console lookup"
   }
   elseif ($status -in "200","204","401","400") {
-    Write-Host "=== WAF 通過 ✓  HTTP $status ===" -ForegroundColor Green
+    Write-Host "=== WAF PASSED  HTTP $status ===" -ForegroundColor Green
     if ($status -in "401","400") {
-      Write-Host "[probe] 401/400 = 後端拒假簽章,WAF 是過的"
+      Write-Host "[probe] 401/400 means backend rejected fake signature - WAF is OK"
     } else {
-      Write-Host "[probe] WAF + 後端都通"
+      Write-Host "[probe] WAF and backend both reachable"
     }
   }
   else {
-    Write-Host "=== HTTP $status 但沒抓到 Akamai Reference ===" -ForegroundColor Yellow
-    Write-Host "[probe] 完整 response body(看下面找 reference 或別的擋下訊息):"
+    Write-Host "=== HTTP $status  but no Akamai Reference found ===" -ForegroundColor Yellow
+    Write-Host "[probe] Full response body below:"
     Write-Host ""
     Write-Host "--- BODY ---"
     Write-Host $raw
@@ -69,5 +70,5 @@ try {
 finally {
   Remove-Item $tmpBody -ErrorAction SilentlyContinue
   Write-Host ""
-  Write-Host "[probe] 完整 response 暫存於: $tmpOut"
+  Write-Host "[probe] Full response saved to: $tmpOut"
 }
