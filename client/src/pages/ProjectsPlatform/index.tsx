@@ -1,15 +1,27 @@
 /**
- * ProjectsPlatform 入口 — Routes + Tabs(home view)
+ * ProjectsPlatform 入口
  *
- * 設計變更(2026-05-11):
- *   原本 visibility=hidden 會「靜默 redirect 回 /chat」— debug 起來很痛苦
- *   改成顯示診斷頁,讓 user / dev 看到「為什麼進不來」
+ * 設計變更(2026-05-12):
+ *   依照 docs/Cortex_互動Demo.html(Ocean Depth + Cyan)重新設計風格,
+ *   進入 /projects-platform/* 後完全獨立 shell(navy topbar + slide-in sidebar),
+ *   Cortex 主站 sidebar 不顯示(對齊 spec slide 4「Cortex 加一個 menu 入口」)。
+ *
+ * Routes:
+ *   /projects-platform                              → ProjectsList(我的專案)
+ *   /projects-platform/projects/:id                 → WarRoom(戰情會議室)
+ *   /projects-platform/internal-admin/overview      → Internal Admin Overview(admin only)
+ *   /projects-platform/internal-admin/system-health → System Health(admin only)
  */
 
+import { useEffect } from 'react'
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { useProjectsPlatformVisibility } from '../../hooks/useProjectsPlatformVisibility'
-import HomeTabs from './HomeTabs'
-import ProjectDetail from './Projects/ProjectDetail'
+import { PlatformProvider } from './Shell/PlatformContext'
+import PlatformShell from './Shell/PlatformShell'
+import ProjectsList from './Projects/ProjectsList'
+import WarRoom from './WarRoom/WarRoom'
+import InternalAdminOverview from './InternalAdmin/Overview'
+import SystemHealthPage from './InternalAdmin/SystemHealth'
 
 export default function ProjectsPlatformPage() {
   const v = useProjectsPlatformVisibility()
@@ -18,28 +30,27 @@ export default function ProjectsPlatformPage() {
   // Loading
   if (v.mode === 'loading') {
     return (
-      <div className="min-h-screen bg-slate-900 text-slate-400 flex items-center justify-center">
+      <div className="min-h-screen bg-cortex-bg text-cortex-muted flex items-center justify-center font-cortex">
         <span className="text-sm">確認權限中…</span>
       </div>
     )
   }
 
-  // 不可見 — 顯示診斷頁,不再靜默 redirect
+  // 不可見 — 顯示診斷頁(對齊 docs/Cortex_互動Demo 風格)
   if (!v.can_see) {
     return (
-      <div className="min-h-screen bg-slate-900 text-slate-200 flex items-center justify-center p-6">
-        <div className="max-w-lg w-full bg-slate-800/50 border border-slate-700 rounded-lg p-6">
+      <div className="min-h-screen bg-cortex-bg text-cortex-text font-cortex flex items-center justify-center p-6">
+        <div className="max-w-lg w-full bg-white border border-cortex-line rounded-lg shadow-cortex p-6">
           <div className="flex items-center gap-2 mb-3">
             <span className="text-2xl">🔒</span>
-            <h2 className="text-lg font-semibold text-amber-300">無法存取專案管理平台</h2>
+            <h2 className="text-lg font-bold text-cortex-ink">無法存取 Cortex 專案管理平台</h2>
           </div>
-          <p className="text-sm text-slate-300 mb-4">
-            原因:<code className="text-amber-300 bg-slate-900 px-1.5 py-0.5 rounded">{v.reason || 'unknown'}</code>
+          <p className="text-sm text-cortex-text mb-4">
+            原因:<code className="text-amber-700 bg-cortex-amber-bg px-1.5 py-0.5 rounded">{v.reason || 'unknown'}</code>
           </p>
-
-          <div className="bg-slate-900/60 border border-slate-700 rounded p-3 text-xs text-slate-400 space-y-1.5 mb-4">
-            <DiagItem label="mode"      value={v.mode} />
-            <DiagItem label="reason"    value={v.reason || '—'} />
+          <div className="bg-cortex-bg border border-cortex-line rounded p-3 text-xs text-cortex-muted space-y-1.5 mb-4">
+            <DiagItem label="mode"    value={v.mode} />
+            <DiagItem label="reason"  value={v.reason || '—'} />
             {v.user && (
               <>
                 <DiagItem label="user.id"       value={String(v.user.id)} mono />
@@ -49,30 +60,26 @@ export default function ProjectsPlatformPage() {
             )}
             {v.api_error && <DiagItem label="api_error" value={v.api_error} mono />}
           </div>
-
-          <div className="space-y-2 text-xs text-slate-400">
-            <p className="font-semibold text-slate-300">可能的解決方式:</p>
+          <div className="space-y-2 text-xs text-cortex-muted">
+            <p className="font-semibold text-cortex-text">可能的解決方式:</p>
             {v.reason === 'not-admin-not-pilot' && (
               <>
-                <p>• Phase 0 只給 admin 看到此功能(visibility evolution plan §A.3)</p>
-                <p>• 改用 admin 帳號登入(server/.env 的 <code className="text-sky-400">DEFAULT_ADMIN_ACCOUNT</code>)</p>
-                <p>• 或請 admin 把你的 user_id 加進 server/.env 的 <code className="text-sky-400">PILOT_USERS</code></p>
+                <p>• Phase 0 只給 admin 看到此功能</p>
+                <p>• 改用 admin 帳號登入(server/.env 的 DEFAULT_ADMIN_ACCOUNT)</p>
+                <p>• 或請 admin 把你的 user_id 加進 server/.env 的 PILOT_USERS</p>
               </>
             )}
             {v.reason === 'api-error' && (
               <>
-                <p>• server 沒啟用 module:檢查 server/.env 是否設 <code className="text-sky-400">ENABLE_PROJECTS_PLATFORM=true</code></p>
+                <p>• server 沒啟用 module:檢查 server/.env 是否設 ENABLE_PROJECTS_PLATFORM=true</p>
                 <p>• 改完 .env 後必須重啟 server</p>
-                <p>• 確認 server log 有出現 <code className="text-sky-400">[Route] /api/projects (projects-platform v0.4) OK</code></p>
               </>
             )}
             {v.reason === 'no-user' && <p>• 尚未登入</p>}
-            {v.reason === 'no-role-no-membership' && <p>• GA mode 下,需有 project role 或為任一 project 成員</p>}
           </div>
-
           <button
             onClick={() => navigate('/chat')}
-            className="mt-5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm rounded transition"
+            className="mt-5 px-3 py-1.5 bg-cortex-navy text-white text-sm rounded hover:opacity-90 transition"
           >
             返回對話
           </button>
@@ -81,20 +88,38 @@ export default function ProjectsPlatformPage() {
     )
   }
 
+  // Visible — 走 shell
   return (
-    <Routes>
-      <Route index element={<HomeTabs />} />
-      <Route path="projects/:id" element={<ProjectDetail />} />
-      <Route path="*" element={<Navigate to="" replace />} />
-    </Routes>
+    <PlatformProvider>
+      <PlatformShell>
+        <Routes>
+          <Route index element={<ProjectsList />} />
+          <Route path="projects/:id" element={<WarRoom />} />
+          <Route path="internal-admin/overview" element={<AdminGuard mode={v.mode}><InternalAdminOverview /></AdminGuard>} />
+          <Route path="internal-admin/system-health" element={<AdminGuard mode={v.mode}><SystemHealthPage /></AdminGuard>} />
+          <Route path="*" element={<Navigate to="" replace />} />
+        </Routes>
+      </PlatformShell>
+    </PlatformProvider>
   )
+}
+
+function AdminGuard({ mode, children }: { mode: string; children: React.ReactNode }) {
+  if (mode !== 'admin') {
+    return (
+      <div className="bg-white border border-cortex-line rounded p-6 text-center text-cortex-muted">
+        Internal admin 限 Cortex admin 進入(目前:{mode})
+      </div>
+    )
+  }
+  return <>{children}</>
 }
 
 function DiagItem({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex items-start gap-2">
-      <span className="text-slate-500 shrink-0 w-20">{label}:</span>
-      <span className={`text-slate-200 break-all ${mono ? 'font-mono text-[10px]' : ''}`}>{value}</span>
+      <span className="text-cortex-muted shrink-0 w-20">{label}:</span>
+      <span className={`text-cortex-ink break-all ${mono ? 'font-mono text-[10px]' : ''}`}>{value}</span>
     </div>
   )
 }

@@ -1,52 +1,53 @@
 /**
- * ProjectsList — 列出所有 user 可看的專案
+ * ProjectsList — 「我的專案」頁
  *
- * - 顯示 project_code / type / title / lifecycle / importance / 更新時間
- * - 提供建案按鈕(開 NewProjectDialog)
- * - 點 row 進詳細頁
+ * 對應 HTML demo .view-projects + .proj-grid
+ *
+ * Sprint A:
+ *   - page-head:標題 + 「匯入 ERP」+ 「新增專案」(Wizard 在 Sprint B 上)
+ *   - filter-row:搜尋 + lifecycle chips
+ *   - 卡片 grid(2-3 欄 responsive)
+ *
+ * Backend 已 ready:GET /projects → projects[]
+ * 缺的欄位(progress / ai_summary / customer / members)Sprint C-F 補
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, RefreshCw } from 'lucide-react'
+import { Plus, Download, Search, Lock } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
-import { api, Project, ProjectType } from '../api'
-import NewProjectDialog from './NewProjectDialog'
+import { api, type Project, type ProjectType } from '../api'
+import { useCrumbs } from '../Shell/PlatformContext'
+import ProjectCard from './ProjectCard'
 
-const LIFECYCLE_BADGE: Record<string, { label: string; cls: string }> = {
-  DRAFT:    { label: '草稿',     cls: 'bg-slate-700/40 text-slate-300 border-slate-600/50' },
-  ACTIVE:   { label: '進行中',   cls: 'bg-green-700/30 text-green-300 border-green-700/50' },
-  PAUSED:   { label: '暫停',     cls: 'bg-amber-700/30 text-amber-300 border-amber-700/50' },
-  CLOSED:   { label: '已結案',   cls: 'bg-slate-800 text-slate-400 border-slate-700' },
-  REOPENED: { label: '重啟',     cls: 'bg-sky-700/30 text-sky-300 border-sky-700/50' },
-}
+type Filter = 'all' | 'active' | 'paused' | 'closed' | 'confidential'
 
-const IMPORTANCE_DOT: Record<string, string> = {
-  HIGH:   'bg-red-500',
-  NORMAL: 'bg-slate-500',
-  LOW:    'bg-slate-700',
-}
+const FILTER_CHIPS: { key: Filter; label: string; icon?: React.ReactNode }[] = [
+  { key: 'all',          label: '全部' },
+  { key: 'active',       label: '進行中' },
+  { key: 'paused',       label: '暫停' },
+  { key: 'closed',       label: '已結案' },
+  { key: 'confidential', label: '機密案', icon: <Lock size={11} /> },
+]
 
 export default function ProjectsList() {
+  useCrumbs([{ label: '我的專案' }])
   const { token } = useAuth() as any
   const navigate = useNavigate()
   const [projects, setProjects] = useState<Project[]>([])
-  const [types, setTypes] = useState<ProjectType[]>([])
-  const [filter, setFilter] = useState<{ status?: string; type_code?: string }>({})
-  const [loading, setLoading] = useState(false)
+  const [_types, setTypes] = useState<ProjectType[]>([])
+  const [filter, setFilter] = useState<Filter>('all')
+  const [search, setSearch] = useState('')
   const [err, setErr] = useState<string | null>(null)
-  const [showNew, setShowNew] = useState(false)
+  const [loading, setLoading] = useState(false)
 
   const reload = async () => {
+    if (!token) return
     setLoading(true)
     setErr(null)
     try {
-      const qs = new URLSearchParams()
-      if (filter.status) qs.set('status', filter.status)
-      if (filter.type_code) qs.set('type_code', filter.type_code)
-      const path = '/projects' + (qs.toString() ? `?${qs}` : '')
-      const data = await api.get<{ projects: Project[] }>(token, path)
-      setProjects(data.projects || [])
+      const r = await api.get<{ projects: Project[] }>(token, '/projects?limit=200')
+      setProjects(r.projects || [])
     } catch (e: any) {
       setErr(e.message)
     } finally {
@@ -56,128 +57,132 @@ export default function ProjectsList() {
 
   useEffect(() => {
     if (!token) return
-    api.get<{ types: ProjectType[] }>(token, '/projects/types')
-      .then((d) => setTypes(d.types || []))
-      .catch(() => {})
+    api.get<{ types: ProjectType[] }>(token, '/projects/types').then((d) => setTypes(d.types || [])).catch(() => {})
+    reload()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token])
 
-  useEffect(() => {
-    if (token) reload()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, filter.status, filter.type_code])
+  const filtered = useMemo(() => {
+    let xs = projects
+    if (filter === 'active')       xs = xs.filter((p) => p.lifecycle_status === 'ACTIVE')
+    else if (filter === 'paused')  xs = xs.filter((p) => p.lifecycle_status === 'PAUSED')
+    else if (filter === 'closed')  xs = xs.filter((p) => p.lifecycle_status === 'CLOSED')
+    else if (filter === 'confidential') xs = xs.filter((p: any) => p.is_confidential)
+    if (search.trim()) {
+      const q = search.trim().toLowerCase()
+      xs = xs.filter((p) =>
+        p.project_code.toLowerCase().includes(q) ||
+        (p.data_payload?.title || '').toLowerCase().includes(q) ||
+        p.type_code.toLowerCase().includes(q),
+      )
+    }
+    return xs
+  }, [projects, filter, search])
 
   return (
-    <div className="space-y-4">
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          onClick={() => setShowNew(true)}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-sky-700 hover:bg-sky-600 text-white text-sm rounded transition"
-        >
-          <Plus size={14} /> 建立專案
-        </button>
-        <button
-          onClick={reload}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm rounded transition"
-        >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> 重新整理
-        </button>
-
-        <div className="ml-auto flex items-center gap-2">
-          <select
-            value={filter.type_code || ''}
-            onChange={(e) => setFilter({ ...filter, type_code: e.target.value || undefined })}
-            className="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-sm"
+    <div>
+      {/* Page head */}
+      <div className="flex items-end justify-between flex-wrap gap-3 mb-5">
+        <div>
+          <h1 className="text-2xl font-extrabold text-cortex-ink tracking-tight flex items-center gap-3 m-0">
+            我的專案
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cortex-cyan-bg text-cortex-teal border border-cortex-cyan/30">
+              {filtered.length} 個
+            </span>
+          </h1>
+          <div className="text-[13px] text-cortex-muted mt-1">
+            已參與或負責的專案 · 點任一張卡片進入戰情會議室
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => alert('「匯入 / 從 ERP 拉」尚未實作 — Sprint E 開')}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-[13px] font-semibold border border-cortex-line bg-white text-cortex-text hover:bg-cortex-bg hover:border-slate-300 transition"
           >
-            <option value="">所有類型</option>
-            {types.map((t) => (
-              <option key={t.type_code} value={t.type_code}>{t.type_code}</option>
-            ))}
-          </select>
-          <select
-            value={filter.status || ''}
-            onChange={(e) => setFilter({ ...filter, status: e.target.value || undefined })}
-            className="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-sm"
+            <Download size={14} /> 匯入 / 從 ERP 拉
+          </button>
+          <button
+            onClick={() => alert('「新增專案」Wizard 7 步 — Sprint B 開')}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-[13px] font-bold bg-cortex-cyan text-cortex-navy hover:bg-[#04D9AC] hover:shadow-[0_2px_6px_rgba(2,195,154,0.30)] transition"
           >
-            <option value="">所有狀態</option>
-            <option value="DRAFT">草稿</option>
-            <option value="ACTIVE">進行中</option>
-            <option value="PAUSED">暫停</option>
-            <option value="CLOSED">已結案</option>
-            <option value="REOPENED">重啟</option>
-          </select>
+            <Plus size={14} strokeWidth={2.5} /> 新增專案
+          </button>
         </div>
       </div>
 
+      {/* Filter row */}
+      <div className="flex flex-wrap gap-2 items-center mb-4">
+        <div className="relative flex-1 max-w-[360px] min-w-[220px]">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-cortex-muted pointer-events-none" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="搜尋 ID / 客戶 / 料號 / 負責人..."
+            className="w-full h-9 pl-9 pr-3 border border-cortex-line rounded-md text-[13px] bg-white text-cortex-ink focus:outline-none focus:border-cortex-cyan focus:ring-[3px] focus:ring-cortex-cyan/15 transition"
+          />
+        </div>
+        {FILTER_CHIPS.map((c) => {
+          const on = filter === c.key
+          return (
+            <button
+              key={c.key}
+              onClick={() => setFilter(c.key)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-semibold border transition ${
+                on
+                  ? 'bg-cortex-navy text-white border-cortex-navy shadow-cortex-sm'
+                  : 'bg-white border-cortex-line text-cortex-text hover:border-slate-300 hover:bg-cortex-bg'
+              }`}
+            >
+              {c.icon}
+              {c.label}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Errors / loading */}
       {err && (
-        <div className="p-3 bg-red-900/20 border border-red-800 rounded text-red-300 text-sm">
-          {err}
+        <div className="p-3 mb-4 bg-cortex-red-bg border border-red-200 rounded text-red-700 text-sm">
+          無法載入專案:{err}
         </div>
       )}
 
-      {/* Table */}
-      <div className="bg-slate-800/40 border border-slate-700 rounded overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-900/50 text-slate-400 text-xs uppercase">
-            <tr>
-              <th className="text-left px-4 py-2.5">Code</th>
-              <th className="text-left px-4 py-2.5">類型</th>
-              <th className="text-left px-4 py-2.5">標題</th>
-              <th className="text-left px-4 py-2.5">狀態</th>
-              <th className="text-left px-4 py-2.5">重要</th>
-              <th className="text-left px-4 py-2.5">更新</th>
-            </tr>
-          </thead>
-          <tbody>
-            {projects.length === 0 && !loading && (
-              <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
-                  尚無專案 — 點「建立專案」開始
-                </td>
-              </tr>
-            )}
-            {projects.map((p) => {
-              const lc = LIFECYCLE_BADGE[p.lifecycle_status] || LIFECYCLE_BADGE.DRAFT
-              return (
-                <tr
-                  key={p.id}
-                  onClick={() => navigate(`/projects-platform/projects/${p.id}`)}
-                  className="border-t border-slate-700/50 hover:bg-slate-700/30 cursor-pointer transition"
-                >
-                  <td className="px-4 py-2.5 font-mono text-sky-300">{p.project_code}</td>
-                  <td className="px-4 py-2.5 text-slate-300">{p.type_code}</td>
-                  <td className="px-4 py-2.5 text-slate-200">{p.data_payload?.title || '—'}</td>
-                  <td className="px-4 py-2.5">
-                    <span className={`px-2 py-0.5 text-xs rounded border ${lc.cls}`}>
-                      {lc.label}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <span className="inline-flex items-center gap-1.5 text-xs text-slate-300">
-                      <span className={`w-2 h-2 rounded-full ${IMPORTANCE_DOT[p.importance] || 'bg-slate-600'}`} />
-                      {p.importance}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2.5 text-xs text-slate-500">
-                    {p.updated_at ? new Date(p.updated_at).toLocaleString('zh-TW') : '—'}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      {showNew && (
-        <NewProjectDialog
-          types={types}
-          onClose={() => setShowNew(false)}
-          onCreated={(id) => {
-            setShowNew(false)
-            navigate(`/projects-platform/projects/${id}`)
-          }}
-        />
+      {/* Grid */}
+      {filtered.length === 0 && !loading ? (
+        <div className="text-center py-16 text-cortex-muted bg-white rounded-lg border border-cortex-line">
+          <p className="text-base">尚無專案符合條件</p>
+          <p className="text-sm mt-2">點右上「新增專案」開始(Wizard 在 Sprint B 上線)</p>
+        </div>
+      ) : (
+        <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
+          {filtered.map((p) => (
+            <ProjectCard
+              key={p.id}
+              project={mockEnrichProject(p)}
+              onClick={() => navigate(`/projects-platform/projects/${p.id}`)}
+            />
+          ))}
+        </div>
       )}
     </div>
   )
+}
+
+// ─── Mock 補滿 demo 欄位(Sprint C-F 接 backend 補真值)─────────────
+function mockEnrichProject(p: Project): any {
+  return {
+    ...p,
+    customer: (p.data_payload as any)?.customer || (p as any).bu_id ? `BU#${(p as any).bu_id}` : '—',
+    amount_display: (p.data_payload as any)?.amount_display || '',
+    due: p.sla_due_at ? new Date(p.sla_due_at).toLocaleDateString('zh-TW') : '',
+    progress: Math.min(100, Math.max(0, (p as any).priority_score ? Number((p as any).priority_score) * 10 : 0)),
+    priority: (p as any).priority_score ?? (p.importance === 'HIGH' ? 8 : p.importance === 'LOW' ? 3 : 5),
+    sla: p.lifecycle_status === 'ACTIVE' ? 'green' : p.lifecycle_status === 'PAUSED' ? 'amber' : 'red',
+    pause_reason: (p as any).pause_reason,
+    note: (p as any).reopen_reason ? `重啟原因:${(p as any).reopen_reason}` : null,
+    ai_summary: null, // Sprint D 接 Status SUMMARY
+    members: [{ initial: '我' }],
+    confidential: !!(p as any).is_confidential,
+  }
 }

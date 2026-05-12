@@ -1,0 +1,860 @@
+                                                                  Cortex 互動 Demo 操作手冊 v3.0 · OIBG-aligned
+
+      Cortex 通用專案管理平台
+
+              v0.4 · 互動 Demo 操作手冊
+
+                      Operation Manual · OIBG-aligned
+
+對齊 OIBG RFQ flow · Multi-PM · RACI · Stage Gate · Dependency-based deadlines
+                                             搭配檔案
+
+                          Cortex_互動 Demo.html
+
+                     Cortex_通用專案管理平台_UI 模擬與操作流程.pptx
+                       (三件套交付 · 內容已對齊 v0.4 規格書 + OIBG flow)
+
+                                 文件版本 v3.0 · 2026-05-01
+                              Cortex 規劃小組 · OIBG-aligned
+
+                                     v3.0 · 2026-05-01 · 第 1 頁 / 共 21 頁
+                                                                                     Cortex 互動 Demo 操作手冊 v3.0 · OIBG-aligned
+
+文件目的
+
+本文件搭配 Cortex 通用專案管理平台 v0.4 互動 demo HTML 使用,提供完整的操作流程與功
+能說明:
+
+    1. 引導 Briefing 受邀者快速理解 demo 結構與 OIBG flow 的對應。
+    2. 提供 demo 過程中各畫面的功能說明,作為主持人或受邀者的參考手冊。
+    3. 對應 v0.4 規格書 + OIBG RFQ flow,協助評估者對照功能完整度。
+    4. 收集回饋意見前,讓受邀者有完整的功能脈絡。
+
+ℹ 本文件 v3.0 改版重點
+整體對齊 OIBG RFQ flow:8 stage 流程、Multi-PM (DPM/BPM/MPM/EPM 各帶 team)、
+RACI 矩陣 (A/R 不同人)、Stage Gate (業務確認制)、Dependency-based deadlines (相對
+deadline)、7-channel 戰情會議室。HTML demo、PPT 與本手冊三份文件內容完全一致。
+
+一、Demo 概覽
+
+本 demo 是 Cortex 通用專案管理平台的單檔 HTML 介面原型,提供完整的 UI 互動體驗供
+briefing 階段評估。它涵蓋下列六大核心:
+
+    • OIBG RFQ 8-stage flow:Receive RFQ → Q&A Collect → Q&A Feedback → BOM
+         提供 → 並行 Collect → BOM Cost Review → RFQ Cost Review → Submit Final
+         Quote。
+
+    • Multi-PM 模型:HOST = 業務(主+助理)+ DPM/BPM/MPM/EPM 4 種 PM 各帶自己
+         team。
+
+    • 7 預設 channel 戰情會議室(Slack-like):announcement / general / qa-customer /
+         engineering / sourcing / factory / cost-review + DM。
+
+    • RACI 任務矩陣:每個任務有 A (Accountable 背鍋) + R (Responsible 實作),通常不同
+         人。
+
+    • Stage Gate 業務確認制:stage 不自動跳,所有 task 完成後業務(或業務助理)點「進入下
+         一 stage」。
+
+    • Dependency-based deadline:`QA response+1day`、`EE BOM+3days` 相對
+         deadline,不是固定日期。
+
+Demo 的限制  說明
+
+項目                     v3.0 · 2026-05-01 · 第 2 頁 / 共 21 頁
+                                   Cortex 互動 Demo 操作手冊 v3.0 · OIBG-aligned
+
+項目              說明
+僅前端 demo        點擊互動皆為 mock,無真實後端與資料庫。
+重整會清空變更         新建的對話、發送的訊息、表單填寫不會持久化。
+角色切換是模擬         真實系統由 IAM 模組依 user 身份判定;demo 由操作者自行切換。
+部分按鈕為
+placeholder     「 匯出 Excel」「 發布」「 版本歷史」尚未實作。
+
+13 角色 demo 6 個  spec §17 完整 13 個身份;demo 呈現 6 個聊天室角色
+                (HOST/PARTICIPANT/OBSERVER/CHAT_GUEST/SUPER/OUTSIDER)。
+
+二、環境準備          建議
+                Cortex_互動 Demo.html (約 410 KB,單檔)
+項目              Chrome 100+ / Edge 100+ / Safari 16+ / Firefox 100+
+檔案              建議 1366×768 以上,1920×1080 體驗最佳
+瀏覽器             不需要,純本地檔案。
+螢幕              雙擊檔案,或將 .html 檔拖入瀏覽器。
+網路
+開啟方式
+
+⚠ 字體提醒
+若中文出現方塊,請確認系統有「微軟正黑體」或「PingFang TC」其一。
+
+三、OIBG RFQ 8-Stage 流程
+
+本 demo 的 Apple AirPods 連接器 BOM 報價案以 OIBG RFQ flow 為基礎,完整呈現 8 個
+stage:
+
+Stage 名稱        SLA    誰做
+
+1  Receive RFQ  4h     業務 → DPM (⚖ Stage Gate)
+
+2  Q&A Collect  24h    DPM + Team
+
+3  Q&A Feedback 8h     BPM 對客戶
+
+4  BOM 提供       24-72h EE + ME
+
+                       v3.0 · 2026-05-01 · 第 3 頁 / 共 21 頁
+                                               Cortex 互動 Demo 操作手冊 v3.0 · OIBG-aligned
+
+Stage 名稱                  SLA       誰做
+
+5       並行 Collect        parallel  MPM 帶 PKG/SMT/Cleansheet · DPM 帶
+                                    NRE/EMI/Cert
+
+            BOM Cost      12h       DPM + BPM + 採購 (⚖ Stage Gate)
+6
+
+            Review
+
+7       RFQ Cost Review 8h          True cost / Profit / Suggested Quote (⚖
+                                    Stage Gate)
+
+8       Submit Final      4h        BPM + Sales (⚖ Stage Gate · 結案)
+
+        Quote
+
+⚖ Stage Gate 設計
+Stage 1, 6, 7, 8 是 業 務 gate — 該 stage 內 所 有 task 完 成 後 不 會 自 動 推 進 , 而 是
+announcement channel 發訊息「Stage X 完成,等業務確認」+ 戰情會議室 banner 顯示。
+業務(主)點「進入下一 stage」才推進。業務不在線時「業務助理」可代行(代理機制)。
+
+四、Multi-PM 模型 (對齊 OIBG flow)
+
+v0.4 重大設計變更 — 從「單一 PM」改為「多 PM 並存」。HOST = 業務(主 + 助理),底下 4
+種 PM 各帶自己 team:
+
+PM 角色     全名                        職責 + Team
+
+業務        Sales · 主業務 + 業務 結案 / 換主 PM / 改機密設定 / 邀全員 / Stage Gate 確
+(HOST)
+          助理                        認 · 業務不在線業務助理可代行
+
+DPM       Design Project            設計 + RD/EE/ME 整體技術 · 帶 EE / ME / RD
+          Manager                   team(invited_by_pm = DPM)
+
+MPM       Manufacturing PM          工廠 cleansheet / NRE / PKG / SMT · 帶 SMT / EPM / 工廠
+                                    採購 team
+
+BPM       Business PM               對客戶 / Q&A / 報價提交 · 帶客戶窗口 / 助理
+
+EPM       NPI Engineering PM 工程細項 (NPI 階段)
+
+  為什麼這樣設計
+OIBG flow PDF 已經寫了 Accountable / Responsible / 各 PM 分工 — 業務本來就用「DPM
+
+                               v3.0 · 2026-05-01 · 第 4 頁 / 共 21 頁
+                              Cortex 互動 Demo 操作手冊 v3.0 · OIBG-aligned
+
+team / MPM team」分工,只是沒系統支援 (用 Excel + Email 散在各處)。現在變成資料結構,
+團 隊 關 係 透 過 invited_by_pm_user_id 自 然 涌 現 :EE invited_by DPM 、 SMT invited_by
+MPM。
+
+五、RACI 任務角色矩陣
+
+每個任務 / form 欄位有 2 個角色,通常不同人:
+    • A (Accountable)= 「向上負責的人」(背鍋)— 該任務沒做好誰要解釋。
+    • R (Responsible) = 「實際做事的人」(實作)— 該任務具體誰執行。
+
+範例(對應 OIBG 文件):     A (背鍋)    R (實作)                    備註
+                    DPM Mike  台北採購 / 工廠採購               EE 帶採購一起做
+任務項目                MPM Tony  工廠採購                      工廠主導
+BOM cost - EE       DPM Mike  SMT team / NPI
+BOM cost - PKG                EPM                       設計負責,工廠執行
+Cleansheet 三廠版      DPM Mike
+                    BPM Lisa  廠商 / 塑件 PM                NRE Engineering 細
+NRE - ME Tooling    業務 Amy                              項
+Q&A Feedback (對客)             BPM Lisa                  同人(BPM 主責)
+Submit Final Quote            BPM + Sales               Stage 8 業務 gate
+
+✦ 在 Demo 中看到 RACI
+進「QT-2026-0143 Apple」案戰情會議室 → 任務看板分頁,每張 task 卡都顯示「A:DPM
+Mike」(紅 pill) +「R:EE John」(藍 pill)。OIBG flow 中所有 16 個 deliverable 都已配置
+RACI(部分需業務 review confirm)。
+
+六、Dependency-based Deadlines
+
+對齊 RFQ Schedule example:Deadline 不是固定日期,是「依賴關係 + N 天」:
+
+任務                  依賴        +N                        原 Excel 寫法
+
+Schedule update     QA response +1d                     Schedule update
+                                                        (DPM, QA
+
+                    v3.0 · 2026-05-01 · 第 5 頁 / 共 21 頁
+                                 Cortex 互動 Demo 操作手冊 v3.0 · OIBG-aligned
+
+任務                       依賴      +N                      原 Excel 寫法
+RET Plan and Cost
+EE BOM cost              QA response +3d                 response+1day)
+Internal BOM review
+Cleansheet to VP         EE BOM  +3d                     RET Plan and Cost
+Quotation to Sales                                       (RET, QA
+                         EE BOM Cost +1d                 response+3days)
+
+                         EE BOM Cost +1d                 EE BOM cost (台北採
+                                                         購, EE BOM+3days)
+                         EE BOM Cost +2d
+                                                         Internal BOM review
+                                                         (DPM, EE BOM
+                                                         Cost+1day)
+
+                                                         Cleansheet to VP
+                                                         (MPM, EE BOM
+                                                         Cost+1day)
+
+                                                         Quotation to Sales
+                                                         (DPM, EE BOM
+                                                         Cost+2days)
+
+  為什麼這樣設計
+客戶 QA 晚回 3 天 → 後續所有 deadline 自動推遲(連動更新)· 不需要 Excel 手動重排 · 主管儀
+表板自動更新燈號 · 任務看板每張卡顯示「⏰ QA Response+1d」格式。
+
+七、⭐ 開案 7 步驟 Wizard (v3 NEW)
+
+業務開案不再「一個個 form 慢慢填」。Wizard 7 步驟引導,大量 AI 預填,業務只要 confirm。
+整合 AI #1 / #2 / #32 / #37 — 開案時間從 30 分鐘縮短到 5 分鐘。
+
+⭐ 為什麼是 Wizard?
+原本業務開案要打開 form,從上到下填 30+ 欄位:讀 RFQ PDF、查歷史、想 PM、設機密、套
+流程、決優先序;新人常漏項、欄位填錯。Wizard 拆 7 步,每步只專注 1 件事,AI 在背後自動補
+欄位、推薦選項,業務只要 confirm。
+
+7.1 七步驟概覽
+
+# 步驟                 內容                                  整合 AI
+
+                     v3.0 · 2026-05-01 · 第 6 頁 / 共 21 頁
+               Cortex 互動 Demo 操作手冊 v3.0 · OIBG-aligned
+
+# 步驟       內容                                  整合 AI
+1 客戶來信
+2 歷史參考     拖 RFQ PDF · AI 解析填表 · 右側顯示信心度       #1
+
+3 機密設定     AI 推薦 5 相似案 · 推薦 PM · 預估週期 · 交期合    #2 / #32 /
+4 PM/Team  理性燈號                                #37
+5 流程模板
+6 重要緊急     AI 預判機密欄位並預勾(amount / margin /      (rule-based)
+7 確認啟動     cost)
+
+           業務指派 DPM 主 PM · AI 推薦其他 3 種 PM      (#2 延伸)
+
+           套 8-stage QUOTE_STANDARD · AI 自動算   (template)
+           dependency deadline
+
+           priority_score 矩陣選擇 · AI 建議 score   (rule)
+
+           一頁預覽全設定 · 啟動後自動建 channel + tasks
+                                                                               —
+
+           + 通知 + Pin announcement
+
+7.2 各步驟詳解
+
+Step 1 客戶來信:
+    • 業務拖 RFQ PDF 進左側上傳區 · AI 0.8 秒解析
+    • 自動抓出客戶名、料號、數量、交期 4 個關鍵欄位
+    • 右側 AI 助手 panel 顯示信心度(整體 92%)+ 規格不清項目(電壓未填、RoHS 是否要求)
+    • 業務看一眼 confirm,或人工修改後送出
+
+Step 2 歷史參考:
+    • AI 推薦 5 個相似案(同客戶 / 同料號類)· 顯示歷史結果(WIN/LOSS)
+    • 每張歷史案卡帶相似度 % · 毛利 Tier · 廠區 · 完成週期 · 主 PM
+    • 右側 AI 觀察:推薦主 PM(基於誰處理過類似案)+ 推薦 workflow + 預估完成週期
+    • 交期合理性燈號:綠 / 黃 / 紅 — 客戶要求 vs 歷史平均週期
+
+Step 7 確認啟動:
+    • 一頁預覽:專案編號 · 客戶 · PM 三劍客(DPM/BPM/MPM/EPM)· Workflow · 機密旗
+         標 · 優先序
+    • 點啟動後系統自動執行 5 件事:
+    • ✅ 建 7 個 channels (announcement + general + qa-customer + engineering +
+         sourcing + factory + cost-review)
+
+           v3.0 · 2026-05-01 · 第 7 頁 / 共 21 頁
+                        Cortex 互動 Demo 操作手冊 v3.0 · OIBG-aligned
+
+    • ✅ 建 8 stages 任務(依 RACI 表自動指派 A/R)
+    • ✅ 通知所有相關人員(Webex 群組 + 站內 Badge + Email 三通道)
+    • ✅ #announcement Pin「專案啟動」公告 + 已讀回執
+    • ✅ 啟動 SLA 倒數 (Stage 1 SLA 4h)
+
+7.3 業務體感效益
+
+⏱ 30 分鐘 → 5 分鐘
+原本流程:讀 PDF 抓欄位 (10 min) + 填 form 30+ 欄位 (10 min) + 查歷史 (5 min) + 想 PM 設
+機密 (5 min) ≈ 30 分鐘 Wizard 流程:Step 1 拖檔 (30s) + AI 解析 (1s) + 後續每步看一眼
+confirm (各 30s) + 啟動 ≈ 5 分鐘
+
+    • 新人也不會漏項(7 步驟逐步引導)
+    • AI 預填降低操作門檻,降低 form 填錯率
+    • 專案 setup 全自動(不用手動建 channel / 通知 / 寫 announcement)
+
+八、⭐ AI 加速能力 10 項 (v3 · Phase 1 末上線)
+
+v3 變更:從 12 項精簡到 10 項(移除 #10 長料件預警、#14 三廠對比 AI 解讀)。對齊主管簡報
+v3 Slide 21。沿 RFQ 8-stage 加速 · Gemini Flash 預估 USD $150-250 / 月。
+
+⭐ 核心:#21 狀態 SUMMARY
+10 項中最重要的是 ⭐ #21 「狀態 SUMMARY」 — 跨 7 channel + form + tasks 自動摘要,
+三處顯示(#announcement Pin / 專案列表行下 / Watchlist hover)· 主管 30 秒掃完所有專
+案、業務不用爬 channel 翻訊息。
+
+8.1 Phase 1 必上 8 項(核心)
+
+#   功能                  Stage                業務體感
+                        全程 · 三處顯示            不爬 channel 也知道專案進度
+21 ⭐ 狀態 SUMMARY         Stage 1 收 RFQ        拖檔案進系統,form 自動填好 70%
+                        Stage 1 開案           開案立刻看到「過去類似 3 案」
+1   客戶 RFQ 自動解析         Stage 2 Q&A Collect  DPM 不用想要問什麼,AI 列好
+                        全程 · channel         對話中講「決定...」AI 自動 Pin
+2   歷史相似案 + 建議 PM       全程 · 進入 channel      @我 / Decision / Blocker 排最前
+                        全程 · SLA             SLA 接近時 @owner 自動催
+5   Q&A 問題自動草稿
+
+23  AI 自動寫決策紀錄
+
+24  未讀訊息智慧排序
+
+26  Bot 主動提醒
+
+                        v3.0 · 2026-05-01 · 第 8 頁 / 共 21 頁
+                              Cortex 互動 Demo 操作手冊 v3.0 · OIBG-aligned
+
+#   功能             Stage                       業務體感
+                   Stage 4-5
+29  任務自動拆解                                     PM 一句話「跑越南成本」→ AI 拆
+                                               任務
+
+8.2 加分 2 項(業務超有感)
+
+#   功能             Stage                       業務體感
+                   Stage 6 BOM Review
+32  交期合理性檢查        全程 · 機會偵測                   依 lead time + RACI 工時推算可行
+                                               schedule
+37  歷史案主動推薦
+                                               寫到某客戶/料件,AI 主動跳「3 年
+                                               前類似案」
+
+8.3 v3 移除說明(12 → 10)
+
+❌ #10 長料件預警
+試 產 轉 量 產 才 需 要 (MP 階 段 ),Phase 1 報 價 階 段 不 需 要 。 已 移 到 Phase 4 ( 伴 隨 PROD
+plugin)。
+
+❌ #14 三廠對比 AI 解讀
+廠區是客戶指定(非 AI 推薦),不需 AI 解讀。已移到未來 (待客戶開放廠區選擇權時再上)。
+
+8.4 ⭐ #21 狀態 SUMMARY 詳解
+
+三處顯示位置:
+    • #announcement Pin — 每天 09:00 自動 + Stage 切換時自動 + 手動「@bot
+         summary」 · Pinned 訊息(取代昨日)。
+    • 專案列表行下 — 每行專案下一行灰字摘要(cache 30 min)。
+    • 主管 Watchlist — hover 顯示完整摘要(priority_score≥6 自動訂閱)。
+
+摘要結構(三段式):
+    • 進度:當前 stage / 完成度 / 哪幾個 task 在跑
+    • 風險:Blocker / SLA 接近 / 客戶卡 Q&A
+    • 待辦(24h):接下來要做什麼 / 等誰確認
+
+   Sample Output (Apple AirPods QT-2026-0143)
+
+                   v3.0 · 2026-05-01 · 第 9 頁 / 共 21 頁
+                                  Cortex 互動 Demo 操作手冊 v3.0 · OIBG-aligned
+
+「Stage 5 並行 Collect 進行中 · MPM Cleansheet 80%、 DPM NRE 60% · T-024 紅燈卡
+
+R0.8 應力(已升級)」         進度:Stage 5 並行 · Cleansheet 80% / NRE 60% 風險:T-024
+
+R0.8 模具改費 +$38K · MPM 評估中 待辦:Tony cleansheet 完成 · Amy 確認 R0.8 走
+
+Gate 6
+
+8.5 沿 RFQ 8-stage 加速點分布
+
+AI 加速沿 RFQ flow 各 stage 提供加速:
+    • Stage 1 收 RFQ:#1 RFQ 自動解析 + #2 歷史相似案 (整合到 ⭐ Wizard)
+    • Stage 2 Q&A:#5 問題自動草稿
+    • Stage 4 BOM:#29 任務拆解
+    • Stage 5 並行:#29 持續拆解
+    • Stage 6 BOM Review:#32 交期合理性
+    • Stage 7 RFQ Review:#32 + 歷史毛利對比
+    • 全程同步:⭐ #21 狀態 SUMMARY · #23 決策紀錄 · #24 訊息排序 · #26 Bot 主動 · #37
+         歷史案推薦
+
+  成本估算
+Gemini Flash · USD $150-250 / 月 · 基於 100 個活躍專案/月、平均每案 50 次 AI 呼叫;主要
+為 SUMMARY(高頻)+ 解析 / 拆解 / Wizard 預填 (中頻)。
+
+九、7-Channel 戰情會議室 (Slack-like)
+
+v0.4 重大特色 — 從「單一聊天串」改為「多 channel 模型」。QUOTE plugin 預設自動建 7
+個 channel:
+
+Channel        Type     用途
+
+#announcement                           公告(限業務發,所有 member 必看 + 已讀回執)· Stage
+               announcement
+
+                                        Gate 提醒自動進此 channel
+
+#general       general  一般討論(全員都可發)
+
+#qa-customer group      客戶 Q&A(BPM 主導,對應 stage 2-3)
+
+#engineering group      EE/ME/RD 討論(DPM team 主場)
+
+#sourcing      group    採購 / 供應商
+
+#factory       group    工廠(MPM team + EPM + 廠採購)
+
+                        v3.0 · 2026-05-01 · 第 10 頁 / 共 21 頁
+Channel      Type                                     Cortex 互動 Demo 操作手冊 v3.0 · OIBG-aligned
+
+#cost-review group           用途
+                             BOM cost review + RFQ cost review (對應 stage 6-7)
+DM by need   dm              1 對 1 私聊 · host 邀加入
+
+✦ 解決原痛點
+DECISION 訊息不會在單一 stream 迷路 · 跨組討論互相不干擾 · 機密私聊有專屬空間 · AI Bot
+在每個 channel 都能 @ · 跨 channel RAG 召回(@bot 工程那邊昨天決定的廠區是?→ 自動撈
+#engineering channel)。
+
+十、使用者角色設定
+
+Demo 預設身份為 Amy 王曉明 · project.sales (HOST),可隨時透過「DEMO 視角」切換 6 種
+角色:
+
+角色               圖                                         看到的內容
+                       進入方式
+
+                 示
+
+HOST                業務 + PM 自動                             全部明文 · 邀請/踢人/結案/Stage Gate 確認/改
+                                                           機密
+
+PARTICIPANT         project_members 機密欄位走
+                    自動 + host 邀請 displayStrategy(TIER/ALIAS/MASKED/RANGE)
+
+OBSERVER            host 邀請(主管/觀
+                                                唯讀 · 看完整 form 機密明文
+
+                    察者)
+
+CHAT_GUEST          host 邀請(機密走                            只看 chat,看不到 form/機密欄位 → 403
+                    雙簽)
+
+                                         super_user self-  看完整 + 可選寫(admin 控制)· BU/HQ 經管
+SUPER_PARTICIPANT ⭐
+
+                                         join
+
+OUTSIDER            (非成員)                                  機密案直接 403;非機密案看不到
+
+                    v3.0 · 2026-05-01 · 第 11 頁 / 共 21 頁
+                                                                                     Cortex 互動 Demo 操作手冊 v3.0 · OIBG-aligned
+
+十一、操作流程 · 十一個典型情境
+
+下列 11 個 Story 涵蓋 demo 的所有重要功能,對應 PPT 中的截圖與 spec 章節。建議依序操作,
+可在 45 至 60 分鐘內完整體驗。
+
+Story 1 · PM 早晨開機:看跨專案儀表板抓重點
+
+對應 PPT slide 6 · spec §16.3 主畫面 7 widgets
+
+操作步驟:
+    1. 從 sidebar 點「跨專案儀表板」。
+    2. 觀察 7 個 widget:SLA 燈號統計 / Watchlist / 我的 Task / 待 Review / Delay 熱點 / 本
+         期 KPI / 成員負載熱圖。
+    3. 最下方 AI 預測警示 3 階段(規則式 / RAG 類似案 / ML 模型)分 Phase 上。
+
+Story 2 · 進入 Apple 案戰情會議室
+
+對應 PPT slide 9 · spec §13 + OIBG flow
+
+操作步驟:
+    1. 「我的專案」→ 點「Apple AirPods 連接器 BOM 報價」(QT-2026-0143)。
+    2. 進戰情會議室,看到 4 個分頁:聊天 / 任務看板 / 報價 Form / 成員。
+    3. 觀察頂部 8-stage RFQ ribbon — Stage 5 並行 Collect 高亮(active),Stage 1, 6, 7, 8
+         標 ⚖ GATE。
+    4. 黃色 banner:「Stage 5 並行 Collect 進行中 · 完成後將自動進入 Stage 6 Gate · 屆時
+         會推訊息到 #announcement 並等待業務(Amy)確認」。
+
+Story 3 · 7-Channel 戰情會議室 ★
+
+對應 PPT slide 9 + 10 · spec §13 多 channel 模型
+
+操作步驟:
+    1. 在聊天分頁,左欄看到 7 channel + DM 分組顯示(公告 / 頻道 / 私訊)。
+    2. 依序點 #announcement / #general / #engineering / #qa-customer 等 channel,看
+         訊息流不同。
+    3. #announcement channel 黃色提示「限業務發,所有 member 必看 + 已讀回執」。
+    4. 中欄訊息流可看到 RACI 對話、AI Bot 建議卡、Stage 5 阻塞警示。
+    5. 右欄是「任務 + 成員」,顯示 Stage 5 開放中的 5 個 task(含 RACI A:/R: 標記)+ PM
+         Team 分組成員列表。
+    6. 聊天分頁右上角 toggle 可切「 對話」⇄「 事件流」。事件流是跨 channel audit
+         視角,適合主管掃描。
+
+                                                        v3.0 · 2026-05-01 · 第 12 頁 / 共 21 頁
+                                                                                     Cortex 互動 Demo 操作手冊 v3.0 · OIBG-aligned
+
+✦ 為什麼 7 個 channel?
+對應 OIBG flow 的「業務本來就用 DPM team / MPM team / 採購 / 工廠 分組」習慣 — 把
+這個分組在系統中具體呈現,訊息不會在單一 stream 迷路。
+
+Story 4 · Stage Gate 業務確認制 ★
+
+對應 PPT slide 3 · spec Stage Gate
+
+情境:Stage 6 (BOM Cost Review) 內所有 task 完成,系統發訊息到 #announcement 等業務
+確認進入 Stage 7。
+Demo 中看到的 Stage Gate 機制:
+
+    • Stage 5 並行 Collect 進行中時,黃色 banner 提示「等業務確認進入下一 stage」。
+    • 某 stage 所有 task 完成 → stage.status = READY_FOR_GATE。
+    • announcement channel 推訊息「Stage X 全部完成,等業務確認」。
+    • 業務(Amy)或業務助理(Joy)點「進入下一 stage」→ stage.status = DONE,下一
+
+         stage = ACTIVE。
+    • 進入下一 stage 的 on_enter hook 觸發(自動建任務 / 通知)。
+
+⚖ 為什麼業務 Gate?
+PM 對各自任務負責(任務完成 = PM 做完該做的)。整個 stage 由業務確認(stage 1, 6, 7, 8 都
+是業務 gate)— 對應 OIBG flow 的「集合會議」概念,業務開會確認可以進下一步。業務不在
+線時業務助理可代行。
+
+Story 5 · Multi-PM Team 視覺化 ★
+
+對應 PPT slide 16 · spec Multi-PM 模型
+
+操作步驟:
+    1. 進 Apple 案戰情會議室 → 點「成員」分頁。
+    2. 看到 12 人成員依 PM Team 分組顯示:
+    • 業務 (HOST) 2 人:Amy 王曉明(主)+ 業務助理 Joy。
+    • DPM Team — Design 4 人:Mike Chen (DPM 主) + John Wu (EE) + Lin 林雅玲 (ME)
+         + David RD。EE/ME/RD 都標 invited_by MC。
+    • MPM Team — Manufacturing 3 人:Tony 何宗翰 (MPM 主) + Chen SMT + EPM
+         Wang。
+    • BPM Team — Business 1 人:Lisa BPM。
+    • 採購跨 team:台北採購 Iris + 工廠採購 Ken。
+
+                                                        v3.0 · 2026-05-01 · 第 13 頁 / 共 21 頁
+                                                                                     Cortex 互動 Demo 操作手冊 v3.0 · OIBG-aligned
+
+    3. 最下方教學區塊解釋 Multi-PM 模型(對應 OIBG RFQ flow)。
+
+Story 6 · RACI 任務矩陣 ★
+
+對應 PPT slide 12, 25 · RACI
+
+操作步驟:
+    1. 進 Apple 案戰情會議室 → 點「任務看板」分頁。
+    2. 觀察每張 task 卡:
+    • A: pill (紅底) — Accountable 背鍋的人。
+    • R: pill (藍底) — Responsible 實作的人。
+    • ⏰ Dependency-based deadline (例: QA+1d / EE BOM+5d / Cleansheet+1d)。
+    • ⊃ depends_on: T-018 — 上游依賴 task。
+    3. 以 T-024「結構應力分析報告」為例:A:DPM Mike + R:EE John + 依賴 T-018 + 已逾
+         期 2.3h + Stage 5 阻塞。
+    4. 右上角 toggle 切「 Kanban」⇄「 EPIC 樹」看 SLA 三層 roll-up。
+
+Story 7 · Form 資料收集 + AI Bot 4 類能力
+
+對應 PPT slide 14 + 15 · spec §11 Form 引擎 + §12 AI Bot
+
+操作步驟:
+    1. Apple 案 → 「 報價 Form」分頁。
+    2. 版本鏈 v1 → v2 → v3 ★ → v4 → FINAL。
+    3. 6 sections 進度導航 (整體 34/50 = 68%)。
+    4. 關鍵看點:客戶資料 section 的「客戶代號」欄位顯示 ERP 快照 tag(spec §6.3)+ 拉值
+         時間 + refresh 按鈕。
+
+AI Bot 4 類能力分級(spec §12.2):
+    • 類別 1 · 問答檢索 — 預設開放,RAG + tool call。
+    • 類別 2 · 執行工具(read-only) — 沿用 user 既有權限。
+    • 類別 3 · 產生內容 — 結果是 draft,user 必須 confirm 才落地。
+    • 類別 4 · 執行動作(write) — 預設禁,只有白名單 action 且 user 二次確認。
+
+Story 8 · 機密策略示範 (6 角色切換)
+
+對應 PPT slide 17 ~ 20, 26 · spec §4 + §13.2
+
+操作步驟:
+    1. 停在 Apple 案任一分頁。
+
+                                                        v3.0 · 2026-05-01 · 第 14 頁 / 共 21 頁
+                                                                               Cortex 互動 Demo 操作手冊 v3.0 · OIBG-aligned
+
+2. 點右上角「DEMO 視角」按鈕,展開 6 種角色 dropdown。
+3. 依序切換,觀察畫面變化。
+
+角色        客戶名稱            報價金額      毛利率                        結果
+                                                               完整可見
+HOST      Apple Inc.      $182,500  16.2%                      displayStrategy
+                                                               看明文 · 聊天只讀
+PARTICIPANT A001 (ALIAS)  Tier-A (TIER) ▒▒▒ (MASKED)           form 顯示 403 黃色
+                                                               警告頁
+OBSERVER  Apple Inc.      $182,500  16.2%                      看明文 · 預設只讀
+                                                               整頁變 403
+CHAT_GUEST ——             ——        ——
+
+SUPER     Apple Inc.      $182,500  16.2%
+OUTSIDER  ——              ——        ——
+
+Story 9 · KB 雙層架構 (Live + 沉澱)
+
+對應 PPT slide 7 + 8 · spec §7 KB 雙層 + §8 結案 Fork
+
+操作步驟:
+    1. 從 sidebar 點「KB / 知識庫」。
+    2. 「 Live KB」tab:5 個進行中專案的 chunk(chat / form / task / attach 4 種類型)。
+    3. 「 沉澱 KB」tab:4 個結案案的不可逆快照,含「已 scrub」標記。
+    4. 結案案的 Fork:回到 CLOSED 案戰情會議室,看綠色「 Fork to 沉澱 KB」按鈕。
+
+Story 10 · Admin 後台:表單範本 + 任務模板
+
+對應 PPT slide 21 + 22 · spec §3 + §11 + §14.3 + §5.1
+
+操作 A · 表單範本(sidebar → 管理 → 表單範本)
+    1. 頂部 Workflow Template 三層 scope (SYSTEM/BU/USER) toggle — spec §5.1。
+    2. 4 個 project type tab,QUOTE 預設打開。
+    3. 3 欄式 designer:左 6 sections / 中 欄位列表 / 右 屬性面板含機密策略矩陣。
+
+操作 B · 任務模板(sidebar → 管理 → 任務模板)
+    1. 同樣有三層 scope toggle。
+    2. 6 個 EPIC × 24 SUBTASK · epic-inquiry 標 CRITICAL 紅邊條。
+
+Story 11 · Admin 後台:通知規則 + 連線管理
+
+對應 PPT slide 23 + 24 · spec §14.9 + §15
+
+                          v3.0 · 2026-05-01 · 第 15 頁 / 共 21 頁
+                                                                                     Cortex 互動 Demo 操作手冊 v3.0 · OIBG-aligned
+
+操作 A · 通知規則
+    1. sidebar → 管理 → 通知規則。
+    2. Scope toggle (SYSTEM Phase 1 / BU Phase 2 / PROJECT_TYPE Phase 2)。
+    3. 5 個通道 widget · 8 個規則表 · 2 條 escalation chain。
+
+操作 B · 連線管理
+    1. sidebar → 管理 → 連線管理(ERP/SQL)。
+    2. 6 個連線 + 5 source_type + Field Mapping UI。
+
+                                                        v3.0 · 2026-05-01 · 第 16 頁 / 共 21 頁
+                                      Cortex 互動 Demo 操作手冊 v3.0 · OIBG-aligned
+
+十二、功能提要表
+
+下表整理 demo 包含的所有功能,對應到 v0.4 規格書 + OIBG flow:
+
+功能類別        功能項                       Demo 位置            對應規格
+
+主入口         我的專案 (8 案 5 lifecycle) sidebar → 我的專案        §3.2 專案 Lifecycle
+
+主入口         我的任務 (跨專案)                sidebar → 我的任務     §5 任務 SLA
+
+主入口         跨專案儀表板 7 widgets          sidebar → 跨專案儀表    §16.3
+                                      板
+
+KB          Live KB / 沉澱 KB toggle sidebar → KB          §7, §8
+
+OIBG flow   8-stage RFQ ribbon        戰情會議室頂端            OIBG flow
+
+OIBG flow   Stage Gate banner         聊天分頁(stage active  OIBG flow Stage
+                                      時)                 Gate
+
+OIBG flow   業務 / 業務助理代理               成員分頁 HOST 區        Multi-PM HOST 設計
+
+Multi-PM ★  DPM/BPM/MPM/EPM           成員分頁               Multi-PM 模型
+            Team 分組
+
+Multi-PM ★  invited_by_pm 自然涌現 成員分頁顯示                    Multi-PM 模型
+
+7-channel   announcement channel      聊天分頁 →             §13 多 channel
+                                      #announcement
+
+7-channel   general / qa-customer     聊天分頁 channel 列表 §13 多 channel
+
+7-channel   engineering / sourcing /  聊天分頁 channel 列表 §13 多 channel
+            factory
+
+7-channel   cost-review channel       聊天分頁 channel 列表 §13 多 channel
+
+7-channel   DM 私訊                     聊天分頁 DM 區          §13.2 角色
+
+7-channel   對話 ⇄ 事件流 toggle           聊天分頁右上 toggle      §13 audit-friendly
+
+RACI ★      A:背鍋 + R:實作 雙 pill        任務看板每張卡            RACI 矩陣
+
+RACI ★      Dependency-based          任務看板 ⏰ chip        Dependency 設計
+            deadline
+
+RACI ★      depends_on 顯示             任務看板 ⊃ 標記          Dependency 設計
+
+任務          Kanban ⇄ EPIC 樹 toggle 任務看板右上 toggle         §14.4-14.5 三層 roll-
+                                                         up
+
+                   v3.0 · 2026-05-01 · 第 17 頁 / 共 21 頁
+                                  Cortex 互動 Demo 操作手冊 v3.0 · OIBG-aligned
+
+功能類別        功能項                   Demo 位置                       對應規格
+任務                                                              §5.2, §14.6
+            任務細節 + 回報             點任一 task
+Form                                                            §11.3
+Form        v1→v2→v3★→v4→FINAL
+Form                                                 報價 Form 頂  §6.3
+機密策略                                                            §12.2
+機密策略        版本鏈                                                 §4, §13.2, §17.2
+                                                                §4.2
+機密策略        ERP 快照 tag            客戶資料 section
+                                                                §4, §13.4
+Admin       AI 協助 + 4 類能力標示       議價策略 section
+Admin                                                           §3, §11
+Admin       6 角色切換 demo           右上 DEMO 視角                    §14.3
+Admin                                                           §5.1
+Admin       displayStrategy 矩陣    表單範本 → 機密策略                   §14.9
+Admin                                                           §14.9.2
+Admin       403 / CHAT_GUEST 403  OUTSIDER /                    §15
+                                  CHAT_GUEST
+                                                                §15.4
+            表單範本管理                sidebar → 表單範本
+
+            任務模板管理                sidebar → 任務模板
+
+            Workflow 三層 scope     兩個 admin 頁頂部
+
+            通知規則 (8 規則 + 5 通道) sidebar → 通知規則
+
+            Escalation Chain 視覺化  通知規則頁
+
+            連線管理 (6 連線 + 5        sidebar → 連線管理
+            source_type)
+
+            Field Mapping UI      連線管理頁底
+
+十三、互動操作參考
+
+11.1 鍵盤快捷鍵
+
+鍵      動作
+M      收合 / 展開 sidebar
+R      開 / 關角色切換 dropdown
+Esc    關閉所有 modal
+Enter  在輸入框中送出訊息
+
+11.2 視圖 Toggle
+
+                        v3.0 · 2026-05-01 · 第 18 頁 / 共 21 頁
+                             Cortex 互動 Demo 操作手冊 v3.0 · OIBG-aligned
+
+位置                           Toggle
+戰情會議室 → 聊天分頁                   對話 ⇄ 事件流
+戰情會議室 → 任務看板分頁                 Kanban ⇄ EPIC 樹
+KB / 知識庫                       Live KB ⇄ 沉澱 KB
+表單範本 / 任務模板 admin 頁            SYSTEM ⇄ BU ⇄ USER
+
+11.3 角色切換快速指引                切換到
+                             HOST
+想看                           PARTICIPANT
+主持人完整視角                      OBSERVER
+一般成員看到的內容(displayStrategy)   CHAT_GUEST
+主管彙整視角(看明文)                  SUPER_PARTICIPANT
+外部臨時參與者                      OUTSIDER
+BU/HQ 經管 self-join
+沒權限的人
+
+十四、Demo 限制與 Phase 規劃
+
+14.1 不持久化
+所有變更只存在 JavaScript 記憶體中,重新整理或關閉瀏覽器後消失。
+
+14.2 Mock 資料
+demo 用 mock data,真實系統由後端提供:
+
+    • 8 個專案 / 14 個任務 / 7 個 channel / KPI 數字皆為 demo 用。
+    • Apple 案完整 Multi-PM Team(12 成員)/ 8-stage RFQ flow / 14 RACI 任務。
+
+14.3 Phase 規劃
+
+Phase    時程                  範圍
+Phase 1
+         2-4 週 + AI 1.5-2 週  QUOTE plugin 上線 · 6 角色機密策略 · Multi-PM
+         ≈6週                 (sub_role) · RACI(A+R) · Dependency-based
+                             deadlines · Stage Gate · 7-channel 戰情會議
+                             室 · Inbound 整合 · 規則式 AI 警示 · ⭐ AI 加速 12 項(狀態
+                             SUMMARY / RFQ 解析 / Q&A 草稿 / 任務拆解 + 4 加分)
+
+               v3.0 · 2026-05-01 · 第 19 頁 / 共 21 頁
+                    Cortex 互動 Demo 操作手冊 v3.0 · OIBG-aligned
+
+Phase    時程         範圍
+
+Phase 2  P1 後 ~ 6m  super_user 機制 · AI Bot 整合 + 階段性 summary · 結案
+                    fork + KB sediment · 域內通訊 · AI 戰情
+Phase 3  ~ 12m+     embed · BU/PROJECT_TYPE notification · Excel
+Phase 4  持續迭代       Import/Export · RAG 類似案推論
+
+                    What-if 模擬 / 贏單率預測 · 多級簽核 + reviewer · ML 預
+                    測警示 · Browser Push notification
+
+                    其他 Plugin (TRAINING / IT) · 客戶報價系統 API 對接 · 教
+                    育訓練雙向整合
+
+十五、意見回饋指引
+看完 demo 後,請就以下面向反饋:
+
+15.1 OIBG 流程對齊
+    • 8-stage RFQ 流程是否覆蓋你 BU 的實際情況?
+    • Multi-PM 模型(DPM/BPM/MPM/EPM)是否符合你的分工?
+    • RACI 矩陣(A 背鍋 + R 實作)是否合理?
+    • Stage Gate 業務確認制是否合適?業務不在線的代理機制(業務助理)是否夠?
+    • Dependency-based deadline 設計是否解決你的 RFQ Schedule 痛點?
+
+15.2 7-Channel 戰情會議室
+    • 7 個預設 channel 分組是否合理?
+    • 還有哪些 channel 場景沒覆蓋?
+    • 已讀回執機制(announcement)是否需要?
+
+15.3 介面與互動
+    • 哪些畫面 / 操作流程不夠直覺?
+    • Toggle 切換是否容易發現使用?
+
+15.4 機密與權限
+    • 6 種角色的設定夠不夠?
+    • CHAT_GUEST 機密案雙簽流程是否合適?
+
+15.5 整合
+
+                    v3.0 · 2026-05-01 · 第 20 頁 / 共 21 頁
+                                                                                     Cortex 互動 Demo 操作手冊 v3.0 · OIBG-aligned
+
+    • Inbound 5 source_type 夠不夠?
+    • AI 協助的邊界:Bot 4 類能力分級是否合理?
+15.6 KB 雙層
+    • 結案 Fork 不可逆是否會造成困擾?
+    • scrub 規則是否合適?
+15.7 ⭐ AI 加速 12 項
+    • ⭐ #3 狀態 SUMMARY 三處顯示位置(#announcement Pin / 列表行下 / Watchlist
+
+         hover)夠不夠?還想看到哪裡?
+    • 摘要結構(進度 / 風險 / 待辦)是否符合你 30 秒看完的需求?
+    • 12 項加速中,哪幾項對你的 BU 最有幫助、哪幾項可砍?
+    • Gemini Flash USD $150-250/月 預算可接受嗎?
+  回饋方式
+請將回饋寄回 Cortex 規劃小組(具體聯絡人請洽 BU 內部)。我們將根據回饋調整 v0.5 方向。
+
+                                                       — 文件結束 —
+
+                              Cortex 規劃小組 · v3.0 · 2026-05-01 · 對齊 v0.4 規格書 + OIBG flow
+
+                                                        v3.0 · 2026-05-01 · 第 21 頁 / 共 21 頁
+

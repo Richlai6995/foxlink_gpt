@@ -87,7 +87,180 @@ server/projects-platform/
 
 ---
 
-## Phase 1 開發切片(~6 週 / 12 sprints)
+## Phase 1 開發切片
+
+> **2026-05-12 重大調整** — 對齊新增的三份規格文件:
+> - `docs/Cortex_通用專案管理平台_UI模擬與操作流程.pdf`(29 slide)
+> - `docs/Cortex_Demo操作手冊.pdf`(21 頁)
+> - `docs/Cortex_互動Demo.html`(11322 行,**設計風格 source of truth**)
+>
+> Sprint 1+2 後端 schema / service / routes 全部保留(channel + message + task DB schema 已 ready);
+> **Sprint 1+2 React UI 改走新 Ocean Depth 亮色 shell**(navy topbar + slide-in sidebar + main 容器),
+> 走 Sprint A-F 新節奏(原 Sprint 3-12 對應到 Sprint C-F)。
+
+### ✅ Sprint A — Demo Shell + 我的專案 + 戰情會議室 stub(2026-05-12 完成)
+
+**目標**:對齊 docs/Cortex_互動Demo.html 風格,進 /projects-platform 整個畫面切換成獨立 shell
+
+**已完成**:
+- ✅ Tailwind config 加 `cortex.*` brand colors(navy / cyan / teal / ocean / amber / red / green + ink/text/muted/line/bg)
+- ✅ `tokens.ts`:LIFECYCLE_COLORS / MESSAGE_STYLE / DEMO_ROLES 設計 token
+- ✅ Shell:`PlatformShell` + `Topbar`(navy + brand + breadcrumb + 通知 + avatar)+ `Sidebar`(slide-in 主入口 / Project Types / 管理 三段)+ `RoleSwitcher`(6 demo 視角 dropdown)
+- ✅ `PlatformContext`:sidebar 開關 / demoRole / crumbs + 鍵盤 M 快捷
+- ✅ `Projects/ProjectsList`:卡片 grid 4 columns,filter chips(全部/進行中/暫停/已結案/機密案)+ 搜尋
+- ✅ `Projects/ProjectCard`:對齊 HTML demo .proj-card(ID/type/機密 → 標題 → meta → conditional banner → SLA 燈/progress bar/avatars)
+- ✅ `WarRoom`:8-stage ribbon + 4 分頁(聊天/任務/Form/成員)各先 stub
+- ✅ `WarRoom/StageRibbon`:5 種 stage 狀態(PENDING/ACTIVE/READY_FOR_GATE/DONE/SKIPPED)+ ⚖ Gate 標記
+- ✅ Internal Admin Overview + System Health 重寫為 light theme(對齊 shell)
+- ✅ Routes:`/projects-platform` index = ProjectsList,`projects/:id` = WarRoom,`internal-admin/*` admin only
+- ✅ TypeScript compile clean(我加的檔案 0 errors)
+- ✅ 砍掉 Sprint 1+2 的 5 個深色 React UI 檔(HomeTabs/ProjectsList/NewProjectDialog/ProjectDetail/WarRoom)
+
+**Deliverable**:整個 Cortex Projects Platform UI 切換到 Ocean Depth 亮色;進 `/projects-platform` 看到獨立 shell ✓
+
+---
+
+### Sprint B — ⭐ 開案 Wizard 7 步驟(1 週)
+
+**目標**:對齊 PPT slide 5-8 + Demo 手冊 §7
+
+**任務**:
+- modal Wizard shell(7 步驟 progress + 上/下一步 + 取消)
+- Step 1:客戶來信 — 拖檔上傳 + AI 解析 panel(stub,顯示 mock 結果)
+- Step 2:歷史參考 — 5 案推薦 + AI 推薦 PM + 交期合理性燈(stub)
+- Step 3:機密設定 — 欄位勾選 + AI 預判
+- Step 4:PM/Team — DPM/BPM/MPM/EPM 指派
+- Step 5:流程模板 — 套 QUOTE_STANDARD 8-stage + AI 算 dependency
+- Step 6:重要緊急 — priority_score 矩陣
+- Step 7:確認啟動 — 一頁預覽 + 啟動 → 自動 5 件事(建 channels / stages / 通知 / Pin / SLA)
+- AI 整合 stub(Sprint F 接 real AI)
+- 觸發點:ProjectsList「+ 新增專案」按鈕
+
+**Deliverable**:點建案 → Wizard 跑得起來 → 啟動後產生 project + 7 channels + 8 stages
+
+---
+
+### Sprint C — 戰情會議室填肉(2 週)
+
+**目標**:聊天 / 任務 / Form / 成員 4 分頁完整功能
+
+**聊天分頁**(對齊 Sprint 2 後端):
+- 7 channel + DM 列表(sidebar 左側)
+- 訊息流 + 5 色語言(NORMAL/PROGRESS/BLOCKER/DECISION/AI_INSIGHT)
+- BLOCKER/DECISION/AI_INSIGHT 自動同步 #announcement 提示
+- Pin / Unpin / 刪除 / Emergency Purge
+- 對話 ⇄ 事件流 toggle(audit-friendly view)
+- @bot summary 觸發(stub)
+
+**任務分頁**:
+- migration 007:project_tasks routes(Sprint 1 已 schema,補 service + route)
+- Kanban / EPIC 樹 toggle
+- RACI A/R pill(紅/藍)
+- Dependency-based deadline chip(⏰ QA+1d / EE BOM+3d)
+- 點 task 開細節 modal
+
+**Form 分頁**:
+- migration 008:`qp_form_templates` + `qp_form_template_fields` + `qp_form_instances` + `qp_form_field_values`
+- 版本鏈 v1→v2→v3★→v4→FINAL
+- 6 sections 進度導航
+- 機密欄位 lock icon
+- ERP 快照 tag(stub,Sprint E 接)
+
+**成員分頁**:
+- Multi-PM Team 分組(業務 HOST / DPM Team / MPM Team / BPM Team / EPM)
+- `invited_by_pm_user_id` 自然涌現
+- 邀請 / 踢人 / 改 role(host only)
+
+**Deliverable**:戰情會議室 4 分頁可實際操作,demo Story 2-7 跑得起來
+
+---
+
+### Sprint D — 跨專案儀表板 + ⭐ Status SUMMARY(1 週)
+
+**目標**:對齊 PPT slide 13-14
+
+- `routes/dashboard.js` + `services/dashboardService.js`
+- 7 widget grid:SLA 燈號 / Watchlist / 我的 Task / 待 Review / Delay 熱點 / KPI / 成員負載
+- ⭐ Status SUMMARY 三處顯示:#announcement Pin / 列表行下 / Watchlist hover
+- `ai/statusSummary.js`(Gemini Flash)+ `workers/statusSummaryWorker.js`(每天 09:00 + Stage 切換觸發)
+- 主管登入立刻看到燈號
+
+**Deliverable**:主管視角 30 秒掃完所有專案 ✓
+
+---
+
+### Sprint E — Admin 後台 + 機密 + Inbound(2 週)
+
+**目標**:對齊 demo Story 10, 11 + 機密 4 策略
+
+**Admin 後台**:
+- 表單範本(3-pane designer:sections / fields / 屬性面板 + 機密策略矩陣)
+- 任務模板(EPIC × SUBTASK)
+- 通知規則(5 通道 + 8 規則 + 2 escalation chain)
+- 連線管理(ERP/SQL + Field Mapping UI)
+- Workflow Template 三層 scope(SYSTEM/BU/USER)
+
+**機密保護**:
+- `confidentialityMiddleware`(集中)+ 4 顯示策略 TIER/ALIAS/MASK/RANGE
+- AES-256-GCM 加密(沿用 Cortex KMS)
+- field_grants 個別授權
+- 6 角色切換 demo 真實接 displayStrategy
+
+**Inbound**:
+- `qp_data_connections` + `qp_data_source_definitions` + `qp_form_field_data_bindings`
+- `inboundResolver.js`:custom_sql / custom_plsql
+- 視覺化 Field Mapping UI(拖拉箭頭)
+- snapshot 機制
+
+**Deliverable**:admin 完整 + 機密 demo 6 角色切換可看到不同畫面
+
+---
+
+### Sprint F — AI 加速 10 項 + KB 雙層(2 週)
+
+**目標**:對齊 PPT slide 21 + Demo 手冊 §8
+
+**AI 10 項**(全走 Gemini Flash · LLM queue rate limit · USD $150-250/月預算):
+- ⭐ #21 Status SUMMARY(Sprint D 已上,此處補三處顯示完整)
+- #1 RFQ 自動解析(整合 Wizard Step 1)
+- #2 歷史相似案推薦(整合 Wizard Step 2)
+- #5 Q&A 問題自動草稿
+- #23 AI 決策紀錄自動 Pin
+- #24 訊息智慧排序
+- #26 Bot 主動提醒(SLA 接近 @owner)
+- #29 任務自動拆解(一句話 → 子任務)
+- #32 交期合理性燈
+- #37 歷史案主動推薦
+
+**KB 雙層**:
+- Live KB(per-project)+ Sediment KB(跨專案)
+- 結案 Fork:AI 摘要 + 脫敏 + 不可逆
+- RAG 查詢
+
+**Deliverable**:demo Story 7 + 9 跑得完整;Phase 1 ready → Pilot
+
+---
+
+## 原 Sprint 1-12 對應到新 Sprint A-F
+
+| 原 Sprint | 新 Sprint | 備註 |
+|-----------|-----------|------|
+| Sprint 1 (Schema + CRUD) | ✅ 後端保留 / UI 砍 → Sprint A 重寫 | DB 不動 |
+| Sprint 2 (Multi-Channel) | ✅ 後端保留 / UI 砍 → Sprint C 聊天分頁接 | 後端 messages API 已 ready |
+| Sprint 3 (機密欄位) | Sprint E | |
+| Sprint 4 (Form GUI) | Sprint C / E | C 做使用,E 做 admin builder |
+| Sprint 5 (Inbound) | Sprint E | |
+| Sprint 6 (任務 + Dependency) | Sprint C | |
+| Sprint 7 (Lifecycle + Notification) | Sprint E + D | lifecycle 已在後端,notification 規則 admin 在 E |
+| Sprint 8 (跨專案儀表板) | Sprint D | |
+| Sprint 9 (Wizard + Status SUMMARY) | Sprint B + D | Wizard 拆出來獨立 sprint |
+| Sprint 10 (AI 其他 6 項) | Sprint F | |
+| Sprint 11 (角色身份 + admin) | Sprint E | |
+| Sprint 12 (Smoke + Pilot) | Sprint F 末 | |
+
+---
+
+## Phase 1 開發切片(舊版 ~6 週 / 12 sprints,2026-05-12 廢止)
 
 依優先序排序,每個 sprint 約 0.5 週。Cortex 既有 user 完全不受影響(feature flag = false 預設,Pilot 才開)。
 
