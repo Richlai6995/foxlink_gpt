@@ -21,6 +21,9 @@ import { api, type ProjectDetail } from '../api'
 import { useCrumbs } from '../Shell/PlatformContext'
 import { LIFECYCLE_COLORS } from '../tokens'
 import StageRibbon from './StageRibbon'
+import ChatTab from './ChatTab'
+import TasksTab from './TasksTab'
+import MembersTab from './MembersTab'
 
 type Tab = 'chat' | 'tasks' | 'form' | 'members'
 
@@ -129,69 +132,26 @@ export default function WarRoom() {
         })}
       </div>
 
-      {/* Tab content — Sprint A stub */}
+      {/* Tab content */}
       <div className="min-h-[480px]">
-        {tab === 'chat'    && <ChatStub project={project} />}
-        {tab === 'tasks'   && <TasksStub project={project} />}
-        {tab === 'form'    && <FormStub project={project} />}
-        {tab === 'members' && <MembersStub project={project} />}
+        {tab === 'chat'    && <ChatTab    project={project} />}
+        {tab === 'tasks'   && <TasksTab   project={project} />}
+        {tab === 'form'    && <FormStub   project={project} />}
+        {tab === 'members' && <MembersTab project={project} />}
       </div>
     </div>
   )
 }
 
-// ─── Stubs ─────────────────────────────────────────────────────────
-function ChatStub({ project }: { project: ProjectDetail }) {
-  return (
-    <div className="grid grid-cols-[200px_1fr] divide-x divide-cortex-line h-[480px]">
-      <aside className="p-3 overflow-y-auto bg-cortex-line-2/30">
-        <div className="text-[10px] font-bold text-cortex-muted uppercase tracking-widest mb-2">
-          頻道 ({project.channels.length})
-        </div>
-        {project.channels.map((c) => (
-          <div
-            key={c.id}
-            className="px-2 py-1.5 text-[13px] text-cortex-text rounded hover:bg-white cursor-pointer flex items-center gap-1.5"
-          >
-            <span className="text-cortex-muted">#</span>
-            <span className="truncate">{c.name}</span>
-          </div>
-        ))}
-      </aside>
-      <div className="p-6 text-center text-cortex-muted">
-        <MessageSquare size={28} className="mx-auto opacity-30 mb-3" />
-        <p className="text-sm">聊天 / 訊息流 — Sprint C 填肉</p>
-        <p className="text-xs mt-2 text-cortex-muted/70">
-          後端 API 已 ready(Sprint 2):POST /projects/:id/channels/:cid/messages
-        </p>
-      </div>
-    </div>
-  )
-}
-
-function TasksStub({ project }: { project: ProjectDetail }) {
-  return (
-    <div className="p-6">
-      <div className="text-center text-cortex-muted py-12">
-        <Kanban size={28} className="mx-auto opacity-30 mb-3" />
-        <p className="text-sm">任務看板 — Kanban + RACI + Dependency Gantt — Sprint C</p>
-        <p className="text-xs mt-2 text-cortex-muted/70">
-          DB schema 已 ready:project_tasks(含 accountable_role / primary_owner_user_id / depends_on_task_id / relative_deadline_days)
-        </p>
-        <p className="text-xs mt-1 text-cortex-muted/70">Stages: {project.stages.length} · Channels: {project.channels.length}</p>
-      </div>
-    </div>
-  )
-}
-
+// ─── Form stub(Sprint E 接 qp_form_*)──────────────────────────────
 function FormStub({ project }: { project: ProjectDetail }) {
   return (
     <div className="p-6">
       <div className="text-center text-cortex-muted py-12">
         <FileText size={28} className="mx-auto opacity-30 mb-3" />
-        <p className="text-sm">報價 Form — 版本鏈 + 機密欄位 — Sprint C</p>
+        <p className="text-sm">報價 Form — 版本鏈 + 機密欄位 — Sprint E</p>
         <p className="text-xs mt-2 text-cortex-muted/70">
-          需要 qp_form_templates / qp_form_instances schema(後續 migration 007-010)
+          需要 qp_form_templates / qp_form_instances schema(migration 007-010)
         </p>
         <p className="text-xs mt-1 text-cortex-muted/70">project: {project.project_code}</p>
       </div>
@@ -199,27 +159,3 @@ function FormStub({ project }: { project: ProjectDetail }) {
   )
 }
 
-function MembersStub({ project }: { project: ProjectDetail }) {
-  return (
-    <div className="p-6">
-      <h3 className="text-base font-bold text-cortex-ink mb-3">成員 ({project.members.length})</h3>
-      <div className="grid grid-cols-2 gap-2">
-        {project.members.map((m) => (
-          <div key={m.id} className="bg-white border border-cortex-line rounded p-3 text-sm">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-cortex-ink font-semibold">user#{m.user_id}</span>
-              <span className="text-[10px] font-bold px-1.5 py-0.5 bg-cortex-cyan-bg text-cortex-teal rounded">
-                {m.role}
-              </span>
-            </div>
-            {m.sub_role && <div className="text-xs text-cortex-muted">sub_role: {m.sub_role}</div>}
-            <div className="text-[10px] text-cortex-muted mt-1">{new Date(m.invited_at).toLocaleString('zh-TW')}</div>
-          </div>
-        ))}
-      </div>
-      <p className="text-xs text-cortex-muted/70 mt-4">
-        Multi-PM Team 分組視覺化 + RACI 矩陣 — Sprint C
-      </p>
-    </div>
-  )
-}

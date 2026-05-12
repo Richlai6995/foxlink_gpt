@@ -152,9 +152,42 @@ server/projects-platform/
 
 ---
 
-### Sprint C — 戰情會議室填肉(2 週)
+### ✅ Sprint C — 戰情會議室填肉(2026-05-12 完成,Form 留 Sprint E)
 
-**目標**:聊天 / 任務 / Form / 成員 4 分頁完整功能
+**目標**:聊天 / 任務 / 成員 3 分頁完整功能;Form 待 Sprint E
+
+**已完成 聊天分頁**:
+- ✅ `WarRoom/ChannelList`:左欄,分組顯示(公告 / 頻道 / 私訊 DM),選 channel 切換
+- ✅ `WarRoom/MessageList`:訊息流 + 5 色語言 + Pin/Unpin/Delete hover + 5s polling + 自動同步公告標記 + pinned banner
+- ✅ `WarRoom/MessageInput`:類型 selector + Cmd/Ctrl+Enter 送出 + announcement 限制
+- ✅ `WarRoom/ChatTab`:3 欄 layout(channels | messages | 右欄 Status SUMMARY placeholder + Stages 進度)
+- ✅ Demo role(OBSERVER/OUTSIDER)時 input 自動 readonly + 提示
+
+**已完成 任務分頁**:
+- ✅ Backend `services/tasksService.js`:list / get / create / update / status / 自動算 computed_due_at(dependency-based)
+- ✅ Backend `routes/tasks.js`:GET / POST / GET :id / PATCH :id / POST :id/status / DELETE
+- ✅ Backend mount `/projects/:id/tasks` 進 projects route
+- ✅ Frontend `api.ts` 加 `Task` type
+- ✅ `WarRoom/TasksTab`:5 欄 Kanban(PENDING/IN_PROGRESS/BLOCKED/READY_FOR_REVIEW/DONE)
+  - RACI:A 紅 pill(accountable_role)+ R 藍 pill(primary_owner_user_id)
+  - Dependency chip:`⏰ 上游 task+Nd` 顯示
+  - Overdue 紅框警示
+  - 機密 task 🔒 標記
+  - BLOCKED 顯示 blocker_reason
+  - Progress bar(0-100%)
+  - 點卡片開 detail modal:狀態快速切換 + 5 button
+  - 「+ 新任務」quick-create modal(title / stage / accountable_role)
+
+**已完成 成員分頁**:
+- ✅ `WarRoom/MembersTab`:Multi-PM Team 分組(業務 HOST / DPM / BPM / MPM / EPM / 採購跨 team / 其他)
+- ✅ Wizard 填的 PM 三劍客預覽卡
+- ✅ 顯示 invited_by_pm_user_id 自然涌現箭頭
+
+**Sprint 1 smoke test PASSED**(backend 不破壞);TypeScript compile clean
+
+**Form 分頁** → 留 Sprint E(需新 migration 007-010 + form builder UI)
+
+**Deliverable**:demo Story 2-7 跑得起來 — 聊天 + 任務 + 成員 視覺化完整 ✓
 
 **聊天分頁**(對齊 Sprint 2 後端):
 - 7 channel + DM 列表(sidebar 左側)

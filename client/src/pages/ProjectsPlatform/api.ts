@@ -153,6 +153,36 @@ export type Message = {
   created_at: string
 }
 
+export type TaskStatus = 'PENDING' | 'IN_PROGRESS' | 'BLOCKED' | 'READY_FOR_REVIEW' | 'DONE' | 'CANCELLED'
+
+export type Task = {
+  id: number
+  project_id: number
+  parent_task_id?: number | null
+  stage_id?: number | null
+  title: string
+  description?: string | null
+  task_type?: string
+  accountable_role?: string | null
+  primary_owner_user_id?: number | null
+  collaborator_user_ids: number[]
+  status: TaskStatus
+  progress_percent: number
+  depends_on_task_id?: number | null
+  relative_deadline_days?: number | null
+  absolute_due_at?: string | null
+  computed_due_at?: string | null
+  started_at?: string | null
+  completed_at?: string | null
+  cancelled_at?: string | null
+  blocker_reason?: string | null
+  is_confidential?: number
+  attachment_ids: number[]
+  created_by_user_id: number
+  created_at: string
+  updated_at: string
+}
+
 export type Participant = {
   id: number
   channel_id: number
