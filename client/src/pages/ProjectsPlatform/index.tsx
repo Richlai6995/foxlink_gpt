@@ -20,6 +20,7 @@ import { PlatformProvider } from './Shell/PlatformContext'
 import PlatformShell from './Shell/PlatformShell'
 import ProjectsList from './Projects/ProjectsList'
 import WarRoom from './WarRoom/WarRoom'
+import Dashboard from './Dashboard/Dashboard'
 import InternalAdminOverview from './InternalAdmin/Overview'
 import SystemHealthPage from './InternalAdmin/SystemHealth'
 
@@ -94,6 +95,7 @@ export default function ProjectsPlatformPage() {
       <PlatformShell>
         <Routes>
           <Route index element={<ProjectsList />} />
+          <Route path="dashboard" element={<Dashboard />} />
           <Route path="projects/:id" element={<WarRoom />} />
           <Route path="internal-admin/overview" element={<AdminGuard mode={v.mode}><InternalAdminOverview /></AdminGuard>} />
           <Route path="internal-admin/system-health" element={<AdminGuard mode={v.mode}><SystemHealthPage /></AdminGuard>} />

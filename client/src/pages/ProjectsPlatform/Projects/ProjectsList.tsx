@@ -16,7 +16,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Download, Search, Lock } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
-import { api, type Project, type ProjectType } from '../api'
+import { api, type Project, type ProjectType, type StatusSummary } from '../api'
 import { useCrumbs } from '../Shell/PlatformContext'
 import ProjectCard from './ProjectCard'
 import WizardModal from '../Wizard/WizardModal'
@@ -42,6 +42,7 @@ export default function ProjectsList() {
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [showWizard, setShowWizard] = useState(false)
+  const [summaries, setSummaries] = useState<Record<number, StatusSummary>>({})
 
   const reload = async () => {
     if (!token) return
@@ -50,6 +51,17 @@ export default function ProjectsList() {
     try {
       const r = await api.get<{ projects: Project[] }>(token, '/projects?limit=200')
       setProjects(r.projects || [])
+      // 並行批次拉 status summary(列表行下用 — ⭐ Status SUMMARY 三處之二)
+      const ids = (r.projects || []).map((p) => p.id)
+      if (ids.length > 0) {
+        api.post<{ summaries: StatusSummary[] }>(token, '/dashboard/summary/batch', { project_ids: ids })
+          .then((d) => {
+            const map: Record<number, StatusSummary> = {}
+            ;(d.summaries || []).forEach((s) => { map[s.project_id] = s })
+            setSummaries(map)
+          })
+          .catch(() => {})
+      }
     } catch (e: any) {
       setErr(e.message)
     } finally {
@@ -164,7 +176,7 @@ export default function ProjectsList() {
           {filtered.map((p) => (
             <ProjectCard
               key={p.id}
-              project={mockEnrichProject(p)}
+              project={mockEnrichProject(p, summaries[p.id])}
               onClick={() => navigate(`/projects-platform/projects/${p.id}`)}
             />
           ))}
@@ -174,19 +186,21 @@ export default function ProjectsList() {
   )
 }
 
-// ─── Mock 補滿 demo 欄位(Sprint C-F 接 backend 補真值)─────────────
-function mockEnrichProject(p: Project): any {
+// ─── Mock 補滿 demo 欄位 + 接 status summary(Sprint D)─────────────
+function mockEnrichProject(p: Project, summary?: StatusSummary): any {
   return {
     ...p,
     customer: (p.data_payload as any)?.customer || (p as any).bu_id ? `BU#${(p as any).bu_id}` : '—',
     amount_display: (p.data_payload as any)?.amount_display || '',
     due: p.sla_due_at ? new Date(p.sla_due_at).toLocaleDateString('zh-TW') : '',
-    progress: Math.min(100, Math.max(0, (p as any).priority_score ? Number((p as any).priority_score) * 10 : 0)),
+    // 用 status summary 的 stage progress(若有);否則 fallback
+    progress: summary?.stage_progress_percent ?? Math.min(100, Math.max(0, (p as any).priority_score ? Number((p as any).priority_score) * 10 : 0)),
     priority: (p as any).priority_score ?? (p.importance === 'HIGH' ? 8 : p.importance === 'LOW' ? 3 : 5),
     sla: p.lifecycle_status === 'ACTIVE' ? 'green' : p.lifecycle_status === 'PAUSED' ? 'amber' : 'red',
     pause_reason: (p as any).pause_reason,
     note: (p as any).reopen_reason ? `重啟原因:${(p as any).reopen_reason}` : null,
-    ai_summary: null, // Sprint D 接 Status SUMMARY
+    // ⭐ AI Status SUMMARY one-liner 顯示在列表行下(三處之二)
+    ai_summary: summary?.one_liner || null,
     members: [{ initial: '我' }],
     confidential: !!(p as any).is_confidential,
   }

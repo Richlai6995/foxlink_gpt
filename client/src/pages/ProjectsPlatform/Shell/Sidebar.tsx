@@ -108,7 +108,7 @@ export default function Sidebar() {
         <Section label="主入口">
           <NavItem to="/projects-platform" icon={Briefcase} label="我的專案" count={0} />
           <NavItem icon={CheckCircle2} label="我的任務" count={0} stub />
-          <NavItem icon={LayoutGrid} label="跨專案儀表板" stub />
+          <NavItem to="/projects-platform/dashboard" icon={LayoutGrid} label="跨專案儀表板" />
           <NavItem icon={BookOpen} label="KB / 知識庫" stub />
           <NavItem icon={Sparkles} label={<span className="flex items-center gap-1.5">AI 加速 <span className="bg-gradient-to-br from-cortex-cyan to-cortex-teal text-white text-[9px] px-1.5 py-px rounded font-bold">10</span></span>} stub />
         </Section>

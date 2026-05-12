@@ -71,11 +71,14 @@ function buildRouter() {
   // Internal Admin(限 admin mode,middleware 內部再 require)
   router.use('/internal-admin', require('./routes/internalAdmin'));
 
-  // Sprint 1 — Projects CRUD(含 Sprint 2 channels nested under /:id/channels)
+  // Sprint 1 — Projects CRUD(含 Sprint 2 channels + Sprint C tasks nested under /:id/)
   router.use('/projects', require('./routes/projects'));
 
   // Sprint 2 — message-scoped routes(/messages/:mid/...)
   router.use('/messages', require('./routes/channels').messageScoped);
+
+  // Sprint D — 跨專案儀表板 + Status SUMMARY
+  router.use('/dashboard', require('./routes/dashboard'));
 
   // Route stubs — 後續 sprint 逐個實作
   // router.use('/projects/wizard', require('./routes/wizard'));        // Sprint 9

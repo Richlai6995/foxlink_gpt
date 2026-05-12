@@ -220,17 +220,47 @@ server/projects-platform/
 
 ---
 
-### Sprint D — 跨專案儀表板 + ⭐ Status SUMMARY(1 週)
+### ✅ Sprint D — 跨專案儀表板 + ⭐ Status SUMMARY 三處(2026-05-12 完成)
 
-**目標**:對齊 PPT slide 13-14
+**目標**:對齊 PPT slide 13-14 + Demo 手冊 §8.4
 
-- `routes/dashboard.js` + `services/dashboardService.js`
-- 7 widget grid:SLA 燈號 / Watchlist / 我的 Task / 待 Review / Delay 熱點 / KPI / 成員負載
-- ⭐ Status SUMMARY 三處顯示:#announcement Pin / 列表行下 / Watchlist hover
-- `ai/statusSummary.js`(Gemini Flash)+ `workers/statusSummaryWorker.js`(每天 09:00 + Stage 切換觸發)
-- 主管登入立刻看到燈號
+**Backend(server/projects-platform/)**:
+- ✅ `services/dashboardService.js`:7 widget data 聚合(SLA 燈號 / Watchlist / 我的 Task / 待 Review / Delay 熱點 / KPI / 成員負載)
+- ✅ `ai/statusSummary.js`:三段式 SUMMARY 產生器(進度/風險/待辦)+ 30 min cache
+  - 從 project + stages + tasks 算 mock 摘要(Sprint F 換 Gemini Flash)
+  - `pinToAnnouncement` 自動寫 AI_INSIGHT 訊息 + 取代上一則 Pin
+- ✅ `routes/dashboard.js`:
+  - GET /  — 7 widget 一次回
+  - GET /summary/:projectId — 單一 summary
+  - POST /summary/:projectId/refresh — 強制刷
+  - POST /summary/:projectId/pin — Pin 到 announcement(PM/admin)
+  - POST /summary/batch — 批次拉(給 list 用)
+- ✅ Mount `/api/projects/dashboard`
 
-**Deliverable**:主管視角 30 秒掃完所有專案 ✓
+**Frontend(client/src/pages/ProjectsPlatform/Dashboard/)**:
+- ✅ `Dashboard.tsx`:7 widget 完整 layout
+  - Widget 1 SLA 燈號:4 卡點擊 drill-down
+  - Widget 2 Watchlist:hover 顯示 ⭐ SUMMARY tooltip(navy 漸層卡)
+  - Widget 3 我的 Task:紅/黃/綠 計數
+  - Widget 4 待 Review:form / task
+  - Widget 5 Delay 熱點:per stage bar(漸層紅)
+  - Widget 6 本期 KPI:4 數字 grid
+  - Widget 7 成員負載熱圖:per user load% + alert
+  - AI 預測警示 3 phase 卡(A 規則式 ✓ / B RAG ⏳ / C ML ○)
+- ✅ `WatchlistTooltip.tsx`:hover 顯示三段式 SUMMARY(進度/風險/待辦)
+- ✅ `/projects-platform/dashboard` 路由 + sidebar link 啟用(不再 stub)
+- ✅ ProjectsList 批次拉 `/dashboard/summary/batch`,one_liner 顯示在 ProjectCard 列表行下(⭐ 三處之二)
+
+**⭐ Status SUMMARY 三處顯示**:
+1. ✅ **#announcement Pin** — 走 `POST /dashboard/summary/:id/pin`(AI_INSIGHT 訊息,Sprint 2 後端的 announcement 同步 + Pin 機制)
+2. ✅ **專案列表行下** — ProjectCard 的 ai_summary slot 接 one_liner
+3. ✅ **Watchlist hover** — WatchlistTooltip 三段式完整摘要
+
+**Sprint F 補**:
+- ⏳ 真實 Gemini Flash 摘要(目前 mock,但結構對齊)
+- ⏳ `workers/statusSummaryWorker.js`:每天 09:00 cron + Stage 切換 hook
+
+**Sprint 1 smoke test PASSED**(regression OK);TypeScript compile clean
 
 ---
 

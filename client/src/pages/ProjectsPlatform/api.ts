@@ -183,6 +183,61 @@ export type Task = {
   updated_at: string
 }
 
+// ─── Dashboard ────────────────────────────────────────────────────────
+export type SlaLight = 'red' | 'yellow' | 'green' | 'gray'
+
+export type WatchlistItem = {
+  id: string                 // project_code
+  project_id: number
+  title: string
+  lifecycle: Project['lifecycle_status']
+  priority_score?: number
+  sla_light: SlaLight
+  hint: string
+}
+
+export type DashboardData = {
+  generated_at: string
+  user: { id: number; role: string }
+  sla_lights: { red: number; yellow: number; green: number; gray: number }
+  watchlist: WatchlistItem[]
+  my_tasks: { red: number; yellow: number; green: number; total: number }
+  review_queue: { form_review: number; task_review: number }
+  delay_hotspot: { stage: string; cnt: number; ratio: number }[]
+  kpi: {
+    new_this_week: number
+    closed_this_week: number
+    win_rate: number
+    avg_response_hours: number
+    period_label: string
+  }
+  member_load: {
+    user_id: number
+    name: string
+    total_projects: number
+    load_percent: number
+    overdue: number
+    color: 'red' | 'amber' | 'green'
+    alert: string
+  }[]
+}
+
+export type StatusSummary = {
+  project_id: number
+  project_code: string
+  progress: string
+  risk: string
+  todo: string
+  one_liner: string
+  stage_progress_percent: number
+  active_stage_code: string | null
+  risk_count: number
+  overdue_task_count: number
+  blocked_task_count: number
+  generated_at: string
+  _mock?: boolean
+}
+
 export type Participant = {
   id: number
   channel_id: number
