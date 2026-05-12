@@ -332,6 +332,30 @@ html[data-theme] ::-webkit-scrollbar-thumb {
   background: var(--t-scrollbar);
 }
 
+/* ─── Mobile chat 對 dark theme 的 override ─────────────────────────────
+   桌機 dark theme 設計是「sidebar 深 + 內容白」,內容區仍走白底(line 336 註解)。
+   Mobile chat 對應桌機「內容區」,所以 dark theme 下強制走 light surface,
+   保持白底深字的視覺(對齊桌機 dark 內容區)。
+   dark-dimmed(護眼)/ light-* 主題照 var,讓護眼模式真的整塊變暖深色。 */
+html[data-theme="dark"][data-mobile-chat] {
+  --t-bg: #f8fafc;
+  --t-bg-elevated: #ffffff;
+  --t-bg-card: #ffffff;
+  --t-bg-card-hover: #f1f5f9;
+  --t-bg-input: #ffffff;
+  --t-bg-inset: #f8fafc;
+  --t-border: #e2e8f0;
+  --t-border-subtle: rgba(226,232,240,0.5);
+  --t-text: #1e293b;
+  --t-text-secondary: #334155;
+  --t-text-muted: #64748b;
+  --t-text-dim: #94a3b8;
+  --t-accent: #2563eb;
+  --t-accent-bg: #2563eb;
+  --t-accent-bg-hover: #1d4ed8;
+  --t-accent-subtle: rgba(37,99,235,0.08);
+}
+
 /* 確保全局頁面底跟著主題
    ⚠️ dark 模式不設 body bg — dark 的設計是「sidebar 深 + 內容白」，
    body 保持 UA 預設白色，各頁面自帶 bg 類控制。

@@ -217,6 +217,15 @@ export default function MobileChatLayout() {
   // 預先把可用工具列表 fetch 起來:讓「不選工具」時 send 也能 fallback 把全部 id 帶上(走 LLM function-calling 自選)
   useEffect(() => { void loadTools() }, [loadTools])
 
+  // 在 <html> 上標記 mobile-chat,讓 CSS 對 dark theme 套 light surface override
+  // (對齊桌機 dark theme「內容區仍白」的設計;dark-dimmed / light-* 維持原 var)
+  // 用 html element 而非 wrapper 是因為 vaul Drawer.Portal 渲染到 <body>,
+  // wrapper 上的 attribute 不會 cascade 進 portal。
+  useEffect(() => {
+    document.documentElement.setAttribute('data-mobile-chat', 'true')
+    return () => document.documentElement.removeAttribute('data-mobile-chat')
+  }, [])
+
   // 載入 budget(本月消耗)— 開啟 menu 時抓最新
   // 優先讀 monthly_spent(無上限也會回);fallback 到 monthly.spent(有設上限時)
   const loadMonthSpent = useCallback(() => {
@@ -614,7 +623,7 @@ export default function MobileChatLayout() {
   function fileIcon(f: File) {
     if (f.type.startsWith('image/')) return <ImageIcon size={14} className="text-blue-500" />
     if (f.type.startsWith('audio/')) return <Music size={14} className="text-purple-500" />
-    return <FileText size={14} className="text-slate-500" />
+    return <FileText size={14} className="t-text-muted" />
   }
 
   const handleCopy = useCallback((s: string) => { copyText(s).catch(() => {}) }, [])
@@ -627,19 +636,19 @@ export default function MobileChatLayout() {
     : 'Cortex'
 
   return (
-    <div className="fixed inset-0 flex flex-col bg-slate-50 overflow-hidden">
+    <div className="fixed inset-0 flex flex-col t-bg overflow-hidden">
       {/* Topbar — Gemini 風簡化:只留漢堡 + 標題,模型 / 設定 / 新對話 全下放底部
           減少忽上忽下操作,讓對話內容能充分展開 */}
-      <header className="bg-white border-b border-slate-200 pt-safe">
+      <header className="t-bg-card border-b t-border pt-safe">
         <div className="flex items-center gap-2 px-3 h-14">
           <button
             onClick={() => setDrawerOpen(true)}
             aria-label={t('mobile.chat.openSidebar')}
-            className="w-11 h-11 -ml-1 flex items-center justify-center rounded-lg hover:bg-slate-100 active:bg-slate-200 text-slate-700"
+            className="w-11 h-11 -ml-1 flex items-center justify-center rounded-lg hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)] t-text"
           >
             <Menu size={20} />
           </button>
-          <span className="flex-1 min-w-0 text-sm font-medium text-slate-800 truncate text-center px-2">
+          <span className="flex-1 min-w-0 text-sm font-medium t-text truncate text-center px-2">
             {currentTitle}
           </span>
           {/* 右側留 spacer 讓中間標題視覺置中 — 對齊 Topbar 漢堡按鈕寬度 */}
@@ -663,13 +672,13 @@ export default function MobileChatLayout() {
             <div className="w-16 h-16 rounded-2xl bg-blue-100 flex items-center justify-center mb-4">
               <Sparkles size={28} className="text-blue-600" />
             </div>
-            <h2 className="text-lg font-semibold text-slate-800 mb-1">{t('mobile.chat.welcomeTitle')}</h2>
-            <p className="text-sm text-slate-500">
+            <h2 className="text-lg font-semibold t-text mb-1">{t('mobile.chat.welcomeTitle')}</h2>
+            <p className="text-sm t-text-muted">
               {t('mobile.chat.welcomeHint', { name: (user as any)?.name || (user as any)?.username || '' })}
             </p>
           </div>
         ) : (
-          <Suspense fallback={<div className="p-4 text-sm text-slate-400">Loading…</div>}>
+          <Suspense fallback={<div className="p-4 text-sm t-text-dim">Loading…</div>}>
             <ChatWindow
               messages={messages}
               streaming={streaming}
@@ -693,7 +702,7 @@ export default function MobileChatLayout() {
       </main>
 
       {/* Input bar — 視覺加重 + bg 延伸到 home indicator,避免空白感 */}
-      <div className="border-t border-slate-200 bg-white px-2 pt-2 pb-safe shadow-[0_-2px_8px_-4px_rgba(15,23,42,0.08)]">
+      <div className="border-t t-border t-bg-card px-2 pt-2 pb-safe shadow-[0_-2px_8px_-4px_rgba(15,23,42,0.08)]">
         {/* ERP context chip(ask_with 模式) */}
         {erpPendingContext && (
           <div className="mx-1 mb-1.5 px-3 py-1.5 bg-sky-50 border border-sky-200 rounded-lg text-xs text-sky-800 flex items-center gap-2">
@@ -711,14 +720,14 @@ export default function MobileChatLayout() {
             {attachments.map((f, i) => (
               <div
                 key={i}
-                className="inline-flex items-center gap-1.5 bg-slate-100 border border-slate-200 rounded-full pl-2 pr-1 py-1 text-xs text-slate-700 max-w-[200px]"
+                className="inline-flex items-center gap-1.5 bg-[var(--t-bg-card-hover)] border t-border rounded-full pl-2 pr-1 py-1 text-xs t-text max-w-[200px]"
               >
                 {fileIcon(f)}
                 <span className="truncate">{f.name}</span>
                 <button
                   onClick={() => removeAttachment(i)}
                   aria-label={t('mobile.chat.remove')}
-                  className="w-5 h-5 flex items-center justify-center rounded-full hover:bg-slate-200 text-slate-500"
+                  className="w-5 h-5 flex items-center justify-center rounded-full hover:bg-[var(--t-bg-card-hover)] t-text-muted"
                 >
                   <X size={11} />
                 </button>
@@ -750,7 +759,7 @@ export default function MobileChatLayout() {
           }}
           placeholder={t('mobile.chat.inputPlaceholder')}
           rows={1}
-          className="w-full resize-none border border-slate-200 rounded-2xl px-4 py-3 max-h-40 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-300"
+          className="w-full resize-none border t-border rounded-2xl px-4 py-3 max-h-40 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-300"
           style={{ minHeight: '44px' }}
         />
 
@@ -760,22 +769,22 @@ export default function MobileChatLayout() {
             onClick={() => setPlusOpen(true)}
             disabled={streaming}
             aria-label={t('mobile.chat.attachFile')}
-            className="w-10 h-10 flex items-center justify-center rounded-full text-slate-600 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40 flex-shrink-0"
+            className="w-10 h-10 flex items-center justify-center rounded-full t-text-secondary hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)] disabled:opacity-40 flex-shrink-0"
           >
             <Plus size={20} />
           </button>
           <button
             onClick={() => setModelPickerOpen(true)}
-            className="min-w-0 max-w-[55%] inline-flex items-center gap-1 px-2.5 h-9 rounded-full text-xs text-slate-700 bg-slate-100 hover:bg-slate-200 active:bg-slate-300"
+            className="min-w-0 max-w-[55%] inline-flex items-center gap-1 px-2.5 h-9 rounded-full text-xs t-text bg-[var(--t-bg-card-hover)] hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)]"
           >
             <Sparkles size={12} className="text-blue-500 flex-shrink-0" />
             <span className="truncate">{currentModelName}</span>
-            <ChevronDown size={12} className="flex-shrink-0 text-slate-400" />
+            <ChevronDown size={12} className="flex-shrink-0 t-text-dim" />
           </button>
           <button
             onClick={() => setMenuOpen(true)}
             aria-label={t('mobile.chat.menuLabel')}
-            className="relative w-10 h-10 flex items-center justify-center rounded-full text-slate-600 hover:bg-slate-100 active:bg-slate-200 flex-shrink-0"
+            className="relative w-10 h-10 flex items-center justify-center rounded-full t-text-secondary hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)] flex-shrink-0"
           >
             <Settings size={18} />
             {feedbackUnread > 0 && (
@@ -788,7 +797,7 @@ export default function MobileChatLayout() {
             source="chat"
             disabled={streaming}
             size={18}
-            className="w-10 h-10 flex items-center justify-center rounded-full text-slate-600 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40 flex-shrink-0"
+            className="w-10 h-10 flex items-center justify-center rounded-full t-text-secondary hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)] disabled:opacity-40 flex-shrink-0"
             onTranscript={(text) => {
               if (!text) return
               setInputText((prev) => {
@@ -827,10 +836,10 @@ export default function MobileChatLayout() {
       <Drawer.Root direction="left" open={drawerOpen} onOpenChange={setDrawerOpen}>
         <Drawer.Portal>
           <Drawer.Overlay className="fixed inset-0 bg-black/40 z-40" />
-          <Drawer.Content className="fixed inset-y-0 left-0 w-[85%] max-w-sm bg-white z-50 flex flex-col pt-safe pb-safe">
+          <Drawer.Content className="fixed inset-y-0 left-0 w-[85%] max-w-sm t-bg-card z-50 flex flex-col pt-safe pb-safe">
             <Drawer.Title className="sr-only">{t('mobile.chat.sessions')}</Drawer.Title>
-            <div className="flex items-center gap-2 px-4 h-14 border-b border-slate-200">
-              <span className="text-sm font-semibold text-slate-800 flex-1">{t('mobile.chat.sessions')}</span>
+            <div className="flex items-center gap-2 px-4 h-14 border-b t-border">
+              <span className="text-sm font-semibold t-text flex-1">{t('mobile.chat.sessions')}</span>
               <button
                 onClick={() => { handleNewChat() }}
                 className="text-xs text-white bg-blue-600 hover:bg-blue-700 rounded-lg px-3 py-1.5 inline-flex items-center gap-1"
@@ -840,7 +849,7 @@ export default function MobileChatLayout() {
             </div>
             <div className="flex-1 overflow-y-auto py-2">
               {sessions.length === 0 ? (
-                <p className="px-4 py-6 text-xs text-slate-400 text-center">{t('mobile.chat.noSessions')}</p>
+                <p className="px-4 py-6 text-xs t-text-dim text-center">{t('mobile.chat.noSessions')}</p>
               ) : (
                 sessions.map((s) => {
                   const active = s.id === currentSessionId
@@ -848,7 +857,7 @@ export default function MobileChatLayout() {
                     <div
                       key={s.id}
                       className={`mx-2 px-3 py-2.5 rounded-lg flex items-center gap-2 group ${
-                        active ? 'bg-blue-50' : 'hover:bg-slate-50 active:bg-slate-100'
+                        active ? 'bg-[var(--t-accent-subtle)]' : 'hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)]'
                       }`}
                     >
                       <button
@@ -856,8 +865,8 @@ export default function MobileChatLayout() {
                         className="flex-1 min-w-0 text-left"
                       >
                         <div className="flex items-center gap-2">
-                          <MessageSquare size={14} className={active ? 'text-blue-600' : 'text-slate-400'} />
-                          <span className={`text-sm truncate ${active ? 'text-blue-800 font-medium' : 'text-slate-700'}`}>
+                          <MessageSquare size={14} className={active ? 'text-blue-600' : 't-text-dim'} />
+                          <span className={`text-sm truncate ${active ? 'text-blue-800 font-medium' : 't-text'}`}>
                             {localTitle(s, i18n.language)}
                           </span>
                         </div>
@@ -865,7 +874,7 @@ export default function MobileChatLayout() {
                       <button
                         onClick={() => handleDeleteSession(s.id)}
                         aria-label={t('common.delete')}
-                        className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50"
+                        className="w-8 h-8 flex items-center justify-center rounded-lg t-text-dim hover:text-red-600 hover:bg-red-50"
                       >
                         <Trash2 size={14} />
                       </button>
@@ -874,9 +883,9 @@ export default function MobileChatLayout() {
                 })
               )}
             </div>
-            <div className="border-t border-slate-200 px-4 py-3 text-xs text-slate-500">
+            <div className="border-t t-border px-4 py-3 text-xs t-text-muted">
               <div className="truncate">{(user as any)?.name || (user as any)?.username}</div>
-              <div className="truncate text-slate-400">{(user as any)?.email || ''}</div>
+              <div className="truncate t-text-dim">{(user as any)?.email || ''}</div>
             </div>
           </Drawer.Content>
         </Drawer.Portal>
@@ -886,15 +895,15 @@ export default function MobileChatLayout() {
       <Drawer.Root open={modelPickerOpen} onOpenChange={setModelPickerOpen}>
         <Drawer.Portal>
           <Drawer.Overlay className="fixed inset-0 bg-black/40 z-40" />
-          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl flex flex-col max-h-[80vh] pb-safe">
+          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 t-bg-card rounded-t-2xl flex flex-col max-h-[80vh] pb-safe">
             <Drawer.Title className="sr-only">{t('mobile.chat.selectModel')}</Drawer.Title>
             <div className="mx-auto w-10 h-1 rounded-full bg-slate-300 mt-2" />
-            <div className="px-4 py-3 border-b border-slate-100">
-              <p className="text-sm font-semibold text-slate-800">{t('mobile.chat.selectModel')}</p>
+            <div className="px-4 py-3 border-b t-border-subtle">
+              <p className="text-sm font-semibold t-text">{t('mobile.chat.selectModel')}</p>
             </div>
             <div className="flex-1 overflow-y-auto p-2">
               {availableModels.length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-6">{t('mobile.chat.noModels')}</p>
+                <p className="text-xs t-text-dim text-center py-6">{t('mobile.chat.noModels')}</p>
               ) : (
                 availableModels.map((m) => {
                   const active = m.key === model
@@ -903,13 +912,13 @@ export default function MobileChatLayout() {
                       key={m.key}
                       onClick={() => handleModelChange(m.key)}
                       className={`w-full text-left px-3 py-3 rounded-lg flex items-start gap-3 ${
-                        active ? 'bg-blue-50' : 'hover:bg-slate-50 active:bg-slate-100'
+                        active ? 'bg-[var(--t-accent-subtle)]' : 'hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)]'
                       }`}
                     >
-                      <Sparkles size={16} className={`mt-0.5 ${active ? 'text-blue-600' : 'text-slate-400'}`} />
+                      <Sparkles size={16} className={`mt-0.5 ${active ? 'text-blue-600' : 't-text-dim'}`} />
                       <div className="flex-1 min-w-0">
-                        <p className={`text-sm font-medium ${active ? 'text-blue-800' : 'text-slate-800'}`}>{m.name}</p>
-                        {m.description && <p className="text-xs text-slate-500 mt-0.5">{m.description}</p>}
+                        <p className={`text-sm font-medium ${active ? 'text-blue-800' : 't-text'}`}>{m.name}</p>
+                        {m.description && <p className="text-xs t-text-muted mt-0.5">{m.description}</p>}
                       </div>
                     </button>
                   )
@@ -924,12 +933,12 @@ export default function MobileChatLayout() {
       <Drawer.Root open={menuOpen} onOpenChange={setMenuOpen}>
         <Drawer.Portal>
           <Drawer.Overlay className="fixed inset-0 bg-black/40 z-40" />
-          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl pb-safe max-h-[80vh] flex flex-col">
+          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 t-bg-card rounded-t-2xl pb-safe max-h-[80vh] flex flex-col">
             <Drawer.Title className="sr-only">{t('mobile.chat.menuLabel')}</Drawer.Title>
             <div className="mx-auto w-10 h-1 rounded-full bg-slate-300 mt-2 flex-shrink-0" />
             <div className="overflow-y-auto p-2">
               {/* 本月 token 消耗 */}
-              <div className="px-3 py-2.5 rounded-lg bg-blue-50 border border-blue-100 flex items-center gap-3 mb-1.5">
+              <div className="px-3 py-2.5 rounded-lg bg-[var(--t-accent-subtle)] border border-blue-100 flex items-center gap-3 mb-1.5">
                 <Sparkles size={16} className="text-blue-500" />
                 <div className="flex-1 min-w-0">
                   <div className="text-xs text-blue-700">{t('tokenStats.monthSpent')}</div>
@@ -943,106 +952,106 @@ export default function MobileChatLayout() {
               {/* Pure mode toggle */}
               <button
                 onClick={() => { togglePureMode() }}
-                className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
+                className="w-full px-3 py-3 rounded-lg hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)] flex items-center gap-3 text-left"
               >
-                <MessageSquare size={18} className={pureMode ? 'text-amber-600' : 'text-slate-500'} />
+                <MessageSquare size={18} className={pureMode ? 'text-amber-600' : 't-text-muted'} />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm text-slate-800">{t('mobile.menu.pureMode')}</div>
-                  <div className="text-[11px] text-slate-500 truncate">{t('mobile.menu.pureModeDesc')}</div>
+                  <div className="text-sm t-text">{t('mobile.menu.pureMode')}</div>
+                  <div className="text-[11px] t-text-muted truncate">{t('mobile.menu.pureModeDesc')}</div>
                 </div>
                 <span
                   className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition ${pureMode ? 'bg-amber-500' : 'bg-slate-300'}`}
                   aria-pressed={pureMode}
                 >
-                  <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${pureMode ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                  <span className={`inline-block h-5 w-5 transform rounded-full t-bg-card shadow transition ${pureMode ? 'translate-x-5' : 'translate-x-0.5'}`} />
                 </span>
               </button>
 
-              <div className="my-1 h-px bg-slate-200" />
+              <div className="my-1 h-px bg-[var(--t-border)]" />
 
               {/* Feature navigation */}
               {currentSessionId && (
                 <button
                   onClick={() => { setMenuOpen(false); void handleShareSession() }}
                   disabled={sharing}
-                  className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left disabled:opacity-50"
+                  className="w-full px-3 py-3 rounded-lg hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)] flex items-center gap-3 text-left disabled:opacity-50"
                 >
                   <Share2 size={18} className="text-blue-500" />
-                  <span className="flex-1 text-sm text-slate-800">{sharing ? '建立中…' : '分享當前對話'}</span>
+                  <span className="flex-1 text-sm t-text">{sharing ? '建立中…' : '分享當前對話'}</span>
                 </button>
               )}
 
               <button
                 onClick={() => { setMenuOpen(false); navigate('/skills') }}
-                className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
+                className="w-full px-3 py-3 rounded-lg hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)] flex items-center gap-3 text-left"
               >
                 <Zap size={18} className="text-blue-500" />
-                <span className="flex-1 text-sm text-slate-800">{t('mobile.menu.skillMarket')}</span>
+                <span className="flex-1 text-sm t-text">{t('mobile.menu.skillMarket')}</span>
               </button>
               <button
                 onClick={() => { setMenuOpen(false); navigate('/templates') }}
-                className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
+                className="w-full px-3 py-3 rounded-lg hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)] flex items-center gap-3 text-left"
               >
                 <LayoutTemplate size={18} className="text-violet-500" />
-                <span className="flex-1 text-sm text-slate-800">{t('mobile.menu.templates')}</span>
+                <span className="flex-1 text-sm t-text">{t('mobile.menu.templates')}</span>
               </button>
               <button
                 onClick={() => { setMenuOpen(false); navigate('/my-charts') }}
-                className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
+                className="w-full px-3 py-3 rounded-lg hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)] flex items-center gap-3 text-left"
               >
                 <BarChart3 size={18} className="text-emerald-500" />
-                <span className="flex-1 text-sm text-slate-800">{t('mobile.menu.myCharts')}</span>
+                <span className="flex-1 text-sm t-text">{t('mobile.menu.myCharts')}</span>
               </button>
               <button
                 onClick={() => { setMenuOpen(false); navigate('/feedback') }}
-                className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
+                className="w-full px-3 py-3 rounded-lg hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)] flex items-center gap-3 text-left"
               >
                 <MessageSquarePlus size={18} className="text-rose-500" />
-                <span className="flex-1 text-sm text-slate-800">{t('mobile.menu.feedback')}</span>
+                <span className="flex-1 text-sm t-text">{t('mobile.menu.feedback')}</span>
                 {feedbackUnread > 0 && (
                   <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 font-medium">{feedbackUnread > 99 ? '99+' : feedbackUnread}</span>
                 )}
               </button>
 
-              <div className="my-1 h-px bg-slate-200" />
+              <div className="my-1 h-px bg-[var(--t-border)]" />
 
               {/* Settings */}
               <button
                 onClick={() => { setShowLang(true); setMenuOpen(false) }}
-                className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
+                className="w-full px-3 py-3 rounded-lg hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)] flex items-center gap-3 text-left"
               >
-                <Globe size={18} className="text-slate-500" />
-                <span className="flex-1 text-sm text-slate-800">{t('mobile.menu.language')}</span>
-                <span className="text-xs text-slate-500">
+                <Globe size={18} className="t-text-muted" />
+                <span className="flex-1 text-sm t-text">{t('mobile.menu.language')}</span>
+                <span className="text-xs t-text-muted">
                   {SUPPORTED_LANGUAGES.find((l) => l.code === i18n.language)?.label || i18n.language}
                 </span>
               </button>
               <button
                 onClick={() => { setShowTheme(true); setMenuOpen(false) }}
-                className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
+                className="w-full px-3 py-3 rounded-lg hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)] flex items-center gap-3 text-left"
               >
-                <Palette size={18} className="text-slate-500" />
-                <span className="flex-1 text-sm text-slate-800">{t('mobile.menu.theme')}</span>
-                <span className="text-xs text-slate-500">
+                <Palette size={18} className="t-text-muted" />
+                <span className="flex-1 text-sm t-text">{t('mobile.menu.theme')}</span>
+                <span className="text-xs t-text-muted">
                   {t(THEMES.find((it) => it.id === theme)?.labelKey || 'theme.dark.label')}
                 </span>
               </button>
               <button
                 onClick={() => { setMenuOpen(false); setShowMyDevices(true) }}
-                className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
+                className="w-full px-3 py-3 rounded-lg hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)] flex items-center gap-3 text-left"
               >
                 <Fingerprint size={18} className="text-emerald-600" />
-                <span className="flex-1 text-sm text-slate-800">我的裝置 / 快速登入</span>
+                <span className="flex-1 text-sm t-text">我的裝置 / 快速登入</span>
               </button>
               <button
                 onClick={() => { setMenuOpen(false); navigate('/help') }}
-                className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
+                className="w-full px-3 py-3 rounded-lg hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)] flex items-center gap-3 text-left"
               >
-                <HelpCircle size={18} className="text-slate-500" />
-                <span className="flex-1 text-sm text-slate-800">{t('mobile.menu.help')}</span>
+                <HelpCircle size={18} className="t-text-muted" />
+                <span className="flex-1 text-sm t-text">{t('mobile.menu.help')}</span>
               </button>
 
-              <div className="my-1 h-px bg-slate-200" />
+              <div className="my-1 h-px bg-[var(--t-border)]" />
 
               <button
                 onClick={() => { setMenuOpen(false); logout() }}
@@ -1060,11 +1069,11 @@ export default function MobileChatLayout() {
       <Drawer.Root open={showTheme} onOpenChange={setShowTheme}>
         <Drawer.Portal>
           <Drawer.Overlay className="fixed inset-0 bg-black/40 z-40" />
-          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl pb-safe">
+          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 t-bg-card rounded-t-2xl pb-safe">
             <Drawer.Title className="sr-only">{t('mobile.menu.theme')}</Drawer.Title>
             <div className="mx-auto w-10 h-1 rounded-full bg-slate-300 mt-2" />
-            <div className="px-4 py-3 border-b border-slate-100">
-              <p className="text-sm font-semibold text-slate-800">{t('theme.title', '主題風格')}</p>
+            <div className="px-4 py-3 border-b t-border-subtle">
+              <p className="text-sm font-semibold t-text">{t('theme.title', '主題風格')}</p>
             </div>
             <div className="p-2">
               {THEMES.map((it) => {
@@ -1074,13 +1083,13 @@ export default function MobileChatLayout() {
                     key={it.id}
                     onClick={() => { setTheme(it.id); setShowTheme(false) }}
                     className={`w-full px-3 py-3 rounded-lg flex items-center gap-3 text-left ${
-                      active ? 'bg-blue-50' : 'hover:bg-slate-50 active:bg-slate-100'
+                      active ? 'bg-[var(--t-accent-subtle)]' : 'hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)]'
                     }`}
                   >
-                    <div className={`w-6 h-6 rounded-full border-2 ${it.preview} flex-shrink-0 ${active ? 'border-blue-500' : 'border-slate-200'}`} />
+                    <div className={`w-6 h-6 rounded-full border-2 ${it.preview} flex-shrink-0 ${active ? 'border-blue-500' : 't-border'}`} />
                     <div className="flex-1">
-                      <div className={`text-sm ${active ? 'text-blue-800 font-medium' : 'text-slate-800'}`}>{t(it.labelKey)}</div>
-                      <div className="text-[11px] text-slate-500 mt-0.5">{t(it.descKey)}</div>
+                      <div className={`text-sm ${active ? 'text-blue-800 font-medium' : 't-text'}`}>{t(it.labelKey)}</div>
+                      <div className="text-[11px] t-text-muted mt-0.5">{t(it.descKey)}</div>
                     </div>
                     {active && <Check size={16} className="text-blue-600 flex-shrink-0" />}
                   </button>
@@ -1095,11 +1104,11 @@ export default function MobileChatLayout() {
       <Drawer.Root open={showLang} onOpenChange={setShowLang}>
         <Drawer.Portal>
           <Drawer.Overlay className="fixed inset-0 bg-black/40 z-40" />
-          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl pb-safe">
+          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 t-bg-card rounded-t-2xl pb-safe">
             <Drawer.Title className="sr-only">{t('mobile.menu.language')}</Drawer.Title>
             <div className="mx-auto w-10 h-1 rounded-full bg-slate-300 mt-2" />
-            <div className="px-4 py-3 border-b border-slate-100">
-              <p className="text-sm font-semibold text-slate-800">{t('mobile.menu.language')}</p>
+            <div className="px-4 py-3 border-b t-border-subtle">
+              <p className="text-sm font-semibold t-text">{t('mobile.menu.language')}</p>
             </div>
             <div className="p-2">
               {SUPPORTED_LANGUAGES.map((l) => {
@@ -1113,11 +1122,11 @@ export default function MobileChatLayout() {
                       setShowLang(false)
                     }}
                     className={`w-full px-3 py-3 rounded-lg flex items-center gap-3 text-left ${
-                      active ? 'bg-blue-50' : 'hover:bg-slate-50 active:bg-slate-100'
+                      active ? 'bg-[var(--t-accent-subtle)]' : 'hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)]'
                     }`}
                   >
-                    <Globe size={16} className={active ? 'text-blue-600' : 'text-slate-400'} />
-                    <span className={`flex-1 text-sm ${active ? 'text-blue-800 font-medium' : 'text-slate-800'}`}>
+                    <Globe size={16} className={active ? 'text-blue-600' : 't-text-dim'} />
+                    <span className={`flex-1 text-sm ${active ? 'text-blue-800 font-medium' : 't-text'}`}>
                       {l.label}
                     </span>
                   </button>
@@ -1132,33 +1141,33 @@ export default function MobileChatLayout() {
       <Drawer.Root open={plusOpen} onOpenChange={setPlusOpen}>
         <Drawer.Portal>
           <Drawer.Overlay className="fixed inset-0 bg-black/40 z-40" />
-          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl pb-safe">
+          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 t-bg-card rounded-t-2xl pb-safe">
             <Drawer.Title className="sr-only">{t('mobile.chat.attachFile')}</Drawer.Title>
             <div className="mx-auto w-10 h-1 rounded-full bg-slate-300 mt-2" />
             <div className="p-2">
               <button
                 onClick={() => { setPlusOpen(false); fileInputRef.current?.click() }}
-                className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
+                className="w-full px-3 py-3 rounded-lg hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)] flex items-center gap-3 text-left"
               >
                 <Paperclip size={18} className="text-blue-500" />
-                <span className="flex-1 text-sm text-slate-800">{t('mobile.chat.attachFile')}</span>
+                <span className="flex-1 text-sm t-text">{t('mobile.chat.attachFile')}</span>
               </button>
               <button
                 onClick={() => { setPlusOpen(false); openTools() }}
-                className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
+                className="w-full px-3 py-3 rounded-lg hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)] flex items-center gap-3 text-left"
               >
                 <Zap size={18} className="text-cyan-500" />
-                <span className="flex-1 text-sm text-slate-800">工具(MCP / 知識庫 / API / 技能)</span>
+                <span className="flex-1 text-sm t-text">工具(MCP / 知識庫 / API / 技能)</span>
                 {totalToolsSelected > 0 && (
                   <span className="text-xs px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-700 font-medium">{totalToolsSelected}</span>
                 )}
               </button>
               <button
                 onClick={() => { setPlusOpen(false); setErpPickerOpen(true) }}
-                className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
+                className="w-full px-3 py-3 rounded-lg hover:bg-[var(--t-bg-card-hover)] active:bg-[var(--t-bg-card-hover)] flex items-center gap-3 text-left"
               >
                 <Database size={18} className="text-amber-500" />
-                <span className="flex-1 text-sm text-slate-800">ERP 工具</span>
+                <span className="flex-1 text-sm t-text">ERP 工具</span>
               </button>
             </div>
           </Drawer.Content>
@@ -1169,12 +1178,12 @@ export default function MobileChatLayout() {
       <Drawer.Root open={toolsOpen} onOpenChange={setToolsOpen}>
         <Drawer.Portal>
           <Drawer.Overlay className="fixed inset-0 bg-black/40 z-40" />
-          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl pb-safe max-h-[85vh] flex flex-col">
+          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 t-bg-card rounded-t-2xl pb-safe max-h-[85vh] flex flex-col">
             <Drawer.Title className="sr-only">工具選擇</Drawer.Title>
             <div className="mx-auto w-10 h-1 rounded-full bg-slate-300 mt-2 flex-shrink-0" />
 
             {/* Tabs(橫向 scroll 避擠)*/}
-            <div className="px-2 pt-3 pb-2 border-b border-slate-100 flex gap-1 flex-shrink-0 overflow-x-auto">
+            <div className="px-2 pt-3 pb-2 border-b t-border-subtle flex gap-1 flex-shrink-0 overflow-x-auto">
               {[
                 { key: 'mcp' as const,   label: 'MCP',         count: selectedMcpIds.size,  badge: 'bg-cyan-100 text-cyan-700' },
                 { key: 'kb' as const,    label: '知識庫',       count: selectedKbIds.size,   badge: 'bg-blue-100 text-blue-700' },
@@ -1185,7 +1194,7 @@ export default function MobileChatLayout() {
                   key={tab.key}
                   onClick={() => setToolsTab(tab.key)}
                   className={`flex-1 min-w-[64px] px-2 py-2 rounded-lg text-sm font-medium transition flex items-center justify-center gap-1.5 whitespace-nowrap ${
-                    toolsTab === tab.key ? 'bg-slate-100 text-slate-800' : 'text-slate-500 active:bg-slate-50'
+                    toolsTab === tab.key ? 'bg-[var(--t-bg-card-hover)] t-text' : 't-text-muted active:t-bg'
                   }`}
                 >
                   {tab.label}
@@ -1200,7 +1209,7 @@ export default function MobileChatLayout() {
             <div className="flex-1 overflow-y-auto p-2">
               {toolsTab === 'mcp' && (
                 allMcpServers.length === 0 ? (
-                  <p className="text-xs text-slate-400 text-center py-6">沒有可用 MCP</p>
+                  <p className="text-xs t-text-dim text-center py-6">沒有可用 MCP</p>
                 ) : (
                   allMcpServers.map((s: any) => {
                     const picked = selectedMcpIds.has(s.id)
@@ -1208,17 +1217,17 @@ export default function MobileChatLayout() {
                       <button
                         key={s.id}
                         onClick={() => setSelectedMcpIds(prev => { const n = new Set(prev); picked ? n.delete(s.id) : n.add(s.id); return n })}
-                        className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-lg text-left ${picked ? 'bg-cyan-50' : 'active:bg-slate-100'}`}
+                        className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-lg text-left ${picked ? 'bg-cyan-50' : 'active:bg-[var(--t-bg-card-hover)]'}`}
                       >
                         <span className={`mt-0.5 w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 ${picked ? 'bg-cyan-500 border-cyan-500' : 'border-slate-300'}`}>
                           {picked && <span className="text-white text-xs leading-none">✓</span>}
                         </span>
                         <div className="flex-1 min-w-0">
-                          <p className={`text-sm font-medium truncate ${picked ? 'text-cyan-800' : 'text-slate-800'}`}>
+                          <p className={`text-sm font-medium truncate ${picked ? 'text-cyan-800' : 't-text'}`}>
                             {localName(s)}
                             {isOverrideTool('mcp', s.id) && <span className="ml-1 text-[10px] text-orange-500">⚗</span>}
                           </p>
-                          {localDesc(s) && <p className="text-xs text-slate-500 truncate">{localDesc(s)}</p>}
+                          {localDesc(s) && <p className="text-xs t-text-muted truncate">{localDesc(s)}</p>}
                         </div>
                       </button>
                     )
@@ -1227,7 +1236,7 @@ export default function MobileChatLayout() {
               )}
               {toolsTab === 'kb' && (
                 allSelfKbs.length === 0 ? (
-                  <p className="text-xs text-slate-400 text-center py-6">沒有可用知識庫</p>
+                  <p className="text-xs t-text-dim text-center py-6">沒有可用知識庫</p>
                 ) : (
                   allSelfKbs.map((k: any) => {
                     const id = String(k.id)
@@ -1236,17 +1245,17 @@ export default function MobileChatLayout() {
                       <button
                         key={id}
                         onClick={() => setSelectedKbIds(prev => { const n = new Set(prev); picked ? n.delete(id) : n.add(id); return n })}
-                        className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-lg text-left ${picked ? 'bg-blue-50' : 'active:bg-slate-100'}`}
+                        className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-lg text-left ${picked ? 'bg-[var(--t-accent-subtle)]' : 'active:bg-[var(--t-bg-card-hover)]'}`}
                       >
-                        <span className={`mt-0.5 w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 ${picked ? 'bg-blue-500 border-blue-500' : 'border-slate-300'}`}>
+                        <span className={`mt-0.5 w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 ${picked ? 'bg-[var(--t-accent-subtle)]0 border-blue-500' : 'border-slate-300'}`}>
                           {picked && <span className="text-white text-xs leading-none">✓</span>}
                         </span>
                         <div className="flex-1 min-w-0">
-                          <p className={`text-sm font-medium truncate ${picked ? 'text-blue-800' : 'text-slate-800'}`}>
+                          <p className={`text-sm font-medium truncate ${picked ? 'text-blue-800' : 't-text'}`}>
                             {localName(k)}
                             {isOverrideTool('kb', id) && <span className="ml-1 text-[10px] text-orange-500">⚗</span>}
                           </p>
-                          {localDesc(k) && <p className="text-xs text-slate-500 truncate">{localDesc(k)}</p>}
+                          {localDesc(k) && <p className="text-xs t-text-muted truncate">{localDesc(k)}</p>}
                         </div>
                       </button>
                     )
@@ -1255,7 +1264,7 @@ export default function MobileChatLayout() {
               )}
               {toolsTab === 'dify' && (
                 allDifyKbs.length === 0 ? (
-                  <p className="text-xs text-slate-400 text-center py-6">沒有可用 API 連接器</p>
+                  <p className="text-xs t-text-dim text-center py-6">沒有可用 API 連接器</p>
                 ) : (
                   allDifyKbs.map((d: any) => {
                     const picked = selectedDifyIds.has(d.id)
@@ -1263,17 +1272,17 @@ export default function MobileChatLayout() {
                       <button
                         key={d.id}
                         onClick={() => setSelectedDifyIds(prev => { const n = new Set(prev); picked ? n.delete(d.id) : n.add(d.id); return n })}
-                        className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-lg text-left ${picked ? 'bg-amber-50' : 'active:bg-slate-100'}`}
+                        className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-lg text-left ${picked ? 'bg-amber-50' : 'active:bg-[var(--t-bg-card-hover)]'}`}
                       >
                         <span className={`mt-0.5 w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 ${picked ? 'bg-amber-500 border-amber-500' : 'border-slate-300'}`}>
                           {picked && <span className="text-white text-xs leading-none">✓</span>}
                         </span>
                         <div className="flex-1 min-w-0">
-                          <p className={`text-sm font-medium truncate ${picked ? 'text-amber-800' : 'text-slate-800'}`}>
+                          <p className={`text-sm font-medium truncate ${picked ? 'text-amber-800' : 't-text'}`}>
                             {localName(d)}
                             {isOverrideTool('dify', d.id) && <span className="ml-1 text-[10px] text-orange-500">⚗</span>}
                           </p>
-                          {localDesc(d) && <p className="text-xs text-slate-500 truncate">{localDesc(d)}</p>}
+                          {localDesc(d) && <p className="text-xs t-text-muted truncate">{localDesc(d)}</p>}
                         </div>
                       </button>
                     )
@@ -1282,7 +1291,7 @@ export default function MobileChatLayout() {
               )}
               {toolsTab === 'skill' && (
                 allSkills.length === 0 ? (
-                  <p className="text-xs text-slate-400 text-center py-6">沒有可用技能</p>
+                  <p className="text-xs t-text-dim text-center py-6">沒有可用技能</p>
                 ) : (
                   allSkills.map((s) => {
                     const picked = pickedSkillIds.has(s.id)
@@ -1291,19 +1300,19 @@ export default function MobileChatLayout() {
                       <button
                         key={s.id}
                         onClick={() => toggleSkill(s.id)}
-                        className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-lg text-left ${picked ? 'bg-purple-50' : 'active:bg-slate-100'}`}
+                        className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-lg text-left ${picked ? 'bg-purple-50' : 'active:bg-[var(--t-bg-card-hover)]'}`}
                       >
                         <span className={`mt-0.5 w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 ${picked ? 'bg-purple-500 border-purple-500' : 'border-slate-300'}`}>
                           {picked && <span className="text-white text-xs leading-none">✓</span>}
                         </span>
                         <div className="flex-1 min-w-0">
-                          <p className={`text-sm font-medium truncate ${picked ? 'text-purple-800' : 'text-slate-800'}`}>
+                          <p className={`text-sm font-medium truncate ${picked ? 'text-purple-800' : 't-text'}`}>
                             <span className="mr-1">{s.icon || '🔧'}</span>
                             {localName(s)}
                             {isOverrideTool('skill', s.id) && <span className="ml-1 text-[10px] text-orange-500">⚗</span>}
                             {hasVars && <span className="ml-1 text-[10px] text-amber-600 font-medium">需參數</span>}
                           </p>
-                          {localDesc(s) && <p className="text-xs text-slate-500 truncate">{localDesc(s)}</p>}
+                          {localDesc(s) && <p className="text-xs t-text-muted truncate">{localDesc(s)}</p>}
                         </div>
                       </button>
                     )
@@ -1313,7 +1322,7 @@ export default function MobileChatLayout() {
             </div>
 
             {/* Footer */}
-            <div className="border-t border-slate-100 p-3 flex items-center gap-2 flex-shrink-0">
+            <div className="border-t t-border-subtle p-3 flex items-center gap-2 flex-shrink-0">
               <button
                 onClick={() => {
                   setSelectedMcpIds(new Set())
@@ -1322,7 +1331,7 @@ export default function MobileChatLayout() {
                   setPickedSkillIds(new Set())
                   setPendingSkillIds(new Set())
                 }}
-                className="flex-1 py-2.5 text-sm text-slate-600 rounded-lg active:bg-slate-100"
+                className="flex-1 py-2.5 text-sm t-text-secondary rounded-lg active:bg-[var(--t-bg-card-hover)]"
               >
                 清空
               </button>
@@ -1350,15 +1359,15 @@ export default function MobileChatLayout() {
       <Drawer.Root open={!!shareLink} onOpenChange={(o) => { if (!o) { setShareLink(null); setShareCopied(false) } }}>
         <Drawer.Portal>
           <Drawer.Overlay className="fixed inset-0 bg-black/40 z-[55]" />
-          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-[60] bg-white rounded-t-2xl pb-safe">
+          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-[60] t-bg-card rounded-t-2xl pb-safe">
             <Drawer.Title className="sr-only">分享連結</Drawer.Title>
             <div className="mx-auto w-10 h-1 rounded-full bg-slate-300 mt-2 flex-shrink-0" />
             <div className="px-4 pt-3 pb-4">
               <div className="flex items-center gap-2 mb-3">
                 <Share2 size={18} className="text-blue-600" />
-                <p className="text-sm font-semibold text-slate-800">分享連結已建立</p>
+                <p className="text-sm font-semibold t-text">分享連結已建立</p>
               </div>
-              <p className="text-xs text-slate-500 mb-3 leading-5">
+              <p className="text-xs t-text-muted mb-3 leading-5">
                 任何登入的使用者都可以透過此連結查看對話快照,並選擇繼續這段對話。<br />
                 此快照不會隨原始對話更新,是獨立的分享副本。
               </p>
@@ -1367,7 +1376,7 @@ export default function MobileChatLayout() {
                   readOnly
                   value={shareLink || ''}
                   onFocus={(e) => e.currentTarget.select()}
-                  className="flex-1 text-xs border border-slate-200 rounded-lg px-3 py-3 bg-slate-50 text-slate-700 truncate min-w-0"
+                  className="flex-1 text-xs border t-border rounded-lg px-3 py-3 t-bg t-text truncate min-w-0"
                 />
                 <button
                   onClick={handleCopyShareLink}
@@ -1381,7 +1390,7 @@ export default function MobileChatLayout() {
               {typeof navigator !== 'undefined' && (navigator as any).share && (
                 <button
                   onClick={() => (navigator as any).share({ title: 'Cortex 對話分享', url: shareLink })}
-                  className="w-full mt-3 py-3 text-sm text-blue-600 border border-blue-200 active:bg-blue-50 rounded-lg inline-flex items-center justify-center gap-2"
+                  className="w-full mt-3 py-3 text-sm text-blue-600 border border-blue-200 active:bg-[var(--t-accent-subtle)] rounded-lg inline-flex items-center justify-center gap-2"
                 >
                   <Share2 size={14} /> 用系統分享面板
                 </button>
@@ -1395,27 +1404,27 @@ export default function MobileChatLayout() {
       <Drawer.Root open={!!skillVarSheet} onOpenChange={(o) => { if (!o) setSkillVarSheet(null) }}>
         <Drawer.Portal>
           <Drawer.Overlay className="fixed inset-0 bg-black/40 z-[55]" />
-          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-[60] bg-white rounded-t-2xl pb-safe max-h-[90vh] flex flex-col">
+          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-[60] t-bg-card rounded-t-2xl pb-safe max-h-[90vh] flex flex-col">
             <Drawer.Title className="sr-only">技能參數</Drawer.Title>
             <div className="mx-auto w-10 h-1 rounded-full bg-slate-300 mt-2 flex-shrink-0" />
             {skillVarSheet && (
               <>
-                <div className="px-4 pt-2 pb-3 border-b border-slate-100 flex-shrink-0">
-                  <p className="text-sm font-semibold text-slate-800">
+                <div className="px-4 pt-2 pb-3 border-b t-border-subtle flex-shrink-0">
+                  <p className="text-sm font-semibold t-text">
                     技能 <span className="text-purple-600">「{skillVarSheet.skillName}」</span>— 輸入參數
                   </p>
                 </div>
                 <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
                   {skillVarSheet.variables.map((v: any) => (
                     <div key={v.name}>
-                      <label className="block text-xs text-slate-500 mb-1">
+                      <label className="block text-xs t-text-muted mb-1">
                         {v.label || v.name} {v.required && <span className="text-red-400">*</span>}
                       </label>
                       {v.type === 'select' ? (
                         <select
                           value={skillVarSheet.values[v.name] ?? v.default ?? ''}
                           onChange={(e) => setSkillVarSheet(prev => prev ? { ...prev, values: { ...prev.values, [v.name]: e.target.value } } : null)}
-                          className="w-full border border-slate-200 rounded-lg px-3 py-3 text-sm bg-white focus:outline-none focus:border-purple-400"
+                          className="w-full border t-border rounded-lg px-3 py-3 text-sm t-bg-card focus:outline-none focus:border-purple-400"
                         >
                           <option value="">請選擇</option>
                           {(v.options || []).map((opt: string) => <option key={opt} value={opt}>{opt}</option>)}
@@ -1424,7 +1433,7 @@ export default function MobileChatLayout() {
                         <textarea
                           value={skillVarSheet.values[v.name] ?? ''}
                           onChange={(e) => setSkillVarSheet(prev => prev ? { ...prev, values: { ...prev.values, [v.name]: e.target.value } } : null)}
-                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm h-24 resize-y focus:outline-none focus:border-purple-400"
+                          className="w-full border t-border rounded-lg px-3 py-2 text-sm h-24 resize-y focus:outline-none focus:border-purple-400"
                           placeholder={v.placeholder}
                         />
                       ) : v.type === 'checkbox' ? (
@@ -1435,24 +1444,24 @@ export default function MobileChatLayout() {
                             onChange={(e) => setSkillVarSheet(prev => prev ? { ...prev, values: { ...prev.values, [v.name]: e.target.checked } } : null)}
                             className="w-5 h-5"
                           />
-                          <span className="text-sm text-slate-700">{v.placeholder || (v.label || v.name)}</span>
+                          <span className="text-sm t-text">{v.placeholder || (v.label || v.name)}</span>
                         </label>
                       ) : (
                         <input
                           type={v.type === 'number' ? 'number' : v.type === 'date' ? 'date' : 'text'}
                           value={skillVarSheet.values[v.name] ?? ''}
                           onChange={(e) => setSkillVarSheet(prev => prev ? { ...prev, values: { ...prev.values, [v.name]: e.target.value } } : null)}
-                          className="w-full border border-slate-200 rounded-lg px-3 py-3 text-sm focus:outline-none focus:border-purple-400"
+                          className="w-full border t-border rounded-lg px-3 py-3 text-sm focus:outline-none focus:border-purple-400"
                           placeholder={v.placeholder}
                         />
                       )}
                     </div>
                   ))}
                 </div>
-                <div className="border-t border-slate-100 p-3 flex items-center gap-2 flex-shrink-0">
+                <div className="border-t t-border-subtle p-3 flex items-center gap-2 flex-shrink-0">
                   <button
                     onClick={() => setSkillVarSheet(null)}
-                    className="flex-1 py-2.5 text-sm text-slate-600 rounded-lg active:bg-slate-100"
+                    className="flex-1 py-2.5 text-sm t-text-secondary rounded-lg active:bg-[var(--t-bg-card-hover)]"
                   >
                     {t('common.cancel')}
                   </button>
