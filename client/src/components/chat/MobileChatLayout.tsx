@@ -10,8 +10,9 @@ import {
   LogOut, Globe, Sparkles, Settings, Paperclip, X,
   FileText, Image as ImageIcon, Music,
   Zap, LayoutTemplate, BarChart3, MessageSquarePlus,
-  HelpCircle, Database, Share2, Copy, Check, Fingerprint,
+  HelpCircle, Database, Share2, Copy, Check, Fingerprint, Palette,
 } from 'lucide-react'
+import { useTheme, THEMES } from '../../context/ThemeContext'
 import MyDevicesModal from '../MyDevicesModal'
 import { buildAcceptAttr } from '../../lib/uploadFileTypes'
 import ErpToolPicker from './ErpToolPicker'
@@ -84,6 +85,8 @@ export default function MobileChatLayout() {
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [showLang, setShowLang] = useState(false)
+  const [showTheme, setShowTheme] = useState(false)
+  const { theme, setTheme } = useTheme()
   const [plusOpen, setPlusOpen] = useState(false)
   const [erpPickerOpen, setErpPickerOpen] = useState(false)
   const [erpInvoking, setErpInvoking] = useState<ErpTool | null>(null)
@@ -1015,6 +1018,16 @@ export default function MobileChatLayout() {
                 </span>
               </button>
               <button
+                onClick={() => { setShowTheme(true); setMenuOpen(false) }}
+                className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
+              >
+                <Palette size={18} className="text-slate-500" />
+                <span className="flex-1 text-sm text-slate-800">{t('mobile.menu.theme')}</span>
+                <span className="text-xs text-slate-500">
+                  {t(THEMES.find((it) => it.id === theme)?.labelKey || 'theme.dark.label')}
+                </span>
+              </button>
+              <button
                 onClick={() => { setMenuOpen(false); setShowMyDevices(true) }}
                 className="w-full px-3 py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 flex items-center gap-3 text-left"
               >
@@ -1038,6 +1051,41 @@ export default function MobileChatLayout() {
                 <LogOut size={18} className="text-red-500" />
                 <span className="flex-1 text-sm text-red-600">{t('mobile.unsupported.logout')}</span>
               </button>
+            </div>
+          </Drawer.Content>
+        </Drawer.Portal>
+      </Drawer.Root>
+
+      {/* 主題風格(疊在設定選單上)— 沿用桌機 ThemeContext,跨裝置同步 */}
+      <Drawer.Root open={showTheme} onOpenChange={setShowTheme}>
+        <Drawer.Portal>
+          <Drawer.Overlay className="fixed inset-0 bg-black/40 z-40" />
+          <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl pb-safe">
+            <Drawer.Title className="sr-only">{t('mobile.menu.theme')}</Drawer.Title>
+            <div className="mx-auto w-10 h-1 rounded-full bg-slate-300 mt-2" />
+            <div className="px-4 py-3 border-b border-slate-100">
+              <p className="text-sm font-semibold text-slate-800">{t('theme.title', '主題風格')}</p>
+            </div>
+            <div className="p-2">
+              {THEMES.map((it) => {
+                const active = theme === it.id
+                return (
+                  <button
+                    key={it.id}
+                    onClick={() => { setTheme(it.id); setShowTheme(false) }}
+                    className={`w-full px-3 py-3 rounded-lg flex items-center gap-3 text-left ${
+                      active ? 'bg-blue-50' : 'hover:bg-slate-50 active:bg-slate-100'
+                    }`}
+                  >
+                    <div className={`w-6 h-6 rounded-full border-2 ${it.preview} flex-shrink-0 ${active ? 'border-blue-500' : 'border-slate-200'}`} />
+                    <div className="flex-1">
+                      <div className={`text-sm ${active ? 'text-blue-800 font-medium' : 'text-slate-800'}`}>{t(it.labelKey)}</div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">{t(it.descKey)}</div>
+                    </div>
+                    {active && <Check size={16} className="text-blue-600 flex-shrink-0" />}
+                  </button>
+                )
+              })}
             </div>
           </Drawer.Content>
         </Drawer.Portal>
