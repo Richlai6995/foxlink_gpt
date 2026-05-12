@@ -67,22 +67,11 @@ export function GlobalThemeProvider({ children }: { children: ReactNode }) {
     document.documentElement.setAttribute('data-theme', theme)
   }, [theme])
 
-  // 登入後從 server 同步 user.theme（若跟本地不同）
-  useEffect(() => {
-    const token = localStorage.getItem('token')
-    if (!token) return
-    // 不用 await，非同步跟 /auth/me 並行
-    try {
-      const cached = localStorage.getItem('user')
-      if (!cached) return
-      const u = JSON.parse(cached)
-      const serverTheme = sanitize(u?.theme)
-      if (serverTheme && serverTheme !== theme) {
-        setThemeState(serverTheme)
-        localStorage.setItem(STORAGE_KEY, serverTheme)
-      }
-    } catch (_) {}
-  }, [])
+  // 2026-05-12:原本這裡有從 cached user.theme 覆寫 state 的邏輯,但 getInitialTheme()
+  // 已涵蓋 localStorage > legacy > user.theme > DEFAULT 的 fallback 鏈,此 useEffect 冗餘。
+  // 而且它在 AuthContext /auth/me 跑完之前讀 cached user 可能是 stale 的,
+  // 造成 refresh 後主題被「server 端 default 'dark'」覆寫 — 已刪除。
+  // 跨裝置同步靠 setTheme 寫 PUT /auth/theme + 首次登入時 applyUserTheme 從 server 拉。
 
   // 監聽 storage 事件：另一個分頁改主題時，本頁也跟著變
   useEffect(() => {

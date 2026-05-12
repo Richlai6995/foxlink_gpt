@@ -10,13 +10,16 @@ import { isMobileSync } from '../hooks/useDeviceProfile'
 
 const VALID_THEMES: UITheme[] = ['dark', 'dark-dimmed', 'light-blue', 'light-green', 'light-yellow']
 function applyUserTheme(u: any, setTheme: (t: UITheme) => void) {
+  // 2026-05-12 改成本地優先:有 localStorage 值就絕不被 server 覆蓋,避免 refresh 後
+  // server 端值(可能是 default 'dark' 或舊值)蓋掉使用者剛切的主題。
+  // server 端值只在「全新瀏覽器 / 首次登入」(local 沒值)時當 initial fallback,
+  // 之後使用者切主題會背景 PUT 同步,跨裝置改也是用第一次登入該裝置時拉一次。
+  const local = localStorage.getItem('foxlink-theme') as UITheme | null
+  if (local && VALID_THEMES.includes(local as UITheme)) return // 本地優先,直接 return
   const t = u?.theme
   if (t && VALID_THEMES.includes(t)) {
-    // 只有當 localStorage 沒設或跟 server 不同時才套用 — 避免覆蓋使用者剛在本地改的值
-    const local = localStorage.getItem('foxlink-theme') as UITheme | null
-    if (!local || local !== t) setTheme(t)
-  } else if (!localStorage.getItem('foxlink-theme')) {
-    // 伺服器沒值且本地也沒值 → 保持預設
+    setTheme(t)
+  } else {
     setTheme(DEFAULT_THEME)
   }
 }
