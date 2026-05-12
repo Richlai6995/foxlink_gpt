@@ -120,11 +120,11 @@ export default function Sidebar() {
         </Section>
 
         <Section label="管理">
-          <NavItem icon={FileText} label="表單範本" stub />
-          <NavItem icon={ListTodo} label="任務模板" stub />
-          <NavItem icon={ShieldCheck} label="機密策略" stub />
-          <NavItem icon={Bell} label="通知規則" stub />
-          <NavItem icon={Plug} label="連線管理(ERP/SQL)" stub />
+          <NavItem to="/projects-platform/admin/form-templates" icon={FileText} label="表單範本" />
+          <NavItem to="/projects-platform/admin/task-templates" icon={ListTodo} label="任務模板" />
+          <NavItem to="/projects-platform/admin/confidential-policies" icon={ShieldCheck} label="機密策略" />
+          <NavItem to="/projects-platform/admin/notification-rules" icon={Bell} label="通知規則" />
+          <NavItem to="/projects-platform/admin/connections" icon={Plug} label="連線管理(ERP/SQL)" />
           <NavItem icon={Settings} label="系統設定" stub />
         </Section>
 

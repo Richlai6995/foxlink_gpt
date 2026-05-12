@@ -5,7 +5,7 @@ import {
   Upload, Trash2, RefreshCw, CheckCircle, XCircle, Clock,
   AlertCircle, Globe, Lock, ChevronDown, ChevronUp, Plus, X,
   User, Building2, Layers, BookOpen, Save, Target, Image, History,
-  Pencil, Check, Mail,
+  Pencil, Check, Mail, ShieldAlert,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import api from '../lib/api'
@@ -32,9 +32,10 @@ interface KnowledgeBase {
   parse_mode: string | null
   pdf_ocr_mode: string | null
   retrieval_config: string | null
-  is_public: number; public_status: string
+  is_public: number; is_confidential?: number; public_status: string
   doc_count: number; chunk_count: number; total_size_bytes: number
   creator_id: number; creator_name: string; is_owner: boolean; can_edit: boolean
+  can_view_content?: boolean
   created_at: string; updated_at: string
   tags?: string
 }
@@ -244,7 +245,9 @@ export default function KnowledgeBaseDetailPage() {
             <span><span className="font-medium text-slate-700">{kb.chunk_count}</span> {t('kb.detail.chunkCountLabel')}</span>
             <span><span className="font-medium text-slate-700">{formatBytes(kb.total_size_bytes)}</span></span>
             <span className="bg-slate-100 px-2 py-0.5 rounded-full">{kb.embedding_dims}d · {kb.chunk_strategy}</span>
-            {kb.is_public === 1 || kb.public_status === 'public'
+            {kb.is_confidential === 1 ? (
+              <span className="flex items-center gap-1 bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full"><ShieldAlert size={10} />{t('kb.statusConfidential')}</span>
+            ) : kb.is_public === 1 || kb.public_status === 'public'
               ? <span className="flex items-center gap-1 bg-green-100 text-green-700 px-2 py-0.5 rounded-full"><Globe size={10} />{t('kb.statusPublic')}</span>
               : kb.public_status === 'pending'
               ? <span className="flex items-center gap-1 bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full"><Clock size={10} />{t('kb.statusPending')}</span>
@@ -275,34 +278,48 @@ export default function KnowledgeBaseDetailPage() {
           )}
         </div>
 
-        {/* Tabs */}
-        <div className="flex gap-1 border-b border-slate-200 bg-white rounded-t-xl px-4">
-          {TAB_KEYS.map((key) => (
-            <button
-              key={key}
-              onClick={() => setTab(key)}
-              className={`px-4 py-3 text-sm font-medium border-b-2 transition -mb-px ${
-                tab === key ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              {key === 'docs'     && <FileText  size={14} className="inline mr-1.5" />}
-              {key === 'settings' && <Settings  size={14} className="inline mr-1.5" />}
-              {key === 'share'    && <Share2    size={14} className="inline mr-1.5" />}
-              {key === 'search'   && <Search    size={14} className="inline mr-1.5" />}
-              {key === 'history'  && <History   size={14} className="inline mr-1.5" />}
-              {tabLabel(key)}
-            </button>
-          ))}
-        </div>
+        {/* 保密 KB 內容遮蔽(admin metadata-only) */}
+        {kb.can_view_content === false ? (
+          <div className="bg-rose-50 border border-rose-200 rounded-xl p-8 text-center space-y-3">
+            <ShieldAlert size={48} className="mx-auto text-rose-500" />
+            <h3 className="text-base font-semibold text-rose-800">{t('kb.confidential.adminMetadataOnlyTitle')}</h3>
+            <p className="text-sm text-rose-700/80 max-w-md mx-auto">{t('kb.confidential.adminMetadataOnlyDesc')}</p>
+            <div className="text-xs text-rose-700/70 pt-2 border-t border-rose-200 inline-block px-4">
+              {t('kb.confidential.contactOwner', { owner: kb.creator_name })}
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Tabs */}
+            <div className="flex gap-1 border-b border-slate-200 bg-white rounded-t-xl px-4">
+              {TAB_KEYS.map((key) => (
+                <button
+                  key={key}
+                  onClick={() => setTab(key)}
+                  className={`px-4 py-3 text-sm font-medium border-b-2 transition -mb-px ${
+                    tab === key ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  {key === 'docs'     && <FileText  size={14} className="inline mr-1.5" />}
+                  {key === 'settings' && <Settings  size={14} className="inline mr-1.5" />}
+                  {key === 'share'    && <Share2    size={14} className="inline mr-1.5" />}
+                  {key === 'search'   && <Search    size={14} className="inline mr-1.5" />}
+                  {key === 'history'  && <History   size={14} className="inline mr-1.5" />}
+                  {tabLabel(key)}
+                </button>
+              ))}
+            </div>
 
-        {/* Tab content */}
-        <div className="bg-white border border-slate-200 rounded-xl -mt-4 rounded-t-none border-t-0">
-          {tab === 'docs'     && <DocumentsTab kb={kb} onRefresh={loadKb} isOwner={kb.can_edit || isAdmin} />}
-          {tab === 'settings' && <SettingsTab  kb={kb} onSaved={loadKb} isOwner={kb.can_edit || isAdmin} />}
-          {tab === 'share'    && <ShareTab     kb={kb} isOwner={kb.is_owner || isAdmin} />}
-          {tab === 'search'   && <SearchTab    kb={kb} />}
-          {tab === 'history'  && <QueryHistoryTab kbId={kb.id} />}
-        </div>
+            {/* Tab content */}
+            <div className="bg-white border border-slate-200 rounded-xl -mt-4 rounded-t-none border-t-0">
+              {tab === 'docs'     && <DocumentsTab kb={kb} onRefresh={loadKb} isOwner={kb.can_edit || isAdmin} />}
+              {tab === 'settings' && <SettingsTab  kb={kb} onSaved={loadKb} isOwner={kb.can_edit || isAdmin} />}
+              {tab === 'share'    && <ShareTab     kb={kb} isOwner={kb.is_owner || isAdmin} />}
+              {tab === 'search'   && <SearchTab    kb={kb} />}
+              {tab === 'history'  && <QueryHistoryTab kbId={kb.id} />}
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
@@ -604,8 +621,9 @@ function DocumentsTab({ kb, onRefresh, isOwner }: { kb: KnowledgeBase; onRefresh
 
 function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () => void; isOwner: boolean }) {
   const { t } = useTranslation()
-  const { isAdmin } = useAuth()
+  const { isAdmin, user: authUser } = useAuth()
   const canEditTags = isOwner || isAdmin
+  const isCreatorOwner = String(kb.creator_id) === String((authUser as any)?.id || '')
   const defaultCfg = {
     separator:        '\\n\\n',
     max_size:         1024,
@@ -620,6 +638,7 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
 
   const [kbName,     setKbName]     = useState(kb.name)
   const [kbDesc,     setKbDesc]     = useState(kb.description ?? '')
+  const [confidential, setConfidential] = useState<boolean>(Number(kb.is_confidential) === 1)
   const [strategy,   setStrategy]   = useState(kb.chunk_strategy)
   const [cfg,        setCfg]        = useState<Record<string, unknown>>(merged)
   const [retMode,    setRetMode]    = useState(kb.retrieval_mode)
@@ -692,7 +711,7 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
     const pdfOcrModeChanged = (kb.pdf_ocr_mode || 'off') !== pdfOcrMode
     const parseModeChanged = (kb.parse_mode || 'text_only') !== parseMode
     try {
-      await api.put(`/kb/${kb.id}`, {
+      const payload: Record<string, unknown> = {
         name:             kbName.trim() || kb.name,
         description:      kbDesc.trim() || null,
         tags:             kbTags,
@@ -707,7 +726,10 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
         parse_mode:       parseMode || 'text_only',
         pdf_ocr_mode:     pdfOcrMode,
         retrieval_config: buildRetrievalConfig(),
-      })
+      }
+      // 保密狀態只有 owner 可切換
+      if (isCreatorOwner) payload.is_confidential = confidential
+      await api.put(`/kb/${kb.id}`, payload)
       setMsg(t('kb.settings.savedOk'))
       onSaved()
       setTimeout(() => setMsg(''), 2000)
@@ -761,6 +783,30 @@ function SettingsTab({ kb, onSaved, isOwner }: { kb: KnowledgeBase; onSaved: () 
               />
             </div>
           </div>
+        </div>
+      )}
+
+      {/* 保密 KB toggle — 只有 owner 可改 */}
+      {isCreatorOwner && (
+        <div>
+          <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+            <ShieldAlert size={15} className="text-rose-500" /> {t('kb.settings.confidentialSection')}
+          </h3>
+          <label className={`flex items-start gap-2 p-3 border rounded-lg cursor-pointer transition ${confidential ? 'border-rose-300 bg-rose-50' : 'border-slate-200 bg-slate-50'}`}>
+            <input
+              type="checkbox"
+              checked={confidential}
+              onChange={(e) => setConfidential(e.target.checked)}
+              className="mt-0.5 accent-rose-600"
+            />
+            <div className="flex-1">
+              <div className="text-sm font-medium text-slate-700">{t('kb.createModal.confidentialLabel')}</div>
+              <p className="text-xs text-slate-500 mt-0.5">{t('kb.createModal.confidentialDesc')}</p>
+              {confidential && (kb.is_public === 1 || kb.public_status === 'pending') && (
+                <p className="text-xs text-rose-600 mt-1">{t('kb.settings.confidentialWillResetPublic')}</p>
+              )}
+            </div>
+          </label>
         </div>
       )}
 

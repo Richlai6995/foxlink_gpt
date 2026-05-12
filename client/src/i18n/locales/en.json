@@ -1065,6 +1065,12 @@
     "statusPublic": "Public",
     "statusPending": "Pending",
     "statusPrivate": "Private",
+    "statusConfidential": "Confidential",
+    "confidential": {
+      "adminMetadataOnlyTitle": "Confidential KB — Content Restricted",
+      "adminMetadataOnlyDesc": "This is a confidential knowledge base. Administrators can only see basic metadata (name, owner, size). Documents, chunks, search and share settings are inaccessible unless the owner explicitly grants you access via Share settings.",
+      "contactOwner": "Owner: {{owner}}"
+    },
     "pageTitle": "Knowledge Base",
     "backToChat": "Back to Chat",
     "searchPlaceholder": "Search knowledge bases...",
@@ -1107,7 +1113,9 @@
       "cancel": "Cancel",
       "creating": "Creating...",
       "create": "Create",
-      "nameRequired": "Please enter a knowledge base name"
+      "nameRequired": "Please enter a knowledge base name",
+      "confidentialLabel": "Confidential KB (admins cannot view content)",
+      "confidentialDesc": "When enabled: cannot be made public; admins only see name and basic metadata in the list — they need your explicit grant via Share settings to access content, documents, or search."
     },
     "detail": {
       "breadcrumbKb": "Knowledge Base",

@@ -264,7 +264,36 @@ server/projects-platform/
 
 ---
 
-### Sprint E — Admin 後台 + 機密 + Inbound(2 週)
+### ⏳ Sprint E.1 — Admin 後台 5 頁(2026-05-12 完成 UI demo;後端串接留 E.2 / F)
+
+**已完成**(全 client UI,mock data,結構對齊 HTML demo + spec):
+- ✅ `Admin/AdminPageShell.tsx`:共用 layout(page head + scope toggle SYSTEM/BU/USER)
+- ✅ `Admin/FormTemplates.tsx`:3-pane designer(sections / fields / properties + 機密策略矩陣)
+  - 6 sections × 18 fields(QUOTE)+ 4 type tabs + version card + scope toggle
+- ✅ `Admin/TaskTemplates.tsx`:EPIC × SUBTASK 樹(6 EPIC × 24 SUBTASK QUOTE)
+  - 收合 / 選中切換 properties / RACI A·R pill / Dependency chip
+- ✅ `Admin/NotificationRules.tsx`:5 通道 + 8 規則 + 2 escalation chain
+  - 規則 enable toggle / 優先序 pill / 通道 icon row
+- ✅ `Admin/Connections.tsx`:5 source_type + 6 連線 + Field Mapping 視覺化
+  - 拖拉箭頭 placeholder + 安全規範 banner
+- ✅ `Admin/ConfidentialPolicies.tsx`:**4 顯示策略 + 6 角色 demo**(即時切換)
+  - TIER / ALIAS / MASK / RANGE explainer 卡
+  - 互動 demo 表格:切右上「視角」dropdown,即時看每個欄位顯示變化(HOST/PARTICIPANT/OBSERVER/CHAT_GUEST/SUPER/OUTSIDER)
+- ✅ Routes:`/projects-platform/admin/{form-templates|task-templates|notification-rules|connections|confidential-policies}`
+- ✅ Sidebar 5 個管理 link 啟用(只有「系統設定」still stub)
+
+### ⏳ Sprint E.2 — 後端串接(待做)
+
+- 機密欄位 `confidentialityMiddleware` 真實套 displayStrategy(目前前端 mock)
+- Form template CRUD(qp_form_templates migration 007-010)
+- Task template CRUD(沿用 Sprint 1 schema,UI 寫值進 DB)
+- Notification rule routing engine + Webex / Email gateway 串接
+- Connection CRUD + inboundResolver 真接 ERP / SQL
+- 6 角色 demo 真實串到後端(X-Demo-Role header 切換)
+
+---
+
+### Sprint E — Admin 後台 + 機密 + Inbound(原計畫,已切成 E.1 UI + E.2 後端串接)
 
 **目標**:對齊 demo Story 10, 11 + 機密 4 策略
 

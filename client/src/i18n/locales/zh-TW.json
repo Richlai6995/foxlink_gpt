@@ -1065,6 +1065,12 @@
     "statusPublic": "公開",
     "statusPending": "審核中",
     "statusPrivate": "私有",
+    "statusConfidential": "保密",
+    "confidential": {
+      "adminMetadataOnlyTitle": "保密知識庫 — 無法瀏覽內容",
+      "adminMetadataOnlyDesc": "此為保密知識庫,系統管理員預設僅能查看名稱與基本資訊,無法存取文件、片段、檢索結果或共享設定。如需檢視內容,請聯絡知識庫擁有者並請其於共享設定中授權。",
+      "contactOwner": "擁有者:{{owner}}"
+    },
     "pageTitle": "知識庫",
     "backToChat": "返回聊天",
     "searchPlaceholder": "搜尋知識庫...",
@@ -1107,7 +1113,9 @@
       "cancel": "取消",
       "creating": "建立中...",
       "create": "建立",
-      "nameRequired": "請輸入知識庫名稱"
+      "nameRequired": "請輸入知識庫名稱",
+      "confidentialLabel": "保密知識庫(管理員不可瀏覽內容)",
+      "confidentialDesc": "啟用後:不可申請公開;系統管理員僅能在列表看到名稱與基本資訊,需經您於共享設定授權後才能存取內容/文件/檢索。"
     },
     "detail": {
       "breadcrumbKb": "知識庫",
@@ -1153,6 +1161,8 @@
     },
     "settings": {
       "basicSection": "基本資訊",
+      "confidentialSection": "保密設定",
+      "confidentialWillResetPublic": "⚠ 儲存後將自動取消公開狀態(含 pending 申請)。",
       "nameLabel": "知識庫名稱",
       "descLabel": "說明",
       "chunkSection": "分段設定",

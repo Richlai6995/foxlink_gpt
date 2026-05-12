@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Plus, BookOpen, Cpu, Trash2, Search, FileText,
-  Lock, Globe, Clock, ChevronRight, AlertCircle, Layers,
+  Lock, Globe, Clock, ChevronRight, AlertCircle, Layers, ShieldAlert,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import api from '../lib/api'
@@ -18,6 +18,7 @@ interface KnowledgeBase {
   chunk_strategy: string
   retrieval_mode: string
   is_public: number
+  is_confidential?: number
   public_status: string
   doc_count: number
   chunk_count: number
@@ -25,6 +26,7 @@ interface KnowledgeBase {
   creator_name: string
   creator_emp: string | null
   is_owner: boolean
+  can_view_content?: boolean
   created_at: string
   updated_at: string
 }
@@ -38,6 +40,7 @@ interface CreateForm {
   ocr_model: string
   parse_mode: string
   pdf_ocr_mode: 'off' | 'auto' | 'force'
+  is_confidential: boolean
 }
 
 const emptyForm = (): CreateForm => ({
@@ -49,6 +52,7 @@ const emptyForm = (): CreateForm => ({
   ocr_model: '',
   parse_mode: 'text_only',
   pdf_ocr_mode: 'auto',
+  is_confidential: false,
 })
 
 function formatBytes(bytes: number) {
@@ -135,6 +139,8 @@ export default function KnowledgeBasePage() {
   const sharedKbs = filtered.filter((kb) => !kb.is_owner)
 
   const statusBadge = (kb: KnowledgeBase) => {
+    if (kb.is_confidential === 1)
+      return <span className="flex items-center gap-1 text-xs px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded-full"><ShieldAlert size={10} />{t('kb.statusConfidential')}</span>
     if (kb.is_public === 1 || kb.public_status === 'public')
       return <span className="flex items-center gap-1 text-xs px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full"><Globe size={10} />{t('kb.statusPublic')}</span>
     if (kb.public_status === 'pending')
@@ -318,6 +324,22 @@ export default function KnowledgeBasePage() {
                 </select>
               </div>
             </div>
+
+            {/* 保密 KB checkbox */}
+            <label className="flex items-start gap-2 p-3 bg-rose-50 border border-rose-200 rounded-lg cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.is_confidential}
+                onChange={(e) => setForm({ ...form, is_confidential: e.target.checked })}
+                className="mt-0.5 accent-rose-600"
+              />
+              <div className="flex-1">
+                <div className="flex items-center gap-1.5 text-sm font-medium text-rose-800">
+                  <ShieldAlert size={13} /> {t('kb.createModal.confidentialLabel')}
+                </div>
+                <p className="text-xs text-rose-700/80 mt-0.5">{t('kb.createModal.confidentialDesc')}</p>
+              </div>
+            </label>
 
             {error && <p className="text-red-500 text-sm">{error}</p>}
 

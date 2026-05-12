@@ -21,6 +21,11 @@ import PlatformShell from './Shell/PlatformShell'
 import ProjectsList from './Projects/ProjectsList'
 import WarRoom from './WarRoom/WarRoom'
 import Dashboard from './Dashboard/Dashboard'
+import FormTemplates from './Admin/FormTemplates'
+import TaskTemplates from './Admin/TaskTemplates'
+import NotificationRules from './Admin/NotificationRules'
+import Connections from './Admin/Connections'
+import ConfidentialPolicies from './Admin/ConfidentialPolicies'
 import InternalAdminOverview from './InternalAdmin/Overview'
 import SystemHealthPage from './InternalAdmin/SystemHealth'
 
@@ -97,6 +102,11 @@ export default function ProjectsPlatformPage() {
           <Route index element={<ProjectsList />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="projects/:id" element={<WarRoom />} />
+          <Route path="admin/form-templates" element={<FormTemplates />} />
+          <Route path="admin/task-templates" element={<TaskTemplates />} />
+          <Route path="admin/notification-rules" element={<NotificationRules />} />
+          <Route path="admin/connections" element={<Connections />} />
+          <Route path="admin/confidential-policies" element={<ConfidentialPolicies />} />
           <Route path="internal-admin/overview" element={<AdminGuard mode={v.mode}><InternalAdminOverview /></AdminGuard>} />
           <Route path="internal-admin/system-health" element={<AdminGuard mode={v.mode}><SystemHealthPage /></AdminGuard>} />
           <Route path="*" element={<Navigate to="" replace />} />
