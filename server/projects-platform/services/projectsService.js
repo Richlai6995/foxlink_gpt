@@ -89,21 +89,30 @@ async function create(db, input) {
   // 3. payload(title 寫進 payload,避免主表又加一欄)
   const payload = { title, ...(data_payload || {}) };
 
+  // 3.5 機密旗標 — 從 payload 提取(Wizard Step 3 寫入)
+  const isConfidential = (payload.isConfidential || payload.is_confidential) ? 1 : 0;
+  const confidentialFieldsJson = Array.isArray(payload.confidentialFields)
+    ? JSON.stringify(payload.confidentialFields)
+    : null;
+
   // 4. INSERT projects
   const ins = await db.prepare(
     `INSERT INTO projects (
        project_code, project_type_id, workflow_template_id,
        data_payload,
+       is_confidential, confidential_fields,
        sales_user_id, pm_user_id, bu_id,
        lifecycle_status, status,
        importance, urgency,
        created_by_user_id
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, 'DRAFT', 'DRAFT', ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', 'DRAFT', ?, ?, ?)`,
   ).run(
     project_code,
     Number(typeRow.id),
     typeRow.default_workflow_template_id ? Number(typeRow.default_workflow_template_id) : null,
     JSON.stringify(payload),
+    isConfidential,
+    confidentialFieldsJson,
     sales_user_id || null,
     finalPmId,
     bu_id,
