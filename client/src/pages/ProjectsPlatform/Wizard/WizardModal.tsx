@@ -108,7 +108,7 @@ export default function WizardModal({ open, onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-[200] bg-black/50 flex items-center justify-center p-4 font-cortex">
-      <div className="bg-white rounded-xl shadow-cortex-lg w-full max-w-[920px] max-h-[90vh] flex flex-col overflow-hidden">
+      <div className="bg-white rounded-xl shadow-cortex-lg w-full max-w-[920px] h-[min(640px,calc(100vh-2rem))] flex flex-col overflow-hidden">
         {/* Header */}
         <div className="px-5 py-3 border-b border-cortex-line flex items-center justify-between bg-cortex-navy text-white">
           <div className="flex items-center gap-2">
@@ -129,8 +129,8 @@ export default function WizardModal({ open, onClose }: Props) {
         {/* Stepper */}
         <WizardStepper current={step} onJump={setStep} />
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-5 bg-cortex-bg min-h-[420px]">
+        {/* Content — flex-1 + min-h-0 讓 overflow-y-auto 真的生效,footer 才不會被擠出 */}
+        <div className="flex-1 min-h-0 overflow-y-auto p-5 bg-cortex-bg">
           {step === 1 && <Step1Intake          data={data} onChange={patch} />}
           {step === 2 && <Step2History         data={data} onChange={patch} />}
           {step === 3 && <Step3Confidentiality data={data} onChange={patch} />}
