@@ -120,23 +120,35 @@ server/projects-platform/
 
 ---
 
-### Sprint B — ⭐ 開案 Wizard 7 步驟(1 週)
+### ✅ Sprint B — ⭐ 開案 Wizard 7 步驟(2026-05-12 完成)
 
-**目標**:對齊 PPT slide 5-8 + Demo 手冊 §7
+**目標**:對齊 PPT slide 5-8 + Demo 手冊 §7;UI 完整,AI mock,Sprint F 接真實 Gemini Flash
 
-**任務**:
-- modal Wizard shell(7 步驟 progress + 上/下一步 + 取消)
-- Step 1:客戶來信 — 拖檔上傳 + AI 解析 panel(stub,顯示 mock 結果)
-- Step 2:歷史參考 — 5 案推薦 + AI 推薦 PM + 交期合理性燈(stub)
-- Step 3:機密設定 — 欄位勾選 + AI 預判
-- Step 4:PM/Team — DPM/BPM/MPM/EPM 指派
-- Step 5:流程模板 — 套 QUOTE_STANDARD 8-stage + AI 算 dependency
-- Step 6:重要緊急 — priority_score 矩陣
-- Step 7:確認啟動 — 一頁預覽 + 啟動 → 自動 5 件事(建 channels / stages / 通知 / Pin / SLA)
-- AI 整合 stub(Sprint F 接 real AI)
-- 觸發點:ProjectsList「+ 新增專案」按鈕
+**已完成**:
+- ✅ `wizardState.ts`:WizardData type + INITIAL_WIZARD + generateProjectCode(Q-YYYY-NNNN)
+- ✅ `WizardStepper`:7 圓點 + 連接線(active gradient / done cyan / pending grey),點圓可跳
+- ✅ `WizardSteps`(Step 1-7 同檔):
+  - Step 1 客戶來信 — 拖檔 + AI 預填 4 欄位 + 信心度(92%)+ AI 助手 navy panel + 規格不清提示
+  - Step 2 歷史參考 — 3 案推薦卡(WIN/LOSS)+ AI 推薦 PM(Mike Wang)+ 推薦 Workflow + 預估週期 + 交期合理性綠燈
+  - Step 3 機密設定 — 6 欄位 TIER/ALIAS/MASK/RANGE/NONE 策略 + toggle + AI 判定理由
+  - Step 4 PM/Team — 業務 + 助理 + 4 PM 指派(DPM/BPM/MPM/EPM)+ AI 推薦來源
+  - Step 5 流程模板 — 8 stages 卡片(⚖ GATE / ⚡ 並行 / SLA)+ Dependency 列表 navy panel
+  - Step 6 priority 矩陣 — 3×3 點擊選 score(高重/中重/低重 × 低急/中急/高急)+ AI 推薦理由
+  - Step 7 確認啟動 — 6 區預覽 + 5 件事清單(建 channels / stages / 通知 / Pin / SLA)
+- ✅ `WizardModal`:navy header + stepper + content + 上/下步 + 「✓ 啟動專案」
+- ✅ 啟動接 backend POST /projects(project_code 自動產生 / data_payload 帶 wizard 所有 step 結果 / importance 從 priorityScore 推)
+- ✅ 啟動成功 → 自動跳 WarRoom(因 backend 已建 7 channels + 8 stages)
+- ✅ ProjectsList「+ 新增專案」按鈕觸發 + reload after close
+- ✅ TypeScript compile clean(我加的檔案 0 errors)
 
-**Deliverable**:點建案 → Wizard 跑得起來 → 啟動後產生 project + 7 channels + 8 stages
+**Deliverable**:demo 跑得起來,30min → 5min 開案流程完整呈現 ✓
+
+**Sprint F 補**(real AI):
+- ⏳ Step 1 RFQ PDF 真實上傳 + Gemini Flash 解析(#1)
+- ⏳ Step 2 真實歷史相似案 RAG(#2)+ 真實 PM 推薦(#37)+ 真實交期合理性(#32)
+- ⏳ Step 3 AI 預判機密欄位(rule-based)
+- ⏳ Step 4 真實 PM team member 邀請邏輯
+- ⏳ Step 6 AI 推薦 priority_score
 
 ---
 

@@ -19,6 +19,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { api, type Project, type ProjectType } from '../api'
 import { useCrumbs } from '../Shell/PlatformContext'
 import ProjectCard from './ProjectCard'
+import WizardModal from '../Wizard/WizardModal'
 
 type Filter = 'all' | 'active' | 'paused' | 'closed' | 'confidential'
 
@@ -40,6 +41,7 @@ export default function ProjectsList() {
   const [search, setSearch] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [showWizard, setShowWizard] = useState(false)
 
   const reload = async () => {
     if (!token) return
@@ -102,7 +104,7 @@ export default function ProjectsList() {
             <Download size={14} /> 匯入 / 從 ERP 拉
           </button>
           <button
-            onClick={() => alert('「新增專案」Wizard 7 步 — Sprint B 開')}
+            onClick={() => setShowWizard(true)}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-[13px] font-bold bg-cortex-cyan text-cortex-navy hover:bg-[#04D9AC] hover:shadow-[0_2px_6px_rgba(2,195,154,0.30)] transition"
           >
             <Plus size={14} strokeWidth={2.5} /> 新增專案
@@ -147,6 +149,9 @@ export default function ProjectsList() {
           無法載入專案:{err}
         </div>
       )}
+
+      {/* Wizard modal */}
+      <WizardModal open={showWizard} onClose={() => { setShowWizard(false); reload() }} />
 
       {/* Grid */}
       {filtered.length === 0 && !loading ? (
