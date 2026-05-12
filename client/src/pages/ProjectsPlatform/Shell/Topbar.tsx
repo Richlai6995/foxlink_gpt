@@ -11,6 +11,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { usePlatform } from './PlatformContext'
 import RoleSwitcher from './RoleSwitcher'
+import { TOKENS } from '../tokens'
 
 export default function Topbar() {
   const { toggleSidebar, crumbs } = usePlatform()
@@ -20,7 +21,10 @@ export default function Topbar() {
   const initials = (user?.username || user?.name || 'U').slice(0, 1).toUpperCase()
 
   return (
-    <header className="fixed top-0 inset-x-0 h-14 bg-cortex-navy text-white flex items-center px-4 z-[100] shadow-[0_1px_0_rgba(255,255,255,0.04)] font-cortex">
+    <header
+      className="fixed top-0 inset-x-0 h-14 text-white flex items-center px-4 z-[100] shadow-[0_1px_0_rgba(255,255,255,0.04)] font-cortex"
+      style={{ backgroundColor: TOKENS.navy }}
+    >
       {/* Left */}
       <div className="flex items-center gap-3.5 flex-1 min-w-0">
         <button
