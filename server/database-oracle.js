@@ -388,6 +388,10 @@ async function runMigrations(db) {
   } catch (e) {
     if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn('[Migration] kb_documents_uhash:', e.message);
   }
+  // 2026-05-12 user UI theme 跨裝置持久化 — buildSessionPayload 會回此欄位讓前端套用
+  // (前端 PUT /auth/theme 寫;沒此 column 時 silent fail,主題只能存 localStorage 不跨裝置)
+  await addCol('USERS', 'THEME', "VARCHAR2(32) DEFAULT 'dark'");
+
   // Feedback Webex B 方案：DM thread parent message id
   await addCol('FEEDBACK_TICKETS', 'WEBEX_PARENT_MESSAGE_ID', 'VARCHAR2(200)');
   // 欄位可能已存在但長度不夠（100→200），嘗試擴大

@@ -23,6 +23,8 @@ async function buildSessionPayload(db, userId) {
     org_section:     u.org_section,
     org_group_name:  u.org_group_name,
     factory_code:    u.factory_code,
+    // UI theme(2026-05-12)— 前端 applyUserTheme 讀此值跨裝置同步主題
+    theme:           u.theme || 'dark',
   };
 }
 
