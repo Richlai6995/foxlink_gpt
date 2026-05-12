@@ -19,6 +19,7 @@ import { useNavigate } from 'react-router-dom'
 import { X, Loader2, Rocket } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
 import { api } from '../api'
+import { TOKENS } from '../tokens'
 import WizardStepper from './WizardStepper'
 import { INITIAL_WIZARD, type WizardData, generateProjectCode } from './wizardState'
 import {
@@ -110,7 +111,10 @@ export default function WizardModal({ open, onClose }: Props) {
     <div className="fixed inset-0 z-[200] bg-black/50 flex items-center justify-center p-4 font-cortex">
       <div className="bg-white rounded-xl shadow-cortex-lg w-full max-w-[920px] h-[min(640px,calc(100vh-2rem))] flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="px-5 py-3 border-b border-cortex-line flex items-center justify-between bg-cortex-navy text-white">
+        <div
+          className="px-5 py-3 border-b border-cortex-line flex items-center justify-between text-white"
+          style={{ backgroundColor: TOKENS.navy }}
+        >
           <div className="flex items-center gap-2">
             <Rocket size={16} className="text-cortex-cyan" />
             <span className="font-bold text-[15px]">⭐ 開案 Wizard · 7 步驟</span>
@@ -159,11 +163,12 @@ export default function WizardModal({ open, onClose }: Props) {
           <button
             onClick={next}
             disabled={submitting}
-            className={`px-5 py-2 text-[13px] font-bold rounded-md transition inline-flex items-center gap-1.5 disabled:opacity-50 ${
+            className="px-5 py-2 text-[13px] font-bold rounded-md transition inline-flex items-center gap-1.5 disabled:opacity-50 hover:brightness-110 shadow-cortex-sm"
+            style={
               step === 7
-                ? 'bg-gradient-to-br from-cortex-cyan to-cortex-teal text-white hover:brightness-105 shadow-cortex-sm'
-                : 'bg-cortex-cyan text-cortex-navy hover:bg-[#04D9AC]'
-            }`}
+                ? { background: `linear-gradient(135deg, ${TOKENS.cyan}, ${TOKENS.teal})`, color: '#fff' }
+                : { background: TOKENS.cyan, color: TOKENS.navy }
+            }
           >
             {submitting ? (
               <>

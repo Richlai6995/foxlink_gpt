@@ -18,6 +18,7 @@ import { Plus, Download, Search, Lock } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
 import { api, type Project, type ProjectType, type StatusSummary } from '../api'
 import { useCrumbs, usePlatform } from '../Shell/PlatformContext'
+import { TOKENS } from '../tokens'
 import ProjectCard from './ProjectCard'
 import WizardModal from '../Wizard/WizardModal'
 
@@ -118,7 +119,8 @@ export default function ProjectsList() {
           </button>
           <button
             onClick={() => setShowWizard(true)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-[13px] font-bold bg-cortex-cyan text-cortex-navy hover:bg-[#04D9AC] hover:shadow-[0_2px_6px_rgba(2,195,154,0.30)] transition"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-[13px] font-bold hover:brightness-110 hover:shadow-[0_2px_6px_rgba(2,195,154,0.30)] transition"
+            style={{ background: TOKENS.cyan, color: TOKENS.navy }}
           >
             <Plus size={14} strokeWidth={2.5} /> 新增專案
           </button>
