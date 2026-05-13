@@ -683,6 +683,197 @@ server/projects-platform/
 
 ---
 
+## Phase 1 → Production-Ready 補丁(spec 列但 demo 走 stub / mock 的)
+
+> Phase 1 demo 對齊 spec 範圍已 ship(Sprint A-F + Batch 1+2),但部分項目是 stub。
+> 這些**算 Phase 1 production polish,不歸 Phase 2-4**,因為 spec 都把它們列在 Phase 1。
+
+| 項目 | spec 出處 | 現況 | 估時 |
+|------|----------|------|------|
+| AI #1 RFQ PDF 真解析(Gemini Vision)| spec §12 Phase 1 + Demo §7 | Wizard Step 1 mock 固定 Apple 範例 | 1d |
+| AI #5 Q&A 草稿 | spec Phase 1 + Demo §8.1 | 完全沒做 | 1d |
+| AI #26 Bot 主動提醒(SLA 70% cron + LLM)| spec Phase 1 + Demo §8.1 | 完全沒做 | 1d |
+| AI #37 歷史推薦(Form 填寫時 RAG hint)| spec Phase 1 + Demo §8.2 | 完全沒做 | 1d |
+| ⭐ 狀態 SUMMARY 每天 09:00 cron + Stage 切換 hook | spec §16.4 / Demo §8.4 | 只手動 API 觸發 | 0.5d |
+| Notification 真發送(Webex Bot DM + SMTP)| spec §14.9 / Admin notification rules | console.log stub | 1d |
+| WebSocket / SSE 即時推送(取代 5s polling)| spec §13.1 | polling | 1d |
+| field_grants 個別授權 enforce(per-member 欄位授權)| spec §12.2 | data_payload 有但 middleware 沒 check | 1d |
+| task DONE → stage READY_FOR_GATE 自動 hook | spec §13.7 | task 狀態變更不通知 stage | 0.5d |
+| EPIC × SUBTASK 巢狀視覺化(parent_task_id 收合)| spec §14.4 | schema 有,UI 平層 | 1d |
+| AES-256-GCM at rest 加密 + KMS / Vault Transit | spec §12.5 | confidentialityMiddleware 只在 read 層 mask | 2d |
+
+**估時合計 ~ 12 天**(2 週 sprint),做完 Phase 1 才算 production-ready。
+
+---
+
+## Phase 2(原 spec §19 + PDF §E,4-8 週)
+
+> 來源:`docs/Cortex_通用專案管理平台_UI模擬與操作流程.pdf` §E slide 24
+> ```
+> super_user / Bot 整合 · 結案 fork + KB sediment ·
+> 域內通訊(跨專案 channel)· AI 戰情 embed ·
+> AI 13 項深化(智慧定價 / Cleansheet / 主管日報)
+> ```
+
+### Phase 2 任務切片
+
+#### Sprint H — super_user 機制 + 13 角色身份完整(1 週)
+
+- migration 011:`user_role_definitions` / `user_role_grants` / `organization_units` / `user_organization_memberships`
+- 13 個 role seed(對齊 spec §17):project.* 6 + system / workflow / data / notification / confidential.policy_editor / admin / admin.testing 7
+- `project_super_users` 表 + self-join 機制(BU/HQ 經管讀,admin 開放寫)
+- Admin UI 真實授權介面(目前 stub)
+
+#### Sprint I — Bot 整合(Cortex 既有 Bot 4 類能力)(1 週)
+
+- 接 Cortex existing skill / MCP / DIFY infrastructure
+- Bot 4 類能力分級:
+  1. 問答檢索(RAG,預設開放)
+  2. 執行工具 read-only(沿用 user 權限)
+  3. 產生內容(draft → user confirm)
+  4. 執行動作 write(白名單 + 二次確認)
+- @AI / @bot in any channel,scrub 機密前送 LLM,結果替回 alias
+
+#### Sprint J — 結案 fork + KB sediment production(1.5 週)
+
+- migration 014:`kb_chunks` 加 `embedding VECTOR(768)` + Oracle Text 索引
+- Phase 1 minimal fork(規則 scrub) → production:
+  - 嚴格 audit trail(誰 fork、何時、scrub 哪幾欄)
+  - 不可逆 + admin override
+  - embedding pipeline(Gemini embedding-001 → 768 vec)
+  - Title embedding 強化(spec §7.9.3)
+  - RAG 跨沉澱召回 production
+- Live KB 自動 chunk(form / task / attach 也接,不只 chat)
+
+#### Sprint K — 域內通訊(跨專案 channel)(1 週)
+
+- spec §13.5 + §B.2:同事業處內,跨專案討論的 group channel
+- migration:`organization_channels` 表
+- 跨專案 member 自動可看 BU-level channel
+- 訊息流跟 project channel 一樣 schema,只是 scope = organization
+
+#### Sprint L — AI 戰情 embed(0.5 週)
+
+- 把 Cortex 既有 AI 戰情(BI dashboard)嵌進 ProjectsPlatform 詳細頁
+- 沿用 Cortex `/dashboard/boards` 路由,iframe 或 module federation 嵌入
+
+#### Sprint M — AI 13 項深化(2 週)
+
+對齊 spec §12 / PDF §E 列名:
+
+| # | 項目 |
+|---|------|
+| 11 | **智慧定價建議** — 基於歷史 + 客戶等級 |
+| 12 | **Cleansheet AI 自動分析** — 三廠成本拆解 + 對比說明 |
+| 13 | **主管日報自動生成** — 每日 / 每週彙整 |
+
+(spec 寫「AI 13 項深化」但只明列 3 個項目;其他若 BU 需求再加,目前對齊 spec 只做 3)
+
+---
+
+## Phase 3(原 spec §19 + PDF §E,8-12 週)
+
+> 來源同 PDF §E slide 24
+> ```
+> What-if / 贏單預測 / 多級簽核 · ML 預測警示
+> ```
+
+### Phase 3 任務切片
+
+#### Sprint N — What-if 模擬器(2 週)
+
+- 改參數即時看影響(數量 +10% → 毛利變多少 / 改廠區 → 交期 / cost 動)
+- 對齊 spec §16.5 預測能力 B 層
+- React component:slider / dropdown 改 → 即時 query(用 cache)
+
+#### Sprint O — 贏單機率預測 ML 模型(3-4 週)
+
+- 對齊 spec §16.4 + Demo §8.5「Phase 3 ML 預測模型」
+- 基於 BOM 結構 / 客戶等級 / 季節 / 競品 預測 W/L
+- 訓練資料:沉澱 KB 結案案(需要先有 Phase 2 sediment 累積)
+- 模型 serving:獨立 service(Python sklearn / 走 Vertex AI Custom Predictor)
+
+#### Sprint P — 多級簽核 + reviewer(2 週)
+
+- 高金額 / 跨 BU / 機密升級需多人簽核
+- migration:`project_approval_chains` + `project_approval_steps`
+- 跟 Stage Gate 整合(某 stage advance 前先過 approval)
+
+#### Sprint Q — ML 預測警示(1-2 週)
+
+- 對齊儀表板 §16.4「C · ML 預測模型」格(目前 stub「○ Phase 3 待評估」)
+- 接 Sprint O 模型,跑每天批次預測,warn 高風險專案
+
+---
+
+## Phase 4(原 spec §19 + PDF §E,持續)
+
+> 來源同 PDF §E slide 24
+> ```
+> TRAINING / IT plugin · 客戶報價系統 API 對接 ·
+> 長料件預警(試產轉量產)· 三廠成本對比 AI 解讀
+> ```
+
+### Phase 4 任務切片
+
+#### Sprint R — TRAINING plugin
+
+- 教育訓練專案 type
+- 整合 Cortex 既有教育訓練平台(`/training/*`)
+- 結案專案的 lesson 自動產出(可選功能)
+
+#### Sprint S — IT plugin
+
+- IT 維護專案 type
+- 支援 ticket-like 流程(對應 Cortex `/feedback` 工單)
+
+#### Sprint T — 客戶報價系統 API 對接
+
+- Phase 1-3 純人工傳 Excel,Phase 4 雙向 API
+- spec §E: ❌ 不做 Email gateway / 客戶 portal / 電子簽
+- 等客戶報價系統提供 API
+
+#### Sprint U — AI #10 長料件預警
+
+- 試產轉量產(MP)階段才需要
+- 移到此 phase 是因為 Phase 1 報價階段不需要(對齊 spec §12 v3 移除)
+
+#### Sprint V — AI #14 三廠成本對比 AI 解讀
+
+- 廠區是客戶指定(非 AI 推薦),Phase 1 不需 AI 解讀
+- 移到此 phase:等客戶開放廠區選擇權時再上
+
+---
+
+## Phase 完成依賴關係
+
+```
+Phase 1 (✅ ship)
+  └─ Phase 1 Production Polish (12d)
+      └─ Phase 2
+          ├─ Sprint H super_user (1w)
+          ├─ Sprint I Bot 整合 (1w)
+          ├─ Sprint J 結案 fork production (1.5w) ← Phase 3 ML 訓練資料來源
+          ├─ Sprint K 域內通訊 (1w)
+          ├─ Sprint L AI 戰情 embed (0.5w)
+          └─ Sprint M AI 13 項深化 (2w)
+              └─ Phase 3
+                  ├─ Sprint N What-if (2w)
+                  ├─ Sprint O ML 模型 (3-4w) ← 依賴 Sprint J sediment KB
+                  ├─ Sprint P 多級簽核 (2w)
+                  └─ Sprint Q ML 警示 (1-2w) ← 依賴 Sprint O
+                      └─ Phase 4
+                          ├─ Sprint R TRAINING plugin
+                          ├─ Sprint S IT plugin
+                          ├─ Sprint T 客戶 API (依客戶提供)
+                          ├─ Sprint U 長料件預警 (MP 階段)
+                          └─ Sprint V 三廠對比 AI (客戶開放後)
+```
+
+---
+
 ## Phase 2 / 3 / 4(後續)
 
-依 spec §19 Phase 規劃,不重複。Phase 1 完成後另起 roadmap。
+> 上面已展開完整 roadmap,以下保留作 reference。
+
+依 spec §19 Phase 規劃 + PDF §E。
