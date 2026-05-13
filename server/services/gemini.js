@@ -220,61 +220,71 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
   const modelName = useProModel ? MODEL_PRO : MODEL_FLASH;
   const maxOut = useProModel ? 65536 : 8192;
   const thinkingBudget = useProModel ? 2048 : 512;
-  const model = getGenerativeModel({
-    model: modelName,
-    provider: 'vertex',
-    generationConfig: {
-      maxOutputTokens: maxOut,
-      temperature: 0,
-      thinkingConfig: { thinkingBudget },
-    },
-  });
 
   const tRead0 = Date.now();
   const audioPart = await fileToGeminiPart(filePath, mimeType);
   const base64MB = +(audioPart.inlineData.data.length / 1024 / 1024).toFixed(2);
   console.log(`[Transcribe] ${tagId} read+base64 done in ${Date.now() - tRead0}ms, base64=${base64MB}MB`);
 
-  const tCall0 = Date.now();
-  console.log(`[Transcribe] ${tagId} calling SDK (model=${modelName}, provider=vertex, concurrency=${LONG_AUDIO_CONCURRENCY})...`);
-
-  const transcribePromise = model.generateContent([
-    audioPart,
-    { text: prompt },
-  ]);
-  const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error(`Audio transcription timeout (${(timeoutMs/60000).toFixed(1)} min)`)), timeoutMs)
-  );
-
-  let result;
-  try {
-    result = await Promise.race([transcribePromise, timeoutPromise]);
-    console.log(`[Transcribe] ${tagId} SDK responded in ${Date.now() - tCall0}ms`);
-  } catch (e) {
-    const elapsed = Date.now() - tCall0;
-    // 把 SDK / fetch 錯誤的所有可診斷欄位都印出來,避免只剩 e.message 看不出是 413 / 429 / network
-    console.error(
-      `[Transcribe] ${tagId} SDK FAILED after ${elapsed}ms\n` +
-      `  message: ${e.message}\n` +
-      `  name:    ${e.name}\n` +
-      `  code:    ${e.code || 'n/a'}\n` +
-      `  status:  ${e.status || e.statusCode || 'n/a'}\n` +
-      `  cause:   ${e.cause?.message || e.cause?.code || 'n/a'}\n` +
-      `  errorDetails: ${e.errorDetails ? JSON.stringify(e.errorDetails).slice(0, 500) : 'n/a'}\n` +
-      `  response.data: ${e.response?.data ? JSON.stringify(e.response.data).slice(0, 500) : 'n/a'}\n` +
-      `  stack: ${(e.stack || '').split('\n').slice(0, 6).join('\n         ')}`
+  // 單次嘗試:給 provider 跑一次,回 { text, inputTokens, outputTokens, finishReason }
+  // 失敗(timeout / SDK 5xx / empty text)會 throw,讓 caller 決定要不要 fallback
+  const attempt = async (provider) => {
+    const model = getGenerativeModel({
+      model: modelName,
+      provider,
+      generationConfig: {
+        maxOutputTokens: maxOut,
+        temperature: 0,
+        thinkingConfig: { thinkingBudget },
+      },
+    });
+    const tCall0 = Date.now();
+    console.log(`[Transcribe] ${tagId} calling SDK (model=${modelName}, provider=${provider}, concurrency=${LONG_AUDIO_CONCURRENCY})...`);
+    const callPromise = model.generateContent([audioPart, { text: prompt }]);
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`Audio transcription timeout (${(timeoutMs/60000).toFixed(1)} min)`)), timeoutMs)
     );
-    throw e;
-  }
-
-  const usage = extractUsage(result);
-  const text = extractText(result);
-  console.log(`[Transcribe] ${tagId} done text=${text.length}chars in=${usage.inputTokens} out=${usage.outputTokens}`);
-  return {
-    text,
-    inputTokens: usage.inputTokens,
-    outputTokens: usage.outputTokens,
+    let result;
+    try {
+      result = await Promise.race([callPromise, timeoutPromise]);
+      console.log(`[Transcribe] ${tagId} ${provider} SDK responded in ${Date.now() - tCall0}ms`);
+    } catch (e) {
+      const elapsed = Date.now() - tCall0;
+      console.error(
+        `[Transcribe] ${tagId} ${provider} SDK FAILED after ${elapsed}ms\n` +
+        `  message: ${e.message}\n` +
+        `  name:    ${e.name}\n` +
+        `  code:    ${e.code || 'n/a'}\n` +
+        `  status:  ${e.status || e.statusCode || 'n/a'}\n` +
+        `  cause:   ${e.cause?.message || e.cause?.code || 'n/a'}\n` +
+        `  errorDetails: ${e.errorDetails ? JSON.stringify(e.errorDetails).slice(0, 500) : 'n/a'}\n` +
+        `  response.data: ${e.response?.data ? JSON.stringify(e.response.data).slice(0, 500) : 'n/a'}`
+      );
+      throw e;
+    }
+    const usage = extractUsage(result);
+    const text = extractText(result);
+    const finishReason =
+      result?.response?.candidates?.[0]?.finishReason ??
+      result?.candidates?.[0]?.finishReason ?? 'unknown';
+    console.log(`[Transcribe] ${tagId} ${provider} done text=${text.length}chars in=${usage.inputTokens} out=${usage.outputTokens} finish=${finishReason}`);
+    if (!text || text.trim().length === 0) {
+      const err = new Error(`Empty text (finishReason=${finishReason}, in=${usage.inputTokens}, out=${usage.outputTokens})`);
+      err.code = 'TRANSCRIBE_EMPTY';
+      throw err;
+    }
+    return { text, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens };
   };
+
+  // 2026-05-13:Vertex flash 對某些 mp3 偶爾回 empty text(finishReason=STOP 但內容全在 thought
+  // 被 filter)。對齊上面 line 210-216 註解「實測若 Vertex inline 失敗,改回 studio fallback」,
+  // vertex 失敗 → 自動 retry studio 一次。兩者都失敗才 throw 給 chat handler。
+  try {
+    return await attempt('vertex');
+  } catch (e1) {
+    console.warn(`[Transcribe] ${tagId} vertex FAILED (${e1.code || e1.message}), retrying with studio fallback...`);
+    return await attempt('studio');
+  }
 }
 
 // ── Long-audio transcription (ffmpeg split + parallel Pro) ────────────────────
