@@ -21,9 +21,10 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Clock, GitBranch, AlertTriangle, X, Loader2 } from 'lucide-react'
+import { Plus, Clock, GitBranch, AlertTriangle, X, Loader2, Sparkles } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
 import { api, type Task, type TaskStatus, type ProjectDetail } from '../api'
+import AiBreakdownModal from './AiBreakdownModal'
 
 const COLUMNS: { key: TaskStatus; label: string; bg: string; color: string }[] = [
   { key: 'PENDING',          label: '待處理',   bg: 'bg-cortex-line-2',         color: 'text-cortex-muted' },
@@ -42,6 +43,7 @@ export default function TasksTab({ project }: Props) {
   const [err, setErr] = useState<string | null>(null)
   const [openDetail, setOpenDetail] = useState<Task | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+  const [showAiBreakdown, setShowAiBreakdown] = useState(false)
 
   const reload = async () => {
     if (!token) return
@@ -94,6 +96,14 @@ export default function TasksTab({ project }: Props) {
             {loading ? <Loader2 size={12} className="inline animate-spin" /> : '重新整理'}
           </button>
           <button
+            onClick={() => setShowAiBreakdown(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-white font-bold text-[12px] rounded hover:brightness-110 transition"
+            style={{ background: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)' }}
+            title="AI #29 — 一句話拆解 3-6 個子任務"
+          >
+            <Sparkles size={12} /> AI 拆解
+          </button>
+          <button
             onClick={() => setShowCreate(true)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-cortex-cyan text-cortex-navy font-bold text-[12px] rounded hover:bg-[#04D9AC] transition"
           >
@@ -141,6 +151,15 @@ export default function TasksTab({ project }: Props) {
 
       {openDetail && <TaskDetailModal task={openDetail} onClose={() => setOpenDetail(null)} onChanged={reload} />}
       {showCreate && <QuickCreate projectId={project.id} stages={project.stages} onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); reload() }} />}
+      {showAiBreakdown && (
+        <AiBreakdownModal
+          projectId={project.id}
+          stageId={null}
+          stageCode={null}
+          onClose={() => setShowAiBreakdown(false)}
+          onCreated={(n) => { setShowAiBreakdown(false); alert(`✓ AI 拆解建立 ${n} 個任務`); reload() }}
+        />
+      )}
     </div>
   )
 }

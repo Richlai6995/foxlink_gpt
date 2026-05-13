@@ -14,6 +14,7 @@ const express = require('express');
 const { asyncHandler } = require('../middleware/errorBoundary');
 const { loadProject, requirePmOrAdmin } = require('../middleware/projectAclMiddleware');
 const tasksService = require('../services/tasksService');
+const taskBreakdown = require('../ai/taskBreakdown');
 
 const router = express.Router({ mergeParams: true });
 
@@ -142,6 +143,64 @@ router.post('/:taskId/status', asyncHandler(async (req, res) => {
 router.delete('/:taskId', requirePmOrAdmin, asyncHandler(async (req, res) => {
   await tasksService.remove(getDb(), Number(req.params.taskId));
   res.json({ ok: true });
+}));
+
+// ─── AI #29 — POST /ai-breakdown ─────────────────────────────────────
+// Body: { prompt, stage_id?, stage_code? }
+router.post('/ai-breakdown', asyncHandler(async (req, res) => {
+  const { prompt, stage_code } = req.body || {};
+  if (!prompt) return res.status(400).json({ error: 'prompt required' });
+
+  const ctx = {
+    type_code: (req.project.project_type_id ? null : null),  // 簡化
+    stage_code,
+  };
+
+  // 拿 project type_code(從 DB)
+  const tRow = await getDb().prepare(
+    `SELECT pt.type_code FROM projects p
+       JOIN project_types pt ON pt.id = p.project_type_id
+      WHERE p.id = ?`,
+  ).get(req.project.id);
+  if (tRow) ctx.type_code = tRow.type_code;
+
+  const r = await taskBreakdown.breakdown(prompt, ctx);
+  res.json({ ...r, prompt });
+}));
+
+// ─── POST /batch ─────────────────────────────────────────────────────
+// 批次建任務(AI 拆解後一鍵 import 用)
+// Body: { tasks: [{ title, accountable_role, primary_owner_user_id?, ... }, ...], stage_id? }
+router.post('/batch', requirePmOrAdmin, asyncHandler(async (req, res) => {
+  const { tasks, stage_id } = req.body || {};
+  if (!Array.isArray(tasks) || tasks.length === 0) {
+    return res.status(400).json({ error: 'tasks array required' });
+  }
+  if (tasks.length > 20) {
+    return res.status(400).json({ error: 'cannot batch create more than 20 tasks' });
+  }
+
+  const ids = [];
+  for (const t of tasks) {
+    try {
+      const taskId = await tasksService.create(getDb(), {
+        projectId: req.project.id,
+        title: t.title,
+        description: t.description,
+        stageId: stage_id || t.stage_id || null,
+        accountableRole: t.accountable_role,
+        primaryOwnerUserId: t.primary_owner_user_id,
+        absoluteDueAt: t.sla_hours ? new Date(Date.now() + Number(t.sla_hours) * 3600000) : undefined,
+        createdByUserId: req.user.id,
+      });
+      ids.push(taskId);
+    } catch (e) {
+      // 單筆失敗不中斷其他,記 log
+      console.warn(`[tasks/batch] failed: ${e.message}`);
+    }
+  }
+
+  res.status(201).json({ created: ids.length, ids });
 }));
 
 module.exports = router;
