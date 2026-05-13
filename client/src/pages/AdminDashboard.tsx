@@ -1,52 +1,53 @@
-import { useState } from 'react'
+import { useState, lazy, Suspense } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2, Search, KeyRound, MonitorPlay, Lock, Activity, MessageSquare, Languages, GraduationCap, TicketCheck, Mic, Factory, BookOpen, Megaphone } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import UserManagement from '../components/admin/UserManagement'
-import TokenUsagePanel from '../components/admin/TokenUsage'
-import AuditLogs from '../components/admin/AuditLogs'
-import AuthAuditLogsPanel from '../components/admin/AuthAuditLogsPanel'
-import IpBlacklistPanel from '../components/admin/IpBlacklistPanel'
-import SensitiveKeywords from '../components/admin/SensitiveKeywords'
-import DbMaintenance from '../components/admin/DbMaintenance'
-import MailSettingsPanel from '../components/admin/MailSettings'
-import LlmModelsPanel from '../components/admin/LlmModels'
-import VectorDefaultsPanel from '../components/admin/VectorDefaultsPanel'
-import KbRetrievalSettings from '../components/admin/KbRetrievalSettings'
-import KbRetrievalDebug from '../components/admin/KbRetrievalDebug'
-import KbSynonyms from '../components/admin/KbSynonyms'
-import CostAnalysis from '../components/admin/CostAnalysis'
-import ScheduledTasksPanel from '../components/admin/ScheduledTasksPanel'
-import MCPServersPanel from '../components/admin/MCPServersPanel'
-import DifyKnowledgeBasesPanel from '../components/admin/DifyKnowledgeBasesPanel'
-import RoleManagement from '../components/admin/RoleManagement'
-import SkillManagement from '../components/admin/SkillManagement'
-import CodeRunnersPanel from '../components/admin/CodeRunnersPanel'
-import KbAdminPanel from '../components/admin/KbAdminPanel'
-import ResearchLogsPanel from '../components/admin/ResearchLogsPanel'
-import ApiKeysPanel from '../components/admin/ApiKeysPanel'
-import AiDashboardAdmin from '../components/admin/AiDashboardAdmin'
-import ChartAdoptionPanel from '../components/admin/ChartAdoptionPanel'
-import DataPermissionsPanel from '../components/admin/DataPermissionsPanel'
-import MonitorPage from '../components/monitor/MonitorPage'
-import DbSourcesPanel from '../components/admin/DbSourcesPanel'
-import PipelineWritableTablesPanel from '../components/admin/PipelineWritableTablesPanel'
-import AlertRulesPanel from '../components/admin/AlertRulesPanel'
-import PmBomPanel from '../components/admin/PmBomPanel'
-import PmSettingsPanel from '../components/admin/PmSettingsPanel'
-import PmHealthPanel from '../components/admin/PmHealthPanel'
-import PmErpSyncPanel from '../components/admin/PmErpSyncPanel'
-import WebexLogsPanel from '../components/admin/WebexLogsPanel'
-import HelpTranslationPanel from '../components/admin/HelpTranslationPanel'
-import SpecialManualsPanel from '../components/admin/SpecialManualsPanel'
-import FactoryTranslationsPanel from '../components/admin/FactoryTranslationsPanel'
-import TrainingAdmin from '../components/admin/TrainingAdmin'
-import FeedbackCategoryManager from '../components/feedback/admin/FeedbackCategoryManager'
-import FeedbackSLAConfig from '../components/feedback/admin/FeedbackSLAConfig'
-import FeedbackStatsPanel from '../components/feedback/FeedbackStatsPanel'
-import VoiceInputSettingsPanel from '../components/admin/VoiceInputSettings'
-import AnnouncementsAdmin from '../components/admin/AnnouncementsAdmin'
-import TranscribeJobsPanel from '../components/admin/TranscribeJobsPanel'
+
+const UserManagement = lazy(() => import('../components/admin/UserManagement'))
+const TokenUsagePanel = lazy(() => import('../components/admin/TokenUsage'))
+const AuditLogs = lazy(() => import('../components/admin/AuditLogs'))
+const AuthAuditLogsPanel = lazy(() => import('../components/admin/AuthAuditLogsPanel'))
+const IpBlacklistPanel = lazy(() => import('../components/admin/IpBlacklistPanel'))
+const SensitiveKeywords = lazy(() => import('../components/admin/SensitiveKeywords'))
+const DbMaintenance = lazy(() => import('../components/admin/DbMaintenance'))
+const MailSettingsPanel = lazy(() => import('../components/admin/MailSettings'))
+const LlmModelsPanel = lazy(() => import('../components/admin/LlmModels'))
+const VectorDefaultsPanel = lazy(() => import('../components/admin/VectorDefaultsPanel'))
+const KbRetrievalSettings = lazy(() => import('../components/admin/KbRetrievalSettings'))
+const KbRetrievalDebug = lazy(() => import('../components/admin/KbRetrievalDebug'))
+const KbSynonyms = lazy(() => import('../components/admin/KbSynonyms'))
+const CostAnalysis = lazy(() => import('../components/admin/CostAnalysis'))
+const ScheduledTasksPanel = lazy(() => import('../components/admin/ScheduledTasksPanel'))
+const MCPServersPanel = lazy(() => import('../components/admin/MCPServersPanel'))
+const DifyKnowledgeBasesPanel = lazy(() => import('../components/admin/DifyKnowledgeBasesPanel'))
+const RoleManagement = lazy(() => import('../components/admin/RoleManagement'))
+const SkillManagement = lazy(() => import('../components/admin/SkillManagement'))
+const CodeRunnersPanel = lazy(() => import('../components/admin/CodeRunnersPanel'))
+const KbAdminPanel = lazy(() => import('../components/admin/KbAdminPanel'))
+const ResearchLogsPanel = lazy(() => import('../components/admin/ResearchLogsPanel'))
+const ApiKeysPanel = lazy(() => import('../components/admin/ApiKeysPanel'))
+const AiDashboardAdmin = lazy(() => import('../components/admin/AiDashboardAdmin'))
+const ChartAdoptionPanel = lazy(() => import('../components/admin/ChartAdoptionPanel'))
+const DataPermissionsPanel = lazy(() => import('../components/admin/DataPermissionsPanel'))
+const MonitorPage = lazy(() => import('../components/monitor/MonitorPage'))
+const DbSourcesPanel = lazy(() => import('../components/admin/DbSourcesPanel'))
+const PipelineWritableTablesPanel = lazy(() => import('../components/admin/PipelineWritableTablesPanel'))
+const AlertRulesPanel = lazy(() => import('../components/admin/AlertRulesPanel'))
+const PmBomPanel = lazy(() => import('../components/admin/PmBomPanel'))
+const PmSettingsPanel = lazy(() => import('../components/admin/PmSettingsPanel'))
+const PmHealthPanel = lazy(() => import('../components/admin/PmHealthPanel'))
+const PmErpSyncPanel = lazy(() => import('../components/admin/PmErpSyncPanel'))
+const WebexLogsPanel = lazy(() => import('../components/admin/WebexLogsPanel'))
+const HelpTranslationPanel = lazy(() => import('../components/admin/HelpTranslationPanel'))
+const SpecialManualsPanel = lazy(() => import('../components/admin/SpecialManualsPanel'))
+const FactoryTranslationsPanel = lazy(() => import('../components/admin/FactoryTranslationsPanel'))
+const TrainingAdmin = lazy(() => import('../components/admin/TrainingAdmin'))
+const FeedbackCategoryManager = lazy(() => import('../components/feedback/admin/FeedbackCategoryManager'))
+const FeedbackSLAConfig = lazy(() => import('../components/feedback/admin/FeedbackSLAConfig'))
+const FeedbackStatsPanel = lazy(() => import('../components/feedback/FeedbackStatsPanel'))
+const VoiceInputSettingsPanel = lazy(() => import('../components/admin/VoiceInputSettings'))
+const AnnouncementsAdmin = lazy(() => import('../components/admin/AnnouncementsAdmin'))
+const TranscribeJobsPanel = lazy(() => import('../components/admin/TranscribeJobsPanel'))
 type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'auth-audit' | 'ip-blacklist' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'kb-retrieval' | 'kb-debug' | 'kb-synonyms' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'chart-adoption' | 'data-permissions' | 'monitor' | 'db-sources' | 'pipeline-whitelist' | 'alert-rules' | 'pm-bom' | 'pm-settings' | 'pm-health' | 'pm-erp-sync' | 'webex-logs' | 'help-translation' | 'special-manuals' | 'factory-translations' | 'training' | 'feedback' | 'voice-input' | 'announcements' | 'transcribe-jobs'
 
 export default function AdminDashboard() {
@@ -148,6 +149,7 @@ export default function AdminDashboard() {
 
         {/* Content */}
         <main className="flex-1 overflow-auto p-6">
+          <Suspense fallback={<div className="flex items-center justify-center h-64 text-slate-400 text-sm">Loading...</div>}>
           {activeTab === 'users' && <UserManagement />}
           {activeTab === 'roles' && <RoleManagement />}
           {activeTab === 'tokens' && <TokenUsagePanel />}
@@ -199,6 +201,7 @@ export default function AdminDashboard() {
           {activeTab === 'monitor' && <MonitorPage />}
           {activeTab === 'voice-input' && <VoiceInputSettingsPanel />}
           {activeTab === 'announcements' && <AnnouncementsAdmin />}
+          </Suspense>
         </main>
       </div>
     </div>

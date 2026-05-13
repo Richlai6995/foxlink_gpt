@@ -181,7 +181,7 @@ function ModelDialog({ form, editId, isEdit, hasApiKey, hasExtraConfig, onChange
             <div>
               <label className="label">API Endpoint URL *</label>
               <input value={form.endpoint_url || ''} onChange={(e) => onChange({ ...form, endpoint_url: e.target.value })}
-                placeholder="https://fl-aoai-eus.openai.azure.com" className="input w-full font-mono text-sm" />
+                placeholder="https://YOUR-RESOURCE.openai.azure.com" className="input w-full font-mono text-sm" />
               <p className="text-xs text-slate-400 mt-0.5">{t('llm.form.azureEndpointNote')}</p>
             </div>
             <div className="grid grid-cols-2 gap-3">

@@ -742,7 +742,7 @@
     "saveFailed": "儲存失敗",
     "notes": {
       "gemini": "API Key 可留空，自動使用 env GEMINI_API_KEY；填入後加密存 DB 優先使用",
-      "azure": "Endpoint 填 base URL（如 https://fl-aoai-eus.openai.azure.com），SDK 會自動組合完整路徑",
+      "azure": "Endpoint 填 base URL（如 https://YOUR-RESOURCE.openai.azure.com），SDK 會自動組合完整路徑",
       "oci": "使用 RSA-SHA256 簽名認證，Private Key PEM 加密存入 DB。模型角色可選 Chat / Embedding / Rerank",
       "roles": "Chat 供對話、Embedding/Rerank 供知識庫召回、TTS 供文字轉語音、STT 供語音轉文字",
       "encryption": "以 AES-256-GCM 加密存入 DB，Server 端解密使用，前端永遠不顯示明文"

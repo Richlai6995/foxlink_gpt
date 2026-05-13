@@ -742,7 +742,7 @@
     "saveFailed": "Lưu thất bại",
     "notes": {
       "gemini": "API Key có thể để trống để dùng env GEMINI_API_KEY; nếu điền vào sẽ được mã hóa trong DB và ưu tiên sử dụng",
-      "azure": "Nhập base URL (ví dụ https://fl-aoai-eus.openai.azure.com), SDK sẽ tự tạo đường dẫn đầy đủ",
+      "azure": "Nhập base URL (ví dụ https://YOUR-RESOURCE.openai.azure.com), SDK sẽ tự tạo đường dẫn đầy đủ",
       "oci": "Sử dụng xác thực chữ ký RSA-SHA256, Private Key PEM được mã hóa trong DB. Vai trò có thể là Chat / Embedding / Rerank",
       "roles": "Chat cho trò chuyện, Embedding/Rerank cho tìm kiếm KB, TTS cho văn bản thành giọng nói, STT cho giọng nói thành văn bản",
       "encryption": "Được mã hóa AES-256-GCM trong DB, giải mã phía máy chủ, không bao giờ hiển thị văn bản thuần trên frontend"

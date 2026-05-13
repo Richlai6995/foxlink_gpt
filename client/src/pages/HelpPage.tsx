@@ -5367,7 +5367,7 @@ VERTEX_MODEL_ALIAS_GEMINI_3_PRO_IMAGE_PREVIEW=gemini-2.5-flash-image-preview`}
             ]}
           />
           <NoteBox>
-            Endpoint URL 請填入基礎位址即可，例如 <code className="bg-slate-100 px-1 rounded text-xs">https://fl-aoai-eus.openai.azure.com</code>，
+            Endpoint URL 請填入基礎位址即可，例如 <code className="bg-slate-100 px-1 rounded text-xs">https://YOUR-RESOURCE.openai.azure.com</code>，
             系統會自動組合完整的 <code className="bg-slate-100 px-1 rounded text-xs">/openai/deployments/&#123;deployment&#125;/chat/completions?api-version=...</code> 路徑。
           </NoteBox>
         </SubSection>

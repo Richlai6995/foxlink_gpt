@@ -742,7 +742,7 @@
     "saveFailed": "Save failed",
     "notes": {
       "gemini": "API Key can be left blank to use env GEMINI_API_KEY; if filled, it is encrypted in DB and takes priority",
-      "azure": "Fill in base URL (e.g. https://fl-aoai-eus.openai.azure.com), the SDK will automatically build the full path",
+      "azure": "Fill in base URL (e.g. https://YOUR-RESOURCE.openai.azure.com), the SDK will automatically build the full path",
       "oci": "Uses RSA-SHA256 signature authentication, Private Key PEM encrypted in DB. Model role can be Chat / Embedding / Rerank",
       "roles": "Chat for conversation, Embedding/Rerank for KB retrieval, TTS for text-to-speech, STT for speech-to-text",
       "encryption": "Stored encrypted with AES-256-GCM in DB, decrypted server-side, never displayed in plaintext on frontend"

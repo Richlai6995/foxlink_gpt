@@ -6,7 +6,6 @@ import { GlobalThemeProvider } from './context/ThemeContext'
 import { usePageActivity } from './lib/usePageActivity'
 import Login from './pages/Login'
 import ChatPage from './pages/ChatPage'
-import AdminDashboard from './pages/AdminDashboard'
 import ScheduledTasksPage from './pages/ScheduledTasksPage'
 import HelpPage from './pages/HelpPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
@@ -31,6 +30,7 @@ import FeedbackPage from './pages/FeedbackPage'
 import FeedbackNewPage from './pages/FeedbackNewPage'
 import FeedbackDetailPage from './pages/FeedbackDetailPage'
 import { lazy, Suspense } from 'react'
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
 const TrainingPage = lazy(() => import('./pages/TrainingPage'))
 const PmReviewQueuePage = lazy(() => import('./pages/PmReviewQueuePage'))
 const PmBriefingPage = lazy(() => import('./pages/PmBriefingPage'))
@@ -80,7 +80,9 @@ function AppRoutes() {
         element={
           <AdminRoute>
             <MobileGuard pageKey="admin">
-              <AdminDashboard />
+              <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-100 text-slate-400">Loading...</div>}>
+                <AdminDashboard />
+              </Suspense>
             </MobileGuard>
           </AdminRoute>
         }
