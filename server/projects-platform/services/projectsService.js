@@ -302,10 +302,13 @@ async function get(db, projectId, user) {
         ORDER BY stage_order`,
     ).all(projectId),
     db.prepare(
-      `SELECT id, user_id, role, sub_role, invited_by, invited_by_pm_user_id, invited_at
-         FROM project_members
-        WHERE project_id = ?
-        ORDER BY invited_at`,
+      `SELECT pm.id, pm.user_id, pm.role, pm.sub_role,
+              pm.invited_by, pm.invited_by_pm_user_id, pm.invited_at,
+              u.username, u.name, u.email
+         FROM project_members pm
+         LEFT JOIN users u ON u.id = pm.user_id
+        WHERE pm.project_id = ?
+        ORDER BY pm.invited_at`,
     ).all(projectId),
   ]);
 

@@ -2,12 +2,15 @@
  * RoleSwitcher — 6 種 demo 視角切換 dropdown
  *
  * 對應 HTML demo .role-switch + .dropdown-menu
- * 切換後在頁面內所有「機密欄位顯示」走對應 displayStrategy(後續 sprint 接)
+ * 切換後在頁面內所有「機密欄位顯示」走對應 displayStrategy
+ *
+ * 注意:dropdown 內所有文字用 inline style 強制設色,
+ * 避免被 navy topbar 的 color:white 繼承導致白底白字。
  */
 
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, Check } from 'lucide-react'
-import { DEMO_ROLES, type DemoRole } from '../tokens'
+import { DEMO_ROLES, TOKENS, type DemoRole } from '../tokens'
 import { usePlatform } from './PlatformContext'
 
 export default function RoleSwitcher() {
@@ -29,17 +32,32 @@ export default function RoleSwitcher() {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 px-3 py-1.5 bg-white/[0.06] border border-white/10 rounded-md text-white text-xs hover:bg-white/10 transition"
-        title="切換角色觀察機密策略效果(R)"
+        className="flex items-center gap-2 px-3 py-1.5 border rounded-md text-xs transition"
+        style={{
+          background: 'rgba(255,255,255,0.06)',
+          borderColor: 'rgba(255,255,255,0.10)',
+          color: '#fff',
+        }}
+        title="切換角色觀察機密策略效果"
       >
-        <span className="text-cortex-cyan font-semibold">視角</span>
+        <span style={{ color: TOKENS.cyan, fontWeight: 600 }}>視角</span>
         <span className="font-semibold">{current.label}</span>
         <ChevronDown size={10} className="opacity-50" />
       </button>
 
       {open && (
-        <div className="absolute right-0 top-[110%] w-[300px] bg-white border border-cortex-line rounded-lg shadow-cortex-lg overflow-hidden z-[200] text-cortex-text">
-          <div className="px-3 py-2 text-[11px] uppercase font-bold tracking-widest text-cortex-muted bg-cortex-bg border-b border-cortex-line">
+        <div
+          className="absolute right-0 top-[110%] w-[320px] rounded-lg overflow-hidden z-[200] shadow-cortex-lg border"
+          style={{
+            background: '#fff',
+            borderColor: TOKENS.line,
+            color: TOKENS.text,
+          }}
+        >
+          <div
+            className="px-3 py-2 text-[11px] uppercase font-bold tracking-widest border-b"
+            style={{ color: TOKENS.muted, background: TOKENS.bg, borderColor: TOKENS.line }}
+          >
             DEMO 視角(模擬機密策略)
           </div>
           {DEMO_ROLES.map((r) => {
@@ -51,16 +69,20 @@ export default function RoleSwitcher() {
                   setDemoRole(r.key as DemoRole)
                   setOpen(false)
                 }}
-                className={`w-full text-left px-3 py-2 text-sm transition flex items-start gap-2 hover:bg-cortex-line-2 ${
-                  active ? 'bg-cortex-cyan-bg/40' : ''
-                }`}
+                className="w-full text-left px-3 py-2.5 text-sm flex items-start gap-2 transition"
+                style={{
+                  background: active ? TOKENS.cyanBg : '#fff',
+                  color: TOKENS.text,
+                }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = active ? TOKENS.cyanBg : TOKENS.line2 }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = active ? TOKENS.cyanBg : '#fff' }}
               >
-                <span className={`mt-0.5 ${active ? 'text-cortex-cyan' : 'opacity-0'}`}>
+                <span style={{ color: active ? TOKENS.cyan : 'transparent', marginTop: 2 }}>
                   <Check size={14} />
                 </span>
                 <span className="flex-1 min-w-0">
-                  <span className="font-semibold text-cortex-ink">{r.label}</span>
-                  <span className="block text-[11px] text-cortex-muted mt-0.5 leading-tight">
+                  <span className="font-semibold" style={{ color: TOKENS.ink }}>{r.label}</span>
+                  <span className="block text-[11px] mt-0.5 leading-tight" style={{ color: TOKENS.muted }}>
                     {r.desc}
                   </span>
                 </span>

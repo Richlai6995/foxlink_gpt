@@ -8,6 +8,7 @@
  */
 
 import { Globe, Building2, User, BookOpen } from 'lucide-react'
+import { TOKENS } from '../tokens'
 
 export type Scope = 'SYSTEM' | 'BU' | 'USER'
 
@@ -52,11 +53,14 @@ export default function AdminPageShell({
 
       {/* Scope toggle */}
       {scope && onScope && (
-        <div className="bg-gradient-to-b from-cortex-line-2/50 to-white border border-cortex-line rounded-xl px-4 py-2.5 flex items-center gap-3.5 flex-wrap">
-          <div className="text-[11px] font-bold text-cortex-muted tracking-wider uppercase">
+        <div
+          className="rounded-xl px-4 py-2.5 flex items-center gap-3.5 flex-wrap border"
+          style={{ background: TOKENS.line2, borderColor: TOKENS.line }}
+        >
+          <div className="text-[11px] font-bold tracking-wider uppercase" style={{ color: TOKENS.muted }}>
             Workflow Template Scope (spec §5.1)
           </div>
-          <div className="inline-flex rounded-md border border-cortex-line bg-white overflow-hidden">
+          <div className="inline-flex rounded-md overflow-hidden border" style={{ background: '#fff', borderColor: TOKENS.line }}>
             <ScopeBtn active={scope === 'SYSTEM'} onClick={() => onScope('SYSTEM')} icon={<Globe size={11} />}>
               SYSTEM
             </ScopeBtn>
@@ -67,11 +71,14 @@ export default function AdminPageShell({
               USER
             </ScopeBtn>
           </div>
-          <span className="text-[11px] text-cortex-muted">
+          <span className="text-[11px] font-medium" style={{ color: TOKENS.text }}>
             → 解析優先序:USER &gt; BU &gt; SYSTEM (§5.2)
           </span>
           {scopeOwnerId && (
-            <span className="ml-auto font-mono text-[10px] text-cortex-ocean bg-cortex-ocean-bg px-2 py-1 rounded font-semibold">
+            <span
+              className="ml-auto font-mono text-[10px] px-2 py-1 rounded font-semibold"
+              style={{ background: TOKENS.oceanBg, color: TOKENS.ocean }}
+            >
               scope_owner_id: {scopeOwnerId}
             </span>
           )}
@@ -89,9 +96,12 @@ function ScopeBtn({ active, onClick, icon, children }: { active: boolean; onClic
   return (
     <button
       onClick={onClick}
-      className={`px-3 py-1.5 text-[12px] font-semibold inline-flex items-center gap-1.5 transition ${
-        active ? 'bg-cortex-navy text-white' : 'text-cortex-text hover:bg-cortex-bg'
-      }`}
+      className="px-3 py-1.5 text-[12px] font-semibold inline-flex items-center gap-1.5 transition"
+      style={
+        active
+          ? { background: TOKENS.navy, color: '#fff' }
+          : { background: '#fff', color: TOKENS.text }
+      }
     >
       {icon}
       {children}

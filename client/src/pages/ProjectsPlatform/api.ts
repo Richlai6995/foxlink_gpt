@@ -127,6 +127,9 @@ export type Member = {
   invited_by: number
   invited_by_pm_user_id?: number | null
   invited_at: string
+  username?: string | null
+  name?: string | null
+  email?: string | null
 }
 
 export type ProjectDetail = Project & {

@@ -6,7 +6,7 @@
  *   右:role-switch + 通知 icon + avatar
  */
 
-import { Menu, Bell, ChevronRight } from 'lucide-react'
+import { Menu, Bell, ChevronRight, ArrowLeft } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { usePlatform } from './PlatformContext'
@@ -73,6 +73,14 @@ export default function Topbar() {
 
       {/* Right */}
       <div className="flex items-center gap-2">
+        <button
+          onClick={() => navigate('/chat')}
+          className="text-[12px] text-white/80 hover:text-white hover:bg-white/10 px-2.5 py-1.5 rounded inline-flex items-center gap-1 transition"
+          title="回 Cortex 主站"
+        >
+          <ArrowLeft size={12} /> 回 Cortex
+        </button>
+
         <RoleSwitcher />
 
         <button

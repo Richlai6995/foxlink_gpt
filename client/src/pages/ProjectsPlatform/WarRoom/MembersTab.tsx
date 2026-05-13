@@ -130,17 +130,19 @@ export default function MembersTab({ project }: { project: ProjectDetail }) {
                 {g.members.map((m) => (
                   <div key={m.id} className="bg-white border border-cortex-line/60 rounded p-2.5 text-[12px] flex items-center gap-2.5">
                     <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-400 to-cyan-400 text-white text-[12px] font-bold flex items-center justify-center shrink-0">
-                      {String(m.user_id).slice(-2)}
+                      {((m.name || m.username || String(m.user_id)).slice(0, 1) || '?').toUpperCase()}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-cortex-ink truncate">user#{m.user_id}</div>
+                      <div className="font-semibold text-cortex-ink truncate">
+                        {m.name || m.username || `user#${m.user_id}`}
+                      </div>
                       <div className="text-[10px] text-cortex-muted">
-                        {m.role}{m.sub_role && ` · ${m.sub_role}`}
+                        {m.username && m.name ? `@${m.username} · ` : ''}{m.role}{m.sub_role && ` · ${m.sub_role}`}
                       </div>
                     </div>
                     {m.invited_by_pm_user_id && (
-                      <span className="text-[9px] text-cortex-muted">
-                        ← {m.invited_by_pm_user_id}
+                      <span className="text-[9px] text-cortex-muted" title="由此 PM 邀請">
+                        ← #{m.invited_by_pm_user_id}
                       </span>
                     )}
                   </div>
