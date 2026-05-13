@@ -11,12 +11,16 @@
  *   EPM
  *   採購跨 team(role = 'sourcing'/'procurement')
  *
- * 後端:project.members 已 ready(role + sub_role + invited_by_pm_user_id)
+ * 後端:members 已 ready(role + sub_role + invited_by_pm_user_id)
  * Sprint A 砸 data_payload 進的 pms 結構(從 Wizard)— 此處讀來建分組
  */
 
-import { Crown, ShieldCheck, Wrench, Factory, Building2, ShoppingCart } from 'lucide-react'
-import type { ProjectDetail, Member } from '../api'
+import { useState } from 'react'
+import { Crown, ShieldCheck, Wrench, Factory, Building2, ShoppingCart, UserPlus, X as XIcon } from 'lucide-react'
+import { useAuth } from '../../../context/AuthContext'
+import { api, type ProjectDetail, type Member } from '../api'
+import InviteMemberModal from './InviteMemberModal'
+import { TOKENS } from '../tokens'
 
 type TeamGroup = {
   key: string
@@ -28,6 +32,33 @@ type TeamGroup = {
 }
 
 export default function MembersTab({ project }: { project: ProjectDetail }) {
+  const { token } = useAuth() as any
+  const [members, setMembers] = useState<Member[]>(project.members)
+  const [showInvite, setShowInvite] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const reloadMembers = async () => {
+    setBusy(true)
+    try {
+      const r = await api.get<{ members: Member[] }>(token, `/projects/${project.id}/members`)
+      setMembers(r.members || [])
+    } catch (e: any) {
+      console.error('reload members:', e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const removeMember = async (m: Member) => {
+    if (!confirm(`確定踢除「${m.name || m.username || `user#${m.user_id}`}」?`)) return
+    try {
+      await api.delete(token, `/projects/${project.id}/members/${m.id}`)
+      reloadMembers()
+    } catch (e: any) {
+      alert('踢除失敗:' + e.message)
+    }
+  }
+
   // 從 data_payload.pms 拿 wizard 填的 PM 名字(若無則顯示「待邀」)
   const pms = (project.data_payload as any)?.pms || {}
 
@@ -38,7 +69,7 @@ export default function MembersTab({ project }: { project: ProjectDetail }) {
       Icon: Crown,
       color: 'text-red-700',
       bg: 'bg-red-50 border-red-200',
-      members: project.members.filter((m) => m.role === 'PM' || m.role === 'sales' || m.role === 'observer'),
+      members: members.filter((m) => m.role === 'PM' || m.role === 'sales' || m.role === 'observer'),
     },
     {
       key: 'dpm',
@@ -46,7 +77,7 @@ export default function MembersTab({ project }: { project: ProjectDetail }) {
       Icon: Wrench,
       color: 'text-purple-700',
       bg: 'bg-purple-50 border-purple-200',
-      members: project.members.filter((m) => m.sub_role === 'DPM' || m.role === 'engineering'),
+      members: members.filter((m) => m.sub_role === 'DPM' || m.role === 'engineering'),
     },
     {
       key: 'bpm',
@@ -54,7 +85,7 @@ export default function MembersTab({ project }: { project: ProjectDetail }) {
       Icon: Building2,
       color: 'text-cortex-ocean',
       bg: 'bg-cortex-ocean-bg border-blue-200',
-      members: project.members.filter((m) => m.sub_role === 'BPM'),
+      members: members.filter((m) => m.sub_role === 'BPM'),
     },
     {
       key: 'mpm',
@@ -62,7 +93,7 @@ export default function MembersTab({ project }: { project: ProjectDetail }) {
       Icon: Factory,
       color: 'text-cortex-teal',
       bg: 'bg-cortex-cyan-bg border-cortex-cyan/30',
-      members: project.members.filter((m) => m.sub_role === 'MPM' || m.role === 'factory'),
+      members: members.filter((m) => m.sub_role === 'MPM' || m.role === 'factory'),
     },
     {
       key: 'epm',
@@ -70,7 +101,7 @@ export default function MembersTab({ project }: { project: ProjectDetail }) {
       Icon: ShieldCheck,
       color: 'text-cortex-green',
       bg: 'bg-cortex-green-bg border-cortex-green/30',
-      members: project.members.filter((m) => m.sub_role === 'EPM'),
+      members: members.filter((m) => m.sub_role === 'EPM'),
     },
     {
       key: 'sourcing',
@@ -78,13 +109,13 @@ export default function MembersTab({ project }: { project: ProjectDetail }) {
       Icon: ShoppingCart,
       color: 'text-amber-700',
       bg: 'bg-cortex-amber-bg border-amber-300',
-      members: project.members.filter((m) => m.role === 'sourcing' || m.role === 'procurement'),
+      members: members.filter((m) => m.role === 'sourcing' || m.role === 'procurement'),
     },
   ]
 
   // 沒分到 group 的丟到 misc
   const grouped = new Set(groups.flatMap((g) => g.members.map((m) => m.id)))
-  const misc = project.members.filter((m) => !grouped.has(m.id))
+  const misc = members.filter((m) => !grouped.has(m.id))
   if (misc.length > 0) {
     groups.push({
       key: 'misc', label: '其他成員', Icon: Crown, color: 'text-cortex-muted', bg: 'bg-cortex-line-2 border-cortex-line', members: misc,
@@ -93,13 +124,33 @@ export default function MembersTab({ project }: { project: ProjectDetail }) {
 
   return (
     <div className="p-5 max-w-[920px] mx-auto">
-      <h3 className="text-lg font-bold text-cortex-ink mb-1">
-        成員 ({project.members.length})
-        <span className="ml-2 text-[11px] font-normal text-cortex-muted">Multi-PM Team 模型</span>
-      </h3>
-      <p className="text-[12px] text-cortex-muted mb-5">
-        對齊 OIBG flow:業務 HOST + 4 種 PM 各帶自己 team(invited_by_pm_user_id 自然涌現)
-      </p>
+      <div className="flex items-end justify-between mb-1 flex-wrap gap-2">
+        <div>
+          <h3 className="text-lg font-bold text-cortex-ink">
+            成員 ({members.length})
+            <span className="ml-2 text-[11px] font-normal text-cortex-muted">Multi-PM Team 模型</span>
+          </h3>
+          <p className="text-[12px] text-cortex-muted mt-1">
+            對齊 OIBG flow:業務 HOST + 4 種 PM 各帶自己 team(invited_by_pm_user_id 自然涌現)
+          </p>
+        </div>
+        <button
+          onClick={() => setShowInvite(true)}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-bold rounded transition hover:brightness-110"
+          style={{ background: TOKENS.cyan, color: TOKENS.navy }}
+          disabled={busy}
+        >
+          <UserPlus size={12} /> 邀請成員
+        </button>
+      </div>
+
+      {showInvite && (
+        <InviteMemberModal
+          projectId={project.id}
+          onClose={() => setShowInvite(false)}
+          onInvited={reloadMembers}
+        />
+      )}
 
       {/* Wizard 填的 PM 預覽 */}
       {(pms.dpm || pms.bpm || pms.mpm || pms.epm) && (
@@ -128,7 +179,7 @@ export default function MembersTab({ project }: { project: ProjectDetail }) {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 {g.members.map((m) => (
-                  <div key={m.id} className="bg-white border border-cortex-line/60 rounded p-2.5 text-[12px] flex items-center gap-2.5">
+                  <div key={m.id} className="group bg-white border border-cortex-line/60 rounded p-2.5 text-[12px] flex items-center gap-2.5">
                     <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-400 to-cyan-400 text-white text-[12px] font-bold flex items-center justify-center shrink-0">
                       {((m.name || m.username || String(m.user_id)).slice(0, 1) || '?').toUpperCase()}
                     </div>
@@ -145,6 +196,13 @@ export default function MembersTab({ project }: { project: ProjectDetail }) {
                         ← #{m.invited_by_pm_user_id}
                       </span>
                     )}
+                    <button
+                      onClick={() => removeMember(m)}
+                      className="opacity-0 group-hover:opacity-100 transition p-1 rounded hover:bg-red-50"
+                      title="踢除成員"
+                    >
+                      <XIcon size={12} className="text-cortex-muted hover:text-red-600" />
+                    </button>
                   </div>
                 ))}
               </div>

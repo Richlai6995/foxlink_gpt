@@ -30,6 +30,9 @@ router.use('/:projectId/channels', channelsRoutes.projectScoped);
 // Sprint C — tasks routes(scoped under project)
 router.use('/:projectId/tasks', require('./tasks'));
 
+// Sprint E.2 後續 — members invite / search / remove
+router.use('/:projectId/members', require('./members'));
+
 function getDb() {
   return require('../../database-oracle').db;
 }
