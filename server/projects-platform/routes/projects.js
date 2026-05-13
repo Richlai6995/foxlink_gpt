@@ -33,6 +33,9 @@ router.use('/:projectId/tasks', require('./tasks'));
 // Sprint E.2 後續 — members invite / search / remove
 router.use('/:projectId/members', require('./members'));
 
+// Sprint G — Stage Gate 推進
+router.use('/:projectId/stages', require('./stages'));
+
 function getDb() {
   return require('../../database-oracle').db;
 }

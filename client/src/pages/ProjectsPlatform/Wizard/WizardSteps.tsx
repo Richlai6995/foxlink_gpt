@@ -101,7 +101,38 @@ const MOCK_HISTORY = [
   { id: 'QT-2024-0741', cust: 'Apple', similar: 68, result: 'WIN',  margin: 'Tier-H', plant: '中國', cycle: 19, pm: 'Mike Wang' },
 ]
 
+/**
+ * AI #32 交期合理性 — 規則式
+ * 客戶要的天數 vs 歷史平均週期(目前在 data.estimatedCycleDays)
+ *   ≥ 1.5x → green
+ *   1.0~1.5x → amber
+ *   < 1.0x → red
+ */
+function computeScheduleSanity(customerDueDays: number, estimatedCycleDays: number): {
+  light: 'green' | 'amber' | 'red'
+  ratio: number
+  message: string
+} {
+  if (!customerDueDays || !estimatedCycleDays) {
+    return { light: 'amber', ratio: 1, message: '資料不足無法判斷' }
+  }
+  const ratio = customerDueDays / estimatedCycleDays
+  if (ratio >= 1.5) return { light: 'green', ratio, message: `客戶要 ${customerDueDays} 天 · 歷史平均 ${estimatedCycleDays} 天 · 寬鬆 ${(ratio * 100).toFixed(0)}%` }
+  if (ratio >= 1.0) return { light: 'amber', ratio, message: `客戶要 ${customerDueDays} 天 · 歷史平均 ${estimatedCycleDays} 天 · 剛好 (${(ratio * 100).toFixed(0)}%)` }
+  return { light: 'red', ratio, message: `⚠ 客戶要 ${customerDueDays} 天 · 歷史平均 ${estimatedCycleDays} 天 · 不可行 (${(ratio * 100).toFixed(0)}%)` }
+}
+
+function _daysBetween(dateStr: string): number {
+  if (!dateStr) return 0
+  const due = new Date(dateStr).getTime()
+  const now = Date.now()
+  return Math.max(0, Math.floor((due - now) / 86400000))
+}
+
 export function Step2History({ data, onChange }: StepProps) {
+  // AI #32 真算 — 用 dueDate 跟 estimatedCycleDays
+  const customerDueDays = _daysBetween(data.dueDate)
+  const sanity = computeScheduleSanity(customerDueDays, data.estimatedCycleDays)
   return (
     <div className="grid grid-cols-[1.6fr_1fr] gap-5">
       <div>
@@ -171,10 +202,28 @@ export function Step2History({ data, onChange }: StepProps) {
           <div className="text-[18px] font-extrabold text-cortex-ink font-mono">{data.estimatedCycleDays} 天</div>
         </div>
 
-        <div className="bg-cortex-green-bg border-l-[3px] border-cortex-green p-2.5 rounded">
-          <div className="text-[10px] font-bold text-green-800 mb-0.5">🚦 #32 交期合理性</div>
-          <div className="text-[11px] font-bold text-green-800">✅ 綠燈</div>
-          <div className="text-[10px] text-cortex-text mt-0.5 leading-relaxed">客戶要 60 天 · 歷史平均 21 天</div>
+        <div
+          className={`border-l-[3px] p-2.5 rounded ${
+            sanity.light === 'green' ? 'bg-cortex-green-bg border-cortex-green'
+            : sanity.light === 'amber' ? 'bg-cortex-amber-bg border-cortex-amber'
+            : 'bg-cortex-red-bg border-cortex-red'
+          }`}
+        >
+          <div className={`text-[10px] font-bold mb-0.5 ${
+            sanity.light === 'green' ? 'text-green-800'
+            : sanity.light === 'amber' ? 'text-amber-800'
+            : 'text-red-800'
+          }`}>
+            🚦 #32 交期合理性
+          </div>
+          <div className={`text-[11px] font-bold ${
+            sanity.light === 'green' ? 'text-green-800'
+            : sanity.light === 'amber' ? 'text-amber-800'
+            : 'text-red-800'
+          }`}>
+            {sanity.light === 'green' ? '✅ 綠燈' : sanity.light === 'amber' ? '⚠ 黃燈' : '🚫 紅燈'}
+          </div>
+          <div className="text-[10px] text-cortex-text mt-0.5 leading-relaxed">{sanity.message}</div>
         </div>
 
         <div className="text-[9px] text-cortex-muted italic mt-2.5 text-center">整合 #2 / #32 / #37</div>

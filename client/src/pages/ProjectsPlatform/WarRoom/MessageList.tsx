@@ -10,8 +10,8 @@
  *   - announcement channel:訊息渲染 SUMMARY 卡(若有 SYSTEM type)
  */
 
-import { useEffect, useRef, useState } from 'react'
-import { Pin, Trash2, RefreshCw, Sparkles } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Pin, Trash2, RefreshCw, Sparkles, ListChecks, Clock } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
 import { api, type Message, type Channel } from '../api'
 import { MESSAGE_STYLE } from '../tokens'
@@ -23,12 +23,38 @@ type Props = {
   onError?: (msg: string) => void
 }
 
+type SortMode = 'time' | 'smart'
+
+/** AI #24 訊息智慧排序權重(@me / DECISION / BLOCKER / AI_INSIGHT 優先,Pin 最高)*/
+function smartScore(m: Message, userId: number | undefined): number {
+  let score = 0
+  if (m.is_pinned) score += 1000
+  if (m.message_type === 'BLOCKER')    score += 100
+  if (m.message_type === 'DECISION')   score += 90
+  if (m.message_type === 'AI_INSIGHT') score += 80
+  if (Number(m.user_id) === Number(userId)) score += 50
+  if (m.message_type === 'PROGRESS')   score += 20
+  if (m.content && m.content.includes('@')) score += 30
+  // 越新的越前(時間 tiebreaker)
+  score += Number(new Date(m.created_at).getTime()) / 1e12
+  return score
+}
+
 export default function MessageList({ projectId, channel, onError }: Props) {
   const { token, user } = useAuth() as any
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [sortMode, setSortMode] = useState<SortMode>('time')
   const listRef = useRef<HTMLDivElement>(null)
+
+  // AI #24 排序
+  const displayMessages = useMemo(() => {
+    if (sortMode === 'time') return messages
+    const arr = [...messages]
+    arr.sort((a, b) => smartScore(b, user?.id) - smartScore(a, user?.id))
+    return arr
+  }, [messages, sortMode, user?.id])
 
   const reload = async () => {
     if (!token || !channel?.id) return
@@ -90,6 +116,33 @@ export default function MessageList({ projectId, channel, onError }: Props) {
 
   return (
     <div className="flex flex-col h-full bg-white">
+      {/* Sort toggle(AI #24)*/}
+      <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-cortex-line bg-cortex-bg/50 text-[10px]">
+        <span className="text-cortex-muted">排序:</span>
+        <button
+          onClick={() => setSortMode('time')}
+          className={`px-2 py-0.5 rounded transition inline-flex items-center gap-1 ${
+            sortMode === 'time' ? 'bg-cortex-navy text-white' : 'text-cortex-text hover:bg-white'
+          }`}
+        >
+          <Clock size={9} /> 時間
+        </button>
+        <button
+          onClick={() => setSortMode('smart')}
+          className={`px-2 py-0.5 rounded transition inline-flex items-center gap-1 ${
+            sortMode === 'smart' ? 'bg-cortex-navy text-white' : 'text-cortex-text hover:bg-white'
+          }`}
+          title="AI #24:@me / DECISION / BLOCKER / AI_INSIGHT / 我發的 排前"
+        >
+          <ListChecks size={9} /> ✨ 智慧
+        </button>
+        {sortMode === 'smart' && (
+          <span className="text-[9px] text-cortex-muted italic ml-1">
+            Pin → BLOCKER → DECISION → AI → 我發的 → PROGRESS · 時間 tiebreaker
+          </span>
+        )}
+      </div>
+
       {/* Pinned banner */}
       {pinnedMsgs.length > 0 && (
         <div className="px-4 py-2 bg-amber-50 border-b border-amber-200 text-xs text-amber-900 flex items-center gap-2 flex-shrink-0">
@@ -116,7 +169,7 @@ export default function MessageList({ projectId, channel, onError }: Props) {
           </div>
         )}
 
-        {messages.map((m) => {
+        {displayMessages.map((m) => {
           const style = MESSAGE_STYLE[m.message_type] || MESSAGE_STYLE.NORMAL
           const isMine = Number(m.user_id) === Number(user?.id)
           const isSystem = m.message_type === 'SYSTEM'

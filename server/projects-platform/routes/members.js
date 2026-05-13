@@ -111,6 +111,27 @@ router.post('/', requirePmOrAdmin, asyncHandler(async (req, res) => {
       req.user.id,
       invited_by_pm_user_id ? Number(invited_by_pm_user_id) : null,
     );
+
+    // ⭐ 邀請完自動進 announcement + general channel(讓邀請者馬上看到對話)
+    // chat_guest / outsider 不自動進(對齊 demo §10)
+    if (role !== 'chat_guest' && role !== 'outsider') {
+      const channels = await db.prepare(
+        `SELECT id, channel_type FROM project_channels
+          WHERE project_id = ? AND channel_type IN ('announcement', 'general') AND is_archived = 0`,
+      ).all(req.project.id);
+      for (const c of channels) {
+        try {
+          await db.prepare(
+            `INSERT INTO channel_participants (channel_id, user_id, role) VALUES (?, ?, 'member')`,
+          ).run(Number(c.id), Number(user_id));
+        } catch (e) {
+          if (!/UNIQUE constraint failed/.test(e.message)) {
+            console.warn(`[members/invite] auto-join ${c.channel_type}:`, e.message);
+          }
+        }
+      }
+    }
+
     res.status(201).json({ ok: true });
   } catch (e) {
     if (/UNIQUE constraint failed/.test(e.message)) {

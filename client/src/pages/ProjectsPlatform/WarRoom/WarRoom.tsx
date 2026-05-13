@@ -19,11 +19,12 @@ import { ArrowLeft, MessageSquare, Kanban, FileText, Users, Lock, type LucideIco
 import { useAuth } from '../../../context/AuthContext'
 import { api, type ProjectDetail } from '../api'
 import { useCrumbs, usePlatform } from '../Shell/PlatformContext'
-import { LIFECYCLE_COLORS } from '../tokens'
+import { LIFECYCLE_COLORS, TOKENS } from '../tokens'
 import StageRibbon from './StageRibbon'
 import ChatTab from './ChatTab'
 import TasksTab from './TasksTab'
 import MembersTab from './MembersTab'
+import WarRoomHeaderActions from './WarRoomHeaderActions'
 
 type Tab = 'chat' | 'tasks' | 'form' | 'members'
 
@@ -52,15 +53,20 @@ export default function WarRoom() {
       : [{ label: '我的專案', to: '/projects-platform' }, { label: 'Loading…' }],
   )
 
+  const reload = () => {
+    if (!id || !token) return
+    setErr(null)
+    api.get<{ project: ProjectDetail }>(token, `/projects/${id}`)
+      .then((r) => setProject(r.project))
+      .catch((e) => setErr(e.message))
+  }
+
   useEffect(() => {
     if (!id || !token) return
-    let cancelled = false
     setErr(null)
     setProject(null)
-    api.get<{ project: ProjectDetail }>(token, `/projects/${id}`)
-      .then((r) => { if (!cancelled) setProject(r.project) })
-      .catch((e) => { if (!cancelled) setErr(e.message) })
-    return () => { cancelled = true }
+    reload()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, token, demoRole])  // demoRole 變 → 重拉(機密案 OUTSIDER 看 403)
 
   if (err) {
@@ -107,6 +113,7 @@ export default function WarRoom() {
           <span className={`ml-auto text-[11px] font-semibold px-2 py-0.5 rounded-full border ${lc.pill}`}>
             {lc.label}
           </span>
+          <WarRoomHeaderActions project={project} onChanged={reload} />
         </div>
       </div>
 

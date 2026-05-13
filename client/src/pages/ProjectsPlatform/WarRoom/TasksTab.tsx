@@ -25,6 +25,7 @@ import { Plus, Clock, GitBranch, AlertTriangle, X, Loader2, Sparkles } from 'luc
 import { useAuth } from '../../../context/AuthContext'
 import { api, type Task, type TaskStatus, type ProjectDetail } from '../api'
 import AiBreakdownModal from './AiBreakdownModal'
+import TaskGantt from './TaskGantt'
 
 const COLUMNS: { key: TaskStatus; label: string; bg: string; color: string }[] = [
   { key: 'PENDING',          label: '待處理',   bg: 'bg-cortex-line-2',         color: 'text-cortex-muted' },
@@ -44,6 +45,7 @@ export default function TasksTab({ project }: Props) {
   const [openDetail, setOpenDetail] = useState<Task | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [showAiBreakdown, setShowAiBreakdown] = useState(false)
+  const [view, setView] = useState<'kanban' | 'gantt'>('kanban')
 
   const reload = async () => {
     if (!token) return
@@ -89,6 +91,26 @@ export default function TasksTab({ project }: Props) {
           </p>
         </div>
         <div className="flex gap-2">
+          {/* View toggle */}
+          <div className="inline-flex rounded border border-cortex-line bg-white overflow-hidden">
+            <button
+              onClick={() => setView('kanban')}
+              className={`px-2.5 py-1.5 text-[12px] font-semibold transition ${
+                view === 'kanban' ? 'bg-cortex-navy text-white' : 'text-cortex-text hover:bg-cortex-bg'
+              }`}
+            >
+              Kanban
+            </button>
+            <button
+              onClick={() => setView('gantt')}
+              className={`px-2.5 py-1.5 text-[12px] font-semibold transition ${
+                view === 'gantt' ? 'bg-cortex-navy text-white' : 'text-cortex-text hover:bg-cortex-bg'
+              }`}
+              title="Dependency-based 排程"
+            >
+              Gantt
+            </button>
+          </div>
           <button
             onClick={reload}
             className="px-3 py-1.5 text-[12px] border border-cortex-line bg-white rounded hover:bg-cortex-bg transition"
@@ -123,7 +145,13 @@ export default function TasksTab({ project }: Props) {
         </div>
       )}
 
+      {/* Gantt view */}
+      {view === 'gantt' && (
+        <TaskGantt tasks={tasks} onClick={(t) => setOpenDetail(t)} />
+      )}
+
       {/* Kanban grid */}
+      {view === 'kanban' && (
       <div className="grid grid-cols-5 gap-3 min-h-[420px]">
         {COLUMNS.map((col) => (
           <div key={col.key} className="bg-cortex-bg border border-cortex-line rounded-lg flex flex-col">
@@ -148,6 +176,7 @@ export default function TasksTab({ project }: Props) {
           </div>
         ))}
       </div>
+      )}
 
       {openDetail && <TaskDetailModal task={openDetail} onClose={() => setOpenDetail(null)} onChanged={reload} />}
       {showCreate && <QuickCreate projectId={project.id} stages={project.stages} onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); reload() }} />}
