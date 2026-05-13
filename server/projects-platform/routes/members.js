@@ -23,22 +23,33 @@ function getDb() {
 }
 
 // ─── GET /search?q= ─────────────────────────────────────────────────
-// 搜尋 user(active)— 限 active member 已在的 project member、且 user 自己已有 project 訪問權
+// LOV 模式:不帶 q → 回前 30 個 active user;帶 q → 模糊搜尋
 router.get('/search', asyncHandler(async (req, res) => {
   const q = (req.query.q || '').trim();
-  if (q.length < 1) return res.json({ users: [] });
-
   const db = getDb();
-  const rows = await db.prepare(
-    `SELECT id, username, name, employee_id, email, dept_name
-       FROM users
-      WHERE status = 'active'
-        AND (UPPER(username) LIKE UPPER(?)
-             OR UPPER(name) LIKE UPPER(?)
-             OR employee_id LIKE ?)
-      ORDER BY username
-      FETCH FIRST 20 ROWS ONLY`,
-  ).all(`%${q}%`, `%${q}%`, `%${q}%`);
+
+  let rows;
+  if (q.length < 1) {
+    // LOV 預設清單(熱門 / 最新登入 30 人)
+    rows = await db.prepare(
+      `SELECT id, username, name, employee_id, email, dept_name
+         FROM users
+        WHERE status = 'active'
+        ORDER BY id DESC
+        FETCH FIRST 30 ROWS ONLY`,
+    ).all();
+  } else {
+    rows = await db.prepare(
+      `SELECT id, username, name, employee_id, email, dept_name
+         FROM users
+        WHERE status = 'active'
+          AND (UPPER(username) LIKE UPPER(?)
+               OR UPPER(name) LIKE UPPER(?)
+               OR employee_id LIKE ?)
+        ORDER BY username
+        FETCH FIRST 30 ROWS ONLY`,
+    ).all(`%${q}%`, `%${q}%`, `%${q}%`);
+  }
 
   // 排除已是成員的 user
   const existing = await db.prepare(

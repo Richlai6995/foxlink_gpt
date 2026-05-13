@@ -54,20 +54,22 @@ export default function InviteMemberModal({ projectId, onClose, onInvited }: Pro
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
-  // 搜尋 debounce
+  // LOV 模式:一開啟即載預設清單,輸入做過濾(debounce 250ms)
   useEffect(() => {
-    if (!query.trim()) { setUsers([]); return }
     const id = setTimeout(async () => {
       setSearching(true)
       try {
-        const r = await api.get<{ users: UserRow[] }>(token, `/projects/${projectId}/members/search?q=${encodeURIComponent(query)}`)
+        const r = await api.get<{ users: UserRow[] }>(
+          token,
+          `/projects/${projectId}/members/search?q=${encodeURIComponent(query)}`,
+        )
         setUsers(r.users || [])
       } catch (e: any) {
         setErr(e.message)
       } finally {
         setSearching(false)
       }
-    }, 250)
+    }, query.trim() ? 250 : 0)  // 預設清單立刻載,輸入時 debounce
     return () => clearTimeout(id)
   }, [query, projectId, token])
 
@@ -115,10 +117,10 @@ export default function InviteMemberModal({ projectId, onClose, onInvited }: Pro
 
         {/* Body */}
         <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
-          {/* Search input */}
+          {/* Search input(LOV 過濾)*/}
           <div>
             <div className="text-[11px] font-bold mb-1.5" style={{ color: TOKENS.muted }}>
-              1. 搜尋 user(工號 / 帳號 / 姓名)
+              1. 選擇 user(預設顯示前 30,可輸入工號 / 帳號 / 姓名過濾)
             </div>
             <div className="relative">
               <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: TOKENS.muted }} />
@@ -126,22 +128,22 @@ export default function InviteMemberModal({ projectId, onClose, onInvited }: Pro
                 autoFocus
                 value={query}
                 onChange={(e) => { setQuery(e.target.value); setSelected(null) }}
-                placeholder="例:rich / 12345 / 王曉明"
+                placeholder="輸入關鍵字過濾,或直接從下方清單選"
                 className="w-full h-9 pl-8 pr-3 rounded border text-[13px] focus:outline-none"
                 style={{ borderColor: TOKENS.line, color: TOKENS.ink, background: '#fff' }}
               />
             </div>
           </div>
 
-          {/* Search results */}
-          {query.trim() && (
+          {/* User LOV(預設就顯示)*/}
+          <div>
             <div
-              className="border rounded max-h-[200px] overflow-y-auto"
+              className="border rounded max-h-[260px] overflow-y-auto"
               style={{ borderColor: TOKENS.line, background: TOKENS.line2 }}
             >
               {searching && (
                 <div className="p-3 text-[12px] inline-flex items-center gap-2" style={{ color: TOKENS.muted }}>
-                  <Loader2 size={12} className="animate-spin" /> 搜尋中…
+                  <Loader2 size={12} className="animate-spin" /> 載入中…
                 </div>
               )}
               {!searching && users.length === 0 && (
@@ -183,7 +185,7 @@ export default function InviteMemberModal({ projectId, onClose, onInvited }: Pro
                 </button>
               ))}
             </div>
-          )}
+          </div>
 
           {/* Step 2: role */}
           {selected && (
