@@ -45,6 +45,52 @@ const storage = multer.diskStorage({
 // 用 diskStorage 直接寫 NFS,不吃 pod RAM。需配合 K8s ingress proxy-body-size。
 const upload = multer({ storage, limits: { fileSize: 500 * 1024 * 1024 } });
 
+// ─── Annotation → prompt helper ──────────────────────────────────────────────
+// 統一所有 hotspot AI 分析 endpoint 用同一份 annotation 解析邏輯。
+// 接 stringified JSON 或 array,回 prompt 片段(含 leading/trailing \n)。
+// 為何重要:用戶畫的紅框/紅圈/箭頭是 AI 框 region 最強的訊號;只看 number 標註
+// (舊版 /slides/:sid/ai-analyze 的 bug) 會讓 AI 完全錯失重點。
+function buildAnnotationPrompt(annotationsJson) {
+  if (!annotationsJson) return '';
+  let annots;
+  try {
+    annots = typeof annotationsJson === 'string' ? JSON.parse(annotationsJson) : annotationsJson;
+  } catch { return ''; }
+  if (!Array.isArray(annots) || annots.length === 0) return '';
+
+  const stepAnnots = annots.filter(a => a.type === 'number').sort((a, b) => (a.stepNumber || 0) - (b.stepNumber || 0));
+  const otherAnnots = annots.filter(a => a.type !== 'number');
+  const lines = [];
+  lines.push('使用者在截圖上做了以下標註（表示操作重點和順序）：');
+  stepAnnots.forEach(a => {
+    const x = Number(a.coords?.x ?? 0).toFixed(1);
+    const y = Number(a.coords?.y ?? 0).toFixed(1);
+    lines.push(`步驟 ${a.stepNumber}: 編號在座標 (${x}%, ${y}%)${a.label ? `，標註「${a.label}」` : ''}`);
+  });
+  const typeNames = { circle: '紅色圓圈', rect: '矩形框', arrow: '箭頭', text: '文字標註', freehand: '手繪', mosaic: '馬賽克遮蔽' };
+  otherAnnots.forEach(a => {
+    const tn = typeNames[a.type] || a.type;
+    const x = Number(a.coords?.x ?? 0).toFixed(1);
+    const y = Number(a.coords?.y ?? 0).toFixed(1);
+    if (a.type === 'arrow') {
+      const x2 = Number(a.coords?.x2 ?? 0).toFixed(1);
+      const y2 = Number(a.coords?.y2 ?? 0).toFixed(1);
+      lines.push(`${tn}從 (${x}%, ${y}%) 指向 (${x2}%, ${y2}%)${a.label ? `，標註「${a.label}」` : ''}`);
+    } else if (a.type === 'text') {
+      lines.push(`文字標註: 「${a.label || ''}」在 (${x}%, ${y}%)`);
+    } else if (a.type !== 'mosaic') {
+      lines.push(`${tn}在 (${x}%, ${y}%)${a.label ? `，標註「${a.label}」` : ''}`);
+    }
+  });
+  lines.push('');
+  lines.push('請根據使用者的標註：');
+  lines.push('1. 以標註的步驟編號順序生成操作說明');
+  lines.push('2. 標註圈住/指向的元素就是該步驟的主要操作目標（設為 is_primary）');
+  lines.push('3. 文字標註作為額外說明補充到操作說明中');
+  lines.push('4. 生成旁白時按步驟順序描述');
+  return '\n' + lines.join('\n') + '\n';
+}
+
 // ─── Concurrency limiter (used by translate / TTS batch / etc.) ──────────────
 function pLimit(n) {
   let active = 0;
@@ -5651,6 +5697,7 @@ router.get('/admin/reports/by-user', async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // POST /api/training/ai/analyze-screenshot — single screenshot → hotspot regions
+// 對齊「全部送 AI 處理」:JSON mode + annotations + is_primary 強制 + Flash + altUploadDir fallback。
 router.post('/ai/analyze-screenshot', upload.single('screenshot'), async (req, res) => {
   try {
     let imageBase64;
@@ -5659,15 +5706,22 @@ router.post('/ai/analyze-screenshot', upload.single('screenshot'), async (req, r
     } else if (req.body.screenshot_base64) {
       imageBase64 = req.body.screenshot_base64.replace(/^data:image\/\w+;base64,/, '');
     } else if (req.body.screenshot_url) {
-      const absPath = path.join(UPLOAD_ROOT, req.body.screenshot_url.replace(/^\/api\/training\/files\//, ''));
+      // 對齊靜態服務 root(uploadDir 而非 UPLOAD_ROOT)+ altUploadDir fallback
+      const rel = req.body.screenshot_url.replace(/^\/api\/training\/files\//, '');
+      let absPath = path.join(uploadDir, rel);
+      if (!fs.existsSync(absPath) && fs.existsSync(altUploadDir)) {
+        const alt = path.join(altUploadDir, rel);
+        if (fs.existsSync(alt)) absPath = alt;
+      }
       if (fs.existsSync(absPath)) imageBase64 = fs.readFileSync(absPath).toString('base64');
-      else return res.status(404).json({ error: '截圖檔案不存在' });
+      else return res.status(404).json({ error: '截圖檔案不存在', tried: absPath });
     } else {
       return res.status(400).json({ error: '需提供 screenshot (file/base64/url)' });
     }
 
     const clickCoords = req.body.click_coords || null;
     const context = req.body.context || '';
+    const annotationPrompt = buildAnnotationPrompt(req.body.annotations_json || req.body.annotations);
 
     const { getGenerativeModel, extractText } = require('../services/geminiClient');
     // 強制 Flash:Pro 在 vision + JSON 任務 latency 跨前端 timeout 邊界,且 thinking 浪費
@@ -5678,59 +5732,47 @@ router.post('/ai/analyze-screenshot', upload.single('screenshot'), async (req, r
        ORDER BY sort_order FETCH FIRST 1 ROWS ONLY`
     ).get();
     // 走 AI Studio:Vertex gRPC payload 上限 ~4MB,screenshot base64 常超限。
+    // JSON mode 強制純 JSON,避 Gemini 偶爾掺雜說明文字導致 JSON.parse 炸。
     const model = getGenerativeModel({
       model: flashRow?.api_model || process.env.GEMINI_MODEL_FLASH || 'gemini-3-flash-preview',
       provider: 'studio',
+      generationConfig: { responseMimeType: 'application/json' },
     });
 
     const clickInfo = clickCoords ? `使用者剛點擊了位於 (x:${clickCoords.x}px, y:${clickCoords.y}px) 的元素。` : '';
 
-    const prompt = `分析這張系統操作截圖。${clickInfo}${context ? `背景: ${context}` : ''}
+    const prompt = `分析這張系統操作截圖。${clickInfo}${context ? `背景: ${context}` : ''}${annotationPrompt}
+識別所有可互動 UI 元素，回傳 JSON。至少要有一個 region 的 is_primary 設為 true（此畫面最重要的操作目標${clickCoords ? '，使用者剛點擊的元素優先' : ''}）：
+{ "regions": [{ "type": "button|input|link|select|checkbox|tab|menu|icon", "label": "繁體中文功能說明", "coords": { "x": 0, "y": 0, "w": 0, "h": 0 }, "is_primary": true }],
+  "instruction": "操作說明 (1-2 句)",
+  "narration": "口語化旁白 (適合 TTS 朗讀)",
+  "sensitive_areas": [{ "type": "password", "coords": { "x": 0, "y": 0, "w": 0, "h": 0 } }] }
+注意：coords 的 x, y, w, h 必須是百分比 (0-100)，相對於圖片寬高。x, y 是左上角百分比。
+只回傳 JSON。`;
 
-請完成以下任務：
-1. 識別畫面中所有可互動的 UI 元素（按鈕、輸入框、連結、下拉選單、checkbox、tab 等）
-2. 回傳每個元素的：
-   - coords: { x, y, w, h } 百分比座標（相對於圖片左上角，0-100）
-   - type: button | input | link | select | checkbox | tab | menu | icon
-   - label: 元素的文字或功能說明（繁體中文）
-   - is_primary: 是否為此畫面的主要操作點${clickCoords ? '（使用者剛點擊的元素 = true）' : '（至少要有一個 region 設為 true）'}
-3. 生成此畫面的操作說明（instruction，1-2 句）
-4. 生成旁白文字（narration，口語化，適合 TTS 朗讀）
-5. 偵測是否包含敏感資訊（密碼欄位、個資、帳號密碼）
-
-只回傳 JSON，不要 markdown code fence：
-{
-  "regions": [{ "type": "...", "label": "...", "coords": { "x": 0, "y": 0, "w": 0, "h": 0 }, "is_primary": true }],
-  "instruction": "...",
-  "narration": "...",
-  "sensitive_areas": [{ "type": "password", "coords": { "x": 0, "y": 0, "w": 0, "h": 0 } }]
-}`;
-
-    let parsed, lastRaw = '';
-    for (let attempt = 0; attempt < 3; attempt++) {
+    const MAX_ATTEMPTS = 2;
+    let parsed = null, lastErr = null;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS && !parsed; attempt++) {
       try {
         const result = await model.generateContent([
           { inlineData: { mimeType: 'image/png', data: imageBase64 } },
           { text: prompt }
         ]);
         const text = extractText(result);
-        lastRaw = text;
-        const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-        parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(cleaned);
-        break;
-      } catch (parseErr) {
-        console.warn(`[Training] AI analyze attempt ${attempt + 1} failed:`, parseErr.message);
-        if (attempt === 2) {
-          if (req.file) try { fs.unlinkSync(req.file.path); } catch {}
-          return res.status(500).json({ error: 'AI 回覆格式錯誤（已重試 3 次）', raw: lastRaw.slice(0, 500) });
-        }
-        await new Promise(r => setTimeout(r, 1000));
+        const jsonText = text.trim().startsWith('{') ? text.trim() : (text.match(/\{[\s\S]*\}/)?.[0] || '');
+        if (!jsonText) { lastErr = new Error('no_json_in_response'); continue; }
+        parsed = JSON.parse(jsonText);
+      } catch (e) {
+        lastErr = e;
+        console.warn(`[Training] AI analyze screenshot attempt ${attempt}/${MAX_ATTEMPTS} failed:`, e.message);
+        if (attempt < MAX_ATTEMPTS) await new Promise(r => setTimeout(r, 800));
       }
     }
-
-    // Clean up uploaded temp file
     if (req.file) try { fs.unlinkSync(req.file.path); } catch {}
+
+    if (!parsed) {
+      return res.status(502).json({ error: `AI 分析失敗:${lastErr?.message || 'Gemini 無回應'}` });
+    }
 
     res.json(parsed);
   } catch (e) {
@@ -6341,39 +6383,7 @@ router.post('/recording/:sessionId/analyze-step/:stepId', async (req, res) => {
       : '';
 
     // Phase 2E: Parse user annotations for prompt enrichment
-    let annotationPrompt = '';
-    if (step.annotations_json) {
-      try {
-        const annots = JSON.parse(step.annotations_json);
-        if (annots.length > 0) {
-          const stepAnnots = annots.filter(a => a.type === 'number').sort((a, b) => a.stepNumber - b.stepNumber);
-          const otherAnnots = annots.filter(a => a.type !== 'number');
-          const lines = [];
-          lines.push('使用者在截圖上做了以下標註（表示操作重點和順序）：');
-          stepAnnots.forEach(a => {
-            lines.push(`步驟 ${a.stepNumber}: ${a.type === 'number' ? '編號' : a.type}在座標 (${a.coords.x.toFixed(1)}%, ${a.coords.y.toFixed(1)}%)${a.label ? `，標註「${a.label}」` : ''}`);
-          });
-          otherAnnots.forEach(a => {
-            const typeNames = { circle: '紅色圓圈', rect: '矩形框', arrow: '箭頭', text: '文字標註', freehand: '手繪', mosaic: '馬賽克遮蔽' };
-            const tn = typeNames[a.type] || a.type;
-            if (a.type === 'arrow') {
-              lines.push(`${tn}從 (${a.coords.x.toFixed(1)}%, ${a.coords.y.toFixed(1)}%) 指向 (${a.coords.x2.toFixed(1)}%, ${a.coords.y2.toFixed(1)}%)${a.label ? `，標註「${a.label}」` : ''}`);
-            } else if (a.type === 'text') {
-              lines.push(`文字標註: 「${a.label}」在 (${a.coords.x.toFixed(1)}%, ${a.coords.y.toFixed(1)}%)`);
-            } else if (a.type !== 'mosaic') {
-              lines.push(`${tn}在 (${a.coords.x.toFixed(1)}%, ${a.coords.y.toFixed(1)}%)${a.label ? `，標註「${a.label}」` : ''}`);
-            }
-          });
-          lines.push('');
-          lines.push('請根據使用者的標註：');
-          lines.push('1. 以標註的步驟編號順序生成操作說明');
-          lines.push('2. 標註圈住/指向的元素就是該步驟的主要操作目標（設為 is_primary）');
-          lines.push('3. 文字標註作為額外說明補充到操作說明中');
-          lines.push('4. 生成旁白時按步驟順序描述');
-          annotationPrompt = '\n' + lines.join('\n') + '\n';
-        }
-      } catch { /* ignore parse errors */ }
-    }
+    const annotationPrompt = buildAnnotationPrompt(step.annotations_json);
 
     // Phase 2E: model priority — request body > system_settings > llm_models > default
     const { getGenerativeModel, extractText } = require('../services/geminiClient');
@@ -7739,20 +7749,10 @@ router.post('/slides/:sid/ai-analyze', async (req, res) => {
     const imageBase64 = fs.readFileSync(filePath).toString('base64');
     console.log(`${tag} START block_type=${imgBlock.type} annotations=${(imgBlock.annotations || []).length} image_bytes=${imageBase64.length}`);
 
-    // Build annotation prompt from existing annotations
-    let annotationPrompt = '';
+    // 對齊 buildAnnotationPrompt:處理所有標註類型(number/circle/rect/arrow/text/freehand),
+    // 不再只看 number。用戶畫的紅框/紅圈/箭頭才是 AI 框 region 最強的訊號。
     const annotations = imgBlock.annotations || [];
-    if (annotations.length > 0) {
-      const stepAnnots = annotations.filter(a => a.type === 'number').sort((a, b) => (a.stepNumber || 0) - (b.stepNumber || 0));
-      if (stepAnnots.length > 0) {
-        const lines = ['使用者在截圖上做了以下標註：'];
-        stepAnnots.forEach(a => {
-          lines.push(`步驟 ${a.stepNumber}: 在座標 (${a.coords.x?.toFixed?.(1) || a.coords.x}%, ${a.coords.y?.toFixed?.(1) || a.coords.y}%)${a.label ? `，標註「${a.label}」` : ''}`);
-        });
-        lines.push('請根據標註的步驟順序生成操作說明，標註的元素設為 is_primary。');
-        annotationPrompt = '\n' + lines.join('\n') + '\n';
-      }
-    }
+    const annotationPrompt = buildAnnotationPrompt(annotations);
 
     // AI model selection — 強制 Flash(Pro 在 vision + JSON 任務 latency 跨前端 timeout 邊界)
     const { getGenerativeModel, extractText } = require('../services/geminiClient');
@@ -7780,10 +7780,11 @@ router.post('/slides/:sid/ai-analyze', async (req, res) => {
     });
 
     const prompt = `分析這張系統操作截圖。${annotationPrompt}
-識別所有可互動 UI 元素，回傳 JSON：
-{ "regions": [{ "type": "...", "label": "...", "coords": { "x": 0, "y": 0, "w": 0, "h": 0 }, "is_primary": false }],
-  "instruction": "操作說明", "narration": "旁白文字" }
-注意：coords 的 x, y, w, h 必須是百分比 (0-100)，相對於圖片寬高。
+識別所有可互動 UI 元素，回傳 JSON。至少要有一個 region 的 is_primary 設為 true（此畫面最重要的操作目標）：
+{ "regions": [{ "type": "button|input|link|select|checkbox|tab|menu|icon", "label": "繁體中文功能說明", "coords": { "x": 0, "y": 0, "w": 0, "h": 0 }, "is_primary": true }],
+  "instruction": "操作說明 (1-2 句)",
+  "narration": "口語化旁白 (適合 TTS 朗讀)" }
+注意：coords 的 x, y, w, h 必須是百分比 (0-100)，相對於圖片寬高。x, y 是左上角百分比。
 只回傳 JSON。`;
 
     // Retry 一次（網路 glitch / 模型偶發 formatting issue）

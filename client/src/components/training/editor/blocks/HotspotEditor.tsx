@@ -234,7 +234,9 @@ export default function HotspotEditor({ block, onChange, courseId, slideId, bloc
       setAiLoading(true)
       const res = await api.post('/training/ai/analyze-screenshot', {
         screenshot_url: block.image,
-        context: block.instruction || ''
+        context: block.instruction || '',
+        // 把用戶畫的紅框 / 編號 / 箭頭一起送上,效果對齊「全部送 AI 處理」
+        annotations_json: block.annotations?.length ? JSON.stringify(block.annotations) : undefined,
       }, { timeout: 180000 })
       const data = res.data
       if (data.regions?.length > 0) {
