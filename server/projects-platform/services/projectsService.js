@@ -367,6 +367,17 @@ async function updateLifecycle(db, projectId, toStatus, user, { reason, pause_un
     `UPDATE projects SET ${updates.join(', ')} WHERE id = ?`,
   ).run(...params);
 
+  // 結案 → fork 進沉澱 KB(spec §8)
+  if (toStatus === 'CLOSED') {
+    try {
+      const kb = require('./kbPipeline');
+      const r = await kb.forkToSediment(db, projectId);
+      log.log(`CLOSED fork to sediment: ${JSON.stringify(r)}`);
+    } catch (e) {
+      log.warn(`fork to sediment failed: ${e.message}`);
+    }
+  }
+
   log.log(`project ${projectId} lifecycle ${from} → ${toStatus}`);
   return { from, to: toStatus };
 }

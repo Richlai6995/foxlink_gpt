@@ -80,6 +80,9 @@ function buildRouter() {
   // Sprint D — 跨專案儀表板 + Status SUMMARY
   router.use('/dashboard', require('./routes/dashboard'));
 
+  // Sprint G — KB 雙層搜尋
+  router.use('/kb', require('./routes/kb'));
+
   // Route stubs — 後續 sprint 逐個實作
   // router.use('/projects/wizard', require('./routes/wizard'));        // Sprint 9
   // router.use('/projects/:id/tasks', require('./routes/tasks'));       // Sprint 6
@@ -117,6 +120,7 @@ async function runMigrations(db) {
     await require('./migrations/004_tasks')(db);
     await require('./migrations/005_seed')(db);
     await require('./migrations/006_messages')(db);
+    await require('./migrations/007_kb')(db);
     console.log('[projects-platform] migrations ✓');
   } catch (e) {
     console.error('[projects-platform] migrations failed:', e.message, e.stack);

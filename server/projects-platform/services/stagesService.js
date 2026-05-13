@@ -110,6 +110,20 @@ async function advance(db, stageId, user, { notes } = {}) {
   // 寫 SYSTEM 訊息到 announcement(讓所有人看到 stage 推進)
   await _postAnnouncement(db, stage.project_id, stage, nextStage, user, notes, isLast);
 
+  // #9 Notification dispatch
+  try {
+    require('./notificationEngine').dispatch('STAGE_GATE', {
+      project_id: stage.project_id,
+      stage_from: stage.stage_code,
+      stage_to: nextStage?.stage_code || null,
+      project_closed: isLast,
+      actor: user.id,
+      title: isLast ? `✅ Stage ${stage.stage_code} 完成 · 專案結案` : `✅ Stage ${stage.stage_code} → ${nextStage?.stage_code}`,
+    });
+  } catch (e) {
+    log.warn(`notify STAGE_GATE failed: ${e.message}`);
+  }
+
   log.log(
     `stage ${stage.stage_code} → DONE by user ${user.id} · next=${nextStage?.stage_code || 'CLOSED'}`,
   );

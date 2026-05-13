@@ -117,4 +117,16 @@ router.get('/system-health', asyncHandler(async (req, res) => {
   });
 }));
 
+/**
+ * GET /notification-log — 通知 dispatch 記憶體 log(debug 用)
+ */
+router.get('/notification-log', asyncHandler(async (req, res) => {
+  const notify = require('../services/notificationEngine');
+  res.json({
+    recent: notify.recentLog(Math.min(Number(req.query.limit) || 50, 200)),
+    stats: notify.stats(),
+    rules: notify.RULES,
+  });
+}));
+
 module.exports = router;

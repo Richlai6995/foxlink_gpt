@@ -11,7 +11,9 @@
  */
 
 import { useState } from 'react'
-import { Database, Archive, MessageSquare, FileText, ListChecks, Paperclip, FolderArchive, Search, AlertTriangle, Lock } from 'lucide-react'
+import { Database, Archive, MessageSquare, FileText, ListChecks, Paperclip, FolderArchive, Search, AlertTriangle, Lock, Loader2 } from 'lucide-react'
+import { useAuth } from '../../../context/AuthContext'
+import { api } from '../api'
 import { useCrumbs } from '../Shell/PlatformContext'
 
 type Layer = 'live' | 'archived'
@@ -59,9 +61,40 @@ const KIND_BADGE: Record<string, { label: string; bg: string; Icon: any }> = {
   attach: { label: '📎 attach', bg: 'bg-cortex-amber-bg text-amber-800',    Icon: Paperclip },
 }
 
+type RealChunk = {
+  id: number
+  project_id: number
+  kind: string
+  content: string
+  is_sediment: number
+  scrubbed: number
+  scrub_note?: string | null
+  created_at: string
+}
+
 export default function KnowledgeBase() {
   useCrumbs([{ label: 'KB / 知識庫' }])
+  const { token } = useAuth() as any
   const [layer, setLayer] = useState<Layer>('live')
+  const [search, setSearch] = useState('')
+  const [results, setResults] = useState<RealChunk[]>([])
+  const [searching, setSearching] = useState(false)
+
+  const runSearch = async () => {
+    if (!search.trim()) { setResults([]); return }
+    setSearching(true)
+    try {
+      const r = await api.get<{ results: RealChunk[] }>(
+        token,
+        `/kb/search?q=${encodeURIComponent(search)}&layer=${layer}`,
+      )
+      setResults(r.results || [])
+    } catch (e: any) {
+      console.error('kb search:', e.message)
+    } finally {
+      setSearching(false)
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -71,12 +104,24 @@ export default function KnowledgeBase() {
           <h1 className="text-2xl font-extrabold text-cortex-ink tracking-tight">📚 KB · 知識庫</h1>
           <div className="text-[12px] text-cortex-muted mt-1">spec §7 · 雙層架構(Live + 沉澱)· RAG 友善 · 機密 / 非機密不混(§7.10)</div>
         </div>
-        <div className="flex gap-2">
-          <button className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] border border-cortex-line bg-white rounded">
-            <Search size={12} /> RAG 搜尋
-          </button>
-          <button className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] border border-cortex-line bg-white rounded">
-            📊 KB 健康度
+        <div className="flex gap-2 items-center">
+          <div className="relative">
+            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-cortex-muted" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') runSearch() }}
+              placeholder="搜 KB chunk(後端真實)..."
+              className="h-8 pl-8 pr-3 border border-cortex-line bg-white rounded text-[12px] focus:outline-none focus:border-cortex-cyan w-60"
+            />
+          </div>
+          <button
+            onClick={runSearch}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] border border-cortex-line bg-white rounded hover:bg-cortex-bg"
+          >
+            {searching ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+            搜尋
           </button>
         </div>
       </div>
@@ -135,7 +180,38 @@ export default function KnowledgeBase() {
         </div>
       )}
 
-      {/* KB items table */}
+      {/* Real KB search results(後端真實 chunk)*/}
+      {results.length > 0 && (
+        <div className="bg-gradient-to-br from-cortex-cyan-bg/40 to-white border border-cortex-cyan/30 rounded-xl p-4">
+          <div className="text-[11px] font-bold text-cortex-teal mb-2">
+            🔍 後端真實搜尋結果(query: "{search}" · {layer})· {results.length} 筆
+          </div>
+          <div className="space-y-1.5 max-h-[280px] overflow-y-auto">
+            {results.map((c) => (
+              <div key={c.id} className="bg-white border border-cortex-line rounded p-2.5 text-[12px]">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[10px] font-mono text-cortex-ocean font-bold">#{c.id}</span>
+                  <span className="text-[10px] bg-cortex-bg text-cortex-text px-1.5 py-0.5 rounded">{c.kind}</span>
+                  <span className="text-[10px] text-cortex-muted">project #{c.project_id}</span>
+                  {Number(c.scrubbed) === 1 && (
+                    <span className="text-[10px] bg-cortex-amber-bg text-amber-800 px-1.5 py-0.5 rounded font-bold">已 scrub</span>
+                  )}
+                  {Number(c.is_sediment) === 1 && (
+                    <span className="text-[10px] bg-cortex-amber-bg text-amber-800 px-1.5 py-0.5 rounded font-bold">📦 沉澱</span>
+                  )}
+                  <span className="ml-auto text-[10px] text-cortex-muted">{new Date(c.created_at).toLocaleString('zh-TW')}</span>
+                </div>
+                <div className="text-cortex-ink leading-relaxed line-clamp-3">{c.content}</div>
+                {c.scrub_note && (
+                  <div className="text-[10px] text-amber-700 mt-1 italic">{c.scrub_note}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* KB items table(mock 展示)*/}
       <div className="bg-white border border-cortex-line rounded-xl overflow-hidden">
         <div className="grid grid-cols-[100px_1fr_140px_100px_120px] gap-3 px-4 py-2.5 bg-cortex-bg border-b border-cortex-line text-[10px] font-bold text-cortex-muted uppercase tracking-widest">
           <div>類型</div>

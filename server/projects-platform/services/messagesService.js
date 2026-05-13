@@ -22,6 +22,21 @@ const log = makeLogger('messagesService');
 const ALLOWED_TYPES = ['NORMAL', 'PROGRESS', 'BLOCKER', 'DECISION', 'AI_INSIGHT', 'SYSTEM'];
 const ANNOUNCEMENT_SYNC_TYPES = ['BLOCKER', 'DECISION', 'AI_INSIGHT'];
 
+/** AI #23 — 規則式偵測「決議」字眼自動 Pin */
+const DECISION_KEYWORDS = [
+  '決定', '決議', 'decided', 'decision',
+  '同意', '一致', '通過', 'approved',
+  '結論', '定案', '採用',
+];
+function detectDecisionKeyword(content) {
+  if (!content) return null;
+  const s = String(content).toLowerCase();
+  for (const kw of DECISION_KEYWORDS) {
+    if (s.includes(kw.toLowerCase())) return kw;
+  }
+  return null;
+}
+
 function _hash(content) {
   return crypto.createHash('sha256').update(String(content || '')).digest('hex').slice(0, 64);
 }
@@ -107,8 +122,73 @@ async function post(db, input) {
     }
   }
 
+  // AI #23 — DECISION 自動 Pin / NORMAL 訊息偵測決議字眼也自動 Pin
+  let autoPinned = false;
+  const isDecision = messageType === 'DECISION';
+  const decisionKw = messageType === 'NORMAL' || messageType === 'PROGRESS'
+    ? detectDecisionKeyword(content)
+    : null;
+  if (isDecision || decisionKw) {
+    try {
+      await db.prepare(
+        `UPDATE project_messages
+            SET is_pinned = 1, pinned_by = ?, pinned_at = SYSTIMESTAMP,
+                pin_note = ?
+          WHERE id = ?`,
+      ).run(
+        userId,
+        isDecision ? '⭐ AI #23 · 自動 Pin (DECISION)' : `⭐ AI #23 · 自動 Pin (偵測「${decisionKw}」)`,
+        messageId,
+      );
+      autoPinned = true;
+      log.log(`AI #23 auto-pin msg ${messageId}: ${isDecision ? 'DECISION type' : `keyword "${decisionKw}"`}`);
+    } catch (e) {
+      log.warn(`AI #23 auto-pin failed:`, e.message);
+    }
+  }
+
+  // #10 Live KB chunk(NORMAL / PROGRESS / DECISION / AI_INSIGHT / BLOCKER 都寫,SYSTEM 不寫)
+  if (messageType !== 'SYSTEM') {
+    try {
+      const kb = require('./kbPipeline');
+      await kb.writeLiveChunk(db, {
+        projectId: Number(channel.project_id),
+        kind: 'chat',
+        sourceId: messageId,
+        content,
+        tags: [messageType, `channel:${channel.name}`],
+      });
+    } catch (e) {
+      log.warn(`KB writeLiveChunk failed: ${e.message}`);
+    }
+  }
+
+  // #9 Notification engine 觸發
+  try {
+    const notify = require('./notificationEngine');
+    if (messageType === 'BLOCKER') {
+      notify.dispatch('BLOCKER_NEW', {
+        project_id: Number(channel.project_id),
+        message_id: messageId,
+        actor: userId,
+        title: `🚨 BLOCKER in #${channel.name}`,
+        body: String(content).slice(0, 200),
+      });
+    } else if (messageType === 'DECISION' || autoPinned) {
+      notify.dispatch('DECISION_NEW', {
+        project_id: Number(channel.project_id),
+        message_id: messageId,
+        actor: userId,
+        title: autoPinned ? `✅ DECISION 自動偵測 in #${channel.name}` : `✅ DECISION in #${channel.name}`,
+        body: String(content).slice(0, 200),
+      });
+    }
+  } catch (e) {
+    log.warn(`notify dispatch failed: ${e.message}`);
+  }
+
   log.log(`message ${messageId} posted to channel ${channelId} type=${messageType}`);
-  return { id: messageId, announcementMsgId };
+  return { id: messageId, announcementMsgId, autoPinned };
 }
 
 /**

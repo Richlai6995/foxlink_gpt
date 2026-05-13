@@ -153,17 +153,110 @@ export default function WarRoom() {
   )
 }
 
-// ─── Form stub(Sprint E 接 qp_form_*)──────────────────────────────
+// ─── Form minimal(顯 Wizard 填的值 + 版本鏈 placeholder)─────────────
 function FormStub({ project }: { project: ProjectDetail }) {
+  const dp = (project.data_payload as any) || {}
+  const isConf = !!(project as any).is_confidential
+  const sections: { label: string; fields: { key: string; label: string; confidential?: boolean }[] }[] = [
+    {
+      label: '客戶資料',
+      fields: [
+        { key: 'customer', label: '客戶名稱', confidential: true },
+        { key: 'partNo', label: '料號' },
+      ],
+    },
+    {
+      label: '規格 / 數量',
+      fields: [
+        { key: 'quantity', label: '數量', confidential: true },
+        { key: 'dueDate', label: '交期' },
+      ],
+    },
+    {
+      label: '價格 / 成本(機密)',
+      fields: [
+        { key: 'amount', label: '報價金額', confidential: true },
+        { key: 'margin', label: '毛利率', confidential: true },
+        { key: 'cost_breakdown', label: '成本明細', confidential: true },
+      ],
+    },
+    {
+      label: '其他',
+      fields: [
+        { key: 'estimatedCycleDays', label: '預估週期(天)' },
+        { key: 'priorityScore', label: 'priority_score' },
+      ],
+    },
+  ]
+  const versions = ['v1', 'v2', 'v3 ★', 'v4 draft']
+
   return (
-    <div className="p-6">
-      <div className="text-center text-cortex-muted py-12">
-        <FileText size={28} className="mx-auto opacity-30 mb-3" />
-        <p className="text-sm">報價 Form — 版本鏈 + 機密欄位 — Sprint E</p>
-        <p className="text-xs mt-2 text-cortex-muted/70">
-          需要 qp_form_templates / qp_form_instances schema(migration 007-010)
-        </p>
-        <p className="text-xs mt-1 text-cortex-muted/70">project: {project.project_code}</p>
+    <div className="p-5 max-w-[920px] mx-auto">
+      <div className="flex items-end justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h3 className="text-lg font-bold text-cortex-ink">
+            報價 Form
+            <span className="ml-2 text-[11px] font-normal text-cortex-muted">spec §11 · Wizard 填的值 + 版本鏈</span>
+          </h3>
+          <p className="text-[12px] text-cortex-muted mt-0.5">
+            完整 GUI Form Builder + qp_form_* CRUD 留 Phase 2;Phase 1 demo 顯示 Wizard 收的值 + 版本軌跡
+          </p>
+        </div>
+      </div>
+
+      {/* 版本鏈 */}
+      <div className="bg-cortex-line-2/60 border border-cortex-line rounded p-3 mb-3 flex items-center gap-2 flex-wrap text-[12px]">
+        <span className="text-cortex-muted text-[10px] font-bold">版本鏈:</span>
+        {versions.map((v, i) => {
+          const isCurrent = v.includes('★')
+          const isDraft = v.includes('draft')
+          return (
+            <span
+              key={v}
+              className={`px-2 py-0.5 rounded font-mono font-bold ${
+                isCurrent ? 'bg-cortex-cyan text-cortex-navy' :
+                isDraft   ? 'bg-cortex-amber-bg text-amber-800 border border-amber-300' :
+                            'bg-white border border-cortex-line text-cortex-muted'
+              }`}
+            >
+              {v}
+            </span>
+          )
+        })}
+        <span className="text-cortex-muted text-[10px]">→</span>
+        <span className="px-2 py-0.5 rounded font-mono font-bold bg-cortex-line text-cortex-muted">FINAL(待結案)</span>
+      </div>
+
+      {/* Sections + fields */}
+      <div className="space-y-3">
+        {sections.map((sec) => (
+          <div key={sec.label} className="bg-white border border-cortex-line rounded-lg p-4">
+            <div className="text-[12px] font-bold text-cortex-teal mb-2">{sec.label}</div>
+            <div className="grid grid-cols-2 gap-3">
+              {sec.fields.map((f) => {
+                const v = dp[f.key]
+                const display = v === undefined || v === '' || v === null ? '—' : String(v)
+                return (
+                  <div key={f.key} className="flex items-start gap-2 text-[12px] border-b border-cortex-line/50 pb-1.5 last:border-b-0">
+                    <div className="w-24 text-cortex-muted shrink-0 flex items-center gap-1">
+                      {f.confidential && <span title="機密欄位">🔒</span>}
+                      <span>{f.label}</span>
+                    </div>
+                    <div className="flex-1 font-mono text-cortex-ink">
+                      {f.confidential && isConf && display !== '—' ? (
+                        <span className="text-amber-700 bg-cortex-amber-bg/50 px-1.5 rounded">{display}</span>
+                      ) : display}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 bg-cortex-cyan-bg/40 border-l-2 border-cortex-cyan rounded-r p-3 text-[11px] text-cortex-teal">
+        💡 機密欄位 displayStrategy 已在 admin/機密策略頁套用 — 切右上「視角」dropdown 看不同角色畫面
       </div>
     </div>
   )
