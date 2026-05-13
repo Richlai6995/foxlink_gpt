@@ -36,26 +36,28 @@ function parseJsonSafe(v, fallback = null) {
  */
 async function list(db, projectId, { status, stage_id, parent_task_id } = {}) {
   const params = [projectId];
-  const wh = ['project_id = ?'];
-  if (status) { wh.push('status = ?'); params.push(status); }
-  if (stage_id) { wh.push('stage_id = ?'); params.push(stage_id); }
+  const wh = ['t.project_id = ?'];
+  if (status) { wh.push('t.status = ?'); params.push(status); }
+  if (stage_id) { wh.push('t.stage_id = ?'); params.push(stage_id); }
   if (parent_task_id !== undefined) {
-    if (parent_task_id === null) wh.push('parent_task_id IS NULL');
-    else { wh.push('parent_task_id = ?'); params.push(parent_task_id); }
+    if (parent_task_id === null) wh.push('t.parent_task_id IS NULL');
+    else { wh.push('t.parent_task_id = ?'); params.push(parent_task_id); }
   }
 
   const rows = await db.prepare(
-    `SELECT id, project_id, parent_task_id, stage_id,
-            title, description, task_type,
-            accountable_role, primary_owner_user_id, collaborator_user_ids,
-            status, progress_percent,
-            depends_on_task_id, relative_deadline_days, absolute_due_at, computed_due_at,
-            started_at, completed_at, cancelled_at, blocker_reason,
-            is_confidential, attachment_ids,
-            created_by_user_id, created_at, updated_at
-       FROM project_tasks
+    `SELECT t.id, t.project_id, t.parent_task_id, t.stage_id,
+            t.title, t.description, t.task_type,
+            t.accountable_role, t.primary_owner_user_id, t.collaborator_user_ids,
+            t.status, t.progress_percent,
+            t.depends_on_task_id, t.relative_deadline_days, t.absolute_due_at, t.computed_due_at,
+            t.started_at, t.completed_at, t.cancelled_at, t.blocker_reason,
+            t.is_confidential, t.attachment_ids,
+            t.created_by_user_id, t.created_at, t.updated_at,
+            o.username AS owner_username, o.name AS owner_name
+       FROM project_tasks t
+       LEFT JOIN users o ON o.id = t.primary_owner_user_id
       WHERE ${wh.join(' AND ')}
-      ORDER BY stage_id NULLS LAST, id`,
+      ORDER BY t.stage_id NULLS LAST, t.id`,
   ).all(...params);
 
   return rows.map((r) => ({
@@ -67,7 +69,10 @@ async function list(db, projectId, { status, stage_id, parent_task_id } = {}) {
 
 async function get(db, taskId) {
   const r = await db.prepare(
-    `SELECT * FROM project_tasks WHERE id = ?`,
+    `SELECT t.*, o.username AS owner_username, o.name AS owner_name
+       FROM project_tasks t
+       LEFT JOIN users o ON o.id = t.primary_owner_user_id
+      WHERE t.id = ?`,
   ).get(taskId);
   if (!r) return null;
   return {

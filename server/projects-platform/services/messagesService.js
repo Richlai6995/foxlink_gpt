@@ -116,24 +116,26 @@ async function post(db, input) {
  */
 async function list(db, channelId, { limit = 50, beforeId, afterId, includeDeleted = false } = {}) {
   const params = [channelId];
-  const wh = [`channel_id = ?`];
+  const wh = [`m.channel_id = ?`];
 
-  if (!includeDeleted) wh.push(`deleted_at IS NULL`);
-  if (beforeId) { wh.push(`id < ?`); params.push(beforeId); }
-  if (afterId)  { wh.push(`id > ?`); params.push(afterId); }
+  if (!includeDeleted) wh.push(`m.deleted_at IS NULL`);
+  if (beforeId) { wh.push(`m.id < ?`); params.push(beforeId); }
+  if (afterId)  { wh.push(`m.id > ?`); params.push(afterId); }
 
   params.push(limit);
 
   const rows = await db.prepare(
-    `SELECT id, channel_id, project_id, user_id, content, message_type,
-            reply_to_message_id, is_pinned, pinned_by, pinned_at, pin_note,
-            requires_read_receipt,
-            synced_to_announcement, announcement_msg_id,
-            deleted_at, deleted_by, deletion_mode, deletion_reason,
-            attachment_ids, content_hash, edited_at, edit_count, created_at
-       FROM project_messages
+    `SELECT m.id, m.channel_id, m.project_id, m.user_id, m.content, m.message_type,
+            m.reply_to_message_id, m.is_pinned, m.pinned_by, m.pinned_at, m.pin_note,
+            m.requires_read_receipt,
+            m.synced_to_announcement, m.announcement_msg_id,
+            m.deleted_at, m.deleted_by, m.deletion_mode, m.deletion_reason,
+            m.attachment_ids, m.content_hash, m.edited_at, m.edit_count, m.created_at,
+            u.username AS user_username, u.name AS user_name
+       FROM project_messages m
+       LEFT JOIN users u ON u.id = m.user_id
       WHERE ${wh.join(' AND ')}
-      ORDER BY id DESC
+      ORDER BY m.id DESC
       OFFSET 0 ROWS FETCH NEXT ? ROWS ONLY`,
   ).all(...params);
 

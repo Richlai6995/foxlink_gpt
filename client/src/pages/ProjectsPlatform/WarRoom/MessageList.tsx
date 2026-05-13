@@ -130,7 +130,8 @@ export default function MessageList({ projectId, channel, onError }: Props) {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 text-[11px] text-cortex-muted flex-wrap">
                   <span className="text-cortex-text font-semibold">
-                    user#{m.user_id}{isMine && ' · 我'}
+                    {m.user_name || m.user_username || `user#${m.user_id}`}
+                    {isMine && ' · 我'}
                   </span>
                   <span>·</span>
                   <span>

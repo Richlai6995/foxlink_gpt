@@ -163,6 +163,9 @@ export type Message = {
   edited_at?: string | null
   edit_count: number
   created_at: string
+  // JOIN users(後端 join 進來給 frontend 顯示)
+  user_username?: string | null
+  user_name?: string | null
 }
 
 export type TaskStatus = 'PENDING' | 'IN_PROGRESS' | 'BLOCKED' | 'READY_FOR_REVIEW' | 'DONE' | 'CANCELLED'
@@ -193,6 +196,9 @@ export type Task = {
   created_by_user_id: number
   created_at: string
   updated_at: string
+  // JOIN users(primary_owner_user_id)
+  owner_username?: string | null
+  owner_name?: string | null
 }
 
 // ─── Dashboard ────────────────────────────────────────────────────────

@@ -171,8 +171,11 @@ function TaskCard({ task: t, upstream, onClick }: { task: Task; upstream?: Task;
           </span>
         )}
         {t.primary_owner_user_id && (
-          <span className="text-[9px] font-bold px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded border border-blue-200">
-            R · user#{t.primary_owner_user_id}
+          <span
+            className="text-[9px] font-bold px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded border border-blue-200"
+            title={`user#${t.primary_owner_user_id} (@${t.owner_username || '?'})`}
+          >
+            R · {t.owner_name || t.owner_username || `user#${t.primary_owner_user_id}`}
           </span>
         )}
         {Number(t.is_confidential) === 1 && (
@@ -242,7 +245,13 @@ function TaskDetailModal({ task: t, onClose, onChanged }: { task: Task; onClose:
             <KV label="Status" value={t.status} />
             <KV label="進度" value={`${t.progress_percent}%`} />
             <KV label="A · Accountable" value={t.accountable_role || '—'} />
-            <KV label="R · Responsible" value={t.primary_owner_user_id ? `user#${t.primary_owner_user_id}` : '—'} />
+            <KV
+              label="R · Responsible"
+              value={t.primary_owner_user_id
+                ? (t.owner_name || t.owner_username || `user#${t.primary_owner_user_id}`)
+                : '—'
+              }
+            />
             <KV label="Stage" value={t.stage_id ? `#${t.stage_id}` : '—'} />
             <KV label="Due" value={t.computed_due_at ? new Date(t.computed_due_at).toLocaleDateString('zh-TW') : '—'} />
           </div>
