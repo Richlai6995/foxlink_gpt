@@ -36,7 +36,7 @@ router.get('/', async (req, res) => {
                 TO_CHAR(u.end_date, 'YYYY-MM-DD') AS end_date,
                 u.status,
                 u.allow_text_upload, u.text_max_mb, u.allow_audio_upload, u.audio_max_mb,
-                u.allow_image_upload, u.image_max_mb, u.allow_scheduled_tasks,
+                u.allow_image_upload, u.image_max_mb, u.allow_scheduled_tasks, u.scheduled_tasks_limit,
                 u.allow_create_skill, u.allow_external_skill, u.allow_code_skill,
                 u.can_create_kb, u.kb_max_size_mb, u.kb_max_count, u.can_deep_research,
                 u.can_design_ai_select, u.can_use_ai_dashboard, u.training_permission,
@@ -65,7 +65,7 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   const { username, password, name, employee_id, email, role, start_date, end_date, status,
     allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
-    allow_image_upload, image_max_mb, allow_scheduled_tasks, role_id,
+    allow_image_upload, image_max_mb, allow_scheduled_tasks, scheduled_tasks_limit, role_id,
     budget_daily, budget_weekly, budget_monthly, quota_exceed_action,
     webex_bot_enabled } = req.body;
   if (!username || !password || !name) {
@@ -95,10 +95,10 @@ router.post('/', async (req, res) => {
       .prepare(
         `INSERT INTO users (username, password, password_hashed, name, employee_id, email, role, start_date, end_date, status,
                             allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
-                            allow_image_upload, image_max_mb, allow_scheduled_tasks, role_id, creation_method,
+                            allow_image_upload, image_max_mb, allow_scheduled_tasks, scheduled_tasks_limit, role_id, creation_method,
                             budget_daily, budget_weekly, budget_monthly, quota_exceed_action,
                             can_design_ai_select, can_use_ai_dashboard, webex_bot_enabled)
-         VALUES (?, ?, 'Y', ?, ?, ?, ?, ${DI}, ${DI}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)`
+         VALUES (?, ?, 'Y', ?, ?, ?, ?, ${DI}, ${DI}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)`
       )
       .run(
         username, hashedPw, name,
@@ -113,6 +113,7 @@ router.post('/', async (req, res) => {
         resolveP(allow_image_upload, rolePerms?.allow_image_upload, 1),
         image_max_mb || rolePerms?.image_max_mb || 10,
         allow_scheduled_tasks !== undefined ? (allow_scheduled_tasks ? 1 : 0) : (rolePerms?.allow_scheduled_tasks ?? 0),
+        scheduled_tasks_limit != null && scheduled_tasks_limit !== '' ? Number(scheduled_tasks_limit) : null,
         resolvedRoleId,
         'manual',
         parseBudget(budget_daily), parseBudget(budget_weekly), parseBudget(budget_monthly),
@@ -145,7 +146,7 @@ router.put('/:id', async (req, res) => {
   const { id } = req.params;
   const { password, name, employee_id, email, role, start_date, end_date, status,
     allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
-    allow_image_upload, image_max_mb, allow_scheduled_tasks, role_id,
+    allow_image_upload, image_max_mb, allow_scheduled_tasks, scheduled_tasks_limit, role_id,
     budget_daily, budget_weekly, budget_monthly, quota_exceed_action,
     allow_create_skill, allow_external_skill, allow_code_skill,
     can_create_kb, kb_max_size_mb, kb_max_count,
@@ -178,6 +179,7 @@ router.put('/:id', async (req, res) => {
       allow_image_upload !== undefined ? (allow_image_upload ? 1 : 0) : 1,
       image_max_mb || 10,
       allow_scheduled_tasks ? 1 : 0,
+      scheduled_tasks_limit != null && scheduled_tasks_limit !== '' ? Number(scheduled_tasks_limit) : null,
       role_id || null,
       parseBudget(budget_daily), parseBudget(budget_weekly), parseBudget(budget_monthly),
       quota_exceed_action || null,
@@ -214,7 +216,7 @@ router.put('/:id', async (req, res) => {
     const D = `TO_DATE(?, 'YYYY-MM-DD')`;
     const baseSet = `name=?, employee_id=?, email=?, role=?, start_date=${D}, end_date=${D}, status=?,
              allow_text_upload=?, text_max_mb=?, allow_audio_upload=?, audio_max_mb=?,
-             allow_image_upload=?, image_max_mb=?, allow_scheduled_tasks=?, role_id=?,
+             allow_image_upload=?, image_max_mb=?, allow_scheduled_tasks=?, scheduled_tasks_limit=?, role_id=?,
              budget_daily=?, budget_weekly=?, budget_monthly=?, quota_exceed_action=?,
              allow_create_skill=?, allow_external_skill=?, allow_code_skill=?,
              can_create_kb=?, kb_max_size_mb=?, kb_max_count=?, can_deep_research=?,

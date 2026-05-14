@@ -10,21 +10,50 @@ import ShareGranteePicker from '../common/ShareGranteePicker'
 import type { AiSavedQueryShare, AiReportDashboardShare, GranteeSelection, GranteeType } from '../../types'
 
 type Share = AiSavedQueryShare | AiReportDashboardShare
-type ShareType = 'use' | 'manage'
+type ShareType = string
+
+interface ShareTypeOption {
+  value: string
+  label: string
+}
 
 interface Props {
   title: string
   sharesUrl: string
   onClose: () => void
+  /** Override share_type 下拉選項;預設 use/manage 對應 dashboard 既有語意 */
+  shareTypeOptions?: ShareTypeOption[]
+  /** 預設選中哪個 share_type */
+  defaultShareType?: string
+  /** 底部說明文字(預設對應 use/manage);傳 null = 不顯示 */
+  hint?: string | null
+  /** 標題列前綴(預設「分享設定」)*/
+  headerTitle?: string
 }
 
-export default function ShareModal({ title, sharesUrl, onClose }: Props) {
+const DEFAULT_SHARE_OPTIONS: ShareTypeOption[] = [
+  { value: 'use',    label: '使用權限' },
+  { value: 'manage', label: '管理權限' },
+]
+const DEFAULT_HINT = '使用權限：可查詢執行、另存為自己的版本｜管理權限：可修改設定、管理分享'
+
+export default function ShareModal({
+  title, sharesUrl, onClose,
+  shareTypeOptions = DEFAULT_SHARE_OPTIONS,
+  defaultShareType,
+  hint,
+  headerTitle,
+}: Props) {
   const { t } = useTranslation()
   const [shares, setShares] = useState<Share[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<GranteeSelection | null>(null)
-  const [shareType, setShareType] = useState<ShareType>('use')
+  const [shareType, setShareType] = useState<ShareType>(defaultShareType || shareTypeOptions[0]?.value || 'use')
   const [saving, setSaving] = useState(false)
+
+  // Label lookup for current share_type options
+  const labelOf = (v: string) => shareTypeOptions.find(o => o.value === v)?.label || v
+  const effectiveHint = hint === undefined ? DEFAULT_HINT : hint  // null = 顯式隱藏
 
   useEffect(() => { loadShares() }, [])
 
@@ -86,7 +115,7 @@ export default function ShareModal({ title, sharesUrl, onClose }: Props) {
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <div>
-            <h3 className="font-semibold text-gray-800">{t('common.share', '分享設定')}</h3>
+            <h3 className="font-semibold text-gray-800">{headerTitle || t('common.share', '分享設定')}</h3>
             <p className="text-xs text-gray-500 mt-0.5 truncate max-w-sm">{title}</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
@@ -104,16 +133,13 @@ export default function ShareModal({ title, sharesUrl, onClose }: Props) {
             onChange={setSelected}
             shareType={shareType}
             onShareTypeChange={v => setShareType(v as ShareType)}
-            shareTypeOptions={[
-              { value: 'use',    label: '使用權限' },
-              { value: 'manage', label: '管理權限' },
-            ]}
+            shareTypeOptions={shareTypeOptions}
             onAdd={handleAdd}
             adding={saving}
           />
-          <p className="text-xs text-gray-400">
-            使用權限：可查詢執行、另存為自己的版本｜管理權限：可修改設定、管理分享
-          </p>
+          {effectiveHint && (
+            <p className="text-xs text-gray-400">{effectiveHint}</p>
+          )}
         </div>
 
         {/* Current shares */}
@@ -141,9 +167,11 @@ export default function ShareModal({ title, sharesUrl, onClose }: Props) {
                     value={share.share_type}
                     onChange={e => handleChangeShareType(share.id, e.target.value as ShareType)}
                     className="border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-400 bg-white"
+                    title={labelOf(share.share_type)}
                   >
-                    <option value="use">使用權限</option>
-                    <option value="manage">管理權限</option>
+                    {shareTypeOptions.map(o => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
                   </select>
                   <button
                     onClick={() => handleRemove(share.id)}

@@ -1730,9 +1730,44 @@ async function runMigrations(db) {
   // ── Scheduled Tasks Pipeline 支援 ───────────────────────────────────────────
   await addCol('SCHEDULED_TASKS',     'PIPELINE_JSON',        'CLOB');
   await addCol('SCHEDULED_TASK_RUNS', 'PIPELINE_LOG_JSON',    'CLOB');
+  // Dashboard pipeline node:失敗節點摘要 — email 主旨/body 用、history UI 顯示
+  // 內容:[{ id, type, label, error, required }],跟 pipeline_log_json 重複但前端不用
+  // parse 全部 log 就能撈出失敗訊息
+  await addCol('SCHEDULED_TASK_RUNS', 'FAILED_NODES_JSON',    'CLOB');
 
   // ── Scheduled Tasks 文件範本輸出支援 ─────────────────────────────────────────
   await addCol('SCHEDULED_TASKS',     'OUTPUT_TEMPLATE_ID',   'VARCHAR2(64)');
+
+  // ── User per-user 排程上限 override ──────────────────────────────────────────
+  // NULL = 用全域 system_settings.scheduled_tasks_max_per_user(預設 10)
+  // 有值 = 個別覆寫該 user 上限(admin 完全 bypass,不檢查)
+  await addCol('USERS', 'SCHEDULED_TASKS_LIMIT', 'NUMBER');
+
+  // ── Scheduled Task Shares (分享給 user / role / org 各層)─────────────────────
+  // 對齊 ai_dashboard_shares / ai_project_shares 結構,7 種 grantee_type
+  // share_type: 'use'(只看,可看歷史/下載產出 / 不能改設定)
+  //           : 'develop'(可改 prompt/pipeline/時段/收件人 + 立刻執行 + toggle,不能刪除/改分享)
+  // 關鍵設計:執行身份永遠 = task.user_id(owner),develop 改了內容也不會切權限
+  // ⚠️ 含 db_write/kb_write/alert 節點的任務 → 後端禁 share_type='develop'(整段封禁)
+  await createTable('SCHEDULED_TASK_SHARES', `CREATE TABLE scheduled_task_shares (
+    id           NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    task_id      NUMBER NOT NULL REFERENCES scheduled_tasks(id) ON DELETE CASCADE,
+    grantee_type VARCHAR2(20) NOT NULL,
+    grantee_id   VARCHAR2(100) NOT NULL,
+    share_type   VARCHAR2(20) DEFAULT 'use' NOT NULL,
+    granted_by   NUMBER,
+    created_at   TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT scheduled_task_shares_uk UNIQUE (task_id, grantee_type, grantee_id)
+  )`);
+  // 早期 migration 用了 `created_by` 欄位名,後來改名 granted_by 但 createTable
+  // 對既有表 no-op。補一次 addCol 確保欄位存在(對 fresh install 也 idempotent)
+  await addCol('SCHEDULED_TASK_SHARES', 'GRANTED_BY', 'NUMBER');
+  // index 加速 user list 查詢(WHERE grantee_id=? AND grantee_type='user')
+  try {
+    await db.prepare(`CREATE INDEX scheduled_task_shares_grantee_ix ON scheduled_task_shares (grantee_type, grantee_id)`).run();
+  } catch (e) {
+    if (!/ORA-00955/.test(e.message)) console.warn('[Migration] scheduled_task_shares_grantee_ix:', e.message);
+  }
 
   // ── Scheduled Tasks 排程模式擴充(Phase 2)─────────────────────────────────
   // schedule_type 既有:daily/weekly/monthly,Phase 2 加 interval / multi_time

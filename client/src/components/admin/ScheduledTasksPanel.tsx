@@ -3,8 +3,9 @@ import {
   CalendarClock, Plus, Play, Pause, Trash2, Edit2, History,
   RefreshCw, CheckCircle, XCircle, ChevronDown, ChevronUp,
   Clock, Mail, FileText, X, Save, TriangleAlert, Settings2,
-  Zap, BookOpen, Wrench, GitBranch, LayoutTemplate, Search,
+  Zap, BookOpen, Wrench, GitBranch, LayoutTemplate, Search, Share2,
 } from 'lucide-react'
+import ShareModal from '../common/ShareModal'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import api from '../../lib/api'
@@ -19,6 +20,11 @@ const FILE_TYPES = ['xlsx', 'docx', 'pdf', 'pptx', 'foxlink_pptx', 'txt', 'mp3']
 interface ToolCatalog {
   skills: { id: number; name: string; icon: string; type: string; description?: string }[]
   kbs: { id: number; name: string; description?: string }[]
+  dashboards?: {
+    design_id: number; name: string; description?: string;
+    topic_name?: string; topic_id?: number; sample_questions?: string[];
+    policy_warning?: string | null;
+  }[]
 }
 const HOURS = Array.from({ length: 24 }, (_, i) => i)
 const MINUTES = [0, 5, 10, 15, 20, 30, 45]
@@ -226,11 +232,17 @@ function TaskFormModal({
   models,
   onClose,
   onSaved,
+  onOpenShares,
+  shareEditable,
 }: {
   task: Partial<ScheduledTask> | null
   models: { key: string; name: string }[]
   onClose: () => void
   onSaved: (t: ScheduledTask) => void
+  /** 點 header 分享按鈕時觸發(上層 set state 開 ShareModal);無此 prop = 不顯示按鈕 */
+  onOpenShares?: () => void
+  /** admin / owner 才能編輯分享(view / develop 不顯示按鈕)*/
+  shareEditable?: boolean
 }) {
   const { t, i18n } = useTranslation()
   const isEdit = !!task?.id
@@ -245,7 +257,7 @@ function TaskFormModal({
   const [outputTemplate, setOutputTemplate] = useState<DocTemplate | null>(null)
   const [showTemplatePicker, setShowTemplatePicker] = useState(false)
   const [recipientInput, setRecipientInput] = useState('')
-  const [catalog, setCatalog] = useState<ToolCatalog>({ skills: [], kbs: [] })
+  const [catalog, setCatalog] = useState<ToolCatalog>({ skills: [], kbs: [], dashboards: [] })
   const promptRef = useRef<HTMLTextAreaElement>(null)
   const [ac, setAc] = useState<{ show: boolean; trigger: string; query: string; idx: number }>(
     { show: false, trigger: '', query: '', idx: 0 }
@@ -458,9 +470,22 @@ function TaskFormModal({
             <CalendarClock size={18} className="text-blue-500" />
             {isEdit ? t('scheduledTask.editTask') : t('scheduledTask.addTask')}
           </h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-1">
+            {/* 分享按鈕 — 只有 isEdit + 有 onOpenShares + shareEditable 才顯示 */}
+            {isEdit && onOpenShares && shareEditable && (
+              <button
+                onClick={onOpenShares}
+                title={t('scheduledTask.share', '分享')}
+                className="px-2.5 py-1.5 rounded-lg text-xs flex items-center gap-1 text-purple-600 hover:bg-purple-50 transition"
+              >
+                <Share2 size={14} />
+                {t('scheduledTask.share', '分享')}
+              </button>
+            )}
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 ml-1">
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {/* Section tabs */}
@@ -870,6 +895,7 @@ function TaskFormModal({
               catalog={catalog}
               mcpServers={mcpServers}
               taskName={form.name}
+              taskModel={form.model}
               taskId={isEdit && task ? task.id : undefined}
             />
           )}
@@ -1444,6 +1470,8 @@ export default function ScheduledTasksPanel() {
   const [expanded, setExpanded] = useState<number | null>(null)
   const [msg, setMsg] = useState('')
   const [runningIds, setRunningIds] = useState<Set<number>>(new Set())
+  // 分享 modal 開啟對應的 task(null = 關閉)
+  const [shareTask, setShareTask] = useState<ScheduledTask | null>(null)
   const [filterName, setFilterName] = useState('')
   const [filterUserId, setFilterUserId] = useState<string>('')
   const [filterStatus, setFilterStatus] = useState<string>('')
@@ -1768,6 +1796,15 @@ export default function ScheduledTasksPanel() {
                           className="p-1.5 rounded hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition">
                           <Edit2 size={14} />
                         </button>
+                        {/* 分享 — 只有 admin / owner 才看得到 icon(API 端也會擋,但 UI 也避免誤點)*/}
+                        {(isAdmin || (task as any).share_role === 'owner') && (
+                          <button
+                            title={t('scheduledTask.share', '分享')}
+                            onClick={() => setShareTask(task)}
+                            className="p-1.5 rounded hover:bg-purple-50 text-slate-400 hover:text-purple-600 transition">
+                            <Share2 size={14} />
+                          </button>
+                        )}
                         <button
                           title={t('common.delete')}
                           onClick={() => del(task)}
@@ -1801,6 +1838,25 @@ export default function ScheduledTasksPanel() {
           models={models}
           onClose={() => setFormTask(null)}
           onSaved={onSaved}
+          onOpenShares={formTask.id ? () => setShareTask(formTask as ScheduledTask) : undefined}
+          shareEditable={isAdmin || (formTask as any).share_role === 'owner'}
+        />
+      )}
+
+      {/* Share Modal — task.share_role=admin/owner 才開得到 */}
+      {shareTask && (
+        <ShareModal
+          title={shareTask.name}
+          sharesUrl={`/scheduled-tasks/${shareTask.id}/shares`}
+          headerTitle={t('scheduledTask.share', '分享設定')}
+          shareTypeOptions={[
+            { value: 'use',     label: t('scheduledTask.shareTypeUse', '檢視權限') },
+            { value: 'develop', label: t('scheduledTask.shareTypeDevelop', '開發權限') },
+          ]}
+          defaultShareType="use"
+          hint={t('scheduledTask.shareHint',
+            '檢視權限:可查看設定與執行歷史、下載產出檔｜開發權限:可修改 Prompt/Pipeline/排程/收件人、立刻執行、啟用停用。不論哪種權限,執行身份永遠是任務擁有者,develop 改不到刪除與分享。')}
+          onClose={() => setShareTask(null)}
         />
       )}
     </div>

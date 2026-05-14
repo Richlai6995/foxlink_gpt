@@ -3179,4 +3179,8 @@ router.delete('/report-dashboards/:id/shares/:shareId', requireDashboard, async 
   }
 });
 
+// 把 forbidden keyword 檢查 export 出來給 services/dashboardService.js buffered wrapper 用
+// (排程環境沒 req,需要在 service 層也跑同樣前置檢查)
 module.exports = router;
+module.exports.checkForbiddenInQuestion = checkForbiddenInQuestion;
+module.exports.canAccessDesign = canAccessDesign;

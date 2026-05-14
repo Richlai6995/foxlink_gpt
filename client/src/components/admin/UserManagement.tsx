@@ -180,6 +180,7 @@ interface Role {
   allow_image_upload: number
   image_max_mb: number
   allow_scheduled_tasks: number
+  scheduled_tasks_limit?: number | null
 }
 
 interface UserForm {
@@ -199,6 +200,7 @@ interface UserForm {
   allow_image_upload: boolean
   image_max_mb: number
   allow_scheduled_tasks: boolean
+  scheduled_tasks_limit: string  // 字串方便 input value;空字串 = 用全域預設
   allow_create_skill: boolean | null  // null = inherit from role
   allow_external_skill: boolean | null
   allow_code_skill: boolean | null
@@ -236,6 +238,7 @@ const empty: UserForm = {
   allow_text_upload: true, text_max_mb: 10, allow_audio_upload: false, audio_max_mb: 10,
   allow_image_upload: true, image_max_mb: 10,
   allow_scheduled_tasks: false,
+  scheduled_tasks_limit: '',
   allow_create_skill: null,
   allow_external_skill: null,
   allow_code_skill: null,
@@ -351,6 +354,7 @@ export default function UserManagement() {
       allow_image_upload: u2.allow_image_upload !== 0,
       image_max_mb: u2.image_max_mb || 10,
       allow_scheduled_tasks: u2.allow_scheduled_tasks === 1,
+      scheduled_tasks_limit: u2.scheduled_tasks_limit != null ? String(u2.scheduled_tasks_limit) : '',
       role_id: u2.role_id || null,
       budget_daily: u2.budget_daily != null ? String(u2.budget_daily) : '',
       budget_weekly: u2.budget_weekly != null ? String(u2.budget_weekly) : '',
@@ -397,6 +401,7 @@ export default function UserManagement() {
         budget_monthly: form.budget_monthly !== '' ? Number(form.budget_monthly) : null,
         kb_max_size_mb: form.kb_max_size_mb !== '' ? Number(form.kb_max_size_mb) : null,
         kb_max_count: form.kb_max_count !== '' ? Number(form.kb_max_count) : null,
+        scheduled_tasks_limit: form.scheduled_tasks_limit !== '' ? Number(form.scheduled_tasks_limit) : null,
       }
       let userId: number
       if (editId) {
@@ -719,6 +724,22 @@ export default function UserManagement() {
                       className="w-4 h-4 accent-blue-600"
                     />
                     {t('users.form.allowScheduledTasks')}
+                    {form.allow_scheduled_tasks && (
+                      <span className="ml-2 inline-flex items-center gap-1 text-xs text-gray-500">
+                        — 上限
+                        <input
+                          type="number"
+                          min={1}
+                          max={9999}
+                          value={form.scheduled_tasks_limit}
+                          onChange={e => setForm(p => ({ ...p, scheduled_tasks_limit: e.target.value }))}
+                          onClick={e => e.stopPropagation()}
+                          placeholder="全域預設"
+                          className="w-20 px-1.5 py-0.5 border border-gray-300 rounded text-xs"
+                        />
+                        個(留空 = 用全域 system_settings)
+                      </span>
+                    )}
                   </label>
                   <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
                     <input

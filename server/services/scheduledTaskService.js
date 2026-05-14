@@ -508,6 +508,7 @@ async function runTask(db, taskId) {
   let attemptNum = 1;
   let toolsUsed = { skills: [], kbs: [], mcp_tools: [], dify_kbs: [] };
   let pipelineLog = [];
+  let failedNodes = [];  // pipeline 內失敗節點摘要(dashboard / skill / kb_write 等)
   // outBag 在 retry callback 內 mutate,但 pipeline 在 callback 外面也要拿,所以宣告在外面共用
   // (retry 重試時 substituteVarsAsync 會 reset outBag.urlWhitelist 為新 array,不會累積舊資料)
   const subBag = {};
@@ -711,14 +712,17 @@ async function runTask(db, taskId) {
         if (dedupedWl.length) {
           console.log(`[Scheduled] task=${task.id} "${task.name}" pipeline 啟用 url_whitelist enforcement (${dedupedWl.length} URLs)`);
         }
-        const { generatedFiles: pFiles, nodeOutputs, log: pLog } = await runPipeline(
+        const { generatedFiles: pFiles, nodeOutputs, log: pLog, failedNodes: pFailed } = await runPipeline(
           pipelineNodes,
           responseText,
           db,
-          { userId: task.user_id, sessionId, taskName: task.name, user, runId, taskId: task.id, extraVars }
+          { userId: task.user_id, sessionId, taskName: task.name, user, runId, taskId: task.id, extraVars,
+            // taskModel:dashboard node 沒指定自己 model_key 時 fallback 用(AI 設定 tab 選的 model)
+            taskModel: task.model }
         );
         generatedFiles.push(...pFiles);
         pipelineLog = pLog;
+        failedNodes = pFailed || [];
         console.log(`[Scheduled] Pipeline finished for task ${task.id}: log.length=${pipelineLog.length}, preview=${JSON.stringify(pipelineLog).slice(0, 500)}`);
         // Merge node outputs into response for email body
         // - 一般 AI 輸出(超過 10 字、不以 [ 起首)→ 直接附加
@@ -738,6 +742,7 @@ async function runTask(db, taskId) {
       } catch (e) {
         console.error(`[Scheduled] Pipeline error for task ${task.id}:`, e.message, e.stack);
         pipelineLog = [{ status: 'error', error: e.message }];
+        failedNodes = [{ id: 'pipeline', type: 'pipeline', label: 'Pipeline 整體錯誤', error: e.message, required: true }];
       }
     }
 
@@ -757,7 +762,11 @@ async function runTask(db, taskId) {
     if (user.email && !recipients.includes(user.email)) recipients.unshift(user.email);
 
     if (recipients.length > 0 && runStatus === 'ok') {
-      const subject = substituteVars(task.email_subject || '排程任務執行完成：{{task_name}} ({{date}})', task.name);
+      // 失敗節點摘要 — 信件主旨加 ⚠️ 標記、body 開頭加紅字錯誤段
+      const failPrefix = failedNodes.length > 0
+        ? `⚠️ (${failedNodes.length} 節點失敗) `
+        : '';
+      const subject = failPrefix + substituteVars(task.email_subject || '排程任務執行完成：{{task_name}} ({{date}})', task.name);
       const bodyTemplate = task.email_body ||
         '您好，\n\n以下為 {{date}}（{{weekday}}）排程任務「{{task_name}}」的執行結果：\n\n{{ai_response}}\n\n如有附件請見附檔。\n\nCortex';
       // Build tools used summary for email
@@ -769,9 +778,17 @@ async function runTask(db, taskId) {
         return parts.length > 0 ? `使用工具：${parts.join('；')}` : '';
       })();
 
-      const bodyText = substituteVars(bodyTemplate, task.name)
+      let bodyText = substituteVars(bodyTemplate, task.name)
         .replace(/\{\{ai_response\}\}/g, stripMarkdownForEmail(responseText.slice(0, 4000)))
         .replace(/\{\{tools_used\}\}/g, toolsSummary);
+
+      // 失敗節點段:塞在 body 最開頭,讓使用者一打開就看到
+      if (failedNodes.length > 0) {
+        const failBlock = `⚠️ 本次執行有 ${failedNodes.length} 個節點失敗：\n`
+          + failedNodes.map(f => `• 節點「${f.label}」(${f.type}) 失敗：${f.error}`).join('\n')
+          + `\n\n下方為其他節點的產出 ↓\n\n──────────────────────────────\n\n`;
+        bodyText = failBlock + bodyText;
+      }
 
       // Build attachments from generated files
       const attachments = generatedFiles
@@ -796,8 +813,8 @@ async function runTask(db, taskId) {
   // ── Write run record ────────────────────────────────────────────────────────
   await db.prepare(
     `INSERT INTO scheduled_task_runs
-      (task_id, run_at, status, attempt, session_id, response_preview, generated_files_json, email_sent_to, error_msg, duration_ms, tools_used_json, pipeline_log_json)
-     VALUES (?, SYSTIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (task_id, run_at, status, attempt, session_id, response_preview, generated_files_json, email_sent_to, error_msg, duration_ms, tools_used_json, pipeline_log_json, failed_nodes_json)
+     VALUES (?, SYSTIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     task.id,
     runStatus,
@@ -810,6 +827,7 @@ async function runTask(db, taskId) {
     durationMs,
     JSON.stringify(toolsUsed),
     pipelineLog.length > 0 ? JSON.stringify(pipelineLog) : null,
+    failedNodes.length > 0 ? JSON.stringify(failedNodes) : null,
   );
 
   // ── Update task stats ───────────────────────────────────────────────────────

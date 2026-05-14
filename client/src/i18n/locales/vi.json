@@ -1423,6 +1423,10 @@
     "backToChat": "Quay lại trò chuyện"
   },
   "scheduledTask": {
+    "share": "Chia sẻ",
+    "shareTypeUse": "Chỉ xem",
+    "shareTypeDevelop": "Phát triển",
+    "shareHint": "Chỉ xem: xem cài đặt + lịch sử + tải file kết quả｜Phát triển: sửa prompt/pipeline/lịch/người nhận, chạy ngay, bật/tắt. Dù quyền nào, tác vụ luôn chạy dưới danh nghĩa chủ sở hữu; develop không xoá hay đổi chia sẻ được.",
     "title": "Lịch tác vụ",
     "addTask": "Thêm tác vụ",
     "editTask": "Chỉnh sửa lịch tác vụ",
@@ -1617,7 +1621,43 @@
         "parallel": "Song song",
         "db_write": "Ghi DB",
         "kb_write": "Ghi KB",
-        "alert": "Cảnh báo"
+        "alert": "Cảnh báo",
+        "dashboard": "AI Dashboard",
+        "merge_excel": "Gộp Excel"
+      },
+      "mergeExcel": {
+        "hint": "Gộp rows từ nhiều dashboard node vào một Excel (nhiều sheet hoặc một sheet). Nên đặt format=none cho các dashboard được gộp (chỉ lấy raw rows, tránh xuất file trùng).",
+        "sources": "Chọn dashboard node để gộp",
+        "noDashboardsHint": "Chưa có dashboard node trong pipeline — hãy thêm trước.",
+        "mode": "Chế độ gộp",
+        "multi_sheet": "Nhiều sheet (mỗi source 1 sheet)",
+        "single_sheet": "Một sheet (nối với cột _source)",
+        "filename": "Tên tệp đầu ra",
+        "sheetName": "Tên Sheet (chỉ single_sheet)"
+      },
+      "dashboardNode": {
+        "hint": "Gọi truy vấn AI Dashboard; xuất rows thành Excel hoặc JSON cho node phía sau. Quyền được kiểm tra theo chủ lịch trình (quyền design + chính sách dữ liệu).",
+        "design": "Truy vấn Design",
+        "selectDesign": "Chọn design AI Dashboard…",
+        "noDesignsHint": "Hiện không có design AI Dashboard nào. Hãy lấy quyền chia sẻ hoặc tạo mới ở trang AI Dashboard.",
+        "question": "Câu hỏi ({{ai_output}} / {{date}} / {{node_X_output}} hỗ trợ)",
+        "questionPlaceholder": "VD: Top 10 hàng tồn dư cho ORG_CODE=GAD 7 ngày qua",
+        "samples": "Ví dụ:",
+        "format": "Định dạng đầu ra",
+        "jsonText": "JSON text (gửi node sau)",
+        "formatNone": "Không xuất file (chỉ dùng để gộp)",
+        "sheetName": "Tên Sheet",
+        "filename": "Tên tệp",
+        "filenameHint": "Hỗ trợ {{date}} / {{task_name}}; phần mở rộng .xlsx tự thêm.",
+        "required": "Bắt buộc (fail-fast)",
+        "requiredHint": "Nếu chọn, lỗi sẽ dừng pipeline; nếu không, chủ đề email có dấu ⚠️ nhưng các node khác tiếp tục.",
+        "tryIt": "Thử ngay — chạy xem trước",
+        "previewRows": "dòng",
+        "previewSample": "Xem {{n}} / {{total}} dòng",
+        "restrictMultiOrg": "Giới hạn phạm vi Multi-Org",
+        "restrictHint": "Chọn tập con từ quyền Multi-Org của bạn (chỉ giao, không mở rộng). Trống = dùng phạm vi đầy đủ.",
+        "restrictPicked": "đã chọn",
+        "restrictClear": "Xoá tất cả giới hạn"
       },
       "vars": {
         "aiOutput": "Đầu ra AI chính",

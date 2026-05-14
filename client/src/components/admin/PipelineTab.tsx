@@ -3,7 +3,7 @@ import {
   Plus, Trash2, ChevronDown, ChevronUp, GitBranch,
   Zap, Wrench, BookOpen, Bot, FileOutput, GitMerge, X,
   GripVertical, AlertCircle, CheckCircle2, LayoutTemplate,
-  Database, Shield, PlayCircle,
+  Database, Shield, PlayCircle, BarChart3, Loader2,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import TemplatePickerPopover from '../templates/TemplatePickerPopover'
@@ -21,9 +21,15 @@ export interface DbWriteColumnMap {
   default?: string
 }
 
+export interface DashboardOutput {
+  format?: 'xlsx' | 'json_text' | 'none'
+  filename?: string
+  sheet_name?: string
+}
+
 export interface PipelineNode {
   id: string
-  type: 'skill' | 'mcp' | 'kb' | 'ai' | 'generate_file' | 'condition' | 'parallel' | 'db_write' | 'kb_write' | 'alert'
+  type: 'skill' | 'mcp' | 'kb' | 'ai' | 'generate_file' | 'condition' | 'parallel' | 'db_write' | 'kb_write' | 'alert' | 'dashboard' | 'merge_excel'
   // skill
   name?: string
   input?: string
@@ -85,6 +91,25 @@ export interface PipelineNode {
   use_llm_analysis?: boolean | number
   cooldown_minutes?: number
   dedup_key?: string
+  // dashboard (AI 戰情)
+  design_id?: number
+  question?: string
+  model_key?: string
+  force_fresh?: boolean
+  output?: DashboardOutput
+  // required:true → fail-fast(整個 pipeline 失敗中斷);false → 寄信時標 ⚠️ 但繼續其他 node
+  required?: boolean
+  // restrict_multi_org:進一步限縮 user 自己的 multi-org scope(intersection-only)
+  // 由 Try it 觸發後從 multiorg_scope 取出 user 全 scope,讓設計者選 subset
+  restrict_multi_org?: {
+    org_ids?: number[]
+    ou_ids?: number[]
+    sob_ids?: number[]
+  }
+  // merge_excel
+  source_node_ids?: string[]
+  mode?: 'multi_sheet' | 'single_sheet'
+  sheet_name?: string
   // label
   label?: string
 }
@@ -106,6 +131,15 @@ interface WritableTableDetail extends WritableTable {
 interface ToolCatalog {
   skills: { id: number; name: string; icon: string; type: string }[]
   kbs: { id: number; name: string }[]
+  dashboards?: {
+    design_id: number
+    name: string
+    description?: string
+    topic_name?: string
+    topic_id?: number
+    sample_questions?: string[]
+    policy_warning?: string | null
+  }[]
 }
 
 interface McpServer {
@@ -120,6 +154,7 @@ interface Props {
   catalog: ToolCatalog
   mcpServers: McpServer[]
   taskName?: string
+  taskModel?: string  // 任務級 model(AI 設定 tab 選的)— dashboard node 沒指定自己的 model 時拿來用
   taskId?: number   // 用於 db_write/kb_write 節點 dry-run 時載入最近一次 ai_output
 }
 
@@ -136,6 +171,8 @@ const NODE_TYPES = [
   { type: 'db_write',      icon: Database,    labelKey: 'scheduledTask.pipeline.nodeType.db_write',       color: 'text-slate-600',  bg: 'bg-slate-50  border-slate-300',  adminOnly: true  },
   { type: 'kb_write',      icon: BookOpen,    labelKey: 'scheduledTask.pipeline.nodeType.kb_write',       color: 'text-emerald-600',bg: 'bg-emerald-50 border-emerald-200', adminOnly: false },
   { type: 'alert',         icon: AlertCircle, labelKey: 'scheduledTask.pipeline.nodeType.alert',          color: 'text-rose-600',   bg: 'bg-rose-50   border-rose-300',     adminOnly: false },
+  { type: 'dashboard',     icon: BarChart3,   labelKey: 'scheduledTask.pipeline.nodeType.dashboard',      color: 'text-orange-500', bg: 'bg-orange-50 border-orange-200',  adminOnly: false },
+  { type: 'merge_excel',   icon: FileOutput,  labelKey: 'scheduledTask.pipeline.nodeType.merge_excel',    color: 'text-cyan-600',   bg: 'bg-cyan-50   border-cyan-200',    adminOnly: false },
 ] as const
 
 const FILE_TYPES = ['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'mp3']
@@ -1223,9 +1260,366 @@ function GenerateFileForm({
   )
 }
 
+// ─── DashboardForm — 呼叫 AI 戰情 query design ────────────────────────────────
+// 元件責任:
+//   1. 從 catalog.dashboards 給使用者選 design(下拉 + topic 標籤 + policy_warning)
+//   2. question 可帶 {{ai_output}} / {{date}} / {{node_X_output}} 插值
+//   3. output 設定:format (xlsx | json_text) + filename + sheet_name
+//   4. required toggle(fail-fast vs 繼續其他 node)
+//   5. Try it 按鈕:即時打 /scheduled-tasks/dashboards/:id/preview 看 SQL + 前 100 筆 rows
+function DashboardForm({
+  node, otherIds, onChange, catalog, taskModel,
+}: {
+  node: PipelineNode
+  otherIds: string[]
+  onChange: (patch: Partial<PipelineNode>) => void
+  catalog: ToolCatalog
+  taskModel?: string  // 任務級預設 model(AI 設定 tab 選的);node.model_key 沒設時用這個
+}) {
+  const { t } = useTranslation()
+  const [previewing, setPreviewing] = useState(false)
+  const [previewResult, setPreviewResult] = useState<any>(null)
+
+  const dashboards = catalog.dashboards || []
+  const selected = dashboards.find(d => d.design_id === node.design_id)
+
+  const output = node.output || {}
+  const setOutput = (patch: Partial<DashboardOutput>) => onChange({ output: { ...output, ...patch } })
+
+  const runPreview = async () => {
+    if (!node.design_id) return
+    setPreviewing(true)
+    setPreviewResult(null)
+    try {
+      const r = await api.post(`/scheduled-tasks/dashboards/${node.design_id}/preview`, {
+        question: node.question || '{{ai_output}}',
+        // 優先序:node.model_key(節點覆寫)> taskModel(AI 設定 tab 選的)> null(後端走 design 預設)
+        model_key: node.model_key || taskModel || null,
+        lang: 'zh-TW',
+        restrict_multi_org: node.restrict_multi_org || null,
+      })
+      setPreviewResult(r.data)
+    } catch (e: any) {
+      setPreviewResult({ error: e?.response?.data?.error || e.message || 'preview 失敗' })
+    } finally {
+      setPreviewing(false)
+    }
+  }
+
+  // 從 previewResult.multiorg_scope 取出 user 自己有的 org/ou/sob 詳細列表
+  // 給 chips 選擇器當「可勾的全集」。restrict 只能 intersection 這個全集。
+  const userScope = previewResult?.multiorg_scope
+  const orgFull = (userScope?.org_details || []) as { id: number; code?: string; name?: string }[]
+  const ouFull  = (userScope?.ou_details  || []) as { id: number; code?: string; name?: string }[]
+  const sobFull = (userScope?.sob_details || []) as { id: number; code?: string; name?: string }[]
+  const showRestrictPanel = orgFull.length + ouFull.length + sobFull.length > 0
+
+  const restrict = node.restrict_multi_org || {}
+  const setRestrict = (patch: Partial<NonNullable<PipelineNode['restrict_multi_org']>>) => {
+    const merged = { ...restrict, ...patch }
+    // 三個都空 → 整個 restrict 清掉(visual cleaner)
+    const empty = !merged.org_ids?.length && !merged.ou_ids?.length && !merged.sob_ids?.length
+    onChange({ restrict_multi_org: empty ? undefined : merged })
+  }
+  const toggle = (key: 'org_ids' | 'ou_ids' | 'sob_ids', id: number) => {
+    const cur = new Set(restrict[key] || [])
+    if (cur.has(id)) cur.delete(id); else cur.add(id)
+    setRestrict({ [key]: Array.from(cur) } as any)
+  }
+  const isPicked = (key: 'org_ids' | 'ou_ids' | 'sob_ids', id: number) =>
+    (restrict[key] || []).includes(id)
+
+  return (
+    <div className="space-y-3">
+      {/* 提示 */}
+      <div className="flex items-start gap-1.5 text-xs bg-orange-50 border border-orange-200 rounded px-2 py-1.5 text-orange-700">
+        <BarChart3 size={12} className="shrink-0 mt-0.5" />
+        <span>{t('scheduledTask.pipeline.dashboardNode.hint')}</span>
+      </div>
+
+      {/* Design 下拉 */}
+      <div>
+        <label className="label text-xs">{t('scheduledTask.pipeline.dashboardNode.design')}</label>
+        <select
+          className="input w-full text-xs"
+          value={node.design_id || ''}
+          onChange={(e) => onChange({ design_id: e.target.value ? Number(e.target.value) : undefined })}
+        >
+          <option value="">{t('scheduledTask.pipeline.dashboardNode.selectDesign')}</option>
+          {dashboards.map(d => (
+            <option key={d.design_id} value={d.design_id}>
+              {d.topic_name ? `[${d.topic_name}] ` : ''}{d.name}
+            </option>
+          ))}
+        </select>
+        {dashboards.length === 0 && (
+          <p className="text-[10px] text-slate-400 mt-1">{t('scheduledTask.pipeline.dashboardNode.noDesignsHint')}</p>
+        )}
+        {selected?.policy_warning && (
+          <p className="text-[10px] text-amber-600 mt-1">⚠️ {selected.policy_warning}</p>
+        )}
+      </div>
+
+      {/* Question */}
+      {node.design_id && (
+        <>
+          <div>
+            <label className="label text-xs">{t('scheduledTask.pipeline.dashboardNode.question')}</label>
+            <VarInput
+              value={node.question || '{{ai_output}}'}
+              onChange={(v) => onChange({ question: v })}
+              placeholder={t('scheduledTask.pipeline.dashboardNode.questionPlaceholder')}
+              multiline
+              allNodeIds={otherIds}
+            />
+            {/* Sample questions chips */}
+            {selected?.sample_questions && selected.sample_questions.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                <span className="text-[10px] text-slate-400 mr-1">💡 {t('scheduledTask.pipeline.dashboardNode.samples')}</span>
+                {selected.sample_questions.slice(0, 6).map((q, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => onChange({ question: q })}
+                    className="text-[10px] px-2 py-0.5 rounded-full border border-slate-200 text-slate-500 hover:border-orange-300 hover:text-orange-600 max-w-[280px] truncate"
+                    title={q}
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Output 設定 */}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="label text-xs">{t('scheduledTask.pipeline.dashboardNode.format')}</label>
+              <select
+                className="input w-full text-xs"
+                value={output.format || 'xlsx'}
+                onChange={(e) => setOutput({ format: e.target.value as 'xlsx' | 'json_text' | 'none' })}
+              >
+                <option value="xlsx">Excel (xlsx)</option>
+                <option value="json_text">{t('scheduledTask.pipeline.dashboardNode.jsonText')}</option>
+                <option value="none">{t('scheduledTask.pipeline.dashboardNode.formatNone')}</option>
+              </select>
+            </div>
+            {(output.format || 'xlsx') === 'xlsx' && (
+              <div>
+                <label className="label text-xs">{t('scheduledTask.pipeline.dashboardNode.sheetName')}</label>
+                <input
+                  className="input w-full text-xs"
+                  value={output.sheet_name || ''}
+                  onChange={(e) => setOutput({ sheet_name: e.target.value })}
+                  placeholder="Result"
+                />
+              </div>
+            )}
+          </div>
+
+          {(output.format || 'xlsx') === 'xlsx' && (
+            <div>
+              <label className="label text-xs">{t('scheduledTask.pipeline.dashboardNode.filename')}</label>
+              <input
+                className="input w-full text-xs font-mono"
+                value={output.filename || ''}
+                onChange={(e) => setOutput({ filename: e.target.value })}
+                placeholder={`${selected?.name || 'dashboard'}_{{date}}.xlsx`}
+              />
+              <p className="text-[10px] text-slate-400 mt-0.5">{t('scheduledTask.pipeline.dashboardNode.filenameHint')}</p>
+            </div>
+          )}
+
+          {/* required toggle */}
+          <label className="flex items-center gap-2 cursor-pointer text-xs">
+            <input
+              type="checkbox"
+              checked={!!node.required}
+              onChange={(e) => onChange({ required: e.target.checked })}
+            />
+            <span>{t('scheduledTask.pipeline.dashboardNode.required')}</span>
+            <span className="text-[10px] text-slate-400">{t('scheduledTask.pipeline.dashboardNode.requiredHint')}</span>
+          </label>
+
+          {/* Try it 按鈕 */}
+          <div className="pt-2 border-t border-slate-200">
+            <button
+              type="button"
+              onClick={runPreview}
+              disabled={previewing}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-orange-500 text-white hover:bg-orange-600 disabled:opacity-50"
+            >
+              {previewing ? <Loader2 size={12} className="animate-spin" /> : <PlayCircle size={12} />}
+              {t('scheduledTask.pipeline.dashboardNode.tryIt')}
+            </button>
+            {previewResult && (
+              <div className="mt-2 space-y-2">
+                {previewResult.error ? (
+                  <div className="text-xs bg-rose-50 border border-rose-200 rounded px-2 py-1.5 text-rose-700">
+                    ❌ {previewResult.error}
+                  </div>
+                ) : (
+                  <>
+                    <div className="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1.5">
+                      <div className="font-medium text-slate-700 mb-0.5">
+                        ✓ {previewResult.row_count} {t('scheduledTask.pipeline.dashboardNode.previewRows')}
+                        <span className="text-slate-400 ml-2">({previewResult.duration_ms}ms)</span>
+                      </div>
+                      {previewResult.multiorg_scope && (
+                        <div className="text-[10px] text-slate-500">
+                          MultiOrg: {(previewResult.multiorg_scope.allowed_org_names || []).slice(0, 3).join(', ')}
+                          {(previewResult.multiorg_scope.allowed_org_names || []).length > 3 ? ` (+${(previewResult.multiorg_scope.allowed_org_names || []).length - 3})` : ''}
+                        </div>
+                      )}
+                    </div>
+                    {previewResult.sql && (
+                      <details className="text-xs bg-slate-50 border border-slate-200 rounded">
+                        <summary className="cursor-pointer px-2 py-1 text-slate-600">SQL</summary>
+                        <pre className="px-2 py-1.5 text-[10px] font-mono text-slate-700 whitespace-pre-wrap overflow-x-auto">{previewResult.sql}</pre>
+                      </details>
+                    )}
+                    {/* Multi-Org 限縮 chips — 只在 user 有 multi-org scope 時顯示 */}
+                    {showRestrictPanel && (
+                      <details className="text-xs bg-orange-50 border border-orange-200 rounded" open>
+                        <summary className="cursor-pointer px-2 py-1 text-orange-700 font-medium">
+                          🎯 {t('scheduledTask.pipeline.dashboardNode.restrictMultiOrg')}
+                          {(restrict.org_ids?.length || restrict.ou_ids?.length || restrict.sob_ids?.length) ? (
+                            <span className="ml-1 text-[10px] text-orange-500">
+                              ({(restrict.org_ids?.length || 0) + (restrict.ou_ids?.length || 0) + (restrict.sob_ids?.length || 0)} {t('scheduledTask.pipeline.dashboardNode.restrictPicked')})
+                            </span>
+                          ) : null}
+                        </summary>
+                        <div className="px-2 py-1.5 space-y-2">
+                          <p className="text-[10px] text-slate-500">
+                            {t('scheduledTask.pipeline.dashboardNode.restrictHint')}
+                          </p>
+                          {orgFull.length > 0 && (
+                            <div>
+                              <div className="text-[10px] font-medium text-slate-600 mb-1">Organization ({orgFull.length})</div>
+                              <div className="flex flex-wrap gap-1">
+                                {orgFull.map(o => (
+                                  <button
+                                    key={o.id}
+                                    type="button"
+                                    onClick={() => toggle('org_ids', o.id)}
+                                    className={`text-[10px] px-2 py-0.5 rounded-full border transition ${
+                                      isPicked('org_ids', o.id)
+                                        ? 'bg-orange-500 text-white border-orange-500'
+                                        : 'bg-white text-slate-600 border-slate-200 hover:border-orange-300'
+                                    }`}
+                                    title={o.name}
+                                  >
+                                    {o.code || o.id}{o.name ? ` (${o.name.slice(0, 12)})` : ''}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {ouFull.length > 0 && (
+                            <div>
+                              <div className="text-[10px] font-medium text-slate-600 mb-1">Operating Unit ({ouFull.length})</div>
+                              <div className="flex flex-wrap gap-1">
+                                {ouFull.map(o => (
+                                  <button
+                                    key={o.id}
+                                    type="button"
+                                    onClick={() => toggle('ou_ids', o.id)}
+                                    className={`text-[10px] px-2 py-0.5 rounded-full border transition ${
+                                      isPicked('ou_ids', o.id)
+                                        ? 'bg-orange-500 text-white border-orange-500'
+                                        : 'bg-white text-slate-600 border-slate-200 hover:border-orange-300'
+                                    }`}
+                                    title={o.name}
+                                  >
+                                    {o.code || o.id}{o.name ? ` (${o.name.slice(0, 12)})` : ''}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {sobFull.length > 0 && (
+                            <div>
+                              <div className="text-[10px] font-medium text-slate-600 mb-1">Set of Books ({sobFull.length})</div>
+                              <div className="flex flex-wrap gap-1">
+                                {sobFull.map(o => (
+                                  <button
+                                    key={o.id}
+                                    type="button"
+                                    onClick={() => toggle('sob_ids', o.id)}
+                                    className={`text-[10px] px-2 py-0.5 rounded-full border transition ${
+                                      isPicked('sob_ids', o.id)
+                                        ? 'bg-orange-500 text-white border-orange-500'
+                                        : 'bg-white text-slate-600 border-slate-200 hover:border-orange-300'
+                                    }`}
+                                    title={o.name}
+                                  >
+                                    {o.code || o.id}{o.name ? ` (${o.name.slice(0, 12)})` : ''}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {node.restrict_multi_org && (
+                            <button
+                              type="button"
+                              onClick={() => onChange({ restrict_multi_org: undefined })}
+                              className="text-[10px] text-slate-500 hover:text-rose-500 underline"
+                            >
+                              {t('scheduledTask.pipeline.dashboardNode.restrictClear')}
+                            </button>
+                          )}
+                        </div>
+                      </details>
+                    )}
+                    {previewResult.rows && previewResult.rows.length > 0 && (
+                      <details className="text-xs bg-slate-50 border border-slate-200 rounded">
+                        <summary className="cursor-pointer px-2 py-1 text-slate-600">
+                          {t('scheduledTask.pipeline.dashboardNode.previewSample', { n: previewResult.rows.length, total: previewResult.row_count })}
+                        </summary>
+                        <div className="overflow-x-auto max-h-60">
+                          <table className="text-[10px] w-full">
+                            <thead className="bg-slate-100 sticky top-0">
+                              <tr>
+                                {(previewResult.columns || Object.keys(previewResult.rows[0])).map((c: string) => (
+                                  <th key={c} className="px-2 py-1 text-left font-medium text-slate-600 border-b border-slate-200">
+                                    {previewResult.column_labels?.[c] || c}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {previewResult.rows.slice(0, 20).map((row: any, ri: number) => (
+                                <tr key={ri} className="border-b border-slate-100">
+                                  {(previewResult.columns || Object.keys(row)).map((c: string) => (
+                                    <td key={c} className="px-2 py-1 text-slate-700">
+                                      {typeof row[c] === 'object' ? JSON.stringify(row[c]) : String(row[c] ?? '')}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          {previewResult.rows.length > 20 && (
+                            <p className="text-[10px] text-slate-400 px-2 py-1">+{previewResult.rows.length - 20} more rows…</p>
+                          )}
+                        </div>
+                      </details>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 // ─── NodeForm ─────────────────────────────────────────────────────────────────
 function NodeForm({
-  node, allNodes, catalog, mcpServers, onChange, taskId,
+  node, allNodes, catalog, mcpServers, onChange, taskId, taskModel,
 }: {
   node: PipelineNode
   allNodes: PipelineNode[]
@@ -1233,6 +1627,7 @@ function NodeForm({
   mcpServers: McpServer[]
   onChange: (patch: Partial<PipelineNode>) => void
   taskId?: number
+  taskModel?: string
 }) {
   const { t } = useTranslation()
   const otherIds = allNodes.filter((n) => n.id !== node.id).map((n) => n.id)
@@ -1355,6 +1750,100 @@ function NodeForm({
     <AlertForm node={node} otherIds={otherIds} onChange={onChange} taskId={taskId} />
   )
 
+  if (node.type === 'dashboard') return (
+    <DashboardForm node={node} otherIds={otherIds} onChange={onChange} catalog={catalog} taskModel={taskModel} />
+  )
+
+  if (node.type === 'merge_excel') {
+    // 只列出此 pipeline 內 type=dashboard 的 node 給 user 挑(這層用 allNodes 比 otherIds 更精確)
+    const dashboardNodes = allNodes.filter(n => n.type === 'dashboard' && n.id !== node.id)
+    const picked = new Set(node.source_node_ids || [])
+    const toggleSource = (id: string) => {
+      const next = new Set(picked)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      onChange({ source_node_ids: Array.from(next) })
+    }
+    return (
+      <div className="space-y-3">
+        <div className="flex items-start gap-1.5 text-xs bg-cyan-50 border border-cyan-200 rounded px-2 py-1.5 text-cyan-700">
+          <FileOutput size={12} className="shrink-0 mt-0.5" />
+          <span>{t('scheduledTask.pipeline.mergeExcel.hint')}</span>
+        </div>
+
+        {/* Sources */}
+        <div>
+          <label className="label text-xs">{t('scheduledTask.pipeline.mergeExcel.sources')}</label>
+          {dashboardNodes.length === 0 ? (
+            <p className="text-[10px] text-slate-400">{t('scheduledTask.pipeline.mergeExcel.noDashboardsHint')}</p>
+          ) : (
+            <div className="space-y-1 max-h-48 overflow-y-auto">
+              {dashboardNodes.map((dn) => (
+                <label key={dn.id} className="flex items-center gap-2 px-2 py-1.5 rounded border border-slate-200 cursor-pointer hover:border-cyan-300 text-xs">
+                  <input type="checkbox" checked={picked.has(dn.id)} onChange={() => toggleSource(dn.id)} />
+                  <span className="font-medium text-slate-700">{dn.label || dn.id}</span>
+                  <span className="text-slate-400 text-[10px] ml-auto">
+                    {dn.design_id ? `design #${dn.design_id}` : t('scheduledTask.pipeline.summary.notSet')}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Mode */}
+        <div>
+          <label className="label text-xs">{t('scheduledTask.pipeline.mergeExcel.mode')}</label>
+          <div className="flex gap-3 text-xs">
+            {(['multi_sheet', 'single_sheet'] as const).map((m) => (
+              <label key={m} className="flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="radio"
+                  checked={(node.mode || 'multi_sheet') === m}
+                  onChange={() => onChange({ mode: m })}
+                />
+                {t(`scheduledTask.pipeline.mergeExcel.${m}`)}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* Filename */}
+        <div>
+          <label className="label text-xs">{t('scheduledTask.pipeline.mergeExcel.filename')}</label>
+          <input
+            className="input w-full text-xs font-mono"
+            value={node.filename || ''}
+            onChange={(e) => onChange({ filename: e.target.value })}
+            placeholder="merged_dashboards_{{date}}.xlsx"
+          />
+        </div>
+
+        {(node.mode || 'multi_sheet') === 'single_sheet' && (
+          <div>
+            <label className="label text-xs">{t('scheduledTask.pipeline.mergeExcel.sheetName')}</label>
+            <input
+              className="input w-full text-xs"
+              value={node.sheet_name || ''}
+              onChange={(e) => onChange({ sheet_name: e.target.value })}
+              placeholder="Merged"
+            />
+          </div>
+        )}
+
+        {/* required toggle */}
+        <label className="flex items-center gap-2 cursor-pointer text-xs">
+          <input
+            type="checkbox"
+            checked={!!node.required}
+            onChange={(e) => onChange({ required: e.target.checked })}
+          />
+          <span>{t('scheduledTask.pipeline.dashboardNode.required')}</span>
+          <span className="text-[10px] text-slate-400">{t('scheduledTask.pipeline.dashboardNode.requiredHint')}</span>
+        </label>
+      </div>
+    )
+  }
+
   if (node.type === 'condition') return (
     <div className="space-y-3">
       <div>
@@ -1448,7 +1937,7 @@ function NodeForm({
 // ─── NodeCard ─────────────────────────────────────────────────────────────────
 function NodeCard({
   node, allNodes, catalog, mcpServers, onUpdate, onDelete, onMove,
-  isFirst, isLast, taskId,
+  isFirst, isLast, taskId, taskModel,
 }: {
   node: PipelineNode
   allNodes: PipelineNode[]
@@ -1460,6 +1949,7 @@ function NodeCard({
   isFirst: boolean
   isLast: boolean
   taskId?: number
+  taskModel?: string
 }) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState(true)
@@ -1487,6 +1977,18 @@ function NodeCard({
     if (node.type === 'alert') return node.rule_name
       ? `${node.rule_name} [${(node.severity || 'warning').toUpperCase()}] ${node.comparison || '?'}`
       : t('scheduledTask.pipeline.summary.notSet')
+    if (node.type === 'dashboard') {
+      if (!node.design_id) return t('scheduledTask.pipeline.summary.notSet')
+      const fmt = (node.output?.format || 'xlsx').toUpperCase()
+      const req = node.required ? ' ⚠️' : ''
+      return `#${node.design_id} → ${fmt}${req}`
+    }
+    if (node.type === 'merge_excel') {
+      const n = (node.source_node_ids || []).length
+      if (n === 0) return t('scheduledTask.pipeline.summary.notSet')
+      const m = node.mode === 'single_sheet' ? 'single' : 'multi'
+      return `${n} sources → ${m} sheet`
+    }
     return ''
   })()
 
@@ -1529,6 +2031,7 @@ function NodeCard({
             mcpServers={mcpServers}
             onChange={(patch) => onUpdate(node.id, patch)}
             taskId={taskId}
+            taskModel={taskModel}
           />
         </div>
       )}
@@ -1576,7 +2079,7 @@ function AddNodeMenu({ onAdd }: { onAdd: (type: PipelineNode['type']) => void })
 }
 
 // ─── PipelineTab (main export) ────────────────────────────────────────────────
-export default function PipelineTab({ nodes, onChange, catalog, mcpServers, taskName, taskId }: Props) {
+export default function PipelineTab({ nodes, onChange, catalog, mcpServers, taskName, taskModel, taskId }: Props) {
   const { t } = useTranslation()
 
   const update = (id: string, patch: Partial<PipelineNode>) =>
@@ -1626,6 +2129,18 @@ export default function PipelineTab({ nodes, onChange, catalog, mcpServers, task
       base.cooldown_minutes = 60
       base.input = '{{ai_output}}'
     }
+    if (type === 'dashboard') {
+      base.question = '{{ai_output}}'
+      base.output = { format: 'xlsx', sheet_name: 'Result' }
+      base.required = false
+      base.force_fresh = true
+    }
+    if (type === 'merge_excel') {
+      base.source_node_ids = []
+      base.mode = 'multi_sheet'
+      base.filename = 'merged_dashboards_{{date}}.xlsx'
+      base.required = false
+    }
     onChange([...nodes, base])
   }
 
@@ -1664,6 +2179,7 @@ export default function PipelineTab({ nodes, onChange, catalog, mcpServers, task
               isFirst={i === 0}
               isLast={i === nodes.length - 1}
               taskId={taskId}
+              taskModel={taskModel}
             />
             {i < nodes.length - 1 && (
               <div className="flex justify-center mt-2">

@@ -340,6 +340,8 @@ export interface ScheduledTask {
   username?: string
   tools_config_json?: string
   pipeline_json?: string
+  // share_role:'admin' / 'owner' / 'develop' / 'use' — 由 GET /api/scheduled-tasks 計算回傳
+  share_role?: 'admin' | 'owner' | 'develop' | 'use'
 }
 
 export interface ResearchJob {

@@ -276,6 +276,212 @@ async function execGenerateFile(node, vars, db, context) {
   return { text, file };
 }
 
+// ── Dashboard (AI 戰情) node ─────────────────────────────────────────────────
+// 把 AI 戰情查詢當成 pipeline 節點呼叫:
+//   • design_id    — 要呼叫的 ai_select_designs.id
+//   • question     — NL 問題(支援 {{ai_output}} / {{date}} / {{node_X_output}} 等插值)
+//   • model_key    — null = 用 design 預設;否則指定 llm_models.key
+//   • output       — { format: 'xlsx' | 'json_text', filename?, sheet_name? }
+//                    json_text 把 rows 字串化丟給下游 ai/db_write 節點接;
+//                    xlsx 直接落檔到 generated/,進 email 附件。
+//   • required     — true = 失敗就 throw 給 runPipeline.catch(預設 false,跟其他 node 一致)
+// 權限走 task.user_id 在 runDashboardQueryBuffered 內做完整檢查
+// (design access + 資料政策 full_block + 關鍵字)。Multi-Org SQL 注入在底層自動處理。
+const MAX_DASHBOARD_ROWS = 50000;
+function rowsToXlsxJsonString(rows, columns, columnLabels, sheetName) {
+  // 把 dashboard SSE result(rows: object[]; columns: string[]; columnLabels: { code → label })
+  // 轉成 fileGenerator.generateXlsx 吃的 JSON 字串格式:[{ sheetName, data: [[hdr...], [row...]] }]
+  const cols = (columns && columns.length) ? columns : (rows[0] ? Object.keys(rows[0]) : []);
+  const header = cols.map(c => columnLabels?.[c] || c);
+  const limited = rows.slice(0, MAX_DASHBOARD_ROWS);
+  const data = [header, ...limited.map(r => cols.map(c => {
+    const v = r[c];
+    if (v == null) return '';
+    if (v instanceof Date) return v.toISOString().slice(0, 19).replace('T', ' ');
+    if (typeof v === 'object') return JSON.stringify(v);
+    return v;
+  }))];
+  const truncated = rows.length > MAX_DASHBOARD_ROWS;
+  return {
+    jsonStr: JSON.stringify([{ sheetName: sheetName || 'Result', data }]),
+    truncated,
+    rowsExported: limited.length,
+  };
+}
+
+async function execDashboard(node, vars, db, context) {
+  const { runDashboardQueryBuffered } = require('./dashboardService');
+  const { processGenerateBlocks } = require('./fileGenerator');
+
+  if (!node.design_id) throw new Error('dashboard 節點缺少 design_id');
+  const question = interpolate(node.question || '{{ai_output}}', vars);
+  if (!question.trim()) throw new Error('dashboard 節點 question 為空');
+
+  const result = await runDashboardQueryBuffered({
+    designId: Number(node.design_id),
+    question,
+    userId: context.userId,
+    user: context.user,
+    // 優先序:node.model_key(節點覆寫)> context.taskModel(任務 AI 設定 model)> null(後端 fallback)
+    modelKey: node.model_key || context.taskModel || null,
+    lang: node.lang || 'zh-TW',
+    isDesigner: false,  // pipeline 永遠以 viewer 身份跑(override_sql 不開放)
+    forceFresh: node.force_fresh !== false,
+    restrictMultiOrg: node.restrict_multi_org || null,
+  });
+
+  // 把結構化資料寫進 artifacts,給後續 merge_excel 等 node 消費(獨立於 nodeOutputs 字串)
+  if (context._artifacts) {
+    context._artifacts[node.id] = {
+      kind: 'dashboard',
+      rows: result.rows,
+      columns: result.columns,
+      columnLabels: result.columnLabels,
+      designName: result.designName,
+      topicName: result.topicName,
+      sql: result.sql,
+      rowCount: result.rowCount,
+    };
+  }
+
+  const output = node.output || {};
+  const format = output.format || 'xlsx';
+
+  if (format === 'none') {
+    // 只寫 artifacts,不落檔不返回 rows 字串 — 給 merge_excel 拉資料用
+    return { text: `[AI 戰情「${result.designName}」拉 ${result.rowCount} 筆(供合併用,未落檔)]`, dashboardSummary: {
+      design_id: node.design_id, design_name: result.designName, topic: result.topicName,
+      sql: result.sql, row_count: result.rowCount, only_artifacts: true,
+    } };
+  }
+
+  if (format === 'json_text') {
+    // 把 rows 序列化,給下游 ai / db_write 節點消費
+    const text = result.rows.length === 0
+      ? '(查詢無結果)'
+      : `共 ${result.rowCount} 筆\n\n${JSON.stringify(result.rows.slice(0, 200), null, 2)}`;
+    return { text, dashboardSummary: {
+      design_id: node.design_id, design_name: result.designName, topic: result.topicName,
+      sql: result.sql, row_count: result.rowCount, sample_only: result.rows.length > 200,
+    } };
+  }
+
+  if (format === 'xlsx') {
+    if (result.rows.length === 0) {
+      // 空結果不產檔,純文字回報(避免 email 附一個只有 header 的空檔)
+      return { text: `[AI 戰情「${result.designName}」查詢無結果]`, dashboardSummary: {
+        design_id: node.design_id, design_name: result.designName, sql: result.sql, row_count: 0,
+      } };
+    }
+    const { jsonStr, truncated, rowsExported } = rowsToXlsxJsonString(
+      result.rows, result.columns, result.columnLabels, output.sheet_name
+    );
+    const filename = interpolate(output.filename || `${result.designName || 'dashboard'}_{{date}}.xlsx`, vars);
+    const syntheticBlock = `\`\`\`generate_xlsx:${filename}\n${jsonStr}\n\`\`\``;
+    const blocks = await processGenerateBlocks(syntheticBlock, context.sessionId);
+    if (!blocks.length) throw new Error('generate_xlsx 落檔失敗');
+    const truncNote = truncated ? `(已截斷至 ${MAX_DASHBOARD_ROWS} 筆,原 ${result.rowCount} 筆)` : '';
+    return {
+      text: `[AI 戰情「${result.designName}」已生成 ${rowsExported} 筆${truncNote} → ${blocks[0].filename}]`,
+      file: blocks[0],
+      dashboardSummary: {
+        design_id: node.design_id, design_name: result.designName, topic: result.topicName,
+        sql: result.sql, row_count: result.rowCount, exported: rowsExported, truncated,
+      },
+    };
+  }
+
+  throw new Error(`dashboard 節點 output.format "${format}" 不支援(支援:xlsx, json_text, none)`);
+}
+
+// ── Merge Excel node ─────────────────────────────────────────────────────────
+// 把多個 dashboard node 的 rows 合併成單一 Excel(多 sheet 或 single sheet)
+//   • source_node_ids — 引用的 dashboard node IDs(必須先跑過,context._artifacts 有資料)
+//   • mode:'multi_sheet'(預設,每個 source 一個 sheet)或 'single_sheet'(全部接在同一個 sheet,加 _source 標記欄)
+//   • filename / sheet_name(single_sheet 模式)
+//   • required — 跟其他 node 一致
+async function execMergeExcel(node, vars, db, context) {
+  const { processGenerateBlocks } = require('./fileGenerator');
+  const sourceIds = Array.isArray(node.source_node_ids) ? node.source_node_ids : [];
+  if (sourceIds.length === 0) throw new Error('merge_excel 節點未指定 source_node_ids');
+  const artifacts = context._artifacts || {};
+
+  // 收集每個 source 的 rows(只接受 dashboard kind);缺資料或非 dashboard → 視為 0 筆 sheet,標 [missing]
+  const sources = sourceIds.map((sid) => {
+    const a = artifacts[sid];
+    if (!a || a.kind !== 'dashboard') {
+      return { sid, missing: true, designName: `[missing: ${sid}]`, rows: [], columns: [], columnLabels: {} };
+    }
+    return { sid, missing: false, ...a };
+  });
+
+  const validCount = sources.filter(s => !s.missing).length;
+  if (validCount === 0) throw new Error('merge_excel:所有 source dashboard node 都沒有 artifacts(可能執行失敗或順序錯誤)');
+
+  const mode = node.mode || 'multi_sheet';
+  const filename = interpolate(node.filename || `merged_dashboards_{{date}}.xlsx`, vars);
+  let sheets = [];
+
+  if (mode === 'single_sheet') {
+    // 全部 source rows 接在同一個 sheet,第一欄補 _source(designName)
+    const sheetName = node.sheet_name || 'Merged';
+    // 取所有 source columns 的聯集當欄位
+    const allCols = new Set();
+    for (const s of sources) {
+      for (const c of (s.columns || [])) allCols.add(c);
+    }
+    const cols = ['_source', ...Array.from(allCols)];
+    const labels = ['Source', ...Array.from(allCols).map(c => sources.find(s => s.columnLabels?.[c])?.columnLabels?.[c] || c)];
+    const rows = [labels];
+    for (const s of sources) {
+      const limited = (s.rows || []).slice(0, MAX_DASHBOARD_ROWS);
+      for (const r of limited) {
+        rows.push(cols.map(c => {
+          if (c === '_source') return s.designName || s.sid;
+          const v = r[c];
+          if (v == null) return '';
+          if (v instanceof Date) return v.toISOString().slice(0, 19).replace('T', ' ');
+          if (typeof v === 'object') return JSON.stringify(v);
+          return v;
+        }));
+      }
+    }
+    sheets = [{ sheetName, data: rows }];
+  } else {
+    // multi_sheet(預設):每個 source 一個 sheet,sheet 名 = designName 或 sid
+    for (const s of sources) {
+      const sheetName = (s.designName || String(s.sid)).slice(0, 28).replace(/[\\/?*[\]:]/g, '_'); // Excel sheet name <=31 chars
+      if (s.missing || !s.rows || s.rows.length === 0) {
+        sheets.push({ sheetName: sheetName + (s.missing ? '_MISSING' : '_EMPTY'), data: [['(無資料)']] });
+        continue;
+      }
+      const cols = (s.columns && s.columns.length) ? s.columns : Object.keys(s.rows[0]);
+      const header = cols.map(c => s.columnLabels?.[c] || c);
+      const limited = s.rows.slice(0, MAX_DASHBOARD_ROWS);
+      const data = [header, ...limited.map(r => cols.map(c => {
+        const v = r[c];
+        if (v == null) return '';
+        if (v instanceof Date) return v.toISOString().slice(0, 19).replace('T', ' ');
+        if (typeof v === 'object') return JSON.stringify(v);
+        return v;
+      }))];
+      sheets.push({ sheetName, data });
+    }
+  }
+
+  const jsonStr = JSON.stringify(sheets);
+  const syntheticBlock = `\`\`\`generate_xlsx:${filename}\n${jsonStr}\n\`\`\``;
+  const blocks = await processGenerateBlocks(syntheticBlock, context.sessionId);
+  if (!blocks.length) throw new Error('merge_excel 落檔失敗');
+  const missingNames = sources.filter(s => s.missing).map(s => s.sid);
+  const summary = sources.map(s => `${s.designName || s.sid}(${s.missing ? 'missing' : (s.rows?.length || 0) + '筆'})`).join(', ');
+  return {
+    text: `[已合併 ${validCount}/${sources.length} 個 dashboard → ${blocks[0].filename}${missingNames.length ? ` ⚠️ missing: ${missingNames.join(',')}` : ''}]\n${summary}`,
+    file: blocks[0],
+    mergeSummary: { mode, source_count: sources.length, valid_count: validCount, missing: missingNames, filename: blocks[0].filename },
+  };
+}
+
 async function execAlert(node, vars, db, context) {
   const { executeAlert } = require('./pipelineAlerter');
   const input = interpolate(node.input || '{{ai_output}}', vars);
@@ -417,6 +623,18 @@ async function runNode(node, vars, db, context, log) {
         output = r.text; file = r.file;
         break;
       }
+      case 'dashboard': {
+        const r = await execDashboard(node, vars, db, context);
+        output = r.text; file = r.file;
+        if (r.dashboardSummary) entry.dashboard_summary = r.dashboardSummary;
+        break;
+      }
+      case 'merge_excel': {
+        const r = await execMergeExcel(node, vars, db, context);
+        output = r.text; file = r.file;
+        if (r.mergeSummary) entry.merge_summary = r.mergeSummary;
+        break;
+      }
       case 'db_write': {
         console.log(`[Pipeline db_write] Start — table=${node.table}, op=${node.operation}, input.len=${(interpolate(node.input || '{{ai_output}}', vars) || '').length}`);
         const r = await execDbWrite(node, vars, db, context);
@@ -509,13 +727,19 @@ async function runNode(node, vars, db, context, log) {
  * @returns {{ generatedFiles, nodeOutputs, log }}
  */
 async function runPipeline(nodes, aiOutput, db, context) {
-  if (!nodes || nodes.length === 0) return { generatedFiles: [], nodeOutputs: {}, log: [] };
+  if (!nodes || nodes.length === 0) return { generatedFiles: [], nodeOutputs: {}, log: [], failedNodes: [], nodeArtifacts: {} };
 
   const { taskName = '', extraVars = null } = context;
-  const nodeOutputs = {};     // id → output text
+  const nodeOutputs = {};     // id → output text(給 prompt 插值用,string-only)
   const generatedFiles = [];  // collected files from all nodes
   const log = [];             // execution log entries
+  const failedNodes = [];     // {id, type, label, error, required} — 給 scheduledTaskService 組信件用
   const skipped = new Set();  // node ids to skip (branching)
+  // nodeArtifacts:結構化資料(rows / columns),給後續節點消費(如 merge_excel)
+  // 跟 nodeOutputs 並存:nodeOutputs[X] 是文字摘要(prompt 用),nodeArtifacts[X] 是 raw data。
+  const nodeArtifacts = {};
+  // 把 artifacts 塞進 context,讓 executor 能讀寫(merge_excel 讀、dashboard 寫)
+  context._artifacts = nodeArtifacts;
 
   // Build a node map for branch resolution
   const nodeMap = {};
@@ -541,9 +765,19 @@ async function runPipeline(nodes, aiOutput, db, context) {
       );
       for (let i = 0; i < childIds.length; i++) {
         const r = results[i];
+        const child = nodeMap[childIds[i]] || {};
         if (r.status === 'fulfilled') {
           nodeOutputs[childIds[i]] = r.value.output;
           if (r.value.file) generatedFiles.push(r.value.file);
+        } else {
+          nodeOutputs[childIds[i]] = `[錯誤: ${r.reason?.message || r.reason}]`;
+          failedNodes.push({
+            id: childIds[i],
+            type: child.type || 'unknown',
+            label: child.label || child.name || childIds[i],
+            error: r.reason?.message || String(r.reason),
+            required: !!child.required,
+          });
         }
       }
       // Mark children as handled so they won't run again in the main loop
@@ -573,13 +807,22 @@ async function runPipeline(nodes, aiOutput, db, context) {
     }
 
     // normal node
-    const onFail = node.on_fail || 'continue';
+    // required=true 等同 on_fail='stop' + 視覺上更明確(信件主旨會標紅);舊 on_fail 'stop'/'goto'
+    // 行為保留向下相容
+    const onFail = node.on_fail || (node.required ? 'stop' : 'continue');
     try {
       const { output, file } = await runNode(node, vars, db, context, log);
       nodeOutputs[node.id] = output;
       if (file) generatedFiles.push(file);
     } catch (e) {
       nodeOutputs[node.id] = `[錯誤: ${e.message}]`;
+      failedNodes.push({
+        id: node.id,
+        type: node.type,
+        label: node.label || node.name || node.id,
+        error: e.message,
+        required: !!node.required,
+      });
       if (onFail === 'stop') break;
       if (onFail === 'goto' && node.on_fail_goto) {
         // Skip to on_fail_goto node
@@ -592,7 +835,7 @@ async function runPipeline(nodes, aiOutput, db, context) {
     }
   }
 
-  return { generatedFiles, nodeOutputs, log };
+  return { generatedFiles, nodeOutputs, log, failedNodes, nodeArtifacts };
 }
 
 module.exports = { runPipeline };

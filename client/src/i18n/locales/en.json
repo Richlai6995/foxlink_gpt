@@ -1423,6 +1423,10 @@
     "backToChat": "Back to Chat"
   },
   "scheduledTask": {
+    "share": "Share",
+    "shareTypeUse": "View",
+    "shareTypeDevelop": "Develop",
+    "shareHint": "View: see settings + history + download outputs｜Develop: edit prompt/pipeline/schedule/recipients, run-now, toggle. Either way, the task always runs under the owner's identity; develop cannot delete or change shares.",
     "title": "Scheduled Tasks",
     "addTask": "Add Task",
     "editTask": "Edit Scheduled Task",
@@ -1617,7 +1621,43 @@
         "parallel": "Parallel",
         "db_write": "DB Write",
         "kb_write": "KB Write",
-        "alert": "Alert"
+        "alert": "Alert",
+        "dashboard": "AI Dashboard",
+        "merge_excel": "Merge Excel"
+      },
+      "mergeExcel": {
+        "hint": "Merge rows from multiple dashboard nodes into a single Excel (multi sheet or single sheet). Recommend setting the merged dashboards' format=none (only fetch raw rows, skip individual file output to avoid duplicates).",
+        "sources": "Select dashboard nodes to merge",
+        "noDashboardsHint": "No dashboard node in this pipeline yet — please add one first.",
+        "mode": "Merge mode",
+        "multi_sheet": "Multi sheet (one sheet per source)",
+        "single_sheet": "Single sheet (concat with _source column)",
+        "filename": "Output filename",
+        "sheetName": "Sheet name (single_sheet only)"
+      },
+      "dashboardNode": {
+        "hint": "Call an AI Dashboard query; output rows as Excel or JSON text for downstream nodes. Permissions are checked against the schedule owner (design access + data policy).",
+        "design": "Query Design",
+        "selectDesign": "Select AI Dashboard design…",
+        "noDesignsHint": "No accessible AI Dashboard design. Please get one shared or create it in the AI Dashboard page first.",
+        "question": "Question ({{ai_output}} / {{date}} / {{node_X_output}} supported)",
+        "questionPlaceholder": "e.g. Top 10 excess inventory for ORG_CODE=GAD in the past 7 days",
+        "samples": "Samples:",
+        "format": "Output format",
+        "jsonText": "JSON text (to downstream)",
+        "formatNone": "No file (for merge only)",
+        "sheetName": "Sheet name",
+        "filename": "Filename",
+        "filenameHint": "Supports {{date}} / {{task_name}}; .xlsx extension is added automatically.",
+        "required": "Required (fail-fast)",
+        "requiredHint": "If checked, failure stops the whole pipeline; otherwise the email subject is tagged ⚠️ but other nodes continue.",
+        "tryIt": "Try it — run preview",
+        "previewRows": "rows",
+        "previewSample": "Preview {{n}} of {{total}} rows",
+        "restrictMultiOrg": "Restrict Multi-Org Scope",
+        "restrictHint": "Pick a subset of your Multi-Org permissions (intersection-only; cannot expand). Empty = use full user scope.",
+        "restrictPicked": "picked",
+        "restrictClear": "Clear all restrictions"
       },
       "vars": {
         "aiOutput": "Main AI Output",

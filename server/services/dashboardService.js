@@ -763,7 +763,11 @@ ${aliasInstruction}
 }
 
 // ─── 主查詢 Pipeline ──────────────────────────────────────────────────────────
-async function runDashboardQuery({ designId, question, userId, user, isDesigner, overrideSql, send, vectorTopK, vectorSimilarityThreshold, modelKey, effectivePolicy, lang }) {
+async function runDashboardQuery({ designId, question, userId, user, isDesigner, overrideSql, send, vectorTopK, vectorSimilarityThreshold, modelKey, effectivePolicy, lang, restrictMultiOrg }) {
+  // restrictMultiOrg(可選,排程 dashboard node 用):進一步「限縮」user 的 multi-org scope
+  //   形狀 { org_ids?: (string|number)[], ou_ids?: (string|number)[], sob_ids?: (string|number)[] }
+  //   只能限縮、不能擴張(intersection with user scope)。
+  //   排程設計者選「我這個排程只跑 ORG_CODE GAD/Z4E 兩家」,不能繞過自己沒權限的組織。
   const db = require('../database-oracle').db;
 
   // 解析 LLM model（從 llm_models 表查，fallback 到 env）
@@ -774,7 +778,19 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
       const mRow = await db.prepare(`SELECT api_model FROM llm_models WHERE key=? AND is_active=1`).get(modelKey);
       if (mRow?.api_model) { sqlApiModel = mRow.api_model; sqlModelKey = modelKey; }
     } else {
-      const mRow = await db.prepare(`SELECT key, api_model FROM llm_models WHERE is_active=1 ORDER BY sort_order ASC FETCH FIRST 1 ROWS ONLY`).get();
+      // ⚠️ dashboardService NL→SQL 寫死用 Vertex/Studio Gemini SDK(getGenerativeModel),
+      //    fallback 必須過濾:
+      //    - model_role='chat'(排除 embedding/rerank/tts/stt)
+      //    - provider_type IN ('gemini','vertex','studio')(排除 azure_openai/oci/cohere
+      //      → 它們的 api_model 名字 Gemini SDK 不認,Vertex 回 404 publishers/google/models/{x})
+      //    AI 戰情主介面永遠帶 model_key='pro',不會走到這條;排程 / 背景 job 才會。
+      const mRow = await db.prepare(
+        `SELECT key, api_model FROM llm_models
+         WHERE is_active=1
+           AND (model_role='chat' OR model_role IS NULL)
+           AND (provider_type IN ('gemini','vertex','studio') OR provider_type IS NULL)
+         ORDER BY sort_order ASC FETCH FIRST 1 ROWS ONLY`
+      ).get();
       if (mRow) { sqlApiModel = mRow.api_model; sqlModelKey = mRow.key; }
     }
   } catch (_) {}
@@ -872,14 +888,35 @@ async function runDashboardQuery({ designId, question, userId, user, isDesigner,
         const newConditions = [];
         let hasAnyAccess = false;
 
+        // restrict 過濾器 — 對 user scope 做 intersection(只能限縮)
+        const _toNumSet = (arr) => new Set((arr || []).map(v => Number(v)).filter(n => !Number.isNaN(n)));
+        const restrictOrgSet = restrictMultiOrg?.org_ids?.length ? _toNumSet(restrictMultiOrg.org_ids) : null;
+        const restrictOUSet  = restrictMultiOrg?.ou_ids?.length  ? _toNumSet(restrictMultiOrg.ou_ids)  : null;
+        const restrictSOBSet = restrictMultiOrg?.sob_ids?.length ? _toNumSet(restrictMultiOrg.sob_ids) : null;
+
         for (const fk of multiorgFilterKeys) {
           let allowedIds = [];
           if (fk.filterSource === 'organization_id') {
             allowedIds = (scope.orgDetails || []).map(o => o.id).filter(Boolean);
+            if (restrictOrgSet) {
+              const before = allowedIds.length;
+              allowedIds = allowedIds.filter(id => restrictOrgSet.has(Number(id)));
+              console.log(`[MultiOrg] restrict_multi_org.org_ids 過濾: ${before} → ${allowedIds.length}`);
+            }
           } else if (fk.filterSource === 'operating_unit') {
             allowedIds = [...(scope.allowedOUIds || [])];
+            if (restrictOUSet) {
+              const before = allowedIds.length;
+              allowedIds = allowedIds.filter(id => restrictOUSet.has(Number(id)));
+              console.log(`[MultiOrg] restrict_multi_org.ou_ids 過濾: ${before} → ${allowedIds.length}`);
+            }
           } else if (fk.filterSource === 'set_of_books_id') {
             allowedIds = [...(scope.allowedSOBIds || [])];
+            if (restrictSOBSet) {
+              const before = allowedIds.length;
+              allowedIds = allowedIds.filter(id => restrictSOBSet.has(Number(id)));
+              console.log(`[MultiOrg] restrict_multi_org.sob_ids 過濾: ${before} → ${allowedIds.length}`);
+            }
           }
 
           if (allowedIds.length) {
@@ -1934,8 +1971,184 @@ async function queryDashboardDesignSync(db, userId, designId, question, modelKey
   return { rows, columns, designName: design.name, sql: safeSql };
 }
 
+// ─── Buffered wrapper:給排程 / 背景 job 用 ───────────────────────────────────
+// runDashboardQuery 走 SSE callback(send event/data),排程環境沒人接 stream,
+// 把 callback 包成 buffer,跑完一次回 { sql, rows, columns, columnLabels, rowCount,
+// multiorgScope, orgScope, designName, topicName, policyCategoryId }。
+// 內含完整資料政策前置檢查(等同 routes/dashboard.js POST /query 行 1788-1832)。
+// 任何 send('error', ...) 都會被翻成 throw,呼叫端用 try/catch 即可。
+//
+// 注意:目前 runDashboardQuery 不走 ai_query_cache(getCachedResult/setCachedResult
+// 為 dead code),force_fresh 為 no-op,保留 API 給未來 cache 啟用後用。
+async function runDashboardQueryBuffered({
+  designId,
+  question,
+  userId,
+  user,
+  modelKey = null,
+  lang = 'zh-TW',
+  isDesigner = false,
+  overrideSql = null,
+  // force_fresh 目前 no-op(dashboard 路徑無 cache),保留參數做未來預備
+  forceFresh = true,  // eslint-disable-line no-unused-vars
+  // restrictMultiOrg(可選):進一步限縮 user 的 multi-org scope。
+  //   { org_ids?, ou_ids?, sob_ids? } — intersection-only,無法擴張權限
+  restrictMultiOrg = null,
+}) {
+  const db = require('../database-oracle').db;
+  if (!designId) throw new Error('design_id 為必填');
+  if (!question || !String(question).trim()) throw new Error('question 為必填');
+
+  // 0. 取 design + topic + 政策類別
+  const design = await db.prepare(
+    `SELECT id, is_public, is_suspended, created_by, topic_id, name AS design_name
+     FROM ai_select_designs WHERE id=?`
+  ).get(designId);
+  if (!design) throw new Error('設計不存在');
+  if (design.is_suspended == 1) throw new Error('此查詢設計已暫停使用');
+
+  // 1. 重新查 user(排程環境 user 物件可能是 task.user_id 對應的 row,要組織欄位齊全)
+  const freshUser = await db.prepare(`SELECT * FROM users WHERE id=?`).get(userId);
+  if (!freshUser) throw new Error(`使用者 ${userId} 不存在`);
+  const effUser = { ...(user || {}), ...freshUser };
+
+  // 2. 設計權限(canAccessDesign 等同邏輯,inline 避免 require 循環)
+  if (effUser.role !== 'admin' && design.created_by !== effUser.id
+      && design.is_public != 1 && design.is_public !== '1') {
+    const shares = await db.prepare(
+      `SELECT id FROM ai_dashboard_shares WHERE design_id=? AND (
+        (grantee_type='user' AND grantee_id=?) OR
+        (grantee_type='role' AND grantee_id=?) OR
+        (grantee_type='department' AND grantee_id=?) OR
+        (grantee_type='cost_center' AND grantee_id=?) OR
+        (grantee_type='division' AND grantee_id=?) OR
+        (grantee_type='factory' AND grantee_id=?) OR
+        (grantee_type='org_group' AND grantee_id=?)
+      )`
+    ).all(
+      design.id,
+      String(effUser.id),
+      String(effUser.role_id || ''),
+      String(effUser.dept_code || ''),
+      String(effUser.profit_center || ''),
+      String(effUser.org_section || ''),
+      String(effUser.factory_code || ''),
+      String(effUser.org_group_name || ''),
+    );
+    if (!shares.length) throw new Error('無此查詢設計的存取權限');
+  }
+
+  // 3. 取政策類別 + 跑資料政策前置檢查
+  let categoryId = null;
+  let topicName = null;
+  if (design.topic_id) {
+    const topic = await db.prepare(
+      `SELECT name, policy_category_id FROM ai_select_topics WHERE id=?`
+    ).get(design.topic_id);
+    topicName = topic?.name || null;
+    categoryId = topic?.policy_category_id || null;
+  }
+
+  let effectivePolicy = null;
+  if (effUser.role !== 'admin') {
+    const { getEffectivePolicies } = require('../routes/dataPermissions');
+    const policies = await getEffectivePolicies(db, effUser.id, categoryId);
+    const allRules = policies.flatMap(p => p.rules);
+    if (allRules.length > 0) {
+      // full_block 三層檢查 — 對齊 routes/dashboard.js
+      const layer12Block = allRules.some(r => (r.layer === 1 || r.layer === 2) && r.value_type === 'full_block');
+      if (layer12Block) throw new Error('⛔ 全面禁止:此帳號的資料政策已設定為全面禁止');
+      const layer3Block = allRules.some(r => r.layer === 3 && r.value_type === 'full_block');
+      if (layer3Block) {
+        const col = await db.prepare(
+          `SELECT sc.id FROM ai_select_designs d
+           JOIN ai_schema_columns sc ON sc.schema_id = d.schema_id
+           WHERE d.id = ? AND sc.filter_layer = 'layer3' FETCH FIRST 1 ROWS ONLY`
+        ).get(Number(designId));
+        if (col) throw new Error('⛔ 全面禁止(組織層):此帳號在組織層被設定為全面禁止');
+      }
+      const layer4Block = allRules.some(r => r.layer === 4 && r.value_type === 'full_block');
+      if (layer4Block) {
+        const col = await db.prepare(
+          `SELECT sc.id FROM ai_select_designs d
+           JOIN ai_schema_columns sc ON sc.schema_id = d.schema_id
+           WHERE d.id = ? AND sc.filter_layer = 'layer4' FETCH FIRST 1 ROWS ONLY`
+        ).get(Number(designId));
+        if (col) throw new Error('⛔ 全面禁止(ERP Multi-Org 層):此帳號在 ERP 層被設定為全面禁止');
+      }
+      // 問題關鍵字檢查 — lazy require 避免 init-time 循環(routes/dashboard 也 require 本檔)
+      const { checkForbiddenInQuestion } = require('../routes/dashboard');
+      const forbidden = checkForbiddenInQuestion(String(question).trim(), allRules);
+      if (forbidden.length > 0) {
+        throw new Error(`⛔ 資料權限不足,問題包含未授權條件:${forbidden.join('、')}`);
+      }
+      effectivePolicy = { rules: allRules };
+    }
+  }
+
+  // 4. 包 SSE callback 成 buffer
+  const buf = {
+    sql: '',
+    rows: [],
+    columns: [],
+    columnLabels: {},
+    rowCount: 0,
+    multiorgScope: null,
+    orgScope: null,
+    designName: design.design_name || null,
+    topicName,
+    policyCategoryId: categoryId,
+    cached: false,
+  };
+  let firstError = null;
+  const send = (event, data) => {
+    switch (event) {
+      case 'sql_preview':
+        buf.sql = data?.sql || buf.sql;
+        if (data?.cached) buf.cached = true;
+        break;
+      case 'result':
+        buf.rows = Array.isArray(data?.rows) ? data.rows : [];
+        buf.columns = Array.isArray(data?.columns) ? data.columns : [];
+        buf.columnLabels = data?.column_labels || {};
+        buf.rowCount = Number(data?.row_count) || buf.rows.length;
+        break;
+      case 'multiorg_scope':
+        buf.multiorgScope = data;
+        break;
+      case 'org_scope':
+        buf.orgScope = data;
+        break;
+      case 'error':
+        // 用第一個 error message 當 throw 依據(後續若有更多 error 留在 console)
+        if (!firstError) firstError = data?.error || data?.message || 'unknown error';
+        break;
+      default:
+        break;
+    }
+  };
+
+  await runDashboardQuery({
+    designId: Number(designId),
+    question: String(question).trim(),
+    userId: effUser.id,
+    user: effUser,
+    isDesigner: !!isDesigner,
+    overrideSql: overrideSql || null,
+    send,
+    modelKey: modelKey || null,
+    effectivePolicy,
+    lang: lang || 'zh-TW',
+    restrictMultiOrg: restrictMultiOrg || null,
+  });
+
+  if (firstError) throw new Error(firstError);
+  return buf;
+}
+
 module.exports = {
   runDashboardQuery,
+  runDashboardQueryBuffered,
   queryDashboardDesignSync,
   runEtlJob,
   cancelEtlJob,

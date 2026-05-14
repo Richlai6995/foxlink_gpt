@@ -24,16 +24,120 @@ async function checkPermission(req, res) {
   return true;
 }
 
+// ── 分享權限 helper ──────────────────────────────────────────────────────────
+// 給定 task + req.user 算出 effective 權限:
+//   { role: 'admin'|'owner'|'develop'|'use'|null }
+//   admin → 全部能做(含 delete + 改 shares)
+//   owner → task.user_id 是自己,等同 admin 對此任務(含 delete + 改 shares)
+//   develop → 改設定 / 立刻執行 / toggle / 改收件人,但不能 delete / 改 shares
+//   use → 只能看(列表 / 歷史 / 下載產出)
+//   null → 無權限
+// 從 scheduled_task_shares 撈,跟 ai_dashboard_shares 的 7 種 grantee_type 對齊
+async function resolveTaskRole(db, task, user) {
+  if (user.role === 'admin') return 'admin';
+  if (task.user_id === user.id) return 'owner';
+  const u = await db.prepare(
+    `SELECT role_id, dept_code, profit_center, org_section, factory_code, org_group_name FROM users WHERE id=?`
+  ).get(user.id) || {};
+  const rows = await db.prepare(
+    `SELECT share_type FROM scheduled_task_shares WHERE task_id=? AND (
+       (grantee_type='user'        AND grantee_id=?) OR
+       (grantee_type='role'        AND grantee_id=?) OR
+       (grantee_type='department'  AND grantee_id=? AND ? IS NOT NULL) OR
+       (grantee_type='cost_center' AND grantee_id=? AND ? IS NOT NULL) OR
+       (grantee_type='division'    AND grantee_id=? AND ? IS NOT NULL) OR
+       (grantee_type='factory'     AND grantee_id=? AND ? IS NOT NULL) OR
+       (grantee_type='org_group'   AND grantee_id=? AND ? IS NOT NULL)
+     )`
+  ).all(
+    task.id,
+    String(user.id), String(u.role_id || ''),
+    u.dept_code || null, u.dept_code || null,
+    u.profit_center || null, u.profit_center || null,
+    u.org_section || null, u.org_section || null,
+    u.factory_code || null, u.factory_code || null,
+    u.org_group_name || null, u.org_group_name || null,
+  );
+  if (rows.some(r => r.share_type === 'develop')) return 'develop';
+  if (rows.length > 0) return 'use';
+  return null;
+}
+
+// 危險節點偵測 — db_write / kb_write / alert 任一存在 → 禁 develop 分享
+function hasDangerousNodes(pipelineJsonStr) {
+  if (!pipelineJsonStr) return false;
+  try {
+    const arr = typeof pipelineJsonStr === 'string' ? JSON.parse(pipelineJsonStr) : pipelineJsonStr;
+    if (!Array.isArray(arr)) return false;
+    return arr.some(n => n && (n.type === 'db_write' || n.type === 'kb_write' || n.type === 'alert'));
+  } catch { return false; }
+}
+
 // ── GET /api/scheduled-tasks ──────────────────────────────────────────────────
 router.get('/', async (req, res) => {
   if (!await checkPermission(req, res)) return;
   const db = getDb();
   try {
     const isAdmin = req.user.role === 'admin';
-    const tasks = isAdmin
-      ? await db.prepare(`SELECT t.*, u.name as user_name, u.username FROM scheduled_tasks t
-                    LEFT JOIN users u ON u.id=t.user_id ORDER BY t.updated_at DESC`).all()
-      : await db.prepare(`SELECT * FROM scheduled_tasks WHERE user_id=? ORDER BY updated_at DESC`).all(req.user.id);
+    if (isAdmin) {
+      const tasks = await db.prepare(`
+        SELECT t.*, u.name as user_name, u.username,
+               'admin' AS share_role
+        FROM scheduled_tasks t LEFT JOIN users u ON u.id=t.user_id
+        ORDER BY t.updated_at DESC`).all();
+      return res.json(tasks);
+    }
+    // 非 admin:自己擁有的 + 被分享給自己的(7 種 grantee_type)
+    const u = await db.prepare(
+      `SELECT role_id, dept_code, profit_center, org_section, factory_code, org_group_name FROM users WHERE id=?`
+    ).get(req.user.id) || {};
+    const tasks = await db.prepare(`
+      SELECT t.*, ow.name AS user_name, ow.username,
+             CASE WHEN t.user_id = ? THEN 'owner'
+                  WHEN EXISTS (SELECT 1 FROM scheduled_task_shares s WHERE s.task_id=t.id AND s.share_type='develop' AND (
+                    (s.grantee_type='user'        AND s.grantee_id=?) OR
+                    (s.grantee_type='role'        AND s.grantee_id=?) OR
+                    (s.grantee_type='department'  AND s.grantee_id=? AND ? IS NOT NULL) OR
+                    (s.grantee_type='cost_center' AND s.grantee_id=? AND ? IS NOT NULL) OR
+                    (s.grantee_type='division'    AND s.grantee_id=? AND ? IS NOT NULL) OR
+                    (s.grantee_type='factory'     AND s.grantee_id=? AND ? IS NOT NULL) OR
+                    (s.grantee_type='org_group'   AND s.grantee_id=? AND ? IS NOT NULL)
+                  )) THEN 'develop'
+                  ELSE 'use'
+             END AS share_role
+      FROM scheduled_tasks t
+      LEFT JOIN users ow ON ow.id = t.user_id
+      WHERE t.user_id = ?
+         OR EXISTS (
+           SELECT 1 FROM scheduled_task_shares s WHERE s.task_id=t.id AND (
+             (s.grantee_type='user'        AND s.grantee_id=?) OR
+             (s.grantee_type='role'        AND s.grantee_id=?) OR
+             (s.grantee_type='department'  AND s.grantee_id=? AND ? IS NOT NULL) OR
+             (s.grantee_type='cost_center' AND s.grantee_id=? AND ? IS NOT NULL) OR
+             (s.grantee_type='division'    AND s.grantee_id=? AND ? IS NOT NULL) OR
+             (s.grantee_type='factory'     AND s.grantee_id=? AND ? IS NOT NULL) OR
+             (s.grantee_type='org_group'   AND s.grantee_id=? AND ? IS NOT NULL)
+           )
+         )
+      ORDER BY t.updated_at DESC
+    `).all(
+      // share_role CASE 內的 binds(develop 判定):14 個
+      req.user.id,
+      String(req.user.id), String(u.role_id || ''),
+      u.dept_code || null, u.dept_code || null,
+      u.profit_center || null, u.profit_center || null,
+      u.org_section || null, u.org_section || null,
+      u.factory_code || null, u.factory_code || null,
+      u.org_group_name || null, u.org_group_name || null,
+      // 主 WHERE 的 binds:1 (user_id) + 13 (EXISTS)
+      req.user.id,
+      String(req.user.id), String(u.role_id || ''),
+      u.dept_code || null, u.dept_code || null,
+      u.profit_center || null, u.profit_center || null,
+      u.org_section || null, u.org_section || null,
+      u.factory_code || null, u.factory_code || null,
+      u.org_group_name || null, u.org_group_name || null,
+    );
     res.json(tasks);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -45,11 +149,23 @@ router.post('/', async (req, res) => {
   if (!await checkPermission(req, res)) return;
   const db = getDb();
   try {
-    // Per-user limit check
-    const limitRow = await db.prepare(`SELECT value FROM system_settings WHERE key='scheduled_tasks_max_per_user'`).get();
-    const limit = parseInt(limitRow?.value || '10');
-    const countRow = await db.prepare('SELECT COUNT(*) as n FROM scheduled_tasks WHERE user_id=?').get(req.user.id);
-    if (countRow.n >= limit) return res.status(400).json({ error: `每人最多 ${limit} 個排程任務` });
+    // 上限檢查 — admin 完全 bypass;一般 user 走 per-user override > 全域 setting > 預設 10
+    if (req.user.role !== 'admin') {
+      const userRow = await db.prepare(
+        `SELECT scheduled_tasks_limit FROM users WHERE id=?`
+      ).get(req.user.id);
+      let limit;
+      if (userRow?.scheduled_tasks_limit != null) {
+        limit = parseInt(userRow.scheduled_tasks_limit);
+      } else {
+        const limitRow = await db.prepare(
+          `SELECT value FROM system_settings WHERE key='scheduled_tasks_max_per_user'`
+        ).get();
+        limit = parseInt(limitRow?.value || '10');
+      }
+      const countRow = await db.prepare('SELECT COUNT(*) as n FROM scheduled_tasks WHERE user_id=?').get(req.user.id);
+      if (countRow.n >= limit) return res.status(400).json({ error: `每人最多 ${limit} 個排程任務` });
+    }
 
     const {
       name, schedule_type, schedule_hour, schedule_minute,
@@ -106,8 +222,9 @@ router.put('/:id', async (req, res) => {
   try {
     const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
     if (!task) return res.status(404).json({ error: '找不到任務' });
-    if (task.user_id !== req.user.id && req.user.role !== 'admin')
-      return res.status(403).json({ error: '無權限' });
+    const role = await resolveTaskRole(db, task, req.user);
+    if (!role || (role !== 'admin' && role !== 'owner' && role !== 'develop'))
+      return res.status(403).json({ error: '無權限修改此任務' });
 
     const {
       name, schedule_type, schedule_hour, schedule_minute,
@@ -118,6 +235,16 @@ router.put('/:id', async (req, res) => {
       status, expire_at, max_runs, tools_config_json, pipeline_json,
       output_template_id,
     } = req.body;
+
+    // develop 受贈者:若 task 已含危險節點,只能保留(不能新增 / 移除),不過此檢查由 hasDangerousNodes
+    // 在 share 建立時擋(整段禁 develop 分享給 task 有危險節點者)。這裡若 develop 改了 pipeline 加入
+    // 新的危險節點,需要再擋一次:
+    if (role === 'develop' && pipeline_json !== undefined) {
+      const newPipelineStr = pipeline_json ? (typeof pipeline_json === 'string' ? pipeline_json : JSON.stringify(pipeline_json)) : null;
+      if (hasDangerousNodes(newPipelineStr)) {
+        return res.status(403).json({ error: 'develop 權限不可新增 db_write / kb_write / alert 節點' });
+      }
+    }
 
     await db.prepare(
       `UPDATE scheduled_tasks SET
@@ -169,8 +296,10 @@ router.delete('/:id', async (req, res) => {
   try {
     const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
     if (!task) return res.status(404).json({ error: '找不到任務' });
-    if (task.user_id !== req.user.id && req.user.role !== 'admin')
-      return res.status(403).json({ error: '無權限' });
+    // 刪除:只能 owner / admin(develop 不可刪)
+    const role = await resolveTaskRole(db, task, req.user);
+    if (role !== 'admin' && role !== 'owner')
+      return res.status(403).json({ error: '只有任務擁有者或管理員可以刪除' });
 
     unscheduleTask(parseInt(req.params.id));
     await db.prepare('DELETE FROM scheduled_tasks WHERE id=?').run(req.params.id);
@@ -187,7 +316,9 @@ router.post('/:id/toggle', async (req, res) => {
   try {
     const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
     if (!task) return res.status(404).json({ error: '找不到任務' });
-    if (task.user_id !== req.user.id && req.user.role !== 'admin')
+    // toggle:admin / owner / develop
+    const role = await resolveTaskRole(db, task, req.user);
+    if (role !== 'admin' && role !== 'owner' && role !== 'develop')
       return res.status(403).json({ error: '無權限' });
 
     const newStatus = task.status === 'active' ? 'paused' : 'active';
@@ -210,8 +341,10 @@ router.post('/:id/run-now', async (req, res) => {
   try {
     const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
     if (!task) return res.status(404).json({ error: '找不到任務' });
-    if (task.user_id !== req.user.id && req.user.role !== 'admin')
-      return res.status(403).json({ error: '無權限' });
+    // run-now:admin / owner / develop(避免 view-only 受贈者狂跑燒 token)
+    const role = await resolveTaskRole(db, task, req.user);
+    if (role !== 'admin' && role !== 'owner' && role !== 'develop')
+      return res.status(403).json({ error: '無權限執行此任務' });
 
     // Pre-check: max_runs
     if (task.max_runs > 0 && task.run_count >= task.max_runs)
@@ -314,13 +447,145 @@ router.get('/tools-catalog', async (req, res) => {
       kbUser.org_group_name || null, kbUser.org_group_name || null,
     );
 
+    // ── Dashboards (AI 戰情) ────────────────────────────────────────────────
+    // 列出該 user 可用的 design,作為 pipeline 內 dashboard node 的下拉清單。
+    // 權限對齊 canAccessDesign:owner / is_public / ai_dashboard_shares(含組織層 7 種)
+    const dashUser = await db.prepare(
+      'SELECT role, role_id, dept_code, profit_center, org_section, org_group_name, factory_code FROM users WHERE id=?'
+    ).get(req.user.id) || {};
+    let dashboards = [];
+    try {
+      const isAdmin = dashUser.role === 'admin';
+      const baseSql = `
+        SELECT d.id, d.name, d.description, d.few_shot_examples, d.topic_id,
+               d.name_zh, d.name_en, d.name_vi, d.desc_zh, d.desc_en, d.desc_vi,
+               t.name AS topic_name, t.policy_category_id,
+               t.name_zh AS topic_name_zh, t.name_en AS topic_name_en, t.name_vi AS topic_name_vi
+        FROM ai_select_designs d
+        LEFT JOIN ai_select_topics t ON t.id = d.topic_id
+        WHERE d.is_suspended = 0
+      `;
+      if (isAdmin) {
+        dashboards = await db.prepare(baseSql + ` ORDER BY d.id ASC`).all();
+      } else {
+        dashboards = await db.prepare(baseSql + `
+          AND (
+            d.created_by = ?
+            OR d.is_public = 1
+            OR EXISTS (
+              SELECT 1 FROM ai_dashboard_shares s WHERE s.design_id = d.id AND (
+                (s.grantee_type='user'        AND s.grantee_id=?) OR
+                (s.grantee_type='role'        AND s.grantee_id=?) OR
+                (s.grantee_type='department'  AND s.grantee_id=? AND ? IS NOT NULL) OR
+                (s.grantee_type='cost_center' AND s.grantee_id=? AND ? IS NOT NULL) OR
+                (s.grantee_type='division'    AND s.grantee_id=? AND ? IS NOT NULL) OR
+                (s.grantee_type='factory'     AND s.grantee_id=? AND ? IS NOT NULL) OR
+                (s.grantee_type='org_group'   AND s.grantee_id=? AND ? IS NOT NULL)
+              )
+            )
+          )
+          ORDER BY d.id ASC
+        `).all(
+          req.user.id,
+          String(req.user.id), String(dashUser.role_id || ''),
+          dashUser.dept_code || null,    dashUser.dept_code || null,
+          dashUser.profit_center || null, dashUser.profit_center || null,
+          dashUser.org_section || null,   dashUser.org_section || null,
+          dashUser.factory_code || null,  dashUser.factory_code || null,
+          dashUser.org_group_name || null, dashUser.org_group_name || null,
+        );
+      }
+    } catch (e) {
+      console.warn('[tools-catalog] dashboards query failed:', e.message);
+      dashboards = [];
+    }
+
+    // 解析 few_shot_examples → sample_questions[lang],對齊 AiDashboardPage.tsx parseFew 邏輯
+    const parseSamples = (raw) => {
+      if (!raw) return [];
+      let arr;
+      try {
+        arr = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (typeof arr === 'string') arr = JSON.parse(arr);
+      } catch (_) { return []; }
+      if (!Array.isArray(arr)) return [];
+      return arr.map((x) => {
+        if (!x) return null;
+        const q = x[`q_${suffix}`] || x.q_zh || x.q || x.q_en || x.q_vi;
+        return (typeof q === 'string' && q.trim()) ? q.trim() : null;
+      }).filter(Boolean);
+    };
+
     res.json({
       skills: skills.map(localize),
       kbs: kbs.map(localize),
+      dashboards: dashboards.map(d => ({
+        design_id: d.id,
+        name: d[`name_${suffix}`] || d.name,
+        description: d[`desc_${suffix}`] || d.description || '',
+        topic_name: d[`topic_name_${suffix}`] || d.topic_name || '',
+        topic_id: d.topic_id,
+        sample_questions: parseSamples(d.few_shot_examples),
+        // 提示:該 topic 有綁政策類別 → 排程執行時會跑 full_block + 關鍵字檢查
+        policy_warning: d.policy_category_id
+          ? `此 design 綁定政策類別 #${d.policy_category_id},排程執行時會以 task.user 身份做政策檢查`
+          : null,
+      })),
     });
   } catch (e) {
     console.error('[tools-catalog] error:', e.message);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ── POST /api/scheduled-tasks/dashboards/:design_id/preview ──────────────────
+// Try it:讓 user 在排程設計界面試跑一次 dashboard,即時看 SQL + rows 預覽。
+// 走 buffered wrapper(非 SSE),回 JSON。權限完全等同最終排程執行(req.user.id = task.user_id)。
+// Body: { question, model_key?, lang? }
+// Limit:rows 截前 100 筆給前端表格,完整 row_count 用 buf.rowCount。
+router.post('/dashboards/:design_id/preview', async (req, res) => {
+  if (!await checkPermission(req, res)) return;
+  const db = getDb();
+  try {
+    const { question, model_key, lang, restrict_multi_org } = req.body || {};
+    if (!question || !String(question).trim()) {
+      return res.status(400).json({ error: 'question 為必填' });
+    }
+    const designId = Number(req.params.design_id);
+    if (!designId) return res.status(400).json({ error: 'design_id 無效' });
+
+    const { runDashboardQueryBuffered } = require('../services/dashboardService');
+    const t0 = Date.now();
+    const buf = await runDashboardQueryBuffered({
+      designId,
+      question: String(question).trim(),
+      userId: req.user.id,
+      user: req.user,
+      modelKey: model_key || null,
+      lang: lang || 'zh-TW',
+      isDesigner: false,
+      forceFresh: true,
+      restrictMultiOrg: restrict_multi_org || null,
+    });
+    res.json({
+      sql: buf.sql,
+      design_name: buf.designName,
+      topic_name: buf.topicName,
+      policy_category_id: buf.policyCategoryId,
+      multiorg_scope: buf.multiorgScope,
+      org_scope: buf.orgScope,
+      row_count: buf.rowCount,
+      columns: buf.columns,
+      column_labels: buf.columnLabels,
+      rows: buf.rows.slice(0, 100),       // 預覽截前 100,實際排程跑全量
+      truncated: buf.rows.length > 100,
+      duration_ms: Date.now() - t0,
+    });
+  } catch (e) {
+    console.error('[dashboard preview] error:', e.message);
+    // 把 ⛔ 開頭的政策錯誤回 403,其餘 500(讓前端能分辨)
+    const code = /^⛔/.test(e.message) ? 403 : 500;
+    res.status(code).json({ error: e.message });
   }
 });
 
@@ -332,8 +597,9 @@ router.get('/:id/last-output', async (req, res) => {
   try {
     const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
     if (!task) return res.status(404).json({ error: '找不到任務' });
-    if (task.user_id !== req.user.id && req.user.role !== 'admin')
-      return res.status(403).json({ error: '無權限' });
+    // 查 last output:有任何 share role 都能看(use 也算讀取)
+    const role = await resolveTaskRole(db, task, req.user);
+    if (!role) return res.status(403).json({ error: '無權限' });
 
     const row = await db.prepare(
       `SELECT TO_CHAR(run_at,'YYYY-MM-DD"T"HH24:MI:SS') AS run_at,
@@ -356,8 +622,9 @@ router.get('/:id/history', async (req, res) => {
   try {
     const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
     if (!task) return res.status(404).json({ error: '找不到任務' });
-    if (task.user_id !== req.user.id && req.user.role !== 'admin')
-      return res.status(403).json({ error: '無權限' });
+    // 查歷史:有任何 share role 都能看(use 也算讀取)
+    const role = await resolveTaskRole(db, task, req.user);
+    if (!role) return res.status(403).json({ error: '無權限' });
 
     const limit = parseInt(req.query.limit || '30');
     const runs = await db.prepare(
@@ -369,6 +636,120 @@ router.get('/:id/history', async (req, res) => {
     ).all(req.params.id, limit);
     res.json(runs);
   } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Shares CRUD ─────────────────────────────────────────────────────────────
+// 對齊 ai_dashboard_shares 的 endpoint 模式:GET / POST(upsert)/ DELETE
+// 權限:只有 admin / owner 能管 shares
+
+// GET /api/scheduled-tasks/:id/shares
+router.get('/:id/shares', async (req, res) => {
+  if (!await checkPermission(req, res)) return;
+  const db = getDb();
+  try {
+    const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
+    if (!task) return res.status(404).json({ error: '找不到任務' });
+    const role = await resolveTaskRole(db, task, req.user);
+    if (!role) return res.status(403).json({ error: '無權限' });
+    const rows = await db.prepare(
+      `SELECT id, task_id, grantee_type, grantee_id, share_type,
+              TO_CHAR(created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at, granted_by
+       FROM scheduled_task_shares WHERE task_id=? ORDER BY created_at DESC`
+    ).all(req.params.id);
+    // 補 grantee_name
+    try {
+      const { resolveGranteeNamesInRows, getLangFromReq } = require('../services/granteeNameResolver');
+      await resolveGranteeNamesInRows(rows, getLangFromReq(req), db);
+    } catch (_) { /* fallback to raw rows */ }
+    res.json(rows);
+  } catch (e) {
+    console.error('[scheduledTasks GET /:id/shares] error:', e.message, e.stack);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/scheduled-tasks/:id/shares  (upsert)
+//   body: { grantee_type, grantee_id, share_type }
+//   權限:admin / owner
+//   限制:含 db_write/kb_write/alert 節點的 task 禁 share_type='develop'(整段封禁)
+router.post('/:id/shares', async (req, res) => {
+  if (!await checkPermission(req, res)) return;
+  const db = getDb();
+  try {
+    const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
+    if (!task) return res.status(404).json({ error: '找不到任務' });
+    const role = await resolveTaskRole(db, task, req.user);
+    if (role !== 'admin' && role !== 'owner')
+      return res.status(403).json({ error: '只有任務擁有者或管理員可以管理分享' });
+
+    const { grantee_type, grantee_id, share_type = 'use' } = req.body || {};
+    if (!grantee_type || !grantee_id) {
+      return res.status(400).json({ error: 'grantee_type 與 grantee_id 為必填' });
+    }
+    const validTypes = ['user', 'role', 'department', 'cost_center', 'division', 'factory', 'org_group'];
+    if (!validTypes.includes(grantee_type)) {
+      return res.status(400).json({ error: `grantee_type 必須是 ${validTypes.join(' / ')}` });
+    }
+    if (!['use', 'develop'].includes(share_type)) {
+      return res.status(400).json({ error: `share_type 必須是 use 或 develop` });
+    }
+
+    // 危險節點 + develop = 拒絕(整段封禁,保護 admin pipeline 不被改成繞權限工具)
+    if (share_type === 'develop' && hasDangerousNodes(task.pipeline_json)) {
+      return res.status(403).json({
+        error: '此任務的 Pipeline 含有 db_write / kb_write / alert 節點,不允許分享 develop 權限(避免繞過 owner 權限寫入敏感資料)。請改用 view 權限分享。',
+      });
+    }
+
+    // Upsert:同 (task_id, grantee_type, grantee_id) 已存在就更新 share_type
+    const existing = await db.prepare(
+      `SELECT id FROM scheduled_task_shares WHERE task_id=? AND grantee_type=? AND grantee_id=?`
+    ).get(req.params.id, grantee_type, String(grantee_id));
+    if (existing) {
+      await db.prepare(
+        `UPDATE scheduled_task_shares SET share_type=? WHERE id=?`
+      ).run(share_type, existing.id);
+    } else {
+      await db.prepare(
+        `INSERT INTO scheduled_task_shares (task_id, grantee_type, grantee_id, share_type, granted_by)
+         VALUES (?, ?, ?, ?, ?)`
+      ).run(req.params.id, grantee_type, String(grantee_id), share_type, req.user.id);
+    }
+
+    // 回傳完整列表(對齊 dashboard ShareModal 期待的格式)
+    const rows = await db.prepare(
+      `SELECT id, task_id, grantee_type, grantee_id, share_type,
+              TO_CHAR(created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at, granted_by
+       FROM scheduled_task_shares WHERE task_id=? ORDER BY created_at DESC`
+    ).all(req.params.id);
+    try {
+      const { resolveGranteeNamesInRows, getLangFromReq } = require('../services/granteeNameResolver');
+      await resolveGranteeNamesInRows(rows, getLangFromReq(req), db);
+    } catch (_) {}
+    res.json(rows);
+  } catch (e) {
+    console.error('[scheduledTasks POST /:id/shares] error:', e.message, e.stack);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/scheduled-tasks/:id/shares/:shareId
+router.delete('/:id/shares/:shareId', async (req, res) => {
+  if (!await checkPermission(req, res)) return;
+  const db = getDb();
+  try {
+    const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(req.params.id);
+    if (!task) return res.status(404).json({ error: '找不到任務' });
+    const role = await resolveTaskRole(db, task, req.user);
+    if (role !== 'admin' && role !== 'owner')
+      return res.status(403).json({ error: '只有任務擁有者或管理員可以管理分享' });
+    await db.prepare(`DELETE FROM scheduled_task_shares WHERE id=? AND task_id=?`)
+      .run(req.params.shareId, req.params.id);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[scheduledTasks DELETE /:id/shares/:shareId] error:', e.message, e.stack);
     res.status(500).json({ error: e.message });
   }
 });

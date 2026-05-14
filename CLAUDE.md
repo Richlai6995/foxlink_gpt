@@ -77,6 +77,8 @@ cd client && npm run dev    # frontend → localhost:5173 (proxy → 3007)
 | `phase6-plan.md` | **Phase 6 規劃書**：9 候選 track(G 體檢 / H token / I prompt edit / J card / K ERP schema 助手 / L retry / M i18n / N mobile / O 對話視圖),待拍板 |
 | `audio-stt-pipeline-plan.md` | **長音檔轉逐字稿 Pipeline 規劃**：Google STT v2(diarization)+ Gemini 校正,>100MB 走新 pipeline、< 100MB 沿用 transcribeAudio。Q1-Q5 已拍板,P0-P5 切分,待開工 |
 | `mobile-support-plan.md` | **手機螢幕支援規劃**：layout 分流(共用 hook + Desktop/Mobile 分檔)+ UA 主判(桌機 0 影響)+ vaul drawer + PWA(Cortex 文字 icon)+ SSE cheap fix。PR-1 基礎 / PR-2 mobile chat / PR-3 收尾 |
+| `scheduled-task-dashboard-integration.md` | **排程 × AI 戰情整合**(2026-05-14 Phase 1+2 ship):新增 `dashboard` pipeline node,排程可呼叫 AI 戰情 design 產 Excel;`runDashboardQueryBuffered` 包 SSE callback、`failed_nodes_json` 收失敗節點、email 主旨/body ⚠️ 標記;Try it 預覽 endpoint。**Phase 2**:`restrict_multi_org` chips(intersection-only) + `merge_excel` node(多 dashboard → 多 sheet xlsx)+ `format='none'`(僅供合併不落檔)。**權限完全等同 task.user 親自手點**(design access + 資料政策 + Multi-Org 全套) |
+| `scheduled-task-share-plan.md` | **排程任務分享**(2026-05-14 ship):`scheduled_task_shares` 表對齊 ai_dashboard_shares,7 種 grantee_type + 兩級權限(use/develop)。**核心保證**:執行身份永遠 = task.user_id(owner),develop 受贈者改了內容也用 owner 權限跑。**整段封禁**:含 db_write/kb_write/alert 節點的任務禁止 develop 分享(避免繞權限寫敏感資料)。delete + 改 shares 只能 admin/owner。**公用 ShareModal**:`components/common/ShareModal.tsx` re-export `dashboard/ShareModal`(增強為自訂 shareTypeOptions / hint / headerTitle) |
 
 ---
 
