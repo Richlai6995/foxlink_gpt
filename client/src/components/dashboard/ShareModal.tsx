@@ -50,10 +50,14 @@ export default function ShareModal({
   const [selected, setSelected] = useState<GranteeSelection | null>(null)
   const [shareType, setShareType] = useState<ShareType>(defaultShareType || shareTypeOptions[0]?.value || 'use')
   const [saving, setSaving] = useState(false)
+  const [errorMsg, setErrorMsg] = useState<string>('')
 
   // Label lookup for current share_type options
   const labelOf = (v: string) => shareTypeOptions.find(o => o.value === v)?.label || v
   const effectiveHint = hint === undefined ? DEFAULT_HINT : hint  // null = 顯式隱藏
+
+  // 從 axios error 抽出 server 回的 error 字串(後端統一回 { error: '...' })
+  const extractErr = (e: any) => e?.response?.data?.error || e?.message || '操作失敗'
 
   useEffect(() => { loadShares() }, [])
 
@@ -62,12 +66,16 @@ export default function ShareModal({
     try {
       const r = await api.get(sharesUrl)
       setShares(r.data)
-    } catch (e) { console.error(e) } finally { setLoading(false) }
+    } catch (e) {
+      console.error(e)
+      setErrorMsg(extractErr(e))
+    } finally { setLoading(false) }
   }
 
   async function handleAdd() {
     if (!selected) return
     setSaving(true)
+    setErrorMsg('')
     try {
       const updated = await api.post(sharesUrl, {
         grantee_type: selected.type,
@@ -78,10 +86,14 @@ export default function ShareModal({
       if (Array.isArray(updated.data)) setShares(updated.data)
       else await loadShares()
       setSelected(null)
-    } catch (e) { console.error(e) } finally { setSaving(false) }
+    } catch (e) {
+      console.error(e)
+      setErrorMsg(extractErr(e))
+    } finally { setSaving(false) }
   }
 
   async function handleChangeShareType(shareId: number, newType: ShareType) {
+    setErrorMsg('')
     try {
       const cur = shares.find(s => s.id === shareId) as Share | undefined
       if (!cur) return
@@ -92,14 +104,21 @@ export default function ShareModal({
       })
       if (Array.isArray(updated.data)) setShares(updated.data)
       else await loadShares()
-    } catch (e) { console.error(e) }
+    } catch (e) {
+      console.error(e)
+      setErrorMsg(extractErr(e))
+    }
   }
 
   async function handleRemove(shareId: number) {
+    setErrorMsg('')
     try {
       await api.delete(`${sharesUrl}/${shareId}`)
       setShares(prev => prev.filter(s => s.id !== shareId))
-    } catch (e) { console.error(e) }
+    } catch (e) {
+      console.error(e)
+      setErrorMsg(extractErr(e))
+    }
   }
 
   const iconFor = (type: string) => {
@@ -139,6 +158,17 @@ export default function ShareModal({
           />
           {effectiveHint && (
             <p className="text-xs text-gray-400">{effectiveHint}</p>
+          )}
+          {errorMsg && (
+            <div className="text-xs bg-rose-50 border border-rose-200 rounded px-2 py-1.5 text-rose-700 flex items-start gap-1.5">
+              <span className="shrink-0">⚠️</span>
+              <span className="flex-1 whitespace-pre-wrap">{errorMsg}</span>
+              <button
+                onClick={() => setErrorMsg('')}
+                className="text-rose-400 hover:text-rose-600 shrink-0"
+                aria-label="dismiss"
+              ><svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+            </div>
           )}
         </div>
 
