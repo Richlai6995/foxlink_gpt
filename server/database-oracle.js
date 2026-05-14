@@ -4151,6 +4151,63 @@ async function runMigrations(db) {
     if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn('[Migration] uq_alert_rules_pipeline_node:', e.message);
   }
 
+  // ── Migration: alert_rules.schedule_cron_expr(支援 cron 精準排程) ────
+  // 既有 schedule_interval_minutes 是 interval-based,無法定「每月 1 號 8:00」
+  // 新增 schedule_cron_expr(5-field cron),由 cronNext.js 算下次 fire time
+  // 註:之後 alert_schedules 子表上線後,本欄位仍保留作 backward compat / legacy 規則 fallback
+  try {
+    const exists = await db.prepare(
+      `SELECT COUNT(*) AS cnt FROM user_tab_columns WHERE table_name='ALERT_RULES' AND column_name='SCHEDULE_CRON_EXPR'`
+    ).get();
+    const cnt = Number(exists?.cnt ?? exists?.CNT ?? 0);
+    if (cnt === 0) {
+      await db.prepare(`ALTER TABLE alert_rules ADD schedule_cron_expr VARCHAR2(120)`).run();
+      console.log('[Migration] alert_rules.schedule_cron_expr added');
+    }
+  } catch (e) { console.warn('[Migration] add schedule_cron_expr failed:', e.message); }
+
+  // ── alert_schedules 子表 — 一條 rule 可掛多個 schedule(日/週/月 同時跑)─
+  // 每個 schedule 帶獨立 cron + lookback_days(替換 rule.data_config.sql 內 {{lookback_days}})
+  //                     + cooldown_min + next_evaluate_at + is_active
+  // alertRuleScheduler 撈 due schedules 不撈 due rules,executeAlert 接 schedule 物件
+  // schedule_cron_expr 跟 schedule_interval_minutes 二選一(一個 schedule 用 cron 或 interval 模式)
+  await createTable('ALERT_SCHEDULES', `CREATE TABLE alert_schedules (
+    id                  NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    rule_id             NUMBER NOT NULL REFERENCES alert_rules(id) ON DELETE CASCADE,
+    schedule_key        VARCHAR2(40),         -- 'daily' / 'weekly' / 'monthly' / 'interval' / 自訂
+    schedule_cron_expr  VARCHAR2(120),        -- cron 模式(daily/weekly/monthly)
+    schedule_interval_minutes NUMBER,         -- interval 模式(每 N 分鐘輪詢)
+    lookback_days       NUMBER,
+    cooldown_minutes    NUMBER DEFAULT 1440,
+    is_active           NUMBER(1) DEFAULT 1,
+    last_evaluated_at   TIMESTAMP,
+    next_evaluate_at    TIMESTAMP,
+    last_eval_result    VARCHAR2(500),
+    creation_date       TIMESTAMP DEFAULT SYSTIMESTAMP,
+    last_modified       TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_alert_schedules_rule_key UNIQUE (rule_id, schedule_key),
+    CONSTRAINT ck_alert_sched_mode CHECK (schedule_cron_expr IS NOT NULL OR schedule_interval_minutes IS NOT NULL)
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_alert_sched_rule ON alert_schedules(rule_id)`).run(); } catch (_) {}
+  try { await db.prepare(`CREATE INDEX idx_alert_sched_due ON alert_schedules(is_active, next_evaluate_at)`).run(); } catch (_) {}
+
+  // Migration: 既有 alert_schedules 補 schedule_interval_minutes 欄位 + 放寬 cron NOT NULL
+  try {
+    const colCheck = await db.prepare(
+      `SELECT COUNT(*) AS cnt FROM user_tab_columns WHERE table_name='ALERT_SCHEDULES' AND column_name='SCHEDULE_INTERVAL_MINUTES'`
+    ).get();
+    const colCnt = Number(colCheck?.cnt ?? colCheck?.CNT ?? 0);
+    if (colCnt === 0) {
+      await db.prepare(`ALTER TABLE alert_schedules ADD schedule_interval_minutes NUMBER`).run();
+      console.log('[Migration] alert_schedules.schedule_interval_minutes added');
+    }
+    // 放寬 schedule_cron_expr NOT NULL(已存在的 NOT NULL constraint)
+    try {
+      await db.prepare(`ALTER TABLE alert_schedules MODIFY schedule_cron_expr NULL`).run();
+      console.log('[Migration] alert_schedules.schedule_cron_expr → NULL allowed');
+    } catch (_) { /* 已經 nullable 或 constraint 不存在 */ }
+  } catch (e) { console.warn('[Migration] alert_schedules interval support:', e.message); }
+
   // ── Phase 5 Track B: Forecast 校驗 + Self-Improving Loop ─────────────────
   // pm_forecast_accuracy — 每日校驗結果(7 天前 forecast vs 今日 actual)
   await createTable('PM_FORECAST_ACCURACY', `CREATE TABLE pm_forecast_accuracy (

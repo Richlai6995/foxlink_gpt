@@ -17,11 +17,28 @@ interface AlertRule {
   is_active: number
   cooldown_minutes: number
   schedule_interval_minutes?: number | null
+  schedule_count?: number
+  active_schedule_count?: number
+  next_schedule_at?: string | null
+  schedule_cooldowns?: string | null  // 各 schedule cooldown 逗號/斜線清單,例 "1440/10080/43200"
   last_evaluated_at?: string | null
   next_evaluate_at?: string | null
   last_eval_result?: string | null
   creation_date: string
   last_modified: string
+}
+
+interface AlertSchedule {
+  id?: number
+  schedule_key: string
+  schedule_cron_expr: string | null
+  schedule_interval_minutes: number | null
+  lookback_days: number | null
+  cooldown_minutes: number
+  is_active: number
+  last_evaluated_at?: string | null
+  next_evaluate_at?: string | null
+  last_eval_result?: string | null
 }
 
 interface AlertRuleFull extends AlertRule {
@@ -32,6 +49,91 @@ interface AlertRuleFull extends AlertRule {
   message_template: string | null
   use_llm_analysis: number
   dedup_key: string | null
+  schedules?: AlertSchedule[]
+}
+
+// ── 排程模式工具:cron-based(daily/weekly/monthly)+ interval-based(每 N 分鐘)──
+type ScheduleKind = 'daily' | 'weekly' | 'monthly' | 'interval'
+type SchedulePartial = { kind: ScheduleKind; hour?: number; minute?: number; weekday?: number; monthday?: number; intervalMin?: number }
+
+function cronToParts(expr: string | null): SchedulePartial | null {
+  if (!expr) return null
+  const parts = expr.trim().split(/\s+/)
+  if (parts.length !== 5) return null
+  const [m, h, dom, mon, dow] = parts
+  if (mon !== '*') return null
+  const mi = Number(m), hi = Number(h)
+  if (!Number.isFinite(mi) || !Number.isFinite(hi)) return null
+  if (dom === '*' && dow === '*') return { kind: 'daily', hour: hi, minute: mi }
+  if (dom === '*' && /^\d+$/.test(dow)) return { kind: 'weekly', hour: hi, minute: mi, weekday: Number(dow) }
+  if (/^\d+$/.test(dom) && dow === '*') return { kind: 'monthly', hour: hi, minute: mi, monthday: Number(dom) }
+  return null
+}
+
+function partsToCron(p: SchedulePartial): string | null {
+  switch (p.kind) {
+    case 'daily':    return `${p.minute ?? 0} ${p.hour ?? 8} * * *`
+    case 'weekly':   return `${p.minute ?? 0} ${p.hour ?? 8} * * ${p.weekday ?? 1}`
+    case 'monthly':  return `${p.minute ?? 0} ${p.hour ?? 8} ${p.monthday ?? 1} * *`
+    case 'interval': return null  // interval 不用 cron
+  }
+}
+
+// 從 schedule item 反推 SchedulePartial(支援 cron + interval)
+function scheduleToParts(s: AlertSchedule): SchedulePartial {
+  if (s.schedule_interval_minutes && s.schedule_interval_minutes > 0) {
+    return { kind: 'interval', intervalMin: Number(s.schedule_interval_minutes) }
+  }
+  return cronToParts(s.schedule_cron_expr) || { kind: 'daily', hour: 8, minute: 0 }
+}
+
+// 確保 schedule_key 唯一(同一條 rule 內不衝突)
+function ensureUniqueKey(kind: ScheduleKind, existing: AlertSchedule[]): string {
+  const usedKeys = new Set((existing || []).map(s => s.schedule_key))
+  if (!usedKeys.has(kind)) return kind
+  let i = 2
+  while (usedKeys.has(`${kind}_${i}`)) i++
+  return `${kind}_${i}`
+}
+
+// 給定 schedule(cron 或 interval),前端純 JS 預估下 N 次
+function predictScheduleNext(s: { schedule_cron_expr: string | null; schedule_interval_minutes: number | null }, count = 3): string[] {
+  const now = new Date()
+  const fmt = (d: Date) => {
+    const wd = ['日','一','二','三','四','五','六'][d.getDay()]
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') +
+      ' (週' + wd + ') ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
+  }
+  const results: Date[] = []
+
+  // interval 模式
+  if (s.schedule_interval_minutes && s.schedule_interval_minutes > 0) {
+    const stepMs = Number(s.schedule_interval_minutes) * 60 * 1000
+    for (let i = 1; i <= count; i++) {
+      results.push(new Date(now.getTime() + stepMs * i))
+    }
+    return results.map(fmt)
+  }
+
+  // cron 模式
+  const p = cronToParts(s.schedule_cron_expr); if (!p) return []
+  if (p.kind === 'daily') {
+    for (let i = 0; results.length < count && i < 30; i++) {
+      const d = new Date(now); d.setDate(now.getDate() + i); d.setHours(p.hour ?? 8, p.minute ?? 0, 0, 0)
+      if (d > now) results.push(d)
+    }
+  } else if (p.kind === 'weekly') {
+    for (let i = 0; results.length < count && i < 60; i++) {
+      const d = new Date(now); d.setDate(now.getDate() + i); d.setHours(p.hour ?? 8, p.minute ?? 0, 0, 0)
+      if (d.getDay() === (p.weekday ?? 1) && d > now) results.push(d)
+    }
+  } else if (p.kind === 'monthly') {
+    for (let i = 0; results.length < count && i < 18; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() + i, p.monthday ?? 1, p.hour ?? 8, p.minute ?? 0, 0, 0)
+      if (d > now) results.push(d)
+    }
+  }
+  return results.map(fmt)
 }
 
 interface AlertHistoryRow {
@@ -212,15 +314,31 @@ export default function AlertRulesPanel() {
                   </td>
                   <td className="px-3 py-2 text-slate-600">
                     {r.bound_to === 'standalone'
-                      ? (r.schedule_interval_minutes
-                          ? <span title={r.next_evaluate_at ? `next: ${new Date(r.next_evaluate_at).toLocaleString('zh-TW')}` : ''}>
+                      ? ((r.schedule_count ?? 0) > 0
+                          ? <span title={r.next_schedule_at ? `next: ${new Date(r.next_schedule_at).toLocaleString('zh-TW')}` : ''}>
                               <Clock size={10} className="inline mr-0.5 text-slate-400" />
-                              每 {r.schedule_interval_minutes} 分
+                              {r.active_schedule_count ?? r.schedule_count} 個排程
                             </span>
-                          : <span className="text-rose-500" title="無 schedule_interval_minutes,scheduler 不會跑">未設</span>)
+                          : (r.schedule_interval_minutes
+                              ? <span title={r.next_evaluate_at ? `next: ${new Date(r.next_evaluate_at).toLocaleString('zh-TW')}` : ''}>
+                                  <Clock size={10} className="inline mr-0.5 text-slate-400" />
+                                  每 {r.schedule_interval_minutes} 分(legacy)
+                                </span>
+                              : <span className="text-rose-500" title="尚未設定排程,scheduler 不會跑">未設</span>))
                       : <span className="text-slate-400 text-[10px]">隨任務</span>}
                   </td>
-                  <td className="px-3 py-2 text-slate-600">{r.cooldown_minutes}</td>
+                  <td className="px-3 py-2 text-slate-600">
+                    {(r.bound_to === 'standalone' && (r.schedule_count ?? 0) > 0 && r.schedule_cooldowns)
+                      ? (() => {
+                          const arr = r.schedule_cooldowns.split('/').map(s => Number(s)).filter(Number.isFinite)
+                          const allSame = arr.every(v => v === arr[0])
+                          const fmt = (m: number) => m >= 1440 ? `${Math.round(m/1440)}d` : m >= 60 ? `${Math.round(m/60)}h` : `${m}m`
+                          return allSame
+                            ? <span title={`所有 schedule cooldown = ${arr[0]} 分`}>{arr[0]} 分</span>
+                            : <span title={`各 schedule cooldown: ${r.schedule_cooldowns} 分`} className="font-mono text-[11px]">{arr.map(fmt).join(' / ')}</span>
+                        })()
+                      : r.cooldown_minutes}
+                  </td>
                   <td className="px-3 py-2 text-center">
                     <button onClick={() => toggleActive(r)} className={`p-1 rounded ${r.is_active ? 'text-emerald-600 hover:bg-emerald-50' : 'text-slate-400 hover:bg-slate-100'}`}
                       title={r.is_active ? t('admin.alertRules.clickToPause', '點擊暫停') : t('admin.alertRules.clickToActivate', '點擊啟用')}>
@@ -319,6 +437,7 @@ function AlertRuleEditor({ mode, initial, onClose, onSaved }: EditorProps) {
       data_config: initial.data_config || {},
       comparison_config: initial.comparison_config || {},
       actions: initial.actions || [{ type: 'alert_history' }],
+      schedules: initial.schedules || [],
     }
     return {
       rule_name: '',
@@ -334,9 +453,10 @@ function AlertRuleEditor({ mode, initial, onClose, onSaved }: EditorProps) {
       message_template: '{{rule_name}} 觸發:{{entity_code}} 當前值 {{trigger_value}}({{reason}})',
       use_llm_analysis: 0,
       cooldown_minutes: 60,
-      schedule_interval_minutes: 60,
+      schedule_interval_minutes: null,
       dedup_key: '',
       is_active: 1,
+      schedules: [],
     }
   })
   const [saving, setSaving] = useState(false)
@@ -357,25 +477,94 @@ function AlertRuleEditor({ mode, initial, onClose, onSaved }: EditorProps) {
   const save = async () => {
     if (!form.rule_name?.trim()) { alert('rule_name 必填'); return }
     if (!form.comparison) { alert('comparison 必填'); return }
-    if (form.bound_to === 'standalone' && !form.schedule_interval_minutes) {
-      alert('獨立規則必須設輪詢分鐘(schedule_interval_minutes)')
-      return
-    }
     if (form.bound_to === 'standalone' && form.data_source === 'upstream_json') {
       alert('獨立規則無 upstream JSON 可用,請改 sql_query 或 literal')
+      return
+    }
+    // standalone:必須至少有一個排程(schedules 或 legacy interval)
+    if (form.bound_to === 'standalone'
+        && (!Array.isArray(form.schedules) || form.schedules.length === 0)
+        && !form.schedule_interval_minutes) {
+      alert('獨立規則必須設至少一個排程(日/週/月)')
       return
     }
     setSaving(true)
     try {
       if (mode === 'edit' && initial?.id) {
-        await api.put(`/alert-rules/${initial.id}`, form)
+        const r = await api.put(`/alert-rules/${initial.id}`, form)
+        if (r.data?._schedule_warnings?.length) {
+          alert('排程設定有警告:\n' + r.data._schedule_warnings.join('\n'))
+        }
       } else {
-        await api.post('/alert-rules', form)
+        const r = await api.post('/alert-rules', form)
+        if (r.data?._schedule_warnings?.length) {
+          alert('排程設定有警告:\n' + r.data._schedule_warnings.join('\n'))
+        }
       }
       onSaved()
     } catch (e: any) {
       alert(e?.response?.data?.error || e.message)
     } finally { setSaving(false) }
+  }
+
+  // schedules 子表操作
+  const setSchedules = (next: AlertSchedule[]) => setForm({ ...form, schedules: next })
+  const addSchedule = (kind: ScheduleKind) => {
+    const base: SchedulePartial = { kind, hour: 8, minute: 0 }
+    if (kind === 'weekly') base.weekday = 1
+    if (kind === 'monthly') base.monthday = 1
+    if (kind === 'interval') base.intervalMin = 60
+    // cooldown / lookback 預設值依模式
+    const cooldownDefault =
+      kind === 'daily'   ? 1440  :
+      kind === 'weekly'  ? 10080 :
+      kind === 'monthly' ? 43200 :
+                           60     // interval default
+    const lookbackDefault =
+      kind === 'daily'   ? 1  :
+      kind === 'weekly'  ? 5  :
+      kind === 'monthly' ? 22 :
+                           1   // interval 也用 1 天(短期變化)
+    const newItem: AlertSchedule = {
+      schedule_key: ensureUniqueKey(kind, form.schedules || []),
+      schedule_cron_expr: kind === 'interval' ? null : partsToCron(base),
+      schedule_interval_minutes: kind === 'interval' ? (base.intervalMin ?? 60) : null,
+      lookback_days: lookbackDefault,
+      cooldown_minutes: cooldownDefault,
+      is_active: 1,
+    }
+    setSchedules([...(form.schedules || []), newItem])
+  }
+  const updateSchedule = (idx: number, patch: Partial<AlertSchedule>) => {
+    const arr = [...(form.schedules || [])]
+    arr[idx] = { ...arr[idx], ...patch }
+    setSchedules(arr)
+  }
+  // 切換 kind(daily/weekly/monthly/interval)時自動 reset cron/interval 欄位
+  const updateScheduleParts = (idx: number, patch: Partial<SchedulePartial>) => {
+    const cur = form.schedules[idx]
+    const curParts = scheduleToParts(cur)
+    const next = { ...curParts, ...patch } as SchedulePartial
+
+    if (next.kind === 'interval') {
+      updateSchedule(idx, {
+        schedule_cron_expr: null,
+        schedule_interval_minutes: next.intervalMin ?? 60,
+      })
+    } else {
+      // 從 interval 切換到 cron 模式時補預設 hour/minute
+      if (curParts.kind === 'interval' && (next.hour == null || next.minute == null)) {
+        next.hour = 8
+        next.minute = 0
+      }
+      updateSchedule(idx, {
+        schedule_cron_expr: partsToCron(next),
+        schedule_interval_minutes: null,
+      })
+    }
+  }
+  const removeSchedule = (idx: number) => {
+    setSchedules((form.schedules || []).filter((_: any, i: number) => i !== idx))
   }
 
   const runTest = async () => {
@@ -435,23 +624,136 @@ function AlertRuleEditor({ mode, initial, onClose, onSaved }: EditorProps) {
             </div>
           </div>
 
-          {/* 繫結 + 輪詢 */}
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-slate-600 mb-1">繫結方式</label>
-              <select className="input w-full" value={form.bound_to} onChange={e => set('bound_to', e.target.value)} disabled={mode === 'edit'}>
-                <option value="standalone">standalone(獨立 cron 輪詢)</option>
-                <option value="pipeline_node">pipeline_node(隨任務跑)</option>
-              </select>
-              {mode === 'edit' && <p className="text-[10px] text-slate-400 mt-0.5">已建立後不可改繫結方式</p>}
-            </div>
-            {form.bound_to === 'standalone' && (
-              <div>
-                <label className="block text-slate-600 mb-1">輪詢間隔(分鐘)*</label>
-                <input type="number" className="input w-full" value={form.schedule_interval_minutes ?? ''} onChange={e => set('schedule_interval_minutes', Number(e.target.value))} placeholder="60" />
-              </div>
-            )}
+          {/* 繫結 */}
+          <div>
+            <label className="block text-slate-600 mb-1">繫結方式</label>
+            <select className="input w-full" value={form.bound_to} onChange={e => set('bound_to', e.target.value)} disabled={mode === 'edit'}>
+              <option value="standalone">standalone(獨立 cron 輪詢)</option>
+              <option value="pipeline_node">pipeline_node(隨任務跑)</option>
+            </select>
+            {mode === 'edit' && <p className="text-[10px] text-slate-400 mt-0.5">已建立後不可改繫結方式</p>}
           </div>
+
+          {/* 排程子表(standalone 才顯示)— 一條 rule 可掛多個 schedule(日/週/月) */}
+          {form.bound_to === 'standalone' && (
+            <div className="border border-slate-200 rounded-lg p-2.5 bg-slate-50">
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-slate-700 font-semibold">
+                  排程設定 <span className="text-[10px] text-slate-400 font-normal">({(form.schedules || []).length} 個)</span>
+                </label>
+                <div className="flex gap-1">
+                  <button type="button" onClick={() => addSchedule('daily')} className="text-[10px] px-2 py-0.5 rounded border border-slate-300 hover:border-rose-400 hover:text-rose-600">+ 日</button>
+                  <button type="button" onClick={() => addSchedule('weekly')} className="text-[10px] px-2 py-0.5 rounded border border-slate-300 hover:border-rose-400 hover:text-rose-600">+ 週</button>
+                  <button type="button" onClick={() => addSchedule('monthly')} className="text-[10px] px-2 py-0.5 rounded border border-slate-300 hover:border-rose-400 hover:text-rose-600">+ 月</button>
+                  <button type="button" onClick={() => addSchedule('interval')} className="text-[10px] px-2 py-0.5 rounded border border-slate-300 hover:border-blue-400 hover:text-blue-600">+ 間隔</button>
+                </div>
+              </div>
+
+              {(!form.schedules || form.schedules.length === 0) && (
+                <p className="text-[10px] text-slate-400 italic">點上方 +日 / +週 / +月 / +間隔 加排程,可同時多個</p>
+              )}
+
+              <div className="space-y-2">
+                {(form.schedules || []).map((s: AlertSchedule, idx: number) => {
+                  const parts = scheduleToParts(s)
+                  const nextRuns = predictScheduleNext(s, 3)
+                  // 緊湊樣式:不依賴 .input class(那個 padding 太大),自己寫 minimal style
+                  const compactInput = 'text-xs py-0 px-1 h-6 border border-slate-300 rounded bg-white focus:border-rose-400 focus:outline-none'
+                  return (
+                    <div key={idx} className="bg-white border border-slate-200 rounded px-2 py-1.5 space-y-1">
+                      {/* Row 1: key tag + 模式 + 時間設定 + 刪除 — 全部 inline 不 wrap */}
+                      <div className="flex items-center gap-1 text-xs">
+                        <span className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-mono text-[10px] whitespace-nowrap">{s.schedule_key}</span>
+                        <select className={`${compactInput} w-14`}
+                          value={parts.kind}
+                          onChange={e => {
+                            const newKind = e.target.value as ScheduleKind
+                            updateScheduleParts(idx, {
+                              kind: newKind,
+                              weekday: newKind === 'weekly' ? (parts.weekday ?? 1) : undefined,
+                              monthday: newKind === 'monthly' ? (parts.monthday ?? 1) : undefined,
+                              intervalMin: newKind === 'interval' ? (parts.intervalMin ?? 60) : undefined,
+                            })
+                          }}>
+                          <option value="daily">每天</option>
+                          <option value="weekly">每週</option>
+                          <option value="monthly">每月</option>
+                          <option value="interval">間隔</option>
+                        </select>
+
+                        {parts.kind === 'interval' ? (
+                          <>
+                            <input type="number" min={1} max={1440} className={`${compactInput} w-14`}
+                              value={parts.intervalMin ?? 60}
+                              onChange={e => updateScheduleParts(idx, { intervalMin: Math.max(1, Number(e.target.value)) })} />
+                            <span className="text-slate-500 text-[11px]">分鐘</span>
+                          </>
+                        ) : (
+                          <>
+                            {parts.kind === 'weekly' && (
+                              <select className={`${compactInput} w-12`} value={parts.weekday ?? 1}
+                                onChange={e => updateScheduleParts(idx, { weekday: Number(e.target.value) })}>
+                                {['日','一','二','三','四','五','六'].map((d, i) => <option key={i} value={i}>週{d}</option>)}
+                              </select>
+                            )}
+                            {parts.kind === 'monthly' && (
+                              <input type="number" min={1} max={28} className={`${compactInput} w-10`}
+                                value={parts.monthday ?? 1}
+                                onChange={e => updateScheduleParts(idx, { monthday: Number(e.target.value) })} />
+                            )}
+                            <select className={`${compactInput} w-11`} value={parts.hour ?? 8}
+                              onChange={e => updateScheduleParts(idx, { hour: Number(e.target.value) })}>
+                              {Array.from({ length: 24 }, (_, i) => i).map(h => <option key={h} value={h}>{String(h).padStart(2, '0')}</option>)}
+                            </select>
+                            <span className="text-slate-400">:</span>
+                            <select className={`${compactInput} w-11`} value={parts.minute ?? 0}
+                              onChange={e => updateScheduleParts(idx, { minute: Number(e.target.value) })}>
+                              {[0,15,30,45].map(m => <option key={m} value={m}>{String(m).padStart(2, '0')}</option>)}
+                            </select>
+                          </>
+                        )}
+                        <label className="flex items-center gap-0.5 cursor-pointer text-[11px] ml-auto">
+                          <input type="checkbox" checked={!!s.is_active}
+                            onChange={e => updateSchedule(idx, { is_active: e.target.checked ? 1 : 0 })} />
+                          啟
+                        </label>
+                        <button type="button" onClick={() => removeSchedule(idx)} className="text-slate-300 hover:text-rose-500 ml-0.5"><X size={11} /></button>
+                      </div>
+
+                      {/* Row 2: lookback + cooldown — inline */}
+                      <div className="flex items-center gap-2 text-[11px] text-slate-600">
+                        <span>lookback</span>
+                        <input type="number" className={`${compactInput} w-12`}
+                          value={s.lookback_days ?? ''}
+                          onChange={e => updateSchedule(idx, { lookback_days: e.target.value === '' ? null : Number(e.target.value) })}
+                          placeholder="—" />
+                        <span>天</span>
+                        <span className="ml-2">冷卻</span>
+                        <input type="number" className={`${compactInput} w-16`}
+                          value={s.cooldown_minutes}
+                          onChange={e => updateSchedule(idx, { cooldown_minutes: Number(e.target.value) })} />
+                        <span>分</span>
+                        <span className="text-slate-300 ml-auto text-[10px] font-mono">
+                          {s.schedule_cron_expr ? s.schedule_cron_expr : `每 ${s.schedule_interval_minutes} 分`}
+                        </span>
+                      </div>
+
+                      {/* Row 3: 下次預估 */}
+                      {nextRuns.length > 0 && (
+                        <div className="text-[10px] text-emerald-600 leading-tight">
+                          ⏱ {nextRuns[0]}{nextRuns[1] ? ` → ${nextRuns[1]}` : ''}
+                          {s.last_eval_result && <span className="text-slate-400 ml-2">last: {s.last_eval_result.slice(0, 40)}</span>}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+              <p className="text-[10px] text-slate-400 mt-1.5">
+                💡 SQL 內可寫 <code className="bg-slate-100 px-0.5">{`{{lookback_days}}`}</code> 變數,scheduler 評估時自動換成該 schedule 的 lookback_days 值。
+              </p>
+            </div>
+          )}
 
           {/* 資料源 */}
           <div>
@@ -571,24 +873,31 @@ function AlertRuleEditor({ mode, initial, onClose, onSaved }: EditorProps) {
             </div>
           </div>
 
-          {/* Cooldown + dedup_key */}
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-slate-600 mb-1">冷卻(分鐘)</label>
-              <input type="number" className="input w-full" value={form.cooldown_minutes ?? 60} onChange={e => set('cooldown_minutes', Number(e.target.value))} />
+          {/* Cooldown + dedup_key — standalone 有 schedules 子表時被覆蓋,隱藏避免誤會 */}
+          {!(form.bound_to === 'standalone' && form.schedules?.length > 0) && (
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-slate-600 mb-1">冷卻(分鐘)</label>
+                <input type="number" className="input w-full" value={form.cooldown_minutes ?? 60} onChange={e => set('cooldown_minutes', Number(e.target.value))} />
+              </div>
+              <div>
+                <label className="block text-slate-600 mb-1">dedup_key(選填)</label>
+                <input className="input w-full" value={form.dedup_key || ''} onChange={e => set('dedup_key', e.target.value)} placeholder="同 key 共用 cooldown" />
+              </div>
             </div>
-            <div>
-              <label className="block text-slate-600 mb-1">dedup_key(選填)</label>
-              <input className="input w-full" value={form.dedup_key || ''} onChange={e => set('dedup_key', e.target.value)} placeholder="同 key 共用 cooldown" />
-            </div>
-          </div>
+          )}
+          {form.bound_to === 'standalone' && form.schedules?.length > 0 && (
+            <p className="text-[10px] text-slate-400 italic">
+              💡 rule-level cooldown / dedup_key 在多排程模式下會被各 schedule 內的設定覆蓋,故隱藏避免誤會。
+            </p>
+          )}
 
           {/* 啟用狀態 */}
           <label className="flex items-center gap-1.5 cursor-pointer">
             <input type="checkbox" checked={!!form.is_active} onChange={e => set('is_active', e.target.checked ? 1 : 0)} />
             <span className="text-slate-700">啟用(active)</span>
-            {form.bound_to === 'standalone' && form.is_active === 1 && form.schedule_interval_minutes && (
-              <span className="text-[10px] text-emerald-600 ml-2">→ scheduler 將每 {form.schedule_interval_minutes} 分評估一次</span>
+            {form.bound_to === 'standalone' && form.is_active === 1 && (form.schedules?.length > 0) && (
+              <span className="text-[10px] text-emerald-600 ml-2">→ scheduler 將依 {form.schedules.length} 個排程獨立評估</span>
             )}
           </label>
 

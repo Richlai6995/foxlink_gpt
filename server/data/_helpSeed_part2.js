@@ -2971,4 +2971,245 @@ module.exports = [
       },
     ],
   },
+
+  /* ──────────────────────── u-alert-rules（Admin）─────────────────────── */
+  {
+    id: 'u-alert-rules',
+    sort_order: 25.5,
+    icon: 'AlertTriangle',
+    icon_color: 'text-rose-500',
+    last_modified: '2026-05-14b',  // bump 觸發 re-seed(加 interval 模式、緊湊 UI、cooldown 摘要列)
+    title: '警示規則設定（Admin）',
+    sidebar_label: '警示規則（Admin）',
+    blocks: [
+      {
+        type: 'para',
+        text: '**警示規則**讓系統定期檢查 DB 資料，若數值符合條件（例如「日漲幅 > 8%」）就自動發出通知。常見用途：貴金屬/基本金屬漲跌幅告警、ERP 庫存異常監控、報廢率偏高警示等。位置：**Admin → 警示規則**。',
+      },
+      {
+        type: 'note',
+        text: '與「自動排程」不同：排程任務是固定時間執行 AI prompt 取得文字結果並寄信；警示規則是定期跑 SQL 查 DB，**只有結果符合門檻時才觸發通知**。日常無異常時完全不發信，不會打擾收件人。',
+      },
+
+      // ── 三層架構 ─────────────────────────────────────────────────
+      {
+        type: 'subsection',
+        title: '架構：規則 + 排程 + 歷史',
+        blocks: [
+          {
+            type: 'table',
+            headers: ['層級', '說明', '對應資料表'],
+            rows: [
+              ['規則 (Rule)', '主表，定義「監看什麼資料、用什麼條件比較、觸發後要做什麼動作」', 'alert_rules'],
+              ['排程 (Schedule)', '子表，一條規則可掛多個排程（例如同時設「日 / 週 / 月」三個），各自獨立 cron + lookback', 'alert_schedules'],
+              ['歷史 (History)', '每次觸發自動記一筆，含當下數值、訊息、發送通道', 'pm_alert_history'],
+            ],
+          },
+          {
+            type: 'tip',
+            text: '舉例：「PT 鉑 漲幅警示」是 **1 條規則**，內掛 **3 個排程**（每天 08:00 看日漲幅 / 每週一 08:00 看週漲幅 / 每月 1 號 08:00 看月漲幅），每個排程用不同 `lookback_days` 套同一條 SQL，達到「一條規則同時看日週月」的效果。',
+          },
+        ],
+      },
+
+      // ── 新增規則步驟 ─────────────────────────────────────────────
+      {
+        type: 'subsection',
+        title: '新增警示規則',
+        blocks: [
+          {
+            type: 'steps',
+            items: [
+              { title: '進入 Admin → 警示規則', desc: '右上「+ 新增獨立規則」按鈕' },
+              {
+                title: '填基本資訊',
+                desc: '規則名稱、嚴重等級（INFO / WARNING / CRITICAL）、標的類型/代碼（例：metal / PT）。「繫結方式」選 standalone（獨立 cron 輪詢），pipeline_node 是給排程任務內 alert 節點用的。',
+              },
+              {
+                title: '寫資料來源 SQL',
+                desc: 'data_source 選 sql_query，貼 SELECT 查詢。SQL 內可寫 `{{lookback_days}}` 變數，scheduler 評估時自動換成該排程的 lookback_days 值。',
+              },
+              {
+                title: '選比較模式',
+                desc: 'threshold（絕對門檻）/ historical_avg（偏離歷史均值）/ rate_change（變化率，最常用於漲跌幅）/ zscore（統計異常）。',
+              },
+              {
+                title: '加排程（至少一個）',
+                desc: '點「+ 日 / + 週 / + 月 / + 間隔」四種按鈕之一。前三種是 cron-based（固定時點，例如「每天 08:00」），「+ 間隔」是 interval-based（每 N 分鐘輪詢，例如「每 60 分鐘」）。每個排程獨立設執行週期、lookback_days、cooldown、是否啟用。系統會即時顯示「下次執行」預估。',
+              },
+              {
+                title: '訊息模板 + 動作',
+                desc: '訊息模板可用 `{{trigger_value}}` `{{threshold_value}}` `{{reason}}` `{{entity_code}}` 等變數。動作支援 email / webex / webhook，預設一定會寫 alert_history（不能取消）。',
+              },
+              { title: '儲存後 alertRuleScheduler 自動接管', desc: '無需重啟服務，下次 fire 時間到了自動評估。' },
+            ],
+          },
+        ],
+      },
+
+      // ── 排程設定詳解 ─────────────────────────────────────────────
+      {
+        type: 'subsection',
+        title: '排程設定詳解',
+        blocks: [
+          {
+            type: 'table',
+            headers: ['模式', 'Cron / 規格', '適用場景', '預設 lookback / cooldown'],
+            rows: [
+              ['每天', '0 H * * *', '日漲幅 / 日庫存變動', '1 天 / 1440 分'],
+              ['每週', '0 H * * D', '週漲幅 / 週銷售總結（建議週一早上）', '5 天 / 10080 分'],
+              ['每月', '0 H D * *', '月漲幅 / 月成本對比（建議每月 1 號）', '22 天 / 43200 分'],
+              ['間隔', '每 N 分鐘（無 cron）', '不關心固定時點，週期性檢查（例 ERP 訂單異常每 60 分鐘掃一次）', '1 天 / 60 分'],
+            ],
+          },
+          {
+            type: 'tip',
+            text: 'lookback_days 是「向前看幾個交易日當基準」。SQL 內寫 `WHERE rn IN (1, {{lookback_days}} + 1)` 自動取「最新 + N 天前」兩筆比對。',
+          },
+          {
+            type: 'note',
+            text: 'Cron 只支援 3 種 pattern：每天 `M H * * *` / 每週 `M H * * D`（D=0-6，0=日）/ 每月 `M H D * *`（D=1-28）。**不支援逗號列表、範圍、步長**（如需「月底前 4 天」這種，請改寫 SQL 在 WHERE 加日期條件，或用 interval 模式）。 **間隔模式**改填 `schedule_interval_minutes`（純分鐘數，可填 1~1440），跟 cron 模式互斥（一個 schedule 二擇一）。',
+          },
+          {
+            type: 'tip',
+            text: '一條 rule 可混搭多種模式。例：PT 鉑警示可同時設「每天 08:00」+「每 6 小時」兩個 schedule，前者抓 fix 後的日線漲幅、後者抓盤中突發異動。',
+          },
+          {
+            type: 'tip',
+            text: 'Cooldown（冷卻分鐘）+ dedup_key 雙重防重發。同一規則同 schedule 在 cooldown 內即使再次觸發也不會重複發信。Cooldown 用 Redis SET NX EX 實作，Redis 掛掉時 fail-open（寧可多發也不漏報）。',
+          },
+        ],
+      },
+
+      // ── 試跑 ─────────────────────────────────────────────────────
+      {
+        type: 'subsection',
+        title: '試跑（模擬觸發，不真寄通知）',
+        blocks: [
+          { type: 'para', text: '編輯規則 modal 底部有「⏵ 試跑」按鈕，點下去會：' },
+          {
+            type: 'list',
+            items: [
+              '把目前表單暫存成 temp rule → 跑 executeAlert（dryRun=true）→ 刪 temp rule',
+              '回傳 triggered / reason / current value / baseline value 的 JSON',
+              '**不會**真發 email / webex / 寫 alert_history，純算給你看',
+              'SQL 內若有 `{{lookback_days}}` 變數，試跑時自動用 schedules[0] 的 lookback 替換（避免 raw template 進 Oracle 報錯）',
+            ],
+          },
+          { type: 'tip', text: '改 SQL / 改門檻後務必先試跑一次。觀察結果裡的 current / baseline 數字對不對，再儲存。' },
+        ],
+      },
+
+      // ── 動作 (actions) ──────────────────────────────────────────
+      {
+        type: 'subsection',
+        title: '動作（actions）說明',
+        blocks: [
+          {
+            type: 'table',
+            headers: ['動作', '說明', '需要設定'],
+            rows: [
+              ['alert_history', '寫一筆到 pm_alert_history（給「歷史」按鈕看，自動加，無法移除）', '無'],
+              ['email', '寄 Email 給指定收件人', 'to: 逗號分隔的 email list'],
+              ['webex', '在 Webex 房間發 Adaptive Card（含 ✓ 已確認按鈕）', 'room_id'],
+              ['webhook', 'POST JSON 到外部 endpoint（可串接 Slack / Teams 等）', 'url + method + headers'],
+            ],
+          },
+          {
+            type: 'tip',
+            text: '若想用 LLM 補充警示意義說明（例：「PT 漲 9% 可能是哪些原因」），勾「附加 LLM 分析」— 觸發時會多花一次 Gemini Flash call 產生 100-300 字分析，附在訊息與 alert_history。沒勾就只有原始模板訊息。',
+          },
+        ],
+      },
+
+      // ── 歷史紀錄 ─────────────────────────────────────────────────
+      {
+        type: 'subsection',
+        title: '查看歷史紀錄',
+        blocks: [
+          {
+            type: 'para',
+            text: '規則列表每列右側「⏱ 歷史」按鈕展開該規則最近 50 次觸發紀錄。欄位含 triggered_at / severity / 當下數值 / 訊息 / LLM 分析 / 已發送通道 / 已確認狀態。',
+          },
+          {
+            type: 'note',
+            text: '歷史只記**觸發成功**那次。沒觸發（變化率沒過門檻）或在 cooldown 內被擋的不會記錄，避免歷史頁充斥噪音。',
+          },
+        ],
+      },
+
+      // ── PM 貴金屬警示範例 ─────────────────────────────────────────
+      {
+        type: 'subsection',
+        title: '範例：貴金屬 / 基本金屬漲幅警示（已預設 seed）',
+        blocks: [
+          {
+            type: 'para',
+            text: '系統開機時 `seedPmAlertRules.js` 預設建立 11 條規則（6 基本金屬 + 5 貴金屬），每條掛日/週/月三個排程，門檻 8%：',
+          },
+          {
+            type: 'table',
+            headers: ['類別', '規則名', 'SQL source filter'],
+            rows: [
+              ['基本金屬', '[PM] CU/AL/NI/ZN/PB/SN ⊕ 漲幅警示 (>8%)', `source LIKE 'Westmetall%'`],
+              ['貴金屬 PGM', '[PM] PT/PD/RH ⊕ 漲幅警示 (>8%)', `source='JohnsonMatthey'`],
+              ['貴金屬', '[PM] AU/AG ⊕ 漲幅警示 (>8%)', `1=1（不過濾，依 metal_code）`],
+            ],
+          },
+          {
+            type: 'note',
+            text: 'AU / AG 目前 DB 歷史資料不足，SQL 跑會回「no historical baseline」自動跳過，不會出錯。等抓取程式補完歷史就自動開始作用，不用改規則。',
+          },
+        ],
+      },
+
+      // ── 常見問題排除 ─────────────────────────────────────────────
+      {
+        type: 'subsection',
+        title: '常見問題排除',
+        blocks: [
+          {
+            type: 'table',
+            headers: ['症狀', '原因 / 解法'],
+            rows: [
+              ['列表「輪詢」欄顯示「未設」紅字', '該規則沒掛任何排程（alert_schedules 子表沒記錄）。編輯規則點「+ 日 / + 週 / + 月 / + 間隔」加排程。'],
+              ['列表「冷卻」欄顯示「1d / 7d / 30d」是什麼', '各 schedule 的 cooldown 自動換算單位後的摘要。1d=1440 分、7d=10080 分、30d=43200 分。若所有 schedule cooldown 都一樣就顯示單一值。hover 可看原始分鐘數。'],
+              ['試跑回「規則已停用」', 'temp rule is_active=0 是試跑機制本身的設定（避免被 scheduler 撈到），server 端已強制視為 active，若仍看到此訊息請更新 server。'],
+              ['試跑回「no historical baseline」', 'SQL 回的資料筆數 < 2，無法算變化率。可能是 metal/entity 沒歷史資料、source filter 太嚴、或 SQL 條件錯。先在 Oracle 直接跑該 SQL 看回幾筆。'],
+              ['Cron 表達式存不下去', '只支援 3 種 pattern（daily/weekly/monthly），用 UI 上「每天/每週/每月」radio 選即可，不需手寫 cron。'],
+              ['Alert 永遠不觸發', '檢查：1) is_active=1  2) schedule.is_active=1  3) next_evaluate_at 已到  4) cooldown 內沒被擋  5) 試跑數字看是否真的過門檻。'],
+              ['想暫時停用某條規則 / 某個 schedule', '規則層級：列表「狀態」欄電源按鈕一鍵切換 is_active。Schedule 層級：編輯規則 → 該排程的「啟用」checkbox 取消勾選。'],
+              ['Email 沒收到', '檢查：1) 收件人在 actions[].to  2) SMTP 設定（Admin → 郵件設定）  3) pm_alert_history 該筆 channels_sent 是否含 "email"  4) email server log。'],
+              ['規則改 cooldown 但似乎沒生效', '若該規則有掛排程（schedules 子表非空），rule-level cooldown 會被 **schedule-level cooldown 覆蓋**。要改實際 cooldown 請編輯各 schedule 的 cooldown 欄位，不是 rule-level。'],
+              ['想批次建多條類似規則', '改 server/scripts/seedPmAlertRules.js 在 METALS 陣列加項目，再跑 `node server/scripts/seedPmAlertRules.js`（idempotent，by rule_name 重跑 skip）。'],
+            ],
+          },
+        ],
+      },
+
+      // ── 相關 service / API ───────────────────────────────────────
+      {
+        type: 'subsection',
+        title: '技術細節（給工程師）',
+        blocks: [
+          {
+            type: 'table',
+            headers: ['項目', '位置'],
+            rows: [
+              ['Scheduler', 'server/services/alertRuleScheduler.js（每分鐘 tick，撈 due schedules JOIN rule）'],
+              ['Cron 算下次 fire', 'server/services/cronNext.js（純 JS，Asia/Taipei tz-aware）'],
+              ['規則執行核心', 'server/services/pipelineAlerter.js（executeAlert，含 4 種 comparison + dispatch）'],
+              ['REST API', 'server/routes/alertRules.js（CRUD + /test + /history）'],
+              ['Admin UI', 'client/src/components/admin/AlertRulesPanel.tsx'],
+              ['Seed script', 'server/scripts/seedPmAlertRules.js（11 metal × 3 schedule）'],
+            ],
+          },
+          {
+            type: 'tip',
+            text: '多 pod 部署安全：alertRuleScheduler 撈到 due schedule 後用 Redis tryLock(`alert_sched_eval:<id>:<minute>`, 90s) 防同分鐘重跑。Redis 掛掉時 fail-open，cooldown_minutes 還是擋得住重複。',
+          },
+        ],
+      },
+    ],
+  },
 ];

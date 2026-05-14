@@ -26,6 +26,7 @@ const { verifyToken } = require('./auth');
 router.use(verifyToken);
 
 const db = () => require('../database-oracle').db;
+const { nextFire, isSupportedCron } = require('../services/cronNext');
 
 // ── Permission helper ───────────────────────────────────────────────────────
 function isAdmin(user) {
@@ -41,33 +42,151 @@ async function fetchRule(id) {
   for (const f of ['data_config', 'comparison_config', 'actions']) {
     try { out[f] = out[f] ? JSON.parse(out[f]) : null; } catch (_) {}
   }
+  // schedules 子表 — 一條 rule 多個 schedule(日/週/月)
+  out.schedules = await fetchSchedules(Number(id));
   return out;
 }
 
+async function fetchSchedules(ruleId) {
+  const rows = await db().prepare(`
+    SELECT id, rule_id, schedule_key, schedule_cron_expr, schedule_interval_minutes, lookback_days,
+           cooldown_minutes, is_active, last_evaluated_at, next_evaluate_at, last_eval_result
+    FROM alert_schedules WHERE rule_id=?
+    ORDER BY id
+  `).all(Number(ruleId));
+  return (rows || []).map(r => {
+    const out = {};
+    for (const [k, v] of Object.entries(r)) out[k.toLowerCase()] = v;
+    return out;
+  });
+}
+
+// Date → 'YYYY-MM-DD HH24:MI:SS'(UTC-naive,與 alertRuleScheduler 一致)
+function isoToOracleTs(d) {
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')} ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}:${String(d.getUTCSeconds()).padStart(2, '0')}`;
+}
+
+// upsert schedules(by rule_id + schedule_key)— rule 儲存時呼叫
+// schedules 傳 array,每個 item: { schedule_key, schedule_cron_expr, lookback_days, cooldown_minutes, is_active }
+// 既有 schedule 不在新 array 內者 → 刪除(實作「同步」語意)
+async function syncSchedules(ruleId, schedules) {
+  if (!Array.isArray(schedules)) return { errors: ['schedules 必須是 array'] };
+  const errors = [];
+
+  // 驗:cron 跟 interval 必須二選一(至少一個);若兩者都填 cron 優先
+  for (const [i, s] of schedules.entries()) {
+    const hasCron = !!s.schedule_cron_expr;
+    const hasInterval = s.schedule_interval_minutes != null && s.schedule_interval_minutes !== '' && Number(s.schedule_interval_minutes) > 0;
+    if (!hasCron && !hasInterval) {
+      errors.push(`schedule[${i}] 必須設 schedule_cron_expr 或 schedule_interval_minutes 其中之一`);
+      continue;
+    }
+    if (hasCron && !isSupportedCron(s.schedule_cron_expr)) {
+      errors.push(`schedule[${i}] cron "${s.schedule_cron_expr}" 不被支援(只支援 daily/weekly/monthly pattern)`);
+    }
+  }
+  if (errors.length) return { errors };
+
+  // 撈既有 schedules
+  const existing = await db().prepare(
+    `SELECT id, schedule_key FROM alert_schedules WHERE rule_id=?`
+  ).all(Number(ruleId));
+  const existingByKey = new Map();
+  for (const r of (existing || [])) {
+    const key = r.schedule_key || r.SCHEDULE_KEY || '';
+    existingByKey.set(key, r.id || r.ID);
+  }
+
+  // 算 next_at:cron 優先,否則 interval
+  function calcNext(s) {
+    if (s.schedule_cron_expr) return nextFire(s.schedule_cron_expr, new Date());
+    if (s.schedule_interval_minutes > 0) return new Date(Date.now() + Number(s.schedule_interval_minutes) * 60 * 1000);
+    return null;
+  }
+
+  // 處理新 array
+  const seenKeys = new Set();
+  for (const s of schedules) {
+    const key = String(s.schedule_key || '').trim();
+    if (!key) { errors.push(`schedule.schedule_key 必填`); continue; }
+    seenKeys.add(key);
+
+    const cronExpr = s.schedule_cron_expr || null;
+    const intervalMin = (s.schedule_interval_minutes != null && s.schedule_interval_minutes !== '' && Number(s.schedule_interval_minutes) > 0)
+      ? Math.max(1, Number(s.schedule_interval_minutes))
+      : null;
+    const lookback = (s.lookback_days != null && s.lookback_days !== '') ? Number(s.lookback_days) : null;
+    const cooldown = Number(s.cooldown_minutes) || 1440;
+    const isActive = s.is_active === 0 ? 0 : 1;
+    const nextAt = calcNext({ schedule_cron_expr: cronExpr, schedule_interval_minutes: intervalMin });
+    const nextSql = nextAt ? isoToOracleTs(nextAt) : null;
+
+    if (existingByKey.has(key)) {
+      // UPDATE,若 cron 或 interval 變了重算 next_at(否則保留既有 — 避免無謂 reset)
+      const schedId = existingByKey.get(key);
+      const prev = await db().prepare(`SELECT schedule_cron_expr, schedule_interval_minutes FROM alert_schedules WHERE id=?`).get(schedId);
+      const prevCron = prev?.schedule_cron_expr ?? prev?.SCHEDULE_CRON_EXPR ?? null;
+      const prevInt = prev?.schedule_interval_minutes ?? prev?.SCHEDULE_INTERVAL_MINUTES ?? null;
+      const changed = (prevCron !== cronExpr) || (Number(prevInt || 0) !== Number(intervalMin || 0));
+      if (changed && nextSql) {
+        await db().prepare(`
+          UPDATE alert_schedules SET
+            schedule_cron_expr=?, schedule_interval_minutes=?, lookback_days=?,
+            cooldown_minutes=?, is_active=?,
+            next_evaluate_at = TO_TIMESTAMP(?, 'YYYY-MM-DD HH24:MI:SS'),
+            last_modified=SYSTIMESTAMP
+          WHERE id=?
+        `).run(cronExpr, intervalMin, lookback, cooldown, isActive, nextSql, schedId);
+      } else {
+        await db().prepare(`
+          UPDATE alert_schedules SET
+            schedule_cron_expr=?, schedule_interval_minutes=?, lookback_days=?,
+            cooldown_minutes=?, is_active=?,
+            last_modified=SYSTIMESTAMP
+          WHERE id=?
+        `).run(cronExpr, intervalMin, lookback, cooldown, isActive, schedId);
+      }
+    } else {
+      // INSERT
+      await db().prepare(`
+        INSERT INTO alert_schedules
+          (rule_id, schedule_key, schedule_cron_expr, schedule_interval_minutes, lookback_days,
+           cooldown_minutes, is_active, next_evaluate_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, TO_TIMESTAMP(?, 'YYYY-MM-DD HH24:MI:SS'))
+      `).run(Number(ruleId), key, cronExpr, intervalMin, lookback, cooldown, isActive, nextSql);
+    }
+  }
+
+  // 刪除新 array 沒有的 keys
+  for (const [key, schedId] of existingByKey.entries()) {
+    if (!seenKeys.has(key)) {
+      await db().prepare(`DELETE FROM alert_schedules WHERE id=?`).run(schedId);
+    }
+  }
+
+  return { errors: [] };
+}
+
 // ── GET / — list ────────────────────────────────────────────────────────────
+// LEFT JOIN alert_schedules 拉 schedule count + 最近的 next_evaluate_at(顯示用)
 router.get('/', async (req, res) => {
   try {
     const u = req.user;
-    let rows;
-    if (isAdmin(u)) {
-      rows = await db().prepare(
-        `SELECT id, rule_name, owner_user_id, bound_to, task_id, node_id,
-                entity_type, entity_code, comparison, severity, is_active,
-                cooldown_minutes, schedule_interval_minutes,
-                last_evaluated_at, next_evaluate_at, last_eval_result,
-                creation_date, last_modified
-         FROM alert_rules ORDER BY is_active DESC, last_modified DESC`
-      ).all();
-    } else {
-      rows = await db().prepare(
-        `SELECT id, rule_name, owner_user_id, bound_to, task_id, node_id,
-                entity_type, entity_code, comparison, severity, is_active,
-                cooldown_minutes, schedule_interval_minutes,
-                last_evaluated_at, next_evaluate_at, last_eval_result,
-                creation_date, last_modified
-         FROM alert_rules WHERE owner_user_id=? ORDER BY is_active DESC, last_modified DESC`
-      ).all(u.id);
-    }
+    const whereOwner = isAdmin(u) ? '' : `WHERE r.owner_user_id=${Number(u.id)}`;
+    const rows = await db().prepare(
+      `SELECT r.id, r.rule_name, r.owner_user_id, r.bound_to, r.task_id, r.node_id,
+              r.entity_type, r.entity_code, r.comparison, r.severity, r.is_active,
+              r.cooldown_minutes, r.schedule_interval_minutes,
+              r.last_evaluated_at, r.next_evaluate_at, r.last_eval_result,
+              r.creation_date, r.last_modified,
+              (SELECT COUNT(*) FROM alert_schedules s WHERE s.rule_id=r.id) AS schedule_count,
+              (SELECT COUNT(*) FROM alert_schedules s WHERE s.rule_id=r.id AND s.is_active=1) AS active_schedule_count,
+              (SELECT MIN(s.next_evaluate_at) FROM alert_schedules s WHERE s.rule_id=r.id AND s.is_active=1) AS next_schedule_at,
+              (SELECT LISTAGG(s.cooldown_minutes, '/') WITHIN GROUP (ORDER BY s.id) FROM alert_schedules s WHERE s.rule_id=r.id) AS schedule_cooldowns
+       FROM alert_rules r
+       ${whereOwner}
+       ORDER BY r.is_active DESC, r.last_modified DESC`
+    ).all();
     res.json(rows || []);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -126,6 +245,17 @@ router.post('/', async (req, res) => {
       scheduleMin,
     );
     const id = ins.lastInsertRowid;
+
+    // schedules 子表 — 一條 rule 多個 schedule(日/週/月)
+    if (Array.isArray(b.schedules) && b.schedules.length > 0) {
+      const { errors } = await syncSchedules(id, b.schedules);
+      if (errors.length) {
+        // rule 已建,但 schedules 失敗 → 回 200 + errors warnings(不 rollback,讓 user 修)
+        const saved = await fetchRule(id);
+        return res.status(200).json({ ...saved, _schedule_warnings: errors });
+      }
+    }
+
     res.json(await fetchRule(id));
   } catch (e) {
     if (/ORA-00001/.test(e.message)) {
@@ -179,7 +309,19 @@ router.put('/:id', async (req, res) => {
       nextSchedMin,
       Number(req.params.id),
     );
-    res.json(await fetchRule(req.params.id));
+
+    // schedules 子表 sync(若 payload 有 schedules,做 upsert-by-key + delete-not-in-array)
+    let scheduleWarnings = [];
+    if (Array.isArray(b.schedules)) {
+      const { errors } = await syncSchedules(Number(req.params.id), b.schedules);
+      scheduleWarnings = errors;
+    }
+
+    const saved = await fetchRule(req.params.id);
+    if (scheduleWarnings.length) {
+      return res.json({ ...saved, _schedule_warnings: scheduleWarnings });
+    }
+    res.json(saved);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -206,10 +348,20 @@ router.post('/:id/test', async (req, res) => {
     }
     const sourceText = req.body?.source_text || '';
     const { executeAlert } = require('../services/pipelineAlerter');
-    // 用 _inline_rule 模式,不走 DB lookup,免影響真實 cooldown
+    const { injectLookback } = require('../services/alertRuleScheduler');
+    // 試跑強制視為 is_active=1(runTest 建 temp rule is_active=0 是為了避免 scheduler 撈到,試跑時要無視)
+    // 若 SQL 含 {{lookback_days}} placeholder,試跑時用 schedules[0]?.lookback_days 或 fallback=1 替換,避免 raw template 進 Oracle
+    let dataConfig = typeof r.data_config === 'string' ? r.data_config : JSON.stringify(r.data_config || {});
+    if (dataConfig.includes('{{lookback_days}}')) {
+      const firstSchedLookback = Array.isArray(r.schedules) && r.schedules[0]?.lookback_days != null
+        ? Number(r.schedules[0].lookback_days)
+        : 1;
+      dataConfig = injectLookback(dataConfig, firstSchedLookback);
+    }
     const inlineRule = {
       ...r,
-      data_config: typeof r.data_config === 'string' ? r.data_config : JSON.stringify(r.data_config || {}),
+      is_active: 1,
+      data_config: dataConfig,
       comparison_config: typeof r.comparison_config === 'string' ? r.comparison_config : JSON.stringify(r.comparison_config || {}),
       actions: typeof r.actions === 'string' ? r.actions : JSON.stringify(r.actions || []),
     };
