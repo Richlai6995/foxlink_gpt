@@ -1,7 +1,7 @@
 /**
  * Help page seed data — zh-TW (source of truth)
  * Auto-extracted from HelpPage.tsx
- * Generated: 2026-05-12
+ * Generated: 2026-05-14
  *
  * Block types: para, tip, note, table, steps, code, list, subsection, card_grid, comparison
  */
@@ -6825,7 +6825,7 @@ const userSections = [
     "sort_order": 25,
     "icon": "Clock",
     "icon_color": "text-green-500",
-    "last_modified": "2026-04-01",
+    "last_modified": "2026-05-14",
     "title": "自動排程功能",
     "sidebar_label": "自動排程功能",
     "blocks": [
@@ -7064,6 +7064,18 @@ const userSections = [
                 "輸出 Excel / PDF / PPT / Word"
               ],
               [
+                "**AI 戰情**",
+                "📊 橘色",
+                "呼叫 AI 戰情 design 執行查詢，結果輸出為 Excel 或丟給下游節點",
+                "每日庫存日報、超額庫存 TOP 10、Multi-Org 報表"
+              ],
+              [
+                "**合併 Excel**",
+                "📁 青色",
+                "把多個 AI 戰情節點的結果合併成單一 Excel（多 sheet 或單 sheet）",
+                "週報整合（庫存 + WIP + PO 多個 design 一張表）"
+              ],
+              [
                 "條件判斷",
                 "🌿 玫瑰色",
                 "根據前一步輸出進行分支（if/else），支援 AI 判斷或文字比對",
@@ -7108,11 +7120,145 @@ const userSections = [
           },
           {
             "type": "tip",
-            "text": "Pipeline 與 Prompt 可以同時使用：Prompt 作為主要的 AI 指示，Pipeline 則在 Prompt 執行前先完成資料收集步驟，Pipeline 的最終輸出會自動注入到 Prompt 的執行上下文中。"
+            "text": "Pipeline 與 Prompt 可以同時使用：Prompt 作為主要的 AI 指示，Pipeline 則在 Prompt 執行前先完成資料收集步驟,Pipeline 的最終輸出會自動注入到 Prompt 的執行上下文中。"
           },
           {
             "type": "note",
-            "text": "Pipeline 節點數量較多時執行時間會增加，建議使用並行節點加速獨立的查詢步驟。若無需多步驟，直接在 Prompt 中使用 `{{skill:}}` / `{{kb:}}` 語法即可，更簡潔。"
+            "text": "Pipeline 節點數量較多時執行時間會增加，建議使用並行節點加速獨立的查詢步驟。若無需多步驟,直接在 Prompt 中使用 `{{skill:}}` / `{{kb:}}` 語法即可，更簡潔。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "AI 戰情節點 — 排程跑 AI 戰情查詢",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "排程任務可在 Pipeline 內加入「AI 戰情」節點,自動呼叫已建好的 AI 戰情 design(例如「合理庫存主表查詢」),把查詢結果產出 Excel 寄到您的信箱。完全不需要每天手動到 AI 戰情頁去查。"
+          },
+          {
+            "type": "note",
+            "text": "排程觸發時的權限完全等同您本人手點 AI 戰情查詢：design 必須是您能看的、資料政策、Multi-Org 範圍全部都會檢查。看不到 design 就不會列在下拉,跑出來的資料也只會在您權限範圍內。"
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "在 Pipeline 加「AI 戰情」節點",
+                "desc": "從「+ 新增節點」選單挑「AI 戰情」"
+              },
+              {
+                "title": "下拉選 Design",
+                "desc": "清單只列出您有權限的 design(對齊 AI 戰情頁的分享範圍)"
+              },
+              {
+                "title": "撰寫查詢問題",
+                "desc": "支援 {{date}} / {{ai_output}} / {{node_X_output}} 插值。例如：「{{date}} 各 ORG_CODE 超額庫存金額 TOP 10」"
+              },
+              {
+                "title": "選輸出格式",
+                "desc": "Excel = 直接落檔給 Email 附件;JSON 文字 = 給下游 AI 追加節點接;不落檔 = 只供「合併 Excel」節點使用"
+              },
+              {
+                "title": "點「Try it 立即試跑」驗證",
+                "desc": "即時看到 SQL 與前 100 筆資料預覽,確認結果正確再儲存"
+              }
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "「Try it」試跑後,如果該 design 有 Multi-Org 範圍(例如您可以看 GAD、Z4E、TPE 三家),畫面下方會顯示「🎯 限縮 Multi-Org 範圍」chip,可勾選只要查其中一兩家。沒勾 = 用您完整的權限範圍。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "合併 Excel 節點 — 多份報表合成一份週報",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "如果您想每週收到一個 Excel,內含「庫存日報」「WIP 異常」「PO 達交率」三張工作表,可用「合併 Excel」節點把多個 AI 戰情節點的結果合併。"
+          },
+          {
+            "type": "steps",
+            "items": [
+              {
+                "title": "建立多個 AI 戰情節點",
+                "desc": "每個對應一個 design,輸出格式選「不落檔(僅供下游合併用)」避免重複產檔"
+              },
+              {
+                "title": "在後面加「合併 Excel」節點",
+                "desc": "勾選要合併的 AI 戰情節點"
+              },
+              {
+                "title": "選合併模式",
+                "desc": "多 sheet = 每個來源一張工作表;single sheet = 全部接在同一張並加 _source 標記欄"
+              },
+              {
+                "title": "填輸出檔名",
+                "desc": "例如 週報合併_{{date}}.xlsx"
+              }
+            ]
+          },
+          {
+            "type": "note",
+            "text": "某個 AI 戰情節點失敗時(例如該 design 被收回權限),合併 Excel 仍會產出,失敗的工作表會標 `_MISSING` 並在 Email 主旨加 ⚠️ 提示。其他成功的節點不會受影響。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "分享任務給其他使用者",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "排程任務可以分享給其他使用者協助維護(例如管理員幫部門建好排程後,讓部門同仁自己微調 Prompt 或時段)。"
+          },
+          {
+            "type": "para",
+            "text": "在任務列表上點 row 右側的 **🔗 紫色分享圖示**(只有任務擁有者或管理員看得到),或進入編輯任務頁右上角點「分享」按鈕,即可開啟分享設定。"
+          },
+          {
+            "type": "table",
+            "headers": [
+              "權限等級",
+              "可以做什麼",
+              "不能做什麼"
+            ],
+            "rows": [
+              [
+                "**檢視權限(use)**",
+                "看設定、看執行歷史、下載產出檔",
+                "不能改任何欄位、不能立刻執行、不能啟用停用"
+              ],
+              [
+                "**開發權限(develop)**",
+                "可改 Prompt / Pipeline / 排程時段 / 收件人、立刻執行、啟用停用",
+                "不能刪除任務、不能改分享設定"
+              ]
+            ]
+          },
+          {
+            "type": "tip",
+            "text": "分享對象支援 7 種:使用者、角色、部門、廠區、利潤中心、事業處、事業群。例如分享給「品保部」整個部門,部門內成員都看得到。"
+          },
+          {
+            "type": "note",
+            "text": "**重要 — 執行身份**:無論被分享者拿到 develop 改了什麼內容,排程觸發時的執行身份永遠是「任務擁有者(建立者)」。也就是說,擁有者建的 AI 戰情 design 即便被分享者沒權限看,排程跑出來的 Excel 還是會包含完整資料寄到收件人信箱。這是設計上的權限模型,讓管理員能放心代建排程給沒 AI 戰情權限的同仁定期收報表。"
+          },
+          {
+            "type": "note",
+            "text": "**特殊限制**:含有 db_write / kb_write / 警示節點的排程任務,僅允許「檢視權限」分享,不能分享「開發權限」(避免被分享者改 column_mapping 等敏感欄位偷用擁有者權限寫入資料)。如要分享,請先把這些節點刪除,或讓被分享者另外建一個新任務。"
+          }
+        ]
+      },
+      {
+        "type": "subsection",
+        "title": "排程任務數量上限",
+        "blocks": [
+          {
+            "type": "para",
+            "text": "系統預設每人最多可建立 **10 個排程任務**。如有需要更多,請聯絡系統管理員,可針對您的帳號個別設定上限,或調整全公司預設值。管理員身分不受此上限約束。"
           }
         ]
       }
