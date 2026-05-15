@@ -145,21 +145,25 @@ data:
         Skip_Long_Lines   On
 
     [FILTER]
-        Name   kubernetes
-        Match  foxlink.*
-        Merge_Log On
-        Keep_Log Off
+        Name              kubernetes
+        Match             foxlink.*
+        # tag prefix 預設 kube.var.log.containers.;input tag 用 foxlink.* 要明確告訴 filter
+        # 不設這個 → filter 看不懂 tag → 不 enrich → 所有 $kubernetes['...'] 全空 → Loki 只剩 job=fluent-bit
+        Kube_Tag_Prefix   foxlink.var.log.containers.
+        Merge_Log         On
+        Keep_Log          Off
         K8S-Logging.Parser  On
         K8S-Logging.Exclude On
 
     [OUTPUT]
-        Name          loki
-        Match         foxlink.*
-        Host          loki
-        Port          3100
-        Labels        app=$kubernetes['labels']['app'],pod=$kubernetes['pod_name'],namespace=$kubernetes['namespace_name']
-        Line_Format   json
-        Auto_Kubernetes_Labels On
+        Name              loki
+        Match             foxlink.*
+        Host              loki
+        Port              3100
+        # 明確列 label(關掉 auto_kubernetes_labels 避免把 pod-template-hash 等高 cardinality label 全塞進去)
+        # 這 4 個 label 對應 LogViewer 按鈕的 query {namespace="...",app="..."}
+        labels            job=fluentbit, namespace=$kubernetes['namespace_name'], pod=$kubernetes['pod_name'], container=$kubernetes['container_name'], app=$kubernetes['labels']['app']
+        line_format       json
 ---
 apiVersion: apps/v1
 kind: DaemonSet
