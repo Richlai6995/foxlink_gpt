@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Search, Download, X, Calendar } from 'lucide-react'
+import { Search, Download, X, Calendar, History } from 'lucide-react'
 
 interface Props {
   type: 'pod' | 'container'
@@ -34,6 +34,34 @@ const PRESET_LABELS: Record<SincePreset, string> = {
   'custom': '自訂時間',
 }
 
+// 把 sincePreset/customDate 轉成 Grafana 時間範圍(from/to 字串)。
+// Grafana 接受 ISO datetime(ms epoch 也可),或 relative 字串如 "now-1h"。
+function getGrafanaRange(preset: SincePreset, customDate?: string): { from: string; to: string } {
+  const now = 'now'
+  if (preset === 'custom' && customDate) {
+    return { from: new Date(customDate).getTime().toString(), to: now }
+  }
+  if (preset === 'today') {
+    const d = new Date(); d.setHours(0, 0, 0, 0)
+    return { from: d.getTime().toString(), to: now }
+  }
+  if (preset === 'yesterday') {
+    const d = new Date(); d.setDate(d.getDate() - 1); d.setHours(0, 0, 0, 0)
+    return { from: d.getTime().toString(), to: now }
+  }
+  // 30m / 1h / 6h → Grafana relative
+  return { from: `now-${preset}`, to: now }
+}
+
+// pod 名稱 → deployment(app label)。
+// K8s ReplicaSet pod 命名:<deployment>-<rs-hash 9~10 hex>-<random 5 alnum>
+// e.g. "foxlink-gpt-6dc5f6c57b-4zbnl" → "foxlink-gpt"。沒命中(StatefulSet / static pod)就回 null,
+// 由 caller 改用 pod 精確匹配,放棄跨重建追蹤。
+function podNameToApp(podName: string): string | null {
+  const m = podName.match(/^(.+)-[a-f0-9]{8,10}-[a-z0-9]{5}$/)
+  return m ? m[1] : null
+}
+
 export default function LogViewer({ type, target, onClose }: Props) {
   const [lines, setLines] = useState<string[]>([])
   const [search, setSearch] = useState('')
@@ -44,10 +72,38 @@ export default function LogViewer({ type, target, onClose }: Props) {
   const [streaming, setStreaming] = useState(true)
   const [jumpToIdx, setJumpToIdx] = useState<number | null>(null)
   const [flashIdx, setFlashIdx] = useState<number | null>(null)
+  const [grafana, setGrafana] = useState<{ baseUrl: string; dataSource: string }>({ baseUrl: '', dataSource: 'Loki' })
   const containerRef = useRef<HTMLDivElement>(null)
   const esRef = useRef<EventSource | null>(null)
 
   const token = localStorage.getItem('token')
+
+  useEffect(() => {
+    fetch('/api/monitor/grafana-config', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => setGrafana({ baseUrl: d.baseUrl || '', dataSource: d.dataSource || 'Loki' }))
+      .catch(() => {})
+  }, [token])
+
+  // 組 Grafana Explore deeplink:用 app label 跨 pod 重建查 Loki。
+  // pod 目標 "ns/pod" → 解析出 ns + app(failback pod 精確)。container 目標不支援(沒 K8s label)。
+  const grafanaUrl = (() => {
+    if (!grafana.baseUrl || type !== 'pod') return ''
+    const [ns, pod] = target.split('/')
+    if (!ns || !pod) return ''
+    const app = podNameToApp(pod)
+    const expr = app
+      ? `{namespace="${ns}",app="${app}"}`
+      : `{namespace="${ns}",pod="${pod}"}`
+    const range = getGrafanaRange(sincePreset, customDate)
+    const left = {
+      datasource: grafana.dataSource,
+      queries: [{ refId: 'A', expr, datasource: { type: 'loki', uid: grafana.dataSource } }],
+      range: { from: range.from, to: range.to },
+    }
+    const base = grafana.baseUrl.replace(/\/$/, '')
+    return `${base}/explore?orgId=1&left=${encodeURIComponent(JSON.stringify(left))}`
+  })()
 
   const startStream = useCallback(() => {
     if (esRef.current) esRef.current.close()
@@ -242,6 +298,18 @@ export default function LogViewer({ type, target, onClose }: Props) {
                 className="text-xs bg-slate-800 border border-slate-600 rounded pl-6 pr-2 py-1 w-36 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
               />
             </div>
+            {grafanaUrl && (
+              <a
+                href={grafanaUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded bg-amber-600 text-white hover:bg-amber-500"
+                title="跨 pod 重建的歷史 log(Grafana + Loki,保留 30 天)。kubelet 的 pod log 只剩活著的 pod 那段。"
+              >
+                <History size={11} />
+                Loki 歷史
+              </a>
+            )}
             <button onClick={downloadLog} className="p-1 text-slate-400 hover:text-blue-400" title="下載 log">
               <Download size={14} />
             </button>

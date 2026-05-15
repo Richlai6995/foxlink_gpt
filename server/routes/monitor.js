@@ -433,6 +433,16 @@ router.get('/pods', async (req, res) => {
   }
 });
 
+// ─── Grafana / Loki config (用於 LogViewer「Loki 歷史」按鈕導向) ──────────────
+// kubelet 的 pod log 會跟著 pod 生命週期消失(image rebuild / rotate / 重排),
+// 要看跨 pod 重建的歷史 log 必須走集中式 Loki。前端拿 baseUrl 自行組 Explore deeplink。
+router.get('/grafana-config', (req, res) => {
+  res.json({
+    baseUrl: process.env.GRAFANA_BASE_URL || '',
+    dataSource: process.env.GRAFANA_LOKI_DATASOURCE || 'Loki',
+  });
+});
+
 // ─── K8s Events ─────────────────────────────────────────────────────────────
 router.get('/events', async (req, res) => {
   try {
