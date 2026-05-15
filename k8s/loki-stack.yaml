@@ -291,6 +291,13 @@ spec:
               value: "foxlink2024"    # TODO: 改成安全密碼或從 secret 取
             - name: GF_AUTH_ANONYMOUS_ENABLED
               value: "false"
+            # ── 掛在 flgpt.foxlink.com.tw:8443/grafana 子路徑下 ────────────
+            # 沒設 root_url + serve_from_sub_path,Grafana 會把 asset 用絕對路徑回
+            # (例:/public/...),瀏覽器去 https://flgpt.../public/... 一定 404。
+            - name: GF_SERVER_ROOT_URL
+              value: "https://flgpt.foxlink.com.tw:8443/grafana"
+            - name: GF_SERVER_SERVE_FROM_SUB_PATH
+              value: "true"
           volumeMounts:
             - name: data
               mountPath: /var/lib/grafana
@@ -330,14 +337,26 @@ metadata:
   name: grafana
   namespace: foxlink
   annotations:
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    # Loki Explore 的 live tail 走 WebSocket,timeout 拉到 1h 避免被截
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    # 內網限定:Grafana 預設密碼還在 yaml 裡(foxlink2024),不該讓外網看到。
+    # 從 WAF 過來的內網 IP 應該已經被 X-Forwarded-For 還原(主 ingress controller 設 externalTrafficPolicy: Local)。
+    nginx.ingress.kubernetes.io/whitelist-source-range: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,193.11.2.0/24,193.11.6.0/24"
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - flgpt.foxlink.com.tw
+      secretName: flgpt-tls    # reuse 主站 cert,完全省掉 DNS + 簽發
   rules:
-    - host: logs.example.com    # TODO: 替換為實際 log 查詢域名
+    # 跟主站 foxlink-gpt ingress 同 host 不同 path → nginx-ingress 自動合併,
+    # /grafana 比 / 更具體會優先 match
+    - host: flgpt.foxlink.com.tw
       http:
         paths:
-          - path: /
+          - path: /grafana
             pathType: Prefix
             backend:
               service:
