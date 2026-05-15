@@ -19,7 +19,8 @@ const defaultSettings: Record<string, string> = {
   monitor_mem_threshold: '85',
   monitor_disk_threshold: '85',
   monitor_load_threshold: '0.9',
-  monitor_pod_restart_limit: '5',
+  monitor_pod_restart_window_minutes: '10',
+  monitor_pod_restart_delta: '3',
   monitor_pod_pending_minutes: '10',
   monitor_alert_webhook_enabled: 'false',
   monitor_alert_webhook_type: 'teams',
@@ -150,7 +151,8 @@ export default function MonitorSettingsModal({ open, onClose }: Props) {
               <Field label="Memory % 閾值" k="monitor_mem_threshold" type="number" />
               <Field label="磁碟 % 閾值" k="monitor_disk_threshold" type="number" />
               <Field label="CPU Load/cores 比值" k="monitor_load_threshold" type="number" />
-              <Field label="Pod restart 上限" k="monitor_pod_restart_limit" type="number" />
+              <Field label="Pod restart 時間窗 (分鐘)" k="monitor_pod_restart_window_minutes" type="number" />
+              <Field label="窗內 restart 增量閾值" k="monitor_pod_restart_delta" type="number" />
               <Field label="Pod pending 上限 (分鐘)" k="monitor_pod_pending_minutes" type="number" />
               <Field label="通知冷卻 (分鐘)" k="monitor_alert_cooldown" type="number" />
             </div>

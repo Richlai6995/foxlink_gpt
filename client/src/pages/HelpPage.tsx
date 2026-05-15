@@ -5766,7 +5766,8 @@ POST /api/v1/kb/chat
               ['Memory % 閾值', 'monitor_mem_threshold', '85', 'K8s Node 的 Memory 請求百分比 > 此值 → critical 告警；主機實際記憶體使用 > 此值 → warning'],
               ['磁碟 % 閾值', 'monitor_disk_threshold', '85', '任一掛載點使用率 > 此值 → critical 告警'],
               ['CPU Load/cores 比值', 'monitor_load_threshold', '0.9', '主機 Load 1m ÷ CPU 核心數 > 此值 → warning 告警'],
-              ['Pod restart 上限', 'monitor_pod_restart_limit', '5', 'Pod 任一 container 重啟次數 > 此值 → critical 告警'],
+              ['Pod restart 時間窗 (分鐘)', 'monitor_pod_restart_window_minutes', '10', '計算 restart 增量的回溯時間窗;與下方「增量閾值」搭配使用'],
+              ['窗內 restart 增量閾值', 'monitor_pod_restart_delta', '3', '時間窗內 restartCount 增加 ≥ 此值 → critical 告警(取代舊的累計值閾值)'],
               ['Pod pending 上限 (分鐘)', 'monitor_pod_pending_minutes', '10', 'Pod 持續 Pending 超過此時間 → warning 告警'],
               ['通知冷卻 (分鐘)', 'monitor_alert_cooldown', '30', '同一告警類型在冷卻期內不重複發送通知，避免告警風暴'],
             ]}

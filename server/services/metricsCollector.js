@@ -182,6 +182,10 @@ async function collectNodeMetrics() {
 }
 
 // ─── Pod Alert Checks ───────────────────────────────────────────────────────
+// 時間窗 delta 邏輯(取代舊的「cumulative restartCount > N」):每 5 分鐘 snapshot 一次
+// 每個 container 的 restartCount,告警條件 = 過去 windowMinutes 內 restart 增加 >= deltaThreshold。
+// 對 control plane 友善:跑 2 個月累計 8 次 restart 但今天沒事 → delta=0 → 不告。
+// 真 CrashLoopBackOff(5 分鐘 5 次)→ delta=5 → 告。
 async function checkPodAlerts() {
   try {
     const alertEnabled = await getSetting('monitor_alert_enabled', 'true');
@@ -189,40 +193,54 @@ async function checkPodAlerts() {
 
     const pods = await getK8sResource('/api/v1/pods', ['get', 'pods', '--all-namespaces', '-o', 'json']);
     const cooldown = parseInt(await getSetting('monitor_alert_cooldown', '30'));
-    const restartLimit = parseInt(await getSetting('monitor_pod_restart_limit', '5'));
+    const windowMinutes = parseInt(await getSetting('monitor_pod_restart_window_minutes', '10'));
+    const deltaThreshold = parseInt(await getSetting('monitor_pod_restart_delta', '3'));
     const pendingMinutes = parseInt(await getSetting('monitor_pod_pending_minutes', '10'));
 
     for (const pod of (pods.items || [])) {
       const podName = `${pod.metadata?.namespace}/${pod.metadata?.name}`;
 
-      // CrashLoopBackOff check — incremental: only alert when restart count INCREASES
+      // Restart delta check — alert when restartCount grew by >= deltaThreshold within windowMinutes
       const containers = pod.status?.containerStatuses || [];
       for (const c of containers) {
-        if (c.restartCount > restartLimit) {
-          const resourceKey = `${podName}/${c.name}`;
-          // Check last known restart count from existing unresolved alert
-          const lastAlert = await db.prepare(
-            `SELECT last_known_value FROM monitor_alerts
-             WHERE alert_type='pod_crash' AND resource_name=? AND resolved_at IS NULL
-             ORDER BY notified_at DESC FETCH FIRST 1 ROW ONLY`
-          ).get(resourceKey);
-          const lastKnown = lastAlert ? parseInt(lastAlert.last_known_value) || 0 : 0;
+        const resourceKey = `${podName}/${c.name}`;
+        const currentCount = c.restartCount || 0;
 
-          if (c.restartCount > lastKnown) {
-            // Auto-resolve previous alerts for same resource (dedup)
-            await db.prepare(
-              `UPDATE monitor_alerts SET resolved_at=SYSTIMESTAMP
-               WHERE alert_type='pod_crash' AND resource_name=? AND resolved_at IS NULL`
-            ).run(resourceKey);
+        // 找窗外最新的 snapshot 當 baseline(>= window 之前最後一筆)
+        const baselineRow = await db.prepare(
+          `SELECT restart_count FROM pod_restart_snapshots
+           WHERE pod_key=? AND collected_at <= SYSTIMESTAMP - NUMTODSINTERVAL(?, 'MINUTE')
+           ORDER BY collected_at DESC FETCH FIRST 1 ROW ONLY`
+        ).get(resourceKey, windowMinutes);
 
-            await notifyAlert({
-              db, alertType: 'pod_crash', severity: 'critical',
-              resourceName: resourceKey,
-              message: `Pod ${podName} container ${c.name} restarts: ${c.restartCount} (> ${restartLimit})`,
-              lastKnownValue: c.restartCount,
-            });
-          }
+        // INSERT 當前 snapshot(無論告不告警都要記,讓未來有 baseline 可比)
+        await db.prepare(
+          `INSERT INTO pod_restart_snapshots (pod_key, restart_count) VALUES (?,?)`
+        ).run(resourceKey, currentCount);
+
+        if (!baselineRow) continue;                  // 第一次採樣,沒 baseline,不告
+        const baseline = parseInt(baselineRow.restart_count) || 0;
+        const delta = currentCount - baseline;
+
+        if (delta < 0) continue;                     // pod 重建 restartCount 歸 0,跳過
+        if (delta < deltaThreshold) {
+          // 沒撞 threshold,順手 auto-resolve 舊告警
+          await db.prepare(
+            `UPDATE monitor_alerts SET resolved_at=SYSTIMESTAMP
+             WHERE alert_type='pod_crash' AND resource_name=? AND resolved_at IS NULL`
+          ).run(resourceKey);
+          continue;
         }
+
+        // 撞 threshold → 走 cooldown(同 alert 在冷卻期內不重複發)
+        if (await isInCooldown(db, 'pod_crash', resourceKey, cooldown)) continue;
+
+        await notifyAlert({
+          db, alertType: 'pod_crash', severity: 'critical',
+          resourceName: resourceKey,
+          message: `Pod ${podName} container ${c.name} restart 增加 ${delta} 次 / ${windowMinutes} 分鐘 (>= ${deltaThreshold}),累計 ${currentCount}`,
+          lastKnownValue: currentCount,
+        });
       }
 
       // Pending too long
@@ -559,6 +577,8 @@ async function cleanupOldData() {
     await db.prepare(`DELETE FROM online_dept_snapshots WHERE collected_at < SYSTIMESTAMP - INTERVAL '${deptRetention}' DAY`).run();
     await db.prepare(`DELETE FROM health_check_results WHERE checked_at < SYSTIMESTAMP - INTERVAL '${healthRetention}' DAY`).run();
     await db.prepare(`DELETE FROM monitor_alerts WHERE resolved_at IS NOT NULL AND notified_at < SYSTIMESTAMP - INTERVAL '${logRetention}' DAY`).run();
+    // pod_restart_snapshots:沿用 metrics retention(7 天綽綽有餘,delta 算只看 window 內)
+    await db.prepare(`DELETE FROM pod_restart_snapshots WHERE collected_at < SYSTIMESTAMP - INTERVAL '${metricsRetention}' DAY`).run();
 
     console.log('[MetricsCollector] Retention cleanup completed');
   } catch (e) {

@@ -2205,6 +2205,22 @@ async function runMigrations(db) {
   await safeAddColumn('MONITOR_ALERTS', 'LAST_KNOWN_VALUE', 'VARCHAR2(100)');
   await safeAddColumn('MONITOR_ALERTS', 'SNOOZED_UNTIL', 'TIMESTAMP');
 
+  // Pod restart 採樣(時間窗 delta 用)。每 5 分鐘 snapshot 一次每個 container 的 restartCount,
+  // 算「過去 N 分鐘內 restart 增加幾次」,取代舊的「cumulative > 5」邏輯
+  await createTable('POD_RESTART_SNAPSHOTS', `CREATE TABLE pod_restart_snapshots (
+    id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    pod_key       VARCHAR2(400),
+    restart_count NUMBER,
+    collected_at  TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+  try {
+    await db.prepare(
+      `CREATE INDEX idx_pod_restart_snap ON pod_restart_snapshots(pod_key, collected_at)`
+    ).run();
+  } catch (e) {
+    if (!e.message?.includes('ORA-00955')) console.warn('[Migration] idx_pod_restart_snap:', e.message);
+  }
+
   // Deploy 歷史紀錄
   await createTable('DEPLOY_HISTORY', `CREATE TABLE deploy_history (
     id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

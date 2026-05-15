@@ -148,8 +148,9 @@ CREATE TABLE deploy_history (
 -- 'monitor_cpu_threshold'            => '90'   (%)
 -- 'monitor_mem_threshold'            => '85'   (%)
 -- 'monitor_disk_threshold'           => '85'   (%)
--- 'monitor_pod_restart_limit'        => '5'
--- 'monitor_pod_pending_minutes'      => '10'
+-- 'monitor_pod_restart_window_minutes' => '10'   (回溯時間窗)
+-- 'monitor_pod_restart_delta'          => '3'    (窗內 restart 增量閾值)
+-- 'monitor_pod_pending_minutes'        => '10'
 -- 'monitor_alert_webhook_url'        => ''     (LINE Notify / Teams Webhook)
 -- 'monitor_alert_webhook_enabled'    => 'false'
 -- 'monitor_load_threshold'           => '0.9'  (load avg / CPU count 比值)
