@@ -20,6 +20,11 @@ data:
           kvstore:
             store: inmemory
           replication_factor: 1
+      # WAL 預設想寫 container "/wal",non-root user(uid 10001)寫不進 / → permission denied
+      # 改寫到 PVC 掛載點下(/loki 已 mount NFS),Loki 啟動時自動 mkdir
+      wal:
+        enabled: true
+        dir: /loki/wal
     schema_config:
       configs:
         - from: 2024-01-01
