@@ -1,5 +1,5 @@
-import { useState, lazy, Suspense } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { lazy, Suspense } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Users, BarChart3, Shield, AlertTriangle, Database, Mail, ArrowLeft, Cpu, DollarSign, CalendarClock, Plug, Zap, UserCog, Sparkles, Code2, Search, KeyRound, MonitorPlay, Lock, Activity, MessageSquare, Languages, GraduationCap, TicketCheck, Mic, Factory, BookOpen, Megaphone } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -50,9 +50,16 @@ const AnnouncementsAdmin = lazy(() => import('../components/admin/AnnouncementsA
 const TranscribeJobsPanel = lazy(() => import('../components/admin/TranscribeJobsPanel'))
 type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'auth-audit' | 'ip-blacklist' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'kb-retrieval' | 'kb-debug' | 'kb-synonyms' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'chart-adoption' | 'data-permissions' | 'monitor' | 'db-sources' | 'pipeline-whitelist' | 'alert-rules' | 'pm-bom' | 'pm-settings' | 'pm-health' | 'pm-erp-sync' | 'webex-logs' | 'help-translation' | 'special-manuals' | 'factory-translations' | 'training' | 'feedback' | 'voice-input' | 'announcements' | 'transcribe-jobs'
 
+const VALID_TABS: Tab[] = ['users', 'roles', 'tokens', 'audit', 'auth-audit', 'ip-blacklist', 'keywords', 'db', 'mail', 'llm', 'vector-defaults', 'kb-retrieval', 'kb-debug', 'kb-synonyms', 'cost', 'scheduled', 'mcp', 'dify', 'kb', 'skills', 'code-runners', 'research', 'api-keys', 'ai-dashboard', 'chart-adoption', 'data-permissions', 'monitor', 'db-sources', 'pipeline-whitelist', 'alert-rules', 'pm-bom', 'pm-settings', 'pm-health', 'pm-erp-sync', 'webex-logs', 'help-translation', 'special-manuals', 'factory-translations', 'training', 'feedback', 'voice-input', 'announcements', 'transcribe-jobs']
+
 export default function AdminDashboard() {
-  const [activeTab, setActiveTab] = useState<Tab>('users')
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tabParam = searchParams.get('tab') as Tab | null
+  const activeTab: Tab = tabParam && VALID_TABS.includes(tabParam) ? tabParam : 'users'
+  const setActiveTab = (id: Tab) => {
+    setSearchParams({ tab: id }, { replace: true })
+  }
   const { t } = useTranslation()
 
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
