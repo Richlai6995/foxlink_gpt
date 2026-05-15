@@ -797,6 +797,120 @@ function streamPodLogViaApi(req, res, ns, pod, tail, since) {
   req.on('close', () => { apiReq.destroy(); });
 }
 
+// ─── Loki Log Streaming (SSE) ───────────────────────────────────────────────
+// 查 Loki 而非 kubelet:跨 pod 重建可看歷史(預設 30d 保留),且不受 pod 生命週期影響。
+// SSE 事件格式跟 kubelet streamer 一致(data: {line} / {error} / {done}),前端不用區分。
+// 流程:
+//   1. 初始 query_range 撈 [from, now] 全部歷史
+//   2. 然後每 3 秒 poll [last_ts+1ns, now],模擬 live tail
+//      (Loki 有原生 tail WebSocket 但要多一份程式碼處理 WS,polling 簡單夠用)
+router.get('/logs/loki/pod/:ns/:pod', async (req, res) => {
+  const http = require('http');
+  const { ns, pod } = req.params;
+  const sinceRaw = req.query.since || '1h';
+  const limit = parseInt(req.query.limit) || 5000;
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  const lokiBase = process.env.LOKI_URL || 'http://loki:3100';
+
+  // since 轉成 ns epoch:支援 ISO date(2026-05-15T...)、duration(30m/1h/6h)
+  function sinceToNs(s) {
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return BigInt(new Date(s).getTime()) * 1000000n;
+    const m = String(s).match(/^(\d+)(s|m|h|d)$/);
+    const mult = { s: 1, m: 60, h: 3600, d: 86400 };
+    const secs = m ? parseInt(m[1]) * (mult[m[2]] || 1) : 3600;
+    return BigInt(Date.now() - secs * 1000) * 1000000n;
+  }
+
+  // 精確 pod 匹配(對齊 kubelet UX:點哪個 pod 看哪個 pod)。
+  // 跨 pod 重建追蹤(同 deployment 歷史合併)走前端橘色按鈕 → Grafana app=label 查詢。
+  const expr = `{namespace="${ns}",pod="${pod}"}`;
+
+  let lastTsNs = sinceToNs(sinceRaw);
+  let closed = false;
+  req.on('close', () => { closed = true; });
+
+  function queryRange(startNs, endNs) {
+    return new Promise((resolve) => {
+      const params = new URLSearchParams({
+        query: expr,
+        start: String(startNs),
+        end: String(endNs),
+        limit: String(limit),
+        direction: 'forward',
+      });
+      const url = new URL(`${lokiBase}/loki/api/v1/query_range?${params}`);
+      const apiReq = http.get({
+        hostname: url.hostname,
+        port: url.port || 3100,
+        path: url.pathname + url.search,
+        timeout: 10000,
+      }, (apiRes) => {
+        const chunks = [];
+        apiRes.on('data', d => chunks.push(d));
+        apiRes.on('end', () => {
+          try {
+            const json = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+            const streams = (json.data && json.data.result) || [];
+            // 合併所有 stream 的 values,按 timestamp 排序
+            const entries = [];
+            for (const s of streams) {
+              for (const [tsStr, raw] of s.values) {
+                entries.push({ tsStr, raw });
+              }
+            }
+            entries.sort((a, b) => (a.tsStr < b.tsStr ? -1 : 1));
+            resolve(entries);
+          } catch { resolve([]); }
+        });
+      });
+      apiReq.on('error', () => resolve([]));
+      apiReq.on('timeout', () => { apiReq.destroy(); resolve([]); });
+    });
+  }
+
+  // 把 raw(可能是 JSON {"time":"...","log":"..."})轉成 LogViewer 認的 "ISO timestamp + space + log"
+  function formatEntry(tsStr, raw) {
+    let ts, line;
+    try {
+      const j = JSON.parse(raw);
+      ts = j.time || new Date(Number(BigInt(tsStr) / 1000000n)).toISOString();
+      line = j.log || raw;
+    } catch {
+      ts = new Date(Number(BigInt(tsStr) / 1000000n)).toISOString();
+      line = raw;
+    }
+    return `${ts} ${String(line).trimEnd()}`;
+  }
+
+  // 初始撈 [from, now]
+  try {
+    const entries = await queryRange(lastTsNs, BigInt(Date.now()) * 1000000n);
+    for (const e of entries) {
+      if (closed) return;
+      res.write(`data: ${JSON.stringify({ line: formatEntry(e.tsStr, e.raw) })}\n\n`);
+      if (BigInt(e.tsStr) > lastTsNs) lastTsNs = BigInt(e.tsStr);
+    }
+  } catch (e) {
+    res.write(`data: ${JSON.stringify({ error: `Loki 初始查詢失敗: ${e.message}` })}\n\n`);
+  }
+
+  // Live tail polling(每 3 秒撈 [lastTsNs+1, now])
+  const interval = setInterval(async () => {
+    if (closed) { clearInterval(interval); return; }
+    const entries = await queryRange(lastTsNs + 1n, BigInt(Date.now()) * 1000000n);
+    for (const e of entries) {
+      if (closed) return;
+      res.write(`data: ${JSON.stringify({ line: formatEntry(e.tsStr, e.raw) })}\n\n`);
+      if (BigInt(e.tsStr) > lastTsNs) lastTsNs = BigInt(e.tsStr);
+    }
+  }, 3000);
+
+  req.on('close', () => { clearInterval(interval); });
+});
+
 // ─── Log Streaming (SSE) ────────────────────────────────────────────────────
 router.get('/logs/pod/:ns/:pod', (req, res) => {
   const { ns, pod } = req.params;

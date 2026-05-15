@@ -110,8 +110,14 @@ export default function LogViewer({ type, target, onClose }: Props) {
 
     const since = getSinceValue(sincePreset, customDate)
     const params = new URLSearchParams({ token: token || '', since })
+    // Loki 模式優先(只對 pod 生效;container target 沒 K8s label 沒 Loki 入口)
+    // 跨 pod 重建可看歷史,kubelet pod log 只剩活著的 pod 那段。
+    // grafana.baseUrl 沒設(代表沒部 Loki)就退回 kubelet endpoint。
+    const useLoki = type === 'pod' && !!grafana.baseUrl
     const url = type === 'pod'
-      ? `/api/monitor/logs/pod/${target}?${params}`
+      ? (useLoki
+          ? `/api/monitor/logs/loki/pod/${target}?${params}`
+          : `/api/monitor/logs/pod/${target}?${params}`)
       : `/api/monitor/logs/container/${target}?${params}`
 
     const es = new EventSource(url)
@@ -145,7 +151,7 @@ export default function LogViewer({ type, target, onClose }: Props) {
       setStreaming(false)
       es.close()
     }
-  }, [type, target, sincePreset, customDate, token])
+  }, [type, target, sincePreset, customDate, token, grafana.baseUrl])
 
   useEffect(() => {
     startStream()
