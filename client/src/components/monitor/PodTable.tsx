@@ -29,6 +29,7 @@ const phaseColor: Record<string, string> = {
 
 export default function PodTable({ pods, loading, onViewLog }: Props) {
   const [nsFilter, setNsFilter] = useState<string>('')
+  const [nameFilter, setNameFilter] = useState<string>('')
   const [showModal, setShowModal] = useState(false)
 
   const namespaces = useMemo(() => {
@@ -37,23 +38,36 @@ export default function PodTable({ pods, loading, onViewLog }: Props) {
   }, [pods])
 
   const filtered = useMemo(() => {
-    if (!nsFilter) return pods
-    return pods.filter(p => p.metadata.namespace === nsFilter)
-  }, [pods, nsFilter])
+    const kw = nameFilter.trim().toLowerCase()
+    return pods.filter(p => {
+      if (nsFilter && p.metadata.namespace !== nsFilter) return false
+      if (kw && !p.metadata.name.toLowerCase().includes(kw)) return false
+      return true
+    })
+  }, [pods, nsFilter, nameFilter])
 
   if (loading) return <div className="animate-pulse h-32 bg-white border rounded-lg" />
 
   const nsSelect = (
-    <div className="relative">
-      <select
-        value={nsFilter}
-        onChange={e => setNsFilter(e.target.value)}
-        className="text-xs border rounded px-2 py-1 pr-6 appearance-none bg-white"
-      >
-        <option value="">All Namespaces</option>
-        {namespaces.map(ns => <option key={ns} value={ns}>{ns}</option>)}
-      </select>
-      <ChevronDown size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+    <div className="flex items-center gap-2">
+      <input
+        type="text"
+        value={nameFilter}
+        onChange={e => setNameFilter(e.target.value)}
+        placeholder="pod 名稱搜尋..."
+        className="text-xs border rounded px-2 py-1 w-40 focus:outline-none focus:border-blue-500"
+      />
+      <div className="relative">
+        <select
+          value={nsFilter}
+          onChange={e => setNsFilter(e.target.value)}
+          className="text-xs border rounded px-2 py-1 pr-6 appearance-none bg-white"
+        >
+          <option value="">All Namespaces</option>
+          {namespaces.map(ns => <option key={ns} value={ns}>{ns}</option>)}
+        </select>
+        <ChevronDown size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+      </div>
     </div>
   )
 
