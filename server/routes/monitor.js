@@ -812,6 +812,12 @@ router.get('/logs/loki/pod/:ns/:pod', async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  // 強制立刻送 headers — 不然 Loki 回 0 row 時 res.write 永遠不會被呼叫,
+  // 瀏覽器卡在 pending response,DevTools 也看不到 Status
+  res.flushHeaders();
+  // SSE comment 當 keep-alive ping,讓 browser 知道連線活著
+  res.write(': connected\n\n');
 
   const lokiBase = process.env.LOKI_URL || 'http://loki:3100';
 
@@ -851,10 +857,13 @@ router.get('/logs/loki/pod/:ns/:pod', async (req, res) => {
         const chunks = [];
         apiRes.on('data', d => chunks.push(d));
         apiRes.on('end', () => {
+          const body = Buffer.concat(chunks).toString('utf8');
+          if (apiRes.statusCode !== 200) {
+            return resolve({ entries: [], error: `Loki ${apiRes.statusCode}: ${body.slice(0, 200)}` });
+          }
           try {
-            const json = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+            const json = JSON.parse(body);
             const streams = (json.data && json.data.result) || [];
-            // 合併所有 stream 的 values,按 timestamp 排序
             const entries = [];
             for (const s of streams) {
               for (const [tsStr, raw] of s.values) {
@@ -862,12 +871,14 @@ router.get('/logs/loki/pod/:ns/:pod', async (req, res) => {
               }
             }
             entries.sort((a, b) => (a.tsStr < b.tsStr ? -1 : 1));
-            resolve(entries);
-          } catch { resolve([]); }
+            resolve({ entries, error: null });
+          } catch (e) {
+            resolve({ entries: [], error: `Loki 回應解析失敗: ${e.message}` });
+          }
         });
       });
-      apiReq.on('error', () => resolve([]));
-      apiReq.on('timeout', () => { apiReq.destroy(); resolve([]); });
+      apiReq.on('error', (e) => resolve({ entries: [], error: `Loki 連線失敗(${lokiBase}): ${e.message}` }));
+      apiReq.on('timeout', () => { apiReq.destroy(); resolve({ entries: [], error: 'Loki 查詢逾時(10s)' }); });
     });
   }
 
@@ -886,29 +897,37 @@ router.get('/logs/loki/pod/:ns/:pod', async (req, res) => {
   }
 
   // 初始撈 [from, now]
-  try {
-    const entries = await queryRange(lastTsNs, BigInt(Date.now()) * 1000000n);
-    for (const e of entries) {
-      if (closed) return;
-      res.write(`data: ${JSON.stringify({ line: formatEntry(e.tsStr, e.raw) })}\n\n`);
-      if (BigInt(e.tsStr) > lastTsNs) lastTsNs = BigInt(e.tsStr);
-    }
-  } catch (e) {
-    res.write(`data: ${JSON.stringify({ error: `Loki 初始查詢失敗: ${e.message}` })}\n\n`);
+  const initial = await queryRange(lastTsNs, BigInt(Date.now()) * 1000000n);
+  if (initial.error) {
+    res.write(`data: ${JSON.stringify({ error: initial.error })}\n\n`);
+  }
+  for (const e of initial.entries) {
+    if (closed) return;
+    res.write(`data: ${JSON.stringify({ line: formatEntry(e.tsStr, e.raw) })}\n\n`);
+    if (BigInt(e.tsStr) > lastTsNs) lastTsNs = BigInt(e.tsStr);
   }
 
   // Live tail polling(每 3 秒撈 [lastTsNs+1, now])
-  const interval = setInterval(async () => {
-    if (closed) { clearInterval(interval); return; }
-    const entries = await queryRange(lastTsNs + 1n, BigInt(Date.now()) * 1000000n);
-    for (const e of entries) {
+  const pollInterval = setInterval(async () => {
+    if (closed) { clearInterval(pollInterval); return; }
+    const r = await queryRange(lastTsNs + 1n, BigInt(Date.now()) * 1000000n);
+    for (const e of r.entries) {
       if (closed) return;
       res.write(`data: ${JSON.stringify({ line: formatEntry(e.tsStr, e.raw) })}\n\n`);
       if (BigInt(e.tsStr) > lastTsNs) lastTsNs = BigInt(e.tsStr);
     }
   }, 3000);
 
-  req.on('close', () => { clearInterval(interval); });
+  // Keep-alive ping(SSE comment 每 25s,避防 ingress / browser idle timeout 砍連線)
+  const pingInterval = setInterval(() => {
+    if (closed) { clearInterval(pingInterval); return; }
+    res.write(': keep-alive\n\n');
+  }, 25000);
+
+  req.on('close', () => {
+    clearInterval(pollInterval);
+    clearInterval(pingInterval);
+  });
 });
 
 // ─── Log Streaming (SSE) ────────────────────────────────────────────────────

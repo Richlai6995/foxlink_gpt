@@ -73,6 +73,7 @@ export default function LogViewer({ type, target, onClose }: Props) {
   const [jumpToIdx, setJumpToIdx] = useState<number | null>(null)
   const [flashIdx, setFlashIdx] = useState<number | null>(null)
   const [grafana, setGrafana] = useState<{ baseUrl: string; dataSource: string }>({ baseUrl: '', dataSource: 'Loki' })
+  const [grafanaLoaded, setGrafanaLoaded] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const esRef = useRef<EventSource | null>(null)
 
@@ -83,6 +84,7 @@ export default function LogViewer({ type, target, onClose }: Props) {
       .then(r => r.json())
       .then(d => setGrafana({ baseUrl: d.baseUrl || '', dataSource: d.dataSource || 'Loki' }))
       .catch(() => {})
+      .finally(() => setGrafanaLoaded(true))
   }, [token])
 
   // 組 Grafana Explore deeplink:用 app label 跨 pod 重建查 Loki。
@@ -154,9 +156,10 @@ export default function LogViewer({ type, target, onClose }: Props) {
   }, [type, target, sincePreset, customDate, token, grafana.baseUrl])
 
   useEffect(() => {
+    if (!grafanaLoaded) return  // 等 grafana config 確認後再 stream,避免 kubelet→Loki 切換清空畫面
     startStream()
     return () => { esRef.current?.close() }
-  }, [startStream])
+  }, [startStream, grafanaLoaded])
 
   useEffect(() => {
     if (autoScroll && containerRef.current) {
