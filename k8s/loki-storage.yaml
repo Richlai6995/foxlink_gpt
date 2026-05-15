@@ -1,0 +1,68 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Loki + Grafana NFS PV
+# 借用既有 flgpt-upload share(10.8.91.215:/volume1/flgpt-upload)的子目錄,
+# 不用在 Synology DSM 新增 share / NFS 權限,只要 mkdir 即可。
+#
+# 部署前先建目錄(挑一條跑):
+#   A. 從 k8s pod 內(已掛 uploads):
+#      kubectl exec -n foxlink deployment/foxlink-gpt -- mkdir -p /app/uploads/_loki /app/uploads/_grafana
+#      kubectl exec -n foxlink deployment/foxlink-gpt -- chmod 777 /app/uploads/_loki /app/uploads/_grafana
+#   B. SSH 進 Synology:
+#      mkdir -p /volume1/flgpt-upload/_loki /volume1/flgpt-upload/_grafana
+#      chmod 777 /volume1/flgpt-upload/_loki /volume1/flgpt-upload/_grafana
+#
+# chmod 777 是因為 Loki(uid 10001)與 Grafana(uid 472)不是 root,
+# 不寫權就炸。如果 Synology NFS 已 no_root_squash 且 root-owned 也 OK,但 777 最簡單。
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-foxlink-loki
+spec:
+  accessModes:
+    - ReadWriteMany
+  capacity:
+    storage: 20Gi
+  mountOptions:
+    - nfsvers=3
+    - hard
+    - timeo=600
+    - retrans=3
+    - noatime
+  nfs:
+    path: /volume1/flgpt-upload/_loki
+    server: 10.8.91.215
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  # claimRef 預先綁定 → 避免 PVC 飄到別的 PV
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    name: loki-pvc
+    namespace: foxlink
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-foxlink-grafana
+spec:
+  accessModes:
+    - ReadWriteMany
+  capacity:
+    storage: 5Gi
+  mountOptions:
+    - nfsvers=3
+    - hard
+    - timeo=600
+    - retrans=3
+    - noatime
+  nfs:
+    path: /volume1/flgpt-upload/_grafana
+    server: 10.8.91.215
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    name: grafana-pvc
+    namespace: foxlink

@@ -51,8 +51,11 @@ metadata:
   name: loki-pvc
   namespace: foxlink
 spec:
+  # storageClassName: "" 對應 k8s/loki-storage.yaml 手動建的 NFS PV
+  # (cluster 沒 default StorageClass,留 unset 會卡 Pending)
+  storageClassName: ""
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteMany
   resources:
     requests:
       storage: 20Gi
@@ -243,8 +246,9 @@ metadata:
   name: grafana-pvc
   namespace: foxlink
 spec:
+  storageClassName: ""
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteMany
   resources:
     requests:
       storage: 5Gi
