@@ -930,6 +930,132 @@ router.get('/logs/loki/pod/:ns/:pod', async (req, res) => {
   });
 });
 
+// ─── Loki 跨 pod 匯總(同 deployment / app label) ──────────────────────────
+// 同 deployment 多 pod 合併看的 inline 視窗,每行加 [pod-suffix] 前綴 + client 端著色。
+// 取代「點 6 個 pod 切 6 次」的痛苦。Pod 名 → app 由 client 用 podNameToApp 解析後傳進來。
+router.get('/logs/loki/app/:ns/:app', async (req, res) => {
+  const http = require('http');
+  const { ns, app } = req.params;
+  const sinceRaw = req.query.since || '1h';
+  const limit = parseInt(req.query.limit) || 5000;
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+  res.write(': connected\n\n');
+
+  const lokiBase = process.env.LOKI_URL || 'http://loki:3100';
+
+  function sinceToNs(s) {
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return BigInt(new Date(s).getTime()) * 1000000n;
+    const m = String(s).match(/^(\d+)(s|m|h|d)$/);
+    const mult = { s: 1, m: 60, h: 3600, d: 86400 };
+    const secs = m ? parseInt(m[1]) * (mult[m[2]] || 1) : 3600;
+    return BigInt(Date.now() - secs * 1000) * 1000000n;
+  }
+
+  const expr = `{namespace="${ns}",app="${app}"}`;
+  let lastTsNs = sinceToNs(sinceRaw);
+  let closed = false;
+  req.on('close', () => { closed = true; });
+
+  function queryRange(startNs, endNs) {
+    return new Promise((resolve) => {
+      const params = new URLSearchParams({
+        query: expr,
+        start: String(startNs),
+        end: String(endNs),
+        limit: String(limit),
+        direction: 'forward',
+      });
+      const url = new URL(`${lokiBase}/loki/api/v1/query_range?${params}`);
+      const apiReq = http.get({
+        hostname: url.hostname,
+        port: url.port || 3100,
+        path: url.pathname + url.search,
+        timeout: 10000,
+      }, (apiRes) => {
+        const chunks = [];
+        apiRes.on('data', d => chunks.push(d));
+        apiRes.on('end', () => {
+          const body = Buffer.concat(chunks).toString('utf8');
+          if (apiRes.statusCode !== 200) {
+            return resolve({ entries: [], error: `Loki ${apiRes.statusCode}: ${body.slice(0, 200)}` });
+          }
+          try {
+            const json = JSON.parse(body);
+            const streams = (json.data && json.data.result) || [];
+            const entries = [];
+            for (const s of streams) {
+              const pod = (s.stream && s.stream.pod) || '';
+              for (const [tsStr, raw] of s.values) {
+                entries.push({ tsStr, raw, pod });
+              }
+            }
+            entries.sort((a, b) => (a.tsStr < b.tsStr ? -1 : 1));
+            resolve({ entries, error: null });
+          } catch (e) {
+            resolve({ entries: [], error: `Loki 回應解析失敗: ${e.message}` });
+          }
+        });
+      });
+      apiReq.on('error', (e) => resolve({ entries: [], error: `Loki 連線失敗(${lokiBase}): ${e.message}` }));
+      apiReq.on('timeout', () => { apiReq.destroy(); resolve({ entries: [], error: 'Loki 查詢逾時(10s)' }); });
+    });
+  }
+
+  // pod 名最後一段(5 alphanumeric)當 suffix,e.g. foxlink-gpt-8556b47b4f-9sd85 → 9sd85
+  function podSuffix(pod) {
+    if (!pod) return '?????';
+    const parts = pod.split('-');
+    return parts[parts.length - 1] || pod;
+  }
+
+  function formatEntry(tsStr, raw, pod) {
+    let ts, line;
+    try {
+      const j = JSON.parse(raw);
+      ts = j.time || new Date(Number(BigInt(tsStr) / 1000000n)).toISOString();
+      line = j.log || raw;
+    } catch {
+      ts = new Date(Number(BigInt(tsStr) / 1000000n)).toISOString();
+      line = raw;
+    }
+    return `[${podSuffix(pod)}] ${ts} ${String(line).trimEnd()}`;
+  }
+
+  const initial = await queryRange(lastTsNs, BigInt(Date.now()) * 1000000n);
+  if (initial.error) {
+    res.write(`data: ${JSON.stringify({ error: initial.error })}\n\n`);
+  }
+  for (const e of initial.entries) {
+    if (closed) return;
+    res.write(`data: ${JSON.stringify({ line: formatEntry(e.tsStr, e.raw, e.pod) })}\n\n`);
+    if (BigInt(e.tsStr) > lastTsNs) lastTsNs = BigInt(e.tsStr);
+  }
+
+  const pollInterval = setInterval(async () => {
+    if (closed) { clearInterval(pollInterval); return; }
+    const r = await queryRange(lastTsNs + 1n, BigInt(Date.now()) * 1000000n);
+    for (const e of r.entries) {
+      if (closed) return;
+      res.write(`data: ${JSON.stringify({ line: formatEntry(e.tsStr, e.raw, e.pod) })}\n\n`);
+      if (BigInt(e.tsStr) > lastTsNs) lastTsNs = BigInt(e.tsStr);
+    }
+  }, 3000);
+
+  const pingInterval = setInterval(() => {
+    if (closed) { clearInterval(pingInterval); return; }
+    res.write(': keep-alive\n\n');
+  }, 25000);
+
+  req.on('close', () => {
+    clearInterval(pollInterval);
+    clearInterval(pingInterval);
+  });
+});
+
 // ─── Log Streaming (SSE) ────────────────────────────────────────────────────
 router.get('/logs/pod/:ns/:pod', (req, res) => {
   const { ns, pod } = req.params;

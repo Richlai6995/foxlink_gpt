@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Search, Download, X, Calendar, History } from 'lucide-react'
+import { Search, Download, X, Calendar, History, Layers } from 'lucide-react'
 
 interface Props {
   type: 'pod' | 'container'
@@ -62,6 +62,24 @@ function podNameToApp(podName: string): string | null {
   return m ? m[1] : null
 }
 
+// Aggregate mode 下 server 把每行加 [pod-suffix] 前綴,這裡抽出來給 UI 著色
+function parsePodPrefix(line: string): { podSuffix: string; rest: string } | null {
+  const m = line.match(/^\[([a-z0-9?]+)\] (.*)$/)
+  if (!m) return null
+  return { podSuffix: m[1], rest: m[2] }
+}
+
+// pod-suffix → 固定顏色(hash → palette index)。同 pod 永遠同色,user 看慣不會跳。
+const POD_COLORS = [
+  'text-cyan-400', 'text-purple-400', 'text-pink-400', 'text-emerald-400',
+  'text-yellow-400', 'text-orange-400', 'text-rose-400', 'text-indigo-400',
+]
+function podColor(suffix: string): string {
+  let h = 0
+  for (let i = 0; i < suffix.length; i++) h = (h * 31 + suffix.charCodeAt(i)) | 0
+  return POD_COLORS[Math.abs(h) % POD_COLORS.length]
+}
+
 export default function LogViewer({ type, target, onClose }: Props) {
   const [lines, setLines] = useState<string[]>([])
   const [search, setSearch] = useState('')
@@ -70,6 +88,7 @@ export default function LogViewer({ type, target, onClose }: Props) {
   const [showDatePicker, setShowDatePicker] = useState(false)
   const [autoScroll, setAutoScroll] = useState(true)
   const [streaming, setStreaming] = useState(true)
+  const [aggregateMode, setAggregateMode] = useState(false)
   const [jumpToIdx, setJumpToIdx] = useState<number | null>(null)
   const [flashIdx, setFlashIdx] = useState<number | null>(null)
   const [grafana, setGrafana] = useState<{ baseUrl: string; dataSource: string }>({ baseUrl: '', dataSource: 'Loki' })
@@ -86,6 +105,12 @@ export default function LogViewer({ type, target, onClose }: Props) {
       .catch(() => {})
       .finally(() => setGrafanaLoaded(true))
   }, [token])
+
+  // 從 target 解析 ns/pod/app(只對 type='pod' 有意義)
+  const [targetNs, targetPod] = type === 'pod' ? target.split('/') : ['', '']
+  const targetApp = targetPod ? podNameToApp(targetPod) : null
+  // 切換 aggregate mode 的入口只在「pod 名解得出 deployment」時出現(static pod / StatefulSet 不支援)
+  const canAggregate = type === 'pod' && !!targetApp && !!grafana.baseUrl
 
   // 組 Grafana Explore deeplink:用 app label 跨 pod 重建查 Loki。
   // pod 目標 "ns/pod" → 解析出 ns + app(failback pod 精確)。container 目標不支援(沒 K8s label)。
@@ -115,11 +140,15 @@ export default function LogViewer({ type, target, onClose }: Props) {
     // Loki 模式優先(只對 pod 生效;container target 沒 K8s label 沒 Loki 入口)
     // 跨 pod 重建可看歷史,kubelet pod log 只剩活著的 pod 那段。
     // grafana.baseUrl 沒設(代表沒部 Loki)就退回 kubelet endpoint。
+    // aggregate=true 走新 /loki/app endpoint,跨 deployment 多 pod 合併
     const useLoki = type === 'pod' && !!grafana.baseUrl
+    const useAggregate = aggregateMode && canAggregate && targetApp
     const url = type === 'pod'
-      ? (useLoki
-          ? `/api/monitor/logs/loki/pod/${target}?${params}`
-          : `/api/monitor/logs/pod/${target}?${params}`)
+      ? (useAggregate
+          ? `/api/monitor/logs/loki/app/${targetNs}/${targetApp}?${params}`
+          : useLoki
+            ? `/api/monitor/logs/loki/pod/${target}?${params}`
+            : `/api/monitor/logs/pod/${target}?${params}`)
       : `/api/monitor/logs/container/${target}?${params}`
 
     const es = new EventSource(url)
@@ -153,7 +182,7 @@ export default function LogViewer({ type, target, onClose }: Props) {
       setStreaming(false)
       es.close()
     }
-  }, [type, target, sincePreset, customDate, token, grafana.baseUrl])
+  }, [type, target, sincePreset, customDate, token, grafana.baseUrl, aggregateMode, canAggregate, targetApp, targetNs])
 
   useEffect(() => {
     if (!grafanaLoaded) return  // 等 grafana config 確認後再 stream,避免 kubelet→Loki 切換清空畫面
@@ -241,7 +270,9 @@ export default function LogViewer({ type, target, onClose }: Props) {
         {/* Header */}
         <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-700 flex-wrap">
           <span className="text-sm font-medium text-white truncate">
-            {type === 'pod' ? `Pod ${target}` : `Container ${target.slice(0, 12)}`}
+            {type === 'pod'
+              ? (aggregateMode && targetApp ? `合併: ${targetNs}/${targetApp}` : `Pod ${target}`)
+              : `Container ${target.slice(0, 12)}`}
           </span>
           {streaming && (
             <span className="flex items-center gap-1 text-[10px] text-green-400">
@@ -307,6 +338,20 @@ export default function LogViewer({ type, target, onClose }: Props) {
                 className="text-xs bg-slate-800 border border-slate-600 rounded pl-6 pr-2 py-1 w-36 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
               />
             </div>
+            {canAggregate && (
+              <button
+                onClick={() => setAggregateMode(m => !m)}
+                className={`flex items-center gap-1 text-[11px] px-2 py-0.5 rounded ${
+                  aggregateMode
+                    ? 'bg-emerald-600 text-white hover:bg-emerald-500'
+                    : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                }`}
+                title={`合併同 deployment(${targetApp})所有 pod 的 log,每行加 [pod-suffix] 標示。再按一次回單一 pod。`}
+              >
+                <Layers size={11} />
+                {aggregateMode ? '單一 pod' : `合併 ${targetApp}`}
+              </button>
+            )}
             {grafanaUrl && (
               <a
                 href={grafanaUrl}
@@ -345,7 +390,9 @@ export default function LogViewer({ type, target, onClose }: Props) {
                 點擊任一行可跳到完整 log 中的位置
               </div>
               {searchResults.map(({ line, origIdx }) => {
-                const { ts, rest } = formatLine(line)
+                const podInfo = aggregateMode ? parsePodPrefix(line) : null
+                const baseLine = podInfo ? podInfo.rest : line
+                const { ts, rest } = formatLine(baseLine)
                 return (
                   <div
                     key={origIdx}
@@ -354,6 +401,11 @@ export default function LogViewer({ type, target, onClose }: Props) {
                       hover:bg-blue-900/40 ${highlightLine(line)} bg-yellow-900/20`}
                   >
                     <span className="text-blue-400/60 mr-2 select-none text-[10px]">#{origIdx + 1}</span>
+                    {podInfo && (
+                      <span className={`font-bold mr-2 select-all ${podColor(podInfo.podSuffix)}`}>
+                        [{podInfo.podSuffix}]
+                      </span>
+                    )}
                     {ts && <span className="text-slate-500 select-all mr-2">{ts}</span>}
                     {rest}
                   </div>
@@ -367,7 +419,9 @@ export default function LogViewer({ type, target, onClose }: Props) {
             /* 一般模式：顯示全部行 */
             <>
               {lines.map((line, i) => {
-                const { ts, rest } = formatLine(line)
+                const podInfo = aggregateMode ? parsePodPrefix(line) : null
+                const baseLine = podInfo ? podInfo.rest : line
+                const { ts, rest } = formatLine(baseLine)
                 return (
                   <div
                     key={i}
@@ -376,6 +430,11 @@ export default function LogViewer({ type, target, onClose }: Props) {
                       flashIdx === i ? 'bg-blue-700/50 transition-colors duration-700' : ''
                     }`}
                   >
+                    {podInfo && (
+                      <span className={`font-bold mr-2 select-all ${podColor(podInfo.podSuffix)}`}>
+                        [{podInfo.podSuffix}]
+                      </span>
+                    )}
                     {ts && <span className="text-slate-500 select-all mr-2">{ts}</span>}
                     {rest}
                   </div>
