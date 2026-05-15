@@ -28,7 +28,8 @@ export default defineConfig({
         // 清掉 Workbox 舊版本的 precache(避免堆疊)
         cleanupOutdatedCaches: true,
         // /api/* 一律 NetworkOnly,絕不 cache(SSE / 上傳 / 對話內容)
-        navigateFallbackDenylist: [/^\/api/, /^\/uploads/],
+        // /grafana/* 是 Grafana sub-path(Loki log 查詢),SW 不能攔(會回 SPA shell 卡住 ingress 轉發)
+        navigateFallbackDenylist: [/^\/api/, /^\/uploads/, /^\/grafana/],
         runtimeCaching: [
           // Google Fonts:CacheFirst,1 年 TTL
           {
