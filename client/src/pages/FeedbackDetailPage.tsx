@@ -723,7 +723,7 @@ export default function FeedbackDetailPage() {
                                   className="max-w-[240px] max-h-[180px] object-cover" />
                               </button>
                             ) : (
-                              <a href={`/uploads/${att.file_path}`} target="_blank" rel="noopener noreferrer"
+                              <a href={`/uploads/${att.file_path}`} download={att.file_name}
                                 className="flex items-center gap-1.5 bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-600 hover:text-blue-600 hover:border-blue-300 transition">
                                 <FileText size={14} className="text-gray-400" />
                                 <span className="truncate max-w-[150px]">{att.file_name}</span>
@@ -985,7 +985,7 @@ export default function FeedbackDetailPage() {
                           </a>
                         )}
                         <span className="text-gray-300 text-[10px] uppercase shrink-0">{ext}</span>
-                        <a href={`/uploads/${att.file_path}`} download className="shrink-0 text-gray-400 hover:text-blue-600">
+                        <a href={`/uploads/${att.file_path}`} download={att.file_name} className="shrink-0 text-gray-400 hover:text-blue-600">
                           <Download size={12} />
                         </a>
                       </div>
