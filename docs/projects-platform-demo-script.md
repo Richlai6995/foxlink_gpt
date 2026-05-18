@@ -276,6 +276,103 @@ curl -i -H "Authorization: Bearer $TOKEN" -H "X-Demo-Role: OUTSIDER" \
 
 ---
 
+## ⭐ Phase 2 Sprint M — AI 13 項深化(2026-05-18 ship)
+
+對齊 spec §12.10.4 + PDF §E。3 個明列項目都上(MVP 範圍)。
+
+### A. 智慧定價建議(#16 / Sprint M-11)
+
+對應 spec §12.5 Form Surface 2「✨ AI 建議」按鈕。
+
+1. 進任一專案 WarRoom → 「報價 Form」tab
+2. 機密欄位區(報價金額 / 毛利率 / cost_breakdown / priorityScore)右側看到紫色「✨ AI」小按鈕
+3. 點 ✨ → 紫色 modal 跳出「AI 智慧定價建議」:
+   - **建議值**(Tier-M / MASKED% / 數字)
+   - **信心 %**(綠/琥珀/紅色碼)
+   - **推薦理由**(< 250 字)
+   - **引用**(歷史相似案 — 從沉澱 KB 撈,scrub 過後 safe)
+4. 點「採用此建議」→ 欄位旁出現「AI ✓」紫色標籤(走影子表 / shadow,不直寫,spec §12.5)
+
+**Stub 模式**:`PROJECTS_PLATFORM_USE_LLM=false` → 回 stub mock + 「stub mock」琥珀 badge
+
+### B. Cleansheet 三廠成本分析(#12 / Sprint M-12)
+
+對應 spec §12.10.4 Cleansheet 草稿。
+
+1. 進 Form tab → 「價格 / 成本」section 右上有黑底「Cleansheet AI 分析」按鈕
+2. 點開 navy modal — 三廠 cost_breakdown 編輯表(VN/CN/IN 預設值 PCB/SMT/組裝/測試)
+3. 修改任一格 → 自動算 total
+4. 點「✨ AI 分析」:
+   - **推薦廠**(獎盃 icon · 不一定是最便宜)
+   - **總成本排序**(綠 → 紅,差 X%)
+   - **各項目最低廠**(PCB winner / SMT winner / ...)
+   - **AI 分析**(markdown 詳細說明)
+   - **優勢 / 風險**(綠/琥珀雙欄)
+5. 規則式 fallback:LLM 失敗仍給數值對比 + 推薦最便宜廠
+
+### C. 主管日報(#33 / Sprint M-13)
+
+對應 spec §12.10.4 主管 AI 日報。
+
+1. 進跨專案儀表板 → 右上琥珀「☀️ 我的日報」按鈕
+2. 點開 modal,可選 ☀️ 日報 / 📊 週報
+3. **「預覽」**:跑 dry_run,顯示 markdown 但不寄通知
+4. **「生成 + 寄出」**:
+   - 把每個關注專案跑 StatusSummary
+   - 紅燈專案排前面
+   - **底部 AI 重點濃縮**(若 ≥ 3 個專案 + USE_LLM=true)
+   - 寫進 user_notifications(鈴鐺紅點)
+   - 寄 email(若 user.email 存在)
+   - 回傳「✓ 已彙整 N 個專案 · 發送通道:in_app_badge · email」
+
+### D. 批次跑(admin scheduled job)
+
+```bash
+# 跑所有 admin / PM / sales / director / super 的日報
+curl.exe -s -X POST -H "Authorization: Bearer $TOKEN" `
+  -H "Content-Type: application/json" `
+  -d '{\"period\":\"daily\"}' `
+  http://localhost:3007/api/projects/ai/daily-report/run-all
+```
+
+回:`{ sent: 12, skipped: 3, errors: [] }`
+
+Cron 整合(可選):
+- env `PROJECTS_DAILY_REPORT_CRON='0 9 * * *'` 開啟(預設不開)
+- 排程 service 內呼叫 `POST /api/projects/ai/daily-report/run-all`
+
+### E. API 試打
+
+```bash
+# 智慧定價
+curl.exe -s -X POST -H "Authorization: Bearer $TOKEN" `
+  -H "Content-Type: application/json" `
+  -d '{\"project_id\":3,\"field\":\"amount\"}' `
+  http://localhost:3007/api/projects/ai/pricing-suggest
+
+# Cleansheet
+curl.exe -s -X POST -H "Authorization: Bearer $TOKEN" `
+  -H "Content-Type: application/json" `
+  -d '{\"project_id\":3,\"factories\":[{\"code\":\"VN\",\"cost_breakdown\":{\"pcb\":1.2,\"smt\":0.8,\"assembly\":1.5,\"test\":0.3}},{\"code\":\"CN\",\"cost_breakdown\":{\"pcb\":1.1,\"smt\":0.9,\"assembly\":1.4,\"test\":0.35}}],\"target\":{\"quantity\":10000}}' `
+  http://localhost:3007/api/projects/ai/cleansheet-analyze
+
+# 我的日報(dry_run 預覽)
+curl.exe -s -X POST -H "Authorization: Bearer $TOKEN" `
+  -H "Content-Type: application/json" `
+  -d '{\"period\":\"daily\",\"dry_run\":true}' `
+  http://localhost:3007/api/projects/ai/daily-report/run
+```
+
+### F. 三段 scrub 鍊路
+
+| 服務 | scrub 點 |
+|---|---|
+| pricing-suggest | confidential mask → plugin scrub → LLM 看 placeholder → unscrub 回 user 視角 |
+| cleansheet-analyze | 不涉及機密 raw(cost 數字 user 自己輸入)|
+| daily-report | StatusSummary 已經走 §10.6 → markdown 內金額不會洩 |
+
+---
+
 ## ⭐ Phase 2 Sprint L — AI 戰情 embed(2026-05-18 ship)
 
 對齊 spec §10.5。不重做 BI,沿用 Cortex 既有 AI 戰情。

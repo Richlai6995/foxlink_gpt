@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Shield, UserPlus, X, Search, AlertTriangle, CheckCircle2, Globe, Building2, Briefcase, ChevronRight, Settings, Loader2 } from 'lucide-react'
+import { Shield, UserPlus, X, Search, AlertTriangle, CheckCircle2, Globe, Building2, Briefcase, Loader2 } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
 import { api } from '../api'
 import AdminPageShell from './AdminPageShell'

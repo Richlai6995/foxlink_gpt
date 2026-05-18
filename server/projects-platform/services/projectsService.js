@@ -141,8 +141,78 @@ async function create(db, input) {
     await _createProjectStages(db, projectId, Number(typeRow.default_workflow_template_id));
   }
 
+  // 8. Sprint J 補:把 Wizard 收的 form 資料寫進 live KB chunk(kind='form')
+  //   讓沉澱時帶上「原始 RFQ 欄位」軌跡。Spec §7 Live KB pipeline。
+  try {
+    const kb = require('./kbPipeline');
+    const formContent = _summarizeFormPayload(payload, project_code);
+    if (formContent && formContent.trim()) {
+      await kb.writeLiveChunk(db, {
+        projectId,
+        kind: 'form',
+        sourceId: projectId,  // form 沒獨立 id,用 projectId
+        content: formContent,
+        title: `${project_code} · 開案 Form`,
+        tags: ['form_initial', 'wizard'],
+        isConfidential,
+      });
+    }
+  } catch (e) {
+    log.warn(`form chunk write failed: ${e.message}`);
+  }
+
+  // 9. Sprint J 補:RFQ 附件(若 Wizard 上傳過)寫 attach chunk(kind='attach')
+  //   data_payload.rfqFilePath / rfqFileName / rfqMimeType / specs / notes 由 Wizard 帶入
+  try {
+    if (payload.rfqFilePath || payload.rfqFileName) {
+      const kb = require('./kbPipeline');
+      const attachContent = [
+        `[attach] ${payload.rfqFileName || 'RFQ'} (${payload.rfqMimeType || 'unknown'})`,
+        payload.specs ? `規格: ${String(payload.specs).slice(0, 500)}` : '',
+        payload.notes ? `備註: ${String(payload.notes).slice(0, 500)}` : '',
+        `file_path: ${payload.rfqFilePath || ''}`,
+      ].filter(Boolean).join('\n');
+      await kb.writeLiveChunk(db, {
+        projectId,
+        kind: 'attach',
+        sourceId: projectId,
+        content: attachContent,
+        title: payload.rfqFileName || 'RFQ 附件',
+        tags: ['rfq', 'wizard_upload'],
+        isConfidential,
+      });
+    }
+  } catch (e) {
+    log.warn(`attach chunk write failed: ${e.message}`);
+  }
+
   log.log(`created project ${project_code} id=${projectId} type=${type_code}`);
   return projectId;
+}
+
+/**
+ * 把 form payload(Wizard 收的)整理成 chunk 內容
+ * Spec §7 Live KB:form/task/attach 也接,不只 chat
+ */
+function _summarizeFormPayload(payload, projectCode) {
+  if (!payload || typeof payload !== 'object') return '';
+  const lines = [`[form] Project ${projectCode} 開案 Form`];
+  const f = (label, key) => {
+    const v = payload[key];
+    if (v != null && v !== '') lines.push(`${label}: ${String(v).slice(0, 200)}`);
+  };
+  f('客戶',     'customer');
+  f('客戶名稱',  'customer_name');
+  f('料號',     'partNo');
+  f('料號',     'part_no');
+  f('數量',     'quantity');
+  f('交期',     'dueDate');
+  f('交期',     'due_date');
+  f('規格',     'specs');
+  f('備註',     'notes');
+  f('預估週期', 'estimatedCycleDays');
+  f('priority', 'priorityScore');
+  return lines.join('\n');
 }
 
 async function _addMember(db, projectId, userId, role, invitedBy) {

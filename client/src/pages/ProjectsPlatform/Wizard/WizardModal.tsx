@@ -74,7 +74,12 @@ export default function WizardModal({ open, onClose }: Props) {
           partNo: data.partNo,
           quantity: data.quantity,
           dueDate: data.dueDate,
+          // Step 1 AI #1 RFQ extract 結果(Sprint J 補:寫 attach chunk 進 KB)
           rfqFileName: data.rfqFileName,
+          rfqFilePath: data.rfqFilePath,
+          rfqMimeType: data.rfqMimeType,
+          specs: data.specs,
+          notes: data.notes,
           // Step 2 結果
           selectedHistoryId: data.selectedHistoryId,
           recommendedPmName: data.recommendedPmName,

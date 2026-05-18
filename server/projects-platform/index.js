@@ -86,6 +86,9 @@ function buildRouter() {
   // Sprint K — 域內通訊(跨專案 channel)
   router.use('/comm-rooms', require('./routes/commRooms'));
 
+  // Sprint M — AI 13 項深化(pricing / cleansheet / daily-report)
+  router.use('/ai', require('./routes/ai'));
+
   // Phase 1 polish — AI #1 RFQ extract(Wizard helper)
   router.use('/wizard', require('./routes/wizard'));
 
@@ -144,15 +147,18 @@ function startWorkers() {
     console.log('[projects-platform] workers disabled');
     return;
   }
+  // K8s 拆 pod:web pods 設 RUN_SCHEDULERS=false 不掛 cron(只 scheduler pod 掛)
+  if (process.env.RUN_SCHEDULERS === 'false') {
+    console.log('[projects-platform] workers skipped · RUN_SCHEDULERS=false (web pod)');
+    return;
+  }
   try {
-    // const statusSummaryWorker = require('./workers/statusSummaryWorker');
-    // const slaWatcherWorker = require('./workers/slaWatcherWorker');
-    // const kbArchiveWorker = require('./workers/kbArchiveWorker');
-    // statusSummaryWorker.start();
-    // slaWatcherWorker.start();
-    // kbArchiveWorker.start();
+    // Sprint M-13 — 主管日報 cron(預設關 · 看 PROJECTS_DAILY_REPORT_ENABLED env)
+    const dailyReport = require('./services/dailyReportService');
+    dailyReport.startCron();
+
     _started = true;
-    console.log('[projects-platform] workers started (scaffold,實際 worker 未實作)');
+    console.log('[projects-platform] workers started');
   } catch (e) {
     console.error('[projects-platform] workers start failed:', e.message);
   }
@@ -164,9 +170,9 @@ function startWorkers() {
 function stopWorkers() {
   if (!_started) return;
   try {
-    // statusSummaryWorker.stop();
-    // slaWatcherWorker.stop();
-    // kbArchiveWorker.stop();
+    const dailyReport = require('./services/dailyReportService');
+    dailyReport.stopCron();
+
     _started = false;
     console.log('[projects-platform] workers stopped');
   } catch (e) {

@@ -791,11 +791,12 @@ Phase 2 補:
   - `mode=vector` / `fulltext` / `like` 手動切
   - Title embedding boost(content 70% + title 30%)
   - Graceful fallback:vector 失敗 → full-text → LIKE
-- ✅ Live KB 自動 chunk:
-  - chat(messagesService 既有)
+- ✅ Live KB 自動 chunk(spec §7 規格 4 kinds 全上,2026-05-18 補):
+  - **chat**(messagesService 既有)
   - **task DONE**(tasksService.update 加 hook,Sprint J 補)
-  - form(待 Sprint 後續 form builder ship)
-  - attach(待 Sprint 後續 attachment service ship)
+  - **form**(projectsService.create 寫 form chunk,kind='form' · 2026-05-18 補)
+  - **attach**(projectsService.create 偵測 `data_payload.rfqFilePath` 寫 attach chunk · 2026-05-18 補)
+  - 未來 form builder / attach service 上線後,各自 endpoint 再加 hook(已有 writeLiveChunk 入口)
 
 API:
 - `GET /api/projects/kb/search?q=&layer=&project_id=&mode=auto|vector|fulltext|like`
@@ -868,17 +869,56 @@ UI:
 - ⏳ 加 CSP header 強化 iframe 安全(spec §10.5.2 提到的選配)
 - ⏳ 主管「關注專案」頁的儀表板 tile / widget pin(spec §10.5.2)
 
-#### Sprint M — AI 13 項深化(2 週)
+#### Sprint M — AI 13 項深化 ✅ ship 2026-05-18
 
-對齊 spec §12 / PDF §E 列名:
+對齊 spec §12.10.4 / PDF §E。3 個明列項目全上(MVP 範圍)。
 
-| # | 項目 |
-|---|------|
-| 11 | **智慧定價建議** — 基於歷史 + 客戶等級 |
-| 12 | **Cleansheet AI 自動分析** — 三廠成本拆解 + 對比說明 |
-| 13 | **主管日報自動生成** — 每日 / 每週彙整 |
+##### M-11 智慧定價建議(spec #16)
 
-(spec 寫「AI 13 項深化」但只明列 3 個項目;其他若 BU 需求再加,目前對齊 spec 只做 3)
+對齊 spec §12.5 Form Surface 2。
+- ✅ Backend `services/aiPricingService.suggest(db, { projectId, field, context, user })`
+- ✅ Route `POST /api/projects/ai/pricing-suggest`
+- ✅ 撈沉澱 KB 內 part_no / specs 相似的歷史案(scrub 過 safe)
+- ✅ Gemini Flash JSON 模式回 `{ suggested_value, confidence_percent, reasoning, references[] }`
+- ✅ Form tab 每個機密欄位旁 ✨ AI 紫色按鈕 → `AiSuggestionModal.tsx`
+- ✅ 走影子表(spec §12.5 — 不直寫,user accept 後標 「AI ✓」)
+- ✅ Stub fallback + LLM 失敗 graceful
+
+##### M-12 Cleansheet AI 三廠分析(spec #12)
+
+- ✅ Backend `services/aiCleansheetService.analyze(db, { projectId, factories, target, user })`
+- ✅ Route `POST /api/projects/ai/cleansheet-analyze`
+- ✅ 規則式 base:總成本排序 + 各項目最低廠 + delta_pct
+- ✅ LLM 補語意分析:`{ recommended_factory, summary, analysis_md, advantages, risks }`
+- ✅ `CleansheetPanel.tsx` modal — 三廠 cost_breakdown 編輯表 + 分析結果
+- ✅ Stub fallback + LLM 失敗 graceful(規則式仍可推薦最便宜廠)
+
+##### M-13 主管日報自動生成(spec #33)
+
+- ✅ Backend `services/dailyReportService.runForUser / runForAll`
+- ✅ Route `POST /api/projects/ai/daily-report/run`(自己跑)
+- ✅ Route `POST /api/projects/ai/daily-report/run-all`(admin 批次)
+- ✅ 找 user 關注 active 專案(PM/sales/member/super_user_join)
+- ✅ 對每個專案跑 `statusSummary.getSummary()`
+- ✅ 紅燈專案排前 + 底部 AI 重點濃縮(LLM 模式)
+- ✅ markdown → HTML 寄 email + 寫 user_notifications(鈴鐺)
+- ✅ Dashboard 右上「☀️ 我的日報」琥珀按鈕 → modal 預覽 / 寄出
+- ✅ Cron 排程已 register(`startCron / stopCron` in dailyReportService):
+  - 由 `projects-platform.startWorkers()` 在 server boot 後自動呼叫
+  - env `PROJECTS_DAILY_REPORT_ENABLED='true'` 才啟用(預設關)
+  - `PROJECTS_DAILY_REPORT_CRON`(default `'0 9 * * *'` 每天 09:00)
+  - `PROJECTS_WEEKLY_REPORT_CRON`(default `'0 9 * * 1'` 週一 09:00)
+  - 自動受 `RUN_SCHEDULERS=false` gate(K8s web pod 不掛 cron,只 scheduler pod 掛)
+
+未來(spec §12.10.4 list 中 Phase 2 加深的其他項目)
+- ⏳ 跨 channel 懶人包(#22)
+- ⏳ 離線 catch-up(#25)
+- ⏳ BOM 自動展開(#8)
+- ⏳ 結案 AI 摘要強化 map-reduce(#36)
+- ⏳ Excel cell binding AI 推薦(#40)
+- ⏳ 新人 onboarding 教練(#38)
+
+(spec §12.10.4 列 9 項 Phase 2 加深;Sprint M 先 ship 最具 BU 價值的 3 項,其餘待後續 sprint)
 
 ---
 

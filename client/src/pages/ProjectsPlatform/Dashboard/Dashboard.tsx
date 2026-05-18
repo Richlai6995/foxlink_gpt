@@ -19,7 +19,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Flame, Star, CheckCircle2, ClipboardList, TrendingUp, Users as UsersIcon, Sparkles,
-  Download, Settings,
+  Download, Settings, Sun, Loader2, X,
 } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
 import { api, type DashboardData, type StatusSummary, type SlaLight } from '../api'
@@ -77,6 +77,7 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="flex gap-2">
+          <DailyReportButton />
           <button className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[13px] border border-cortex-line bg-white rounded hover:bg-cortex-bg">
             <Download size={13} /> 匯出 PDF
           </button>
@@ -355,6 +356,128 @@ function AiPhaseCard({ phase, example, status, statusColor }: { phase: string; e
       <div className="text-[11px] text-cortex-text leading-relaxed">{example}</div>
       <div className={`text-[10px] font-bold mt-1.5 ${statusColor}`}>{status}</div>
     </div>
+  )
+}
+
+// ─── Sprint M-13 · 主管日報按鈕 + modal ────────────────────────────────
+function DailyReportButton() {
+  const { token } = useAuth() as any
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [markdown, setMarkdown] = useState<string>('')
+  const [meta, setMeta] = useState<{ summaries_count?: number; channels?: string[]; skipped?: boolean; reason?: string } | null>(null)
+  const [period, setPeriod] = useState<'daily' | 'weekly'>('daily')
+  const [err, setErr] = useState<string | null>(null)
+
+  const run = async (sendNotif: boolean) => {
+    setLoading(true)
+    setErr(null)
+    setMarkdown('')
+    setMeta(null)
+    try {
+      const r: any = await api.post(token, '/ai/daily-report/run', {
+        period,
+        dry_run: !sendNotif,
+      })
+      if (r.markdown) setMarkdown(r.markdown)
+      setMeta({
+        summaries_count: r.summaries_count,
+        channels: r.channels,
+        skipped: r.skipped,
+        reason: r.reason,
+      })
+    } catch (e: any) {
+      setErr(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[13px] bg-gradient-to-r from-amber-400 to-amber-500 text-white rounded hover:opacity-90 font-semibold"
+        title="AI #33 主管日報 — 我的關注專案彙整"
+      >
+        <Sun size={13} /> 我的日報
+      </button>
+
+      {open && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl max-w-[720px] w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl">
+            <div className="bg-gradient-to-r from-amber-400 to-amber-500 px-5 py-3.5 text-white flex items-center justify-between">
+              <div>
+                <div className="text-[10px] uppercase tracking-widest text-amber-100 font-bold inline-flex items-center gap-1">
+                  <Sun size={11} /> AI #33 主管日報 / 週報
+                </div>
+                <div className="text-base font-bold">我的關注專案 AI 彙整</div>
+              </div>
+              <button onClick={() => setOpen(false)} className="text-amber-100 hover:text-white"><X size={18} /></button>
+            </div>
+
+            <div className="p-4 border-b border-cortex-line flex items-center gap-2">
+              <div className="inline-flex rounded-md border border-cortex-line bg-white overflow-hidden">
+                <button
+                  onClick={() => setPeriod('daily')}
+                  className={`px-3 py-1.5 text-[11px] font-semibold ${period === 'daily' ? 'bg-amber-500 text-white' : 'text-cortex-text'}`}
+                >☀️ 日報</button>
+                <button
+                  onClick={() => setPeriod('weekly')}
+                  className={`px-3 py-1.5 text-[11px] font-semibold ${period === 'weekly' ? 'bg-amber-500 text-white' : 'text-cortex-text'}`}
+                >📊 週報</button>
+              </div>
+              <button
+                onClick={() => run(false)}
+                disabled={loading}
+                className="px-3 py-1.5 text-[11px] border border-cortex-line bg-white rounded hover:bg-cortex-bg disabled:opacity-50 inline-flex items-center gap-1"
+              >
+                {loading ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+                預覽(不寄)
+              </button>
+              <button
+                onClick={() => run(true)}
+                disabled={loading}
+                className="px-3 py-1.5 text-[11px] bg-cortex-cyan text-cortex-navy rounded hover:opacity-90 disabled:opacity-50 font-bold inline-flex items-center gap-1"
+              >
+                {loading ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
+                生成 + 寄出
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4">
+              {err && (
+                <div className="bg-cortex-red-bg/40 border border-red-200 rounded p-2 text-[12px] text-red-700 mb-2">
+                  {err}
+                </div>
+              )}
+              {meta?.skipped && (
+                <div className="bg-cortex-amber-bg/40 border border-amber-200 rounded p-3 text-[12px] text-amber-800">
+                  跳過 — {meta.reason || '無 active 專案可彙整'}
+                </div>
+              )}
+              {meta && !meta.skipped && (
+                <div className="bg-cortex-green-bg/30 border border-cortex-green/30 rounded p-2 text-[11px] text-cortex-green mb-3">
+                  ✓ 已彙整 {meta.summaries_count} 個專案
+                  {meta.channels && meta.channels.length > 0 && (
+                    <> · 發送通道:<strong className="font-mono">{meta.channels.join(' · ')}</strong></>
+                  )}
+                </div>
+              )}
+              {markdown ? (
+                <div className="bg-cortex-bg/30 border border-cortex-line rounded-lg p-4 text-[12px] text-cortex-ink leading-relaxed whitespace-pre-wrap font-mono">
+                  {markdown}
+                </div>
+              ) : !loading && !meta && (
+                <div className="text-center text-cortex-muted text-[12px] py-8">
+                  點上方「預覽」看內容,或「生成 + 寄出」推到鈴鐺 + email
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 
