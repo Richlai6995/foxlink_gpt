@@ -76,10 +76,15 @@ fi
 
 echo "▶ Applying K8s manifests (RBAC, Deployment, Service...)"
 kubectl apply -f "$(dirname "$0")/k8s/deployment.yaml"
+kubectl apply -f "$(dirname "$0")/k8s/scheduler-deployment.yaml"
 
-echo "▶ Rolling update (maxUnavailable=0 → 零停機)"
+echo "▶ Rolling update web (maxUnavailable=0 → 零停機)"
 kubectl rollout restart deployment/${DEPLOY} -n ${NAMESPACE}
 kubectl rollout status deployment/${DEPLOY} -n ${NAMESPACE}
+
+echo "▶ Restart scheduler (Recreate strategy → 30-60s 空窗)"
+kubectl rollout restart deployment/${DEPLOY}-scheduler -n ${NAMESPACE}
+kubectl rollout status deployment/${DEPLOY}-scheduler -n ${NAMESPACE}
 
 echo ""
 echo "✓ 部署完成！Image: ${FULL_IMAGE}"

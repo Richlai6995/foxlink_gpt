@@ -1,60 +1,45 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: foxlink
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: foxlink-gpt
-  namespace: foxlink
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: foxlink-gpt-monitor
-rules:
-  - apiGroups: [""]
-    resources: ["nodes", "pods", "events", "namespaces"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["pods/log"]
-    verbs: ["get"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: foxlink-gpt-monitor
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: foxlink-gpt-monitor
-subjects:
-  - kind: ServiceAccount
-    name: foxlink-gpt
-    namespace: foxlink
----
+# ─────────────────────────────────────────────────────────────────────────────
+# foxlink-gpt-scheduler — 專用 scheduler pod(replicas=1)
+#
+# 為什麼要拆:
+#   原本 foxlink-gpt deployment 跑 4 個 pod,每個都會 initScheduler 把所有 active
+#   排程任務掛到自己的 in-memory cron。toggle 暫停只能停發起 toggle 那個 pod 的 cron,
+#   其他 pod 的 cron 還會觸發(雖有 redis lock + DB status 雙重防線,但設計脆弱)。
+#
+#   此 deployment 開 replicas=1 + strategy: Recreate,保證全 cluster 同時只有
+#   一個 scheduler pod。Web pods 設 RUN_SCHEDULERS=false 完全不掛 cron。
+#
+# Scheduler pod 怎麼跟 web pod 同步:
+#   - Web pod 改 DB(toggle/PUT/DELETE)後不能直接通知 scheduler pod
+#   - Scheduler pod 每 30 秒 reconcileSchedules:讀 DB → 跟記憶體 cron map diff →
+#     新增/移除/重掛。最壞延遲 30 秒。
+#
+# 為什麼不用 leader election:
+#   replicas=1 + Recreate 已經保證單實例。Lease-based leader election 是為了
+#   「N pod 隨機選 1」的場景,我們直接寫死 1 個就夠了,簡單可靠。
+#
+# 部署期間空窗:
+#   Recreate strategy 會先終止舊 pod 才起新 pod,中間 30-60 秒沒 cron 觸發。
+#   排程任務最壞晚 1 分鐘觸發,可接受(scheduler 本不該頻繁部署)。
+# ─────────────────────────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: foxlink-gpt
+  name: foxlink-gpt-scheduler
   namespace: foxlink
   labels:
-    app: foxlink-gpt
+    app: foxlink-gpt-scheduler
 spec:
-  replicas: 4
+  replicas: 1
   selector:
     matchLabels:
-      app: foxlink-gpt
+      app: foxlink-gpt-scheduler
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0        # 零停機，永遠保持 3 個 pod 可用
+    type: Recreate            # 單實例保證:舊 pod 完全 terminate 才起新 pod
   template:
     metadata:
       labels:
-        app: foxlink-gpt
+        app: foxlink-gpt-scheduler
     spec:
       serviceAccountName: foxlink-gpt
       automountServiceAccountToken: true
@@ -67,7 +52,7 @@ spec:
           command: ["sh", "-c", "until redis-cli -h redis ping; do echo waiting for redis; sleep 2; done"]
 
       containers:
-        - name: foxlink-gpt
+        - name: foxlink-gpt-scheduler
           image: 10.8.93.11:5000/foxlink-gpt:latest
           imagePullPolicy: Always
           ports:
@@ -75,10 +60,9 @@ spec:
 
           # ── 環境變數 ────────────────────────────────────────────────────────
           env:
-            # Web pods 不掛 cron(scheduledTaskService 由 foxlink-gpt-scheduler 專屬
-            # deployment 跑;見 k8s/scheduler-deployment.yaml)
+            # 唯一跟 web pod 不同的 env — 顯式設 true(預設也是 true,但寫明意圖)
             - name: RUN_SCHEDULERS
-              value: "false"
+              value: "true"
             - name: PORT
               value: "3007"
             - name: TZ
@@ -90,77 +74,59 @@ spec:
             - name: REDIS_URL
               value: "redis://redis:6379"
             - name: NODE_OPTIONS
-              value: "--max-old-space-size=1536"
-            - name: WEBEX_ROOMS_PER_POLL
-              value: "1000"
-            - name: WEBEX_POLL_INTERVAL_MS
-              value: "5000"
+              value: "--max-old-space-size=1024"
             # Oracle Instant Client
-            # TODO: 確認版本後更新路徑
             - name: ORACLE_HOME
               value: "/opt/oracle/instantclient"
             - name: LD_LIBRARY_PATH
               value: "/opt/oracle/instantclient"
-            # ── GCP Vertex AI SA JSON 絕對路徑（覆蓋 envFrom 的相對路徑）──
-            # Secret gcp-vertex-sa 掛在 /app/gcp,裡面的 file name = key.json
+            # GCP Vertex AI SA JSON
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: /app/gcp/key.json
 
           envFrom:
             - secretRef:
-                name: foxlink-secrets          # kubectl create secret generic foxlink-secrets --from-env-file=server/.env
+                name: foxlink-secrets
 
-          # ── Volume Mounts ─────────────────────────────────────────────────
+          # ── Volume Mounts(與 web pod 對齊,排程任務會產檔 / 用 NFS skill runners)─
           volumeMounts:
-            # ── 持久化：上傳檔案（NFS）──
             - name: nfs-upload
               mountPath: /app/uploads
-            # ── 持久化：Skill Runners（NFS，pod 重啟後保留）──
             - name: nfs-source
               mountPath: /app/skill_runners
               subPath: skill_runners
-            # ── 暫存：logs / backups（pod 重啟後不需保留）──
             - name: tmp-data
               mountPath: /app/logs
               subPath: logs
             - name: tmp-data
               mountPath: /app/backups
               subPath: backups
-            # ── CJK 字型（NFS 持久化，PDF 中文需要）──
             - name: nfs-source
               mountPath: /app/fonts
               subPath: fonts
-            # ── Oracle Instant Client（NFS subPath: oracle_client）──
             - name: nfs-source
               mountPath: /opt/oracle/instantclient
               subPath: oracle_client
-            # ── Docker Socket（監控用）──
             - name: docker-sock
               mountPath: /var/run/docker.sock
               readOnly: true
-            # ── MCP JWT key pair（只讀）──
-            # Secret: mcp-jwt-keys（由 deploy.sh 自動從 server/certs/*.pem 同步）
-            # .env 需設 MCP_JWT_PRIVATE_KEY_PATH=/app/certs/mcp-jwt-private.pem
             - name: mcp-jwt-keys
               mountPath: /app/certs
               readOnly: true
-            # ── GCP Vertex AI Service Account JSON（只讀）──
-            # Secret: gcp-vertex-sa（由 deploy.sh 自動從 server/certs/vertex-ai-sa.json 同步）
-            # env GOOGLE_APPLICATION_CREDENTIALS=/app/gcp/key.json 指向這裡
             - name: gcp-vertex-sa
               mountPath: /app/gcp
               readOnly: true
 
-          # ── Resources ────────────────────────────────────────────────────
+          # ── Resources(比 web pod 低一階 — 沒外部流量、純背景跑)──────────────
           resources:
             requests:
-              memory: "768Mi"
-              cpu: "500m"
+              memory: "512Mi"
+              cpu: "200m"
             limits:
-              memory: "2Gi"
-              cpu: "2000m"
+              memory: "1536Mi"
+              cpu: "1500m"     # 高峰時排程任務含 LLM call + 檔案生成,留足夠 burst
 
-          # ── Health Checks ─────────────────────────────────────────────────
+          # ── Health Checks(scheduler pod 也跑 Express,/api/health 仍可用)──
           livenessProbe:
             httpGet:
               path: /api/health
@@ -183,7 +149,7 @@ spec:
               exec:
                 command: ["/bin/sh", "-c", "sleep 15"]
 
-      # ── Volumes ────────────────────────────────────────────────────────────
+      # ── Volumes(與 web pod 一致)──────────────────────────────────────────
       volumes:
         - name: nfs-upload
           persistentVolumeClaim:
@@ -200,23 +166,12 @@ spec:
         - name: mcp-jwt-keys
           secret:
             secretName: mcp-jwt-keys
-            optional: true   # 暫允許未建立時 pod 照常啟動(send_user_token=1 才會用到)
+            optional: true
             defaultMode: 0400
         - name: gcp-vertex-sa
           secret:
             secretName: gcp-vertex-sa
-            optional: true   # 沒設時 GEMINI_PROVIDER=vertex 會失敗，但 pod 仍可啟動 fallback 到 AI Studio
+            optional: true
             defaultMode: 0400
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: foxlink-gpt
-  namespace: foxlink
-spec:
-  selector:
-    app: foxlink-gpt
-  ports:
-    - port: 3007
-      targetPort: 3007
-  type: ClusterIP
+# 註:不掛 Service / Ingress — scheduler pod 不需要被外部請求打到。
+#     如需 debug `kubectl exec` 或 port-forward 直連即可。

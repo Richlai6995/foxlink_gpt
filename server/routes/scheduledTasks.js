@@ -346,6 +346,8 @@ router.post('/:id/run-now', async (req, res) => {
     if (role !== 'admin' && role !== 'owner' && role !== 'develop')
       return res.status(403).json({ error: '無權限執行此任務' });
 
+    // 註:run-now 不擋 status=paused,讓 admin 暫停 cron 後仍能手動測試一次。
+    //     真正的自動排程被 runTask() 開頭的 status 防線擋掉,cron 觸發路徑不會繞過。
     // Pre-check: max_runs
     if (task.max_runs > 0 && task.run_count >= task.max_runs)
       return res.status(400).json({ error: `已達最大執行次數（${task.max_runs} 次）。請編輯任務將上限調高或設為 0 不限次數。` });
@@ -353,7 +355,7 @@ router.post('/:id/run-now', async (req, res) => {
     if (task.expire_at && new Date(task.expire_at) < new Date())
       return res.status(400).json({ error: '任務已到期，請編輯到期日後再執行。' });
 
-    enqueue(() => runTask(db, parseInt(req.params.id)));
+    enqueue(() => runTask(db, parseInt(req.params.id), { force: true }));
     res.json({ message: '任務已加入執行佇列' });
   } catch (e) {
     res.status(500).json({ error: e.message });

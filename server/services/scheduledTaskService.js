@@ -452,7 +452,9 @@ async function withRetry(fn, maxAttempts) {
 }
 
 // ── Core runner ───────────────────────────────────────────────────────────────
-async function runTask(db, taskId) {
+async function runTask(db, taskId, opts = {}) {
+  // opts.force = true:run-now 手動觸發,繞過 status='active' 檢查,允許跑 paused 任務測試
+  const { force = false } = opts;
   const { generateTextSync, generateTitle } = require('./gemini');
   const { processGenerateBlocks } = require('./fileGenerator');
   const { sendMail } = require('./mailService');
@@ -469,6 +471,14 @@ async function runTask(db, taskId) {
 
   const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(taskId);
   if (!task) { console.error(`[Scheduled] Task ${taskId} not found`); return; }
+
+  // 防線:cron 觸發路徑下,只要 DB status 不是 active 就不跑(擋掉多 pod 環境下因
+  // cron handler DB fetch 失敗 fallback 到舊 closure task 而繞過暫停檢查的情況)。
+  // run-now 手動觸發傳 force=true 可繞過,讓 admin 暫停 cron 後仍能手動測試一次。
+  if (!force && task.status !== 'active') {
+    console.log(`[Scheduled] Task ${task.id} "${task.name}" status=${task.status}, skip execution`);
+    return;
+  }
 
   // Check expiry
   if (task.expire_at && new Date(task.expire_at) < new Date()) {
@@ -841,7 +851,14 @@ async function runTask(db, taskId) {
 }
 
 // ── Cron management ───────────────────────────────────────────────────────────
-const _cronJobs = new Map(); // taskId → cron.ScheduledTask
+// _cronJobs entry shape: { job: cron.ScheduledTask, expr: string }
+// expr 存進來給 reconcileSchedules 用 — schedule 改了的話可以偵測並重新掛。
+const _cronJobs = new Map();
+
+// 是否為 scheduler pod。K8s 環境下 web pods 設 RUN_SCHEDULERS=false 變 no-op,
+// 只有 scheduler 專用的 deployment(replicas=1)會實際掛 cron。
+// 本機開發 / docker-compose 不設此 env → 預設 true,維持原本單機行為。
+const IS_SCHEDULER_POD = process.env.RUN_SCHEDULERS !== 'false';
 
 // 用「排程設計時間 + 當天日期」當 lock key,跨 pod 時鐘漂移仍能阻擋重複觸發。
 // 不用 wall-clock minute(舊設計)是因為 enqueue 排隊延遲 + NTP drift 會讓不同 pod
@@ -908,27 +925,34 @@ function buildCronExpr(task) {
 }
 
 function scheduleTask(db, task) {
-  if (_cronJobs.has(task.id)) {
-    _cronJobs.get(task.id).stop();
+  // Web pods 不掛 cron — 由 scheduler pod 的 reconcile loop 統一處理。
+  // Route handler 仍會呼叫此 fn,但這裡早 return,等 reconcile 拉 DB 同步即可。
+  if (!IS_SCHEDULER_POD) return;
+
+  const existing = _cronJobs.get(task.id);
+  if (existing) {
+    existing.job.stop();
     _cronJobs.delete(task.id);
   }
   if (task.status !== 'active') return;
 
   const expr = buildCronExpr(task);
   const job = cron.schedule(expr, async () => {
-    // K8s 多 pod 都會跑這個 cron callback。在搶 lock 前先 fetch 最新 task,
-    // 若 admin 剛改成 paused 或刪掉就 skip,避免 race。
+    // Scheduler pod 觸發點。fetch 最新 task,reconcile loop 最壞延遲 30s 才會同步
+    // 暫停狀態到 in-memory cron,這層 latest check 把 race window 收緊到秒級。
     let latest;
     try {
       latest = await db.prepare('SELECT * FROM scheduled_tasks WHERE id=?').get(task.id);
     } catch (e) {
-      console.warn(`[Scheduled] cron handler fetch task ${task.id} failed:`, e.message);
-      latest = task;
+      // DB 查不到最新狀態時保守 skip 這次 slot — 寧可漏跑也不要跑到已暫停的 task。
+      // 之前 fallback 到 closure 的 task(status='active' 才會掛上 cron)會繞過暫停檢查。
+      console.warn(`[Scheduled] cron handler fetch task ${task.id} failed, skipping this slot: ${e.message}`);
+      return;
     }
     if (!latest || latest.status !== 'active') return;
 
-    // 分散式鎖(slot-based + TTL 600s):同一排程 slot 不論 pod 之間時鐘漂移多少,
-    // 都解析成同一個 key,只有第一個拿到 lock 的 pod 跑,其他 skip。
+    // 分散式鎖(slot-based + TTL 600s):scheduler 改成單 pod 後此 lock 主要作為保險 —
+    // 萬一未來放寬 replicas / K8s restart 瞬間 overlap / cron handler 重複觸發都擋得住。
     const lockKey = buildLockKey(latest);
     try {
       const { tryLock } = require('./redisClient');
@@ -945,27 +969,89 @@ function scheduleTask(db, task) {
     enqueue(() => runTask(db, task.id));
   }, { timezone: 'Asia/Taipei' });
 
-  _cronJobs.set(task.id, job);
+  _cronJobs.set(task.id, { job, expr });
   console.log(`[Scheduled] Task ${task.id} "${task.name}" scheduled: ${expr}`);
 }
 
 function unscheduleTask(taskId) {
-  if (_cronJobs.has(taskId)) {
-    _cronJobs.get(taskId).stop();
+  if (!IS_SCHEDULER_POD) return;
+  const entry = _cronJobs.get(taskId);
+  if (entry) {
+    entry.job.stop();
     _cronJobs.delete(taskId);
     console.log(`[Scheduled] Task ${taskId} unscheduled`);
   }
 }
 
-/** Called on server start — load all active tasks from DB */
-async function initScheduler(db) {
+// ── Reconcile loop(scheduler pod only)──────────────────────────────────────
+// 用途:Web pods 透過 API 改 DB 後,scheduler pod 沒有直接通訊管道(沒走 Redis pub/sub),
+// 因此每 30 秒重讀 DB 算 diff:DB 該跑 vs 記憶體實際掛的 → 新增/移除/重掛。
+// 最壞延遲 30 秒,但保證最終一致。
+async function reconcileSchedules(db) {
+  let tasks;
   try {
-    const tasks = await db.prepare(`SELECT * FROM scheduled_tasks WHERE status='active'`).all();
-    tasks.forEach(t => scheduleTask(db, t));
-    console.log(`[Scheduled] Loaded ${tasks.length} active task(s)`);
+    tasks = await db.prepare(`SELECT * FROM scheduled_tasks`).all();
   } catch (e) {
-    console.error('[Scheduled] initScheduler error:', e.message);
+    console.warn(`[Scheduled] reconcile fetch failed: ${e.message}`);
+    return;
+  }
+
+  const now = new Date();
+  const wantedById = new Map();
+  for (const t of tasks) {
+    if (t.status !== 'active') continue;
+    if (t.expire_at && new Date(t.expire_at) < now) continue;
+    if (t.max_runs > 0 && t.run_count >= t.max_runs) continue;
+    wantedById.set(t.id, t);
+  }
+
+  let added = 0, removed = 0, rescheduled = 0;
+
+  // 1) 新增 / reschedule(expr 變了就重掛)
+  for (const [id, task] of wantedById) {
+    const existing = _cronJobs.get(id);
+    const newExpr = buildCronExpr(task);
+    if (!existing) {
+      scheduleTask(db, task);
+      added++;
+    } else if (existing.expr !== newExpr) {
+      scheduleTask(db, task);
+      rescheduled++;
+    }
+  }
+
+  // 2) 移除(已被刪除 / paused / 過期 / 達 max_runs)
+  for (const id of [..._cronJobs.keys()]) {
+    if (!wantedById.has(id)) {
+      unscheduleTask(id);
+      removed++;
+    }
+  }
+
+  if (added || removed || rescheduled) {
+    console.log(`[Scheduled] reconcile: +${added} -${removed} ~${rescheduled} (now ${_cronJobs.size} active cron jobs)`);
   }
 }
 
-module.exports = { initScheduler, scheduleTask, unscheduleTask, runTask, enqueue, substituteVarsAsync };
+/** Called on server start — load all active tasks from DB. */
+async function initScheduler(db) {
+  if (!IS_SCHEDULER_POD) {
+    console.log('[Scheduled] RUN_SCHEDULERS=false → this pod will not mount cron jobs (web pod mode)');
+    return;
+  }
+  try {
+    const tasks = await db.prepare(`SELECT * FROM scheduled_tasks WHERE status='active'`).all();
+    tasks.forEach(t => scheduleTask(db, t));
+    console.log(`[Scheduled] Loaded ${tasks.length} active task(s) on scheduler pod`);
+  } catch (e) {
+    console.error('[Scheduled] initScheduler error:', e.message);
+  }
+  // 啟動 reconcile loop:30s 一輪同步 DB 跟記憶體,讓 web pods 的 PUT/toggle/DELETE
+  // 在最壞 30 秒內反映到 cron mount 狀態。
+  setInterval(() => {
+    reconcileSchedules(db).catch(e => console.error('[Scheduled] reconcile error:', e.message));
+  }, 30_000);
+  console.log('[Scheduled] reconcile loop started (30s interval)');
+}
+
+module.exports = { initScheduler, scheduleTask, unscheduleTask, runTask, enqueue, substituteVarsAsync, reconcileSchedules };
