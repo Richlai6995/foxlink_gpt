@@ -83,8 +83,13 @@ function buildRouter() {
   // Sprint G — KB 雙層搜尋
   router.use('/kb', require('./routes/kb'));
 
+  // Sprint K — 域內通訊(跨專案 channel)
+  router.use('/comm-rooms', require('./routes/commRooms'));
+
+  // Phase 1 polish — AI #1 RFQ extract(Wizard helper)
+  router.use('/wizard', require('./routes/wizard'));
+
   // Route stubs — 後續 sprint 逐個實作
-  // router.use('/projects/wizard', require('./routes/wizard'));        // Sprint 9
   // router.use('/projects/:id/tasks', require('./routes/tasks'));       // Sprint 6
   // router.use('/projects/:id/forms', require('./routes/forms'));       // Sprint 4
   // router.use('/projects/dashboard', require('./routes/dashboard'));   // Sprint 8
@@ -121,6 +126,9 @@ async function runMigrations(db) {
     await require('./migrations/005_seed')(db);
     await require('./migrations/006_messages')(db);
     await require('./migrations/007_kb')(db);
+    await require('./migrations/008_roles')(db);
+    await require('./migrations/009_kb_sediment')(db);
+    await require('./migrations/010_comm_rooms')(db);
     console.log('[projects-platform] migrations ✓');
   } catch (e) {
     console.error('[projects-platform] migrations failed:', e.message, e.stack);

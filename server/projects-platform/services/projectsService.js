@@ -371,11 +371,38 @@ async function updateLifecycle(db, projectId, toStatus, user, { reason, pause_un
   if (toStatus === 'CLOSED') {
     try {
       const kb = require('./kbPipeline');
-      const r = await kb.forkToSediment(db, projectId);
-      log.log(`CLOSED fork to sediment: ${JSON.stringify(r)}`);
+      const r = await kb.forkToSediment(db, projectId, {
+        actorUserId: user.id,
+        notes: `auto on lifecycle CLOSED · reason=${reason || ''}`,
+      });
+      log.log(`CLOSED fork to sediment: ${JSON.stringify(r).slice(0, 200)}`);
     } catch (e) {
       log.warn(`fork to sediment failed: ${e.message}`);
     }
+  }
+
+  // #9 Lifecycle notification(PAUSED 通知全 members)
+  if (toStatus === 'PAUSED') {
+    try {
+      const notify = require('./notificationEngine');
+      notify.dispatch(db, 'PROJECT_PAUSED', {
+        project_id: projectId,
+        actor: user.id,
+        title: `⏸ 專案暫停`,
+        body: reason ? `理由:${reason}` : '專案已被暫停',
+        link_url: `/projects-platform/projects/${projectId}`,
+      }).catch((e) => log.warn(`PROJECT_PAUSED notify async failed: ${e.message}`));
+    } catch (e) {
+      log.warn(`notify PROJECT_PAUSED failed: ${e.message}`);
+    }
+  }
+
+  // WebSocket broadcast lifecycle 變動
+  try {
+    const sock = require('../../services/socketService');
+    sock.emitProjectLifecycleChanged(projectId, { from, to: toStatus, actor_user_id: user.id, reason: reason || null });
+  } catch (e) {
+    log.warn(`socket emit lifecycle failed: ${e.message}`);
   }
 
   log.log(`project ${projectId} lifecycle ${from} → ${toStatus}`);

@@ -163,28 +163,46 @@ async function post(db, input) {
     }
   }
 
-  // #9 Notification engine 觸發
+  // #9 Notification engine 觸發(fire-and-forget — 失敗不擋訊息)
   try {
     const notify = require('./notificationEngine');
     if (messageType === 'BLOCKER') {
-      notify.dispatch('BLOCKER_NEW', {
+      notify.dispatch(db, 'BLOCKER_NEW', {
         project_id: Number(channel.project_id),
         message_id: messageId,
         actor: userId,
         title: `🚨 BLOCKER in #${channel.name}`,
         body: String(content).slice(0, 200),
-      });
+        link_url: `/projects-platform/projects/${channel.project_id}`,
+      }).catch((e) => log.warn(`BLOCKER notify async failed: ${e.message}`));
     } else if (messageType === 'DECISION' || autoPinned) {
-      notify.dispatch('DECISION_NEW', {
+      notify.dispatch(db, 'DECISION_NEW', {
         project_id: Number(channel.project_id),
         message_id: messageId,
         actor: userId,
         title: autoPinned ? `✅ DECISION 自動偵測 in #${channel.name}` : `✅ DECISION in #${channel.name}`,
         body: String(content).slice(0, 200),
-      });
+        link_url: `/projects-platform/projects/${channel.project_id}`,
+      }).catch((e) => log.warn(`DECISION notify async failed: ${e.message}`));
     }
   } catch (e) {
     log.warn(`notify dispatch failed: ${e.message}`);
+  }
+
+  // WebSocket broadcast — 即時推給 channel 內所有 client
+  try {
+    const sock = require('../../services/socketService');
+    const msgRow = await get(db, messageId);
+    if (msgRow) {
+      sock.emitProjectMessage(channelId, msgRow);
+      // BLOCKER/DECISION 同步到 announcement → 也推給 announcement channel 的 client
+      if (announcementMsgId) {
+        const annMsgRow = await get(db, announcementMsgId);
+        if (annMsgRow) sock.emitProjectMessage(Number(annMsgRow.channel_id), annMsgRow);
+      }
+    }
+  } catch (e) {
+    log.warn(`socket emit failed: ${e.message}`);
   }
 
   log.log(`message ${messageId} posted to channel ${channelId} type=${messageType}`);
@@ -325,14 +343,16 @@ async function listReadReceipts(db, messageId) {
  */
 async function get(db, messageId) {
   const row = await db.prepare(
-    `SELECT id, channel_id, project_id, user_id, content, message_type,
-            is_pinned, pinned_by, pinned_at, pin_note,
-            requires_read_receipt,
-            synced_to_announcement, announcement_msg_id,
-            deleted_at, deleted_by, deletion_mode, deletion_reason,
-            attachment_ids, content_hash, edited_at, edit_count, created_at
-       FROM project_messages
-      WHERE id = ?`,
+    `SELECT m.id, m.channel_id, m.project_id, m.user_id, m.content, m.message_type,
+            m.reply_to_message_id, m.is_pinned, m.pinned_by, m.pinned_at, m.pin_note,
+            m.requires_read_receipt,
+            m.synced_to_announcement, m.announcement_msg_id,
+            m.deleted_at, m.deleted_by, m.deletion_mode, m.deletion_reason,
+            m.attachment_ids, m.content_hash, m.edited_at, m.edit_count, m.created_at,
+            u.username AS user_username, u.name AS user_name
+       FROM project_messages m
+       LEFT JOIN users u ON u.id = m.user_id
+      WHERE m.id = ?`,
   ).get(messageId);
   if (!row) return null;
   row.attachment_ids = row.attachment_ids ? safeJson(row.attachment_ids, []) : [];

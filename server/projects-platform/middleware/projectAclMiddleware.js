@@ -65,7 +65,35 @@ function loadProject(opts = {}) {
         ).get(projectId, req.user.id);
       }
 
-      const isMember = isAdmin || isPm || isSales || isCreator || !!memberRow;
+      // Sprint H — super_user / director 也算 member(看得到專案)
+      let isSuperUser = false;
+      let isDirector = false;
+      if (!isAdmin && !isPm && !isSales && !isCreator && !memberRow) {
+        try {
+          // 1. self-joined project_super_users
+          const sRow = await db.prepare(
+            `SELECT via_role_code FROM project_super_users
+              WHERE project_id = ? AND user_id = ? AND left_at IS NULL`,
+          ).get(projectId, req.user.id);
+          if (sRow) isSuperUser = true;
+
+          // 2. project.bu_director 含此 bu_id 在 scope_values[],或 project.top_director (GLOBAL)
+          if (!isSuperUser) {
+            const userRoles = require('../services/userRoleService');
+            // top_director GLOBAL → 全公司可看
+            const isTop = await userRoles.hasRole(db, req.user.id, 'project.top_director');
+            // bu_director 含此 bu_id
+            const isBuDir = await userRoles.hasRole(db, req.user.id, 'project.bu_director', { buId: project.bu_id });
+            // hq_super GLOBAL(read-only,等同 director)
+            const isHqSuper = await userRoles.hasRole(db, req.user.id, 'project.hq_super');
+            // bu_super 含此 bu_id(read-only)
+            const isBuSuper = await userRoles.hasRole(db, req.user.id, 'project.bu_super', { buId: project.bu_id });
+            isDirector = isTop || isBuDir || isHqSuper || isBuSuper;
+          }
+        } catch (_) { /* ignore */ }
+      }
+
+      const isMember = isAdmin || isPm || isSales || isCreator || !!memberRow || isSuperUser || isDirector;
 
       if (!isMember && !allowNonMember) {
         log.warn(
@@ -81,6 +109,8 @@ function loadProject(opts = {}) {
         is_sales: isSales,
         is_creator: isCreator,
         is_member: isMember,
+        is_super_user: isSuperUser,
+        is_director: isDirector,
         member_role: memberRow?.role || null,
         sub_role: memberRow?.sub_role || null,
       };

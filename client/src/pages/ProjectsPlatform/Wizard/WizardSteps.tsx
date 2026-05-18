@@ -5,9 +5,10 @@
  *           Sprint F 再接 real Gemini Flash
  */
 
-import { Fragment } from 'react'
-import { Upload, CheckCircle2, AlertTriangle, Sparkles, MessageSquare, ListChecks, Bell, Pin, Clock } from 'lucide-react'
+import { Fragment, useRef, useState } from 'react'
+import { Upload, CheckCircle2, AlertTriangle, Sparkles, MessageSquare, ListChecks, Bell, Pin, Clock, Loader2, FileText } from 'lucide-react'
 import type { WizardData } from './wizardState'
+import { useAuth } from '../../../context/AuthContext'
 
 type StepProps = {
   data: WizardData
@@ -18,12 +19,64 @@ type StepProps = {
 // Step 1 — 客戶來信 / RFQ 解析
 // ────────────────────────────────────────────────────────────
 export function Step1Intake({ data, onChange }: StepProps) {
-  const fields = [
-    { key: 'customer',  label: '客戶名', conf: 96 },
-    { key: 'partNo',    label: '料號',   conf: 94 },
-    { key: 'quantity',  label: '數量',   conf: 99 },
-    { key: 'dueDate',   label: '交期',   conf: 91 },
-  ] as const
+  const { token } = useAuth() as any
+  const [uploading, setUploading] = useState(false)
+  const [uploadErr, setUploadErr] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  // 是否已抽過(client 端判斷:看是否有 confidence 物件)
+  const hasExtracted = !!data.rfqConfidence
+
+  const fields: { key: keyof WizardData; cfKey: keyof NonNullable<WizardData['rfqConfidence']>; label: string }[] = [
+    { key: 'customer',  cfKey: 'customer', label: '客戶名' },
+    { key: 'partNo',    cfKey: 'part_no',  label: '料號' },
+    { key: 'quantity',  cfKey: 'quantity', label: '數量' },
+    { key: 'dueDate',   cfKey: 'due_date', label: '交期' },
+  ]
+
+  const handleFile = async (file: File) => {
+    if (!file) return
+    setUploadErr(null)
+    setUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch('/api/projects/wizard/extract-rfq', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'X-Demo-Role': 'HOST' },
+        body: fd,
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`)
+
+      const ex = json.extracted || {}
+      onChange({
+        rfqFileName: json.original_name || file.name,
+        rfqFilePath: json.file_path,
+        rfqMimeType: json.mime_type,
+        customer:    ex.customer  || '',
+        partNo:      ex.part_no   || '',
+        quantity:    ex.quantity != null ? String(ex.quantity) : '',
+        dueDate:     ex.due_date  || '',
+        specs:       ex.specs || '',
+        notes:       ex.notes || '',
+        rfqConfidence: ex.confidence || {},
+        rfqMissing:    ex.missing || [],
+        rfqWarnings:   ex.warnings || [],
+        rfqIsStub:     !!ex._stub,
+      } as Partial<WizardData>)
+    } catch (e: any) {
+      setUploadErr(e.message || String(e))
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const overall = data.rfqConfidence?.overall ?? 0
+  const overallColor =
+    overall >= 80 ? 'text-cortex-green' :
+    overall >= 60 ? 'text-amber-300'    :
+                    'text-red-300'
 
   return (
     <div className="grid grid-cols-[1.5fr_1fr] gap-5">
@@ -31,60 +84,165 @@ export function Step1Intake({ data, onChange }: StepProps) {
         <StepBadge>STEP 1 / 7</StepBadge>
         <h3 className="text-lg font-bold text-cortex-navy mb-3.5">客戶來信 · RFQ 自動解析</h3>
 
-        {/* Drag-drop area(mock,顯示已上傳)*/}
-        <div className="border-2 border-dashed border-cortex-cyan rounded-[10px] p-6 bg-gradient-to-b from-cortex-cyan-bg to-white text-center mb-4">
-          <Upload size={32} className="mx-auto text-cortex-cyan mb-2" />
-          <div className="text-[13px] text-cortex-ink font-semibold">{data.rfqFileName}</div>
-          <div className="text-[11px] text-cortex-green font-bold mt-1">
-            <CheckCircle2 size={11} className="inline -mt-px mr-0.5" /> 已上傳 · AI 解析完成
-          </div>
+        {/* Drag-drop area — 真檔案上傳 */}
+        <div
+          className={`border-2 border-dashed rounded-[10px] p-5 text-center mb-4 transition cursor-pointer ${
+            uploading ? 'border-cortex-amber bg-cortex-amber-bg/30' :
+            hasExtracted ? 'border-cortex-green bg-cortex-green-bg/30' :
+            'border-cortex-cyan bg-gradient-to-b from-cortex-cyan-bg to-white hover:from-cortex-cyan/20'
+          }`}
+          onClick={() => !uploading && inputRef.current?.click()}
+          onDragOver={(e) => { e.preventDefault() }}
+          onDrop={(e) => {
+            e.preventDefault()
+            if (uploading) return
+            const f = e.dataTransfer.files?.[0]
+            if (f) handleFile(f)
+          }}
+        >
+          <input
+            ref={inputRef}
+            type="file"
+            accept=".pdf,image/*,.eml"
+            className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f) }}
+          />
+
+          {uploading ? (
+            <>
+              <Loader2 size={28} className="mx-auto text-cortex-amber animate-spin mb-2" />
+              <div className="text-[13px] text-cortex-ink font-semibold">解析中…</div>
+              <div className="text-[10px] text-cortex-muted mt-1">Gemini Vision · 約 5-30 秒</div>
+            </>
+          ) : hasExtracted ? (
+            <>
+              <FileText size={28} className="mx-auto text-cortex-green mb-2" />
+              <div className="text-[13px] text-cortex-ink font-semibold">{data.rfqFileName}</div>
+              <div className="text-[11px] text-cortex-green font-bold mt-1">
+                <CheckCircle2 size={11} className="inline -mt-px mr-0.5" />
+                AI 解析完成 · 整體信心 {overall}%
+                {data.rfqIsStub && <span className="ml-2 text-amber-700 bg-cortex-amber-bg px-1.5 py-0.5 rounded text-[9px]">stub mock</span>}
+              </div>
+              <button
+                onClick={(e) => { e.stopPropagation(); inputRef.current?.click() }}
+                className="text-[10px] text-cortex-ocean hover:underline mt-1.5"
+              >重新上傳</button>
+            </>
+          ) : (
+            <>
+              <Upload size={28} className="mx-auto text-cortex-cyan mb-2" />
+              <div className="text-[13px] text-cortex-ink font-semibold">拖檔到此處或點擊選擇</div>
+              <div className="text-[11px] text-cortex-muted mt-1">PDF / 圖檔 / .eml · ≤ 25 MB</div>
+            </>
+          )}
+
+          {uploadErr && (
+            <div className="text-[11px] text-red-600 bg-cortex-red-bg/40 mt-2 px-2 py-1.5 rounded">
+              <AlertTriangle size={10} className="inline -mt-px mr-1" />
+              {uploadErr}
+            </div>
+          )}
         </div>
 
         {/* AI prefilled fields */}
         <div className="bg-white border border-cortex-line rounded-lg p-3.5">
-          <div className="text-[11px] text-cortex-muted font-bold tracking-widest mb-2.5">AI 預填 · 業務 confirm 即可</div>
-          {fields.map((f) => (
-            <div key={f.key} className="flex items-center gap-2.5 mb-2 text-[12px]">
-              <div className="w-14 text-cortex-muted text-[11px]">{f.label}</div>
-              <input
-                type="text"
-                value={(data as any)[f.key]}
-                onChange={(e) => onChange({ [f.key]: e.target.value } as any)}
-                className="flex-1 px-2 py-1 border border-cortex-line rounded text-[12px] font-mono bg-white text-cortex-ink focus:outline-none focus:border-cortex-cyan"
+          <div className="text-[11px] text-cortex-muted font-bold tracking-widest mb-2.5">
+            AI 預填 · 業務 confirm 即可
+            {!hasExtracted && <span className="ml-2 text-amber-600 text-[10px] font-normal italic">(等檔案上傳)</span>}
+          </div>
+          {fields.map((f) => {
+            const conf = data.rfqConfidence?.[f.cfKey] ?? 0
+            const confColor = conf >= 80 ? 'text-cortex-green bg-cortex-green-bg' :
+                              conf >= 60 ? 'text-amber-700 bg-cortex-amber-bg'   :
+                              conf > 0   ? 'text-red-700 bg-cortex-red-bg/50'     :
+                                           'text-cortex-muted bg-cortex-line-2'
+            return (
+              <div key={f.key} className="flex items-center gap-2.5 mb-2 text-[12px]">
+                <div className="w-14 text-cortex-muted text-[11px]">{f.label}</div>
+                <input
+                  type="text"
+                  value={(data as any)[f.key] ?? ''}
+                  onChange={(e) => onChange({ [f.key]: e.target.value } as any)}
+                  className="flex-1 px-2 py-1 border border-cortex-line rounded text-[12px] font-mono bg-white text-cortex-ink focus:outline-none focus:border-cortex-cyan"
+                  placeholder={!hasExtracted ? '—' : ''}
+                />
+                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${confColor}`}>
+                  {conf > 0 ? `${conf}%` : '—'}
+                </span>
+              </div>
+            )
+          })}
+
+          {/* 規格 / 備註(較長) */}
+          {hasExtracted && (
+            <>
+              <div className="text-[10px] text-cortex-muted mt-3 mb-1">📏 規格摘要</div>
+              <textarea
+                value={data.specs || ''}
+                onChange={(e) => onChange({ specs: e.target.value })}
+                className="w-full px-2 py-1.5 border border-cortex-line rounded text-[11px] font-mono bg-white text-cortex-ink focus:outline-none focus:border-cortex-cyan resize-y"
+                rows={2}
+                placeholder="—"
               />
-              <span className="text-[9px] font-bold text-cortex-green bg-cortex-green-bg px-1.5 py-0.5 rounded">
-                {f.conf}%
-              </span>
-            </div>
-          ))}
+              <div className="text-[10px] text-cortex-muted mt-2 mb-1">📝 備註</div>
+              <textarea
+                value={data.notes || ''}
+                onChange={(e) => onChange({ notes: e.target.value })}
+                className="w-full px-2 py-1.5 border border-cortex-line rounded text-[11px] font-mono bg-white text-cortex-ink focus:outline-none focus:border-cortex-cyan resize-y"
+                rows={2}
+                placeholder="—"
+              />
+            </>
+          )}
         </div>
       </div>
 
-      {/* AI panel — navy gradient */}
+      {/* AI panel — navy gradient(真資料 driven) */}
       <div className="bg-gradient-to-b from-cortex-navy to-cortex-teal rounded-[10px] p-4 text-white">
         <div className="flex items-center gap-1.5 mb-2.5">
           <span className="text-lg">🤖</span>
           <span className="text-[13px] font-bold text-cortex-cyan tracking-wide">AI 助手 · #1 RFQ 解析</span>
         </div>
-        <div className="text-[11px] text-cortex-cyan-bg leading-relaxed mb-3.5">
-          已掃 PDF 7 頁 · 抓出客戶 / 料號 / 數量 / 交期 / 規格 5 項<br />
-          整體信心度 <strong className="text-cortex-cyan">92%</strong>
-        </div>
 
-        <div className="border-t border-white/15 pt-3">
-          <div className="text-[10px] font-bold text-cortex-amber mb-1.5 inline-flex items-center gap-0.5">
-            <AlertTriangle size={10} /> 規格不清(2 處)
+        {!hasExtracted ? (
+          <div className="text-[11px] text-cortex-cyan-bg leading-relaxed">
+            上傳客戶 RFQ(PDF / 圖 / email)→ Gemini Vision 自動抽 customer / part_no / quantity / due_date / specs / notes 6 項<br /><br />
+            <span className="text-cortex-amber italic">業務原本 30 分鐘讀完手填,現在 5-30 秒解析完</span>
           </div>
-          <div className="text-[10px] text-cortex-cyan-bg leading-relaxed">
-            • 電壓未填(5V / 9V?)<br />
-            • RoHS 是否要求未提
-          </div>
-          <div className="text-[9px] text-amber-300 mt-2 italic">→ 系統將列入 Step 2 Q&amp;A 草稿</div>
-        </div>
+        ) : (
+          <>
+            <div className="text-[11px] text-cortex-cyan-bg leading-relaxed mb-3.5">
+              {data.rfqIsStub
+                ? <>📌 LLM 不可用 · 顯示 stub mock<br />(設 <code className="bg-black/30 px-1 rounded">PROJECTS_PLATFORM_USE_LLM=true</code> 後跑真 Gemini)</>
+                : <>已掃 RFQ · 抽出 6 欄位<br />整體信心度 <strong className={overallColor}>{overall}%</strong></>}
+            </div>
 
-        <div className="mt-3.5 pt-3 border-t border-white/15 text-[9px] text-slate-400 italic leading-relaxed">
-          解析時間 0.8 秒 · Gemini Flash · 業務原本要花 30 分鐘讀完 PDF 手填
-        </div>
+            {(data.rfqWarnings?.length || 0) > 0 && (
+              <div className="border-t border-white/15 pt-3">
+                <div className="text-[10px] font-bold text-cortex-amber mb-1.5 inline-flex items-center gap-0.5">
+                  <AlertTriangle size={10} /> 警示({data.rfqWarnings!.length} 處)
+                </div>
+                <ul className="text-[10px] text-cortex-cyan-bg leading-relaxed space-y-0.5">
+                  {data.rfqWarnings!.map((w, i) => <li key={i}>• {w}</li>)}
+                </ul>
+                <div className="text-[9px] text-amber-300 mt-2 italic">→ 系統將列入 Step 2 Q&amp;A 草稿</div>
+              </div>
+            )}
+
+            {(data.rfqMissing?.length || 0) > 0 && (
+              <div className="border-t border-white/15 pt-3 mt-3">
+                <div className="text-[10px] font-bold text-red-300 mb-1.5">未找到的欄位</div>
+                <div className="text-[10px] text-cortex-cyan-bg/80">
+                  {data.rfqMissing!.join(' · ')}
+                </div>
+              </div>
+            )}
+
+            <div className="mt-3.5 pt-3 border-t border-white/15 text-[9px] text-slate-400 italic leading-relaxed">
+              {data.rfqIsStub ? 'stub mock 模式' : 'Gemini Vision · 自動 fallback stub'}
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

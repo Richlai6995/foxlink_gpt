@@ -110,18 +110,36 @@ async function advance(db, stageId, user, { notes } = {}) {
   // 寫 SYSTEM 訊息到 announcement(讓所有人看到 stage 推進)
   await _postAnnouncement(db, stage.project_id, stage, nextStage, user, notes, isLast);
 
-  // #9 Notification dispatch
+  // #9 Notification dispatch(fire-and-forget)
   try {
-    require('./notificationEngine').dispatch('STAGE_GATE', {
+    const notify = require('./notificationEngine');
+    notify.dispatch(db, 'STAGE_GATE', {
       project_id: stage.project_id,
-      stage_from: stage.stage_code,
-      stage_to: nextStage?.stage_code || null,
-      project_closed: isLast,
       actor: user.id,
       title: isLast ? `✅ Stage ${stage.stage_code} 完成 · 專案結案` : `✅ Stage ${stage.stage_code} → ${nextStage?.stage_code}`,
-    });
+      body: notes || (isLast ? '所有 stage 完成,專案進入 CLOSED 狀態' : `業務確認進入 ${nextStage?.stage_code}`),
+      link_url: `/projects-platform/projects/${stage.project_id}`,
+    }).catch((e) => log.warn(`STAGE_GATE notify async failed: ${e.message}`));
   } catch (e) {
     log.warn(`notify STAGE_GATE failed: ${e.message}`);
+  }
+
+  // WebSocket broadcast — stage 切換時讓 WarRoom ribbon 即時 refresh
+  try {
+    const sock = require('../../services/socketService');
+    sock.emitProjectStageAdvanced(stage.project_id, {
+      from_stage_code: stage.stage_code,
+      from_stage_order: stage.stage_order,
+      to_stage_code: nextStage?.stage_code || null,
+      to_stage_id: nextStage?.id || null,
+      project_closed: isLast,
+      actor_user_id: user.id,
+    });
+    if (isLast) {
+      sock.emitProjectLifecycleChanged(stage.project_id, { to: 'CLOSED', from: 'ACTIVE', actor_user_id: user.id });
+    }
+  } catch (e) {
+    log.warn(`socket emit stage advance failed: ${e.message}`);
   }
 
   log.log(

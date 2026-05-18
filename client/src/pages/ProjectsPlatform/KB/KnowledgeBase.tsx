@@ -10,8 +10,8 @@
  *   ACTIVE → CLOSED → fork → scrub pipeline → 進沉澱 KB
  */
 
-import { useState } from 'react'
-import { Database, Archive, MessageSquare, FileText, ListChecks, Paperclip, FolderArchive, Search, AlertTriangle, Lock, Loader2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Database, Archive, MessageSquare, FileText, ListChecks, Paperclip, FolderArchive, Search, AlertTriangle, Lock, Loader2, History, Zap, RefreshCw, Sparkles, Cpu } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
 import { api } from '../api'
 import { useCrumbs } from '../Shell/PlatformContext'
@@ -66,27 +66,73 @@ type RealChunk = {
   project_id: number
   kind: string
   content: string
+  title?: string | null
   is_sediment: number
   scrubbed: number
   scrub_note?: string | null
   created_at: string
+  _signal?: 'vector' | 'fulltext' | 'hybrid' | 'like'
+  _score?: number
+  embedding_model?: string | null
+  embedded_at?: string | null
+}
+
+type SearchMode = 'auto' | 'vector' | 'fulltext' | 'like'
+
+type AuditRow = {
+  id: number
+  project_id: number
+  action: string
+  actor_user_id: number | null
+  actor_name?: string | null
+  chunks_total: number
+  chunks_copied: number
+  chunks_scrubbed: number
+  embed_model?: string | null
+  embed_count?: number
+  duration_ms?: number | null
+  notes?: string | null
+  created_at: string
+}
+
+const SIGNAL_BADGE: Record<string, { label: string; bg: string; Icon: any }> = {
+  vector:   { label: '向量',      bg: 'bg-purple-100 text-purple-700',    Icon: Sparkles },
+  fulltext: { label: '全文索引',  bg: 'bg-cortex-cyan-bg text-cortex-teal', Icon: Zap },
+  hybrid:   { label: '混合 RRF',  bg: 'bg-gradient-to-r from-purple-100 to-cortex-cyan-bg text-cortex-teal', Icon: Sparkles },
+  like:     { label: 'LIKE 退化', bg: 'bg-cortex-amber-bg text-amber-800',  Icon: Search },
 }
 
 export default function KnowledgeBase() {
   useCrumbs([{ label: 'KB / 知識庫' }])
-  const { token } = useAuth() as any
+  const { token, user } = useAuth() as any
   const [layer, setLayer] = useState<Layer>('live')
   const [search, setSearch] = useState('')
   const [results, setResults] = useState<RealChunk[]>([])
   const [searching, setSearching] = useState(false)
+  const [mode, setMode] = useState<SearchMode>('auto')
+  const [projectFilter, setProjectFilter] = useState('')
+
+  // Audit
+  const [auditOpen, setAuditOpen] = useState(false)
+  const [auditRows, setAuditRows] = useState<AuditRow[]>([])
+  const [auditLoading, setAuditLoading] = useState(false)
+  const [refork, setRefork] = useState(false)
+
+  const isAdmin = user?.role === 'admin'
 
   const runSearch = async () => {
     if (!search.trim()) { setResults([]); return }
     setSearching(true)
     try {
-      const r = await api.get<{ results: RealChunk[] }>(
+      const params = new URLSearchParams({
+        q: search,
+        layer,
+        mode,
+      })
+      if (projectFilter && Number(projectFilter) > 0) params.set('project_id', String(projectFilter))
+      const r = await api.get<{ results: RealChunk[]; mode?: string }>(
         token,
-        `/kb/search?q=${encodeURIComponent(search)}&layer=${layer}`,
+        `/kb/search?${params}`,
       )
       setResults(r.results || [])
     } catch (e: any) {
@@ -96,6 +142,44 @@ export default function KnowledgeBase() {
     }
   }
 
+  const loadAudit = async (pid: number) => {
+    setAuditLoading(true)
+    try {
+      const r = await api.get<{ audit: AuditRow[] }>(token, `/kb/audit/${pid}`)
+      setAuditRows(r.audit || [])
+    } catch (e: any) {
+      setAuditRows([])
+    } finally {
+      setAuditLoading(false)
+    }
+  }
+
+  const doRefork = async () => {
+    if (!projectFilter || Number(projectFilter) <= 0) {
+      alert('請先在「project filter」輸入專案 id')
+      return
+    }
+    if (!window.confirm(`確定要重 fork project #${projectFilter}? (force 會刪舊沉澱 chunk)`)) return
+    setRefork(true)
+    try {
+      const r = await api.post(token, `/kb/fork/${Number(projectFilter)}`, { force: true, notes: 'manual UI re-fork' })
+      alert(`重 fork OK · copied=${(r as any).copied} scrubbed=${(r as any).scrubbed}`)
+      loadAudit(Number(projectFilter))
+    } catch (e: any) {
+      alert('重 fork 失敗:' + e.message)
+    } finally {
+      setRefork(false)
+    }
+  }
+
+  // 切到「審計」自動載 audit(若有 project_id)
+  useEffect(() => {
+    if (auditOpen && projectFilter && Number(projectFilter) > 0) {
+      loadAudit(Number(projectFilter))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auditOpen, projectFilter])
+
   return (
     <div className="space-y-4">
       {/* Page head */}
@@ -104,7 +188,25 @@ export default function KnowledgeBase() {
           <h1 className="text-2xl font-extrabold text-cortex-ink tracking-tight">📚 KB · 知識庫</h1>
           <div className="text-[12px] text-cortex-muted mt-1">spec §7 · 雙層架構(Live + 沉澱)· RAG 友善 · 機密 / 非機密不混(§7.10)</div>
         </div>
-        <div className="flex gap-2 items-center">
+        <div className="flex gap-2 items-center flex-wrap">
+          <input
+            type="number"
+            value={projectFilter}
+            onChange={(e) => setProjectFilter(e.target.value)}
+            placeholder="project id(可空)"
+            className="h-8 px-2 border border-cortex-line bg-white rounded text-[12px] focus:outline-none focus:border-cortex-cyan w-32 font-mono"
+          />
+          <select
+            value={mode}
+            onChange={(e) => setMode(e.target.value as SearchMode)}
+            className="h-8 px-2 border border-cortex-line bg-white rounded text-[12px] focus:outline-none focus:border-cortex-cyan"
+            title="搜尋模式"
+          >
+            <option value="auto">auto (hybrid)</option>
+            <option value="vector">vector only</option>
+            <option value="fulltext">Oracle Text</option>
+            <option value="like">LIKE only</option>
+          </select>
           <div className="relative">
             <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-cortex-muted" />
             <input
@@ -123,8 +225,89 @@ export default function KnowledgeBase() {
             {searching ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
             搜尋
           </button>
+          <button
+            onClick={() => setAuditOpen((v) => !v)}
+            disabled={!projectFilter}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] border border-cortex-line bg-white rounded hover:bg-cortex-bg disabled:opacity-40"
+            title="須輸入 project id"
+          >
+            <History size={12} /> 審計
+          </button>
+          {isAdmin && (
+            <button
+              onClick={doRefork}
+              disabled={refork || !projectFilter}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] bg-cortex-amber text-cortex-navy rounded hover:opacity-90 disabled:opacity-40 font-semibold"
+              title="強制重 fork(會刪舊沉澱 chunk · admin only)"
+            >
+              {refork ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+              重 fork
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Audit log panel(toggle 開才顯)*/}
+      {auditOpen && projectFilter && (
+        <div className="bg-white border border-cortex-line rounded-xl p-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-[12px] font-bold text-cortex-ink inline-flex items-center gap-1.5">
+              <History size={13} /> Sediment 審計記錄 · project #{projectFilter}
+            </div>
+            <span className="text-[10px] text-cortex-muted">{auditRows.length} 筆</span>
+          </div>
+          {auditLoading ? (
+            <div className="text-center text-cortex-muted text-[12px] py-3">
+              <Loader2 size={14} className="inline animate-spin mr-1" /> 載入中…
+            </div>
+          ) : auditRows.length === 0 ? (
+            <div className="text-center text-cortex-muted text-[12px] py-3 italic">
+              尚無記錄 · 結案 fork 觸發時會在此列出
+            </div>
+          ) : (
+            <table className="w-full text-[11px]">
+              <thead className="text-[9px] text-cortex-muted uppercase tracking-wider border-b border-cortex-line">
+                <tr>
+                  <th className="text-left py-1 px-2">動作</th>
+                  <th className="text-left py-1 px-2">執行者</th>
+                  <th className="text-right py-1 px-2">chunks</th>
+                  <th className="text-right py-1 px-2">scrubbed</th>
+                  <th className="text-right py-1 px-2">embed</th>
+                  <th className="text-right py-1 px-2">耗時 (ms)</th>
+                  <th className="text-left py-1 px-2">時間</th>
+                  <th className="text-left py-1 px-2">備註</th>
+                </tr>
+              </thead>
+              <tbody>
+                {auditRows.map((a) => (
+                  <tr key={a.id} className="border-b border-cortex-line/40 hover:bg-cortex-line-2/30">
+                    <td className="py-1.5 px-2">
+                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                        a.action === 'fork' ? 'bg-cortex-green-bg text-cortex-green' :
+                        a.action === 're_fork' ? 'bg-cortex-amber-bg text-amber-800' :
+                        a.action === 'embed' ? 'bg-purple-100 text-purple-700' :
+                        a.action === 'error' ? 'bg-cortex-red-bg text-red-700' :
+                        'bg-cortex-line-2 text-cortex-text'
+                      }`}>{a.action}</span>
+                    </td>
+                    <td className="py-1.5 px-2">{a.actor_name || `user#${a.actor_user_id || '?'}`}</td>
+                    <td className="py-1.5 px-2 text-right font-mono">{a.chunks_copied}/{a.chunks_total}</td>
+                    <td className="py-1.5 px-2 text-right font-mono">{a.chunks_scrubbed}</td>
+                    <td className="py-1.5 px-2 text-right font-mono">
+                      {a.embed_model ? `${a.embed_count} · ${a.embed_model.split('-').pop()}` : '—'}
+                    </td>
+                    <td className="py-1.5 px-2 text-right text-cortex-muted">{a.duration_ms || '—'}</td>
+                    <td className="py-1.5 px-2 text-cortex-muted text-[10px]">
+                      {new Date(a.created_at).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    </td>
+                    <td className="py-1.5 px-2 text-[10px] text-cortex-text">{a.notes || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       {/* Layer toggle */}
       <div className="bg-white border border-cortex-line rounded-xl p-3.5 flex items-center gap-3.5 flex-wrap">
@@ -184,29 +367,50 @@ export default function KnowledgeBase() {
       {results.length > 0 && (
         <div className="bg-gradient-to-br from-cortex-cyan-bg/40 to-white border border-cortex-cyan/30 rounded-xl p-4">
           <div className="text-[11px] font-bold text-cortex-teal mb-2">
-            🔍 後端真實搜尋結果(query: "{search}" · {layer})· {results.length} 筆
+            🔍 後端真實搜尋結果(query: "{search}" · {layer} · mode={mode})· {results.length} 筆
           </div>
-          <div className="space-y-1.5 max-h-[280px] overflow-y-auto">
-            {results.map((c) => (
-              <div key={c.id} className="bg-white border border-cortex-line rounded p-2.5 text-[12px]">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-[10px] font-mono text-cortex-ocean font-bold">#{c.id}</span>
-                  <span className="text-[10px] bg-cortex-bg text-cortex-text px-1.5 py-0.5 rounded">{c.kind}</span>
-                  <span className="text-[10px] text-cortex-muted">project #{c.project_id}</span>
-                  {Number(c.scrubbed) === 1 && (
-                    <span className="text-[10px] bg-cortex-amber-bg text-amber-800 px-1.5 py-0.5 rounded font-bold">已 scrub</span>
+          <div className="space-y-1.5 max-h-[400px] overflow-y-auto">
+            {results.map((c) => {
+              const sig = c._signal && SIGNAL_BADGE[c._signal]
+              return (
+                <div key={c.id} className="bg-white border border-cortex-line rounded p-2.5 text-[12px]">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <span className="text-[10px] font-mono text-cortex-ocean font-bold">#{c.id}</span>
+                    <span className="text-[10px] bg-cortex-bg text-cortex-text px-1.5 py-0.5 rounded">{c.kind}</span>
+                    <span className="text-[10px] text-cortex-muted">project #{c.project_id}</span>
+                    {sig && (
+                      <span className={`text-[10px] inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded font-bold ${sig.bg}`}>
+                        <sig.Icon size={9} /> {sig.label}
+                      </span>
+                    )}
+                    {typeof c._score === 'number' && (
+                      <span className="text-[9px] font-mono text-cortex-ocean">
+                        score {c._score.toFixed(3)}
+                      </span>
+                    )}
+                    {c.embedding_model && (
+                      <span className="text-[9px] text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded font-mono inline-flex items-center gap-0.5">
+                        <Cpu size={8} /> {c.embedding_model.split('-').pop()}
+                      </span>
+                    )}
+                    {Number(c.scrubbed) === 1 && (
+                      <span className="text-[10px] bg-cortex-amber-bg text-amber-800 px-1.5 py-0.5 rounded font-bold">已 scrub</span>
+                    )}
+                    {Number(c.is_sediment) === 1 && (
+                      <span className="text-[10px] bg-cortex-amber-bg text-amber-800 px-1.5 py-0.5 rounded font-bold">📦 沉澱</span>
+                    )}
+                    <span className="ml-auto text-[10px] text-cortex-muted">{new Date(c.created_at).toLocaleString('zh-TW')}</span>
+                  </div>
+                  {c.title && (
+                    <div className="text-[11px] font-semibold text-cortex-ink mb-0.5">{c.title}</div>
                   )}
-                  {Number(c.is_sediment) === 1 && (
-                    <span className="text-[10px] bg-cortex-amber-bg text-amber-800 px-1.5 py-0.5 rounded font-bold">📦 沉澱</span>
+                  <div className="text-cortex-ink leading-relaxed line-clamp-3">{c.content}</div>
+                  {c.scrub_note && (
+                    <div className="text-[10px] text-amber-700 mt-1 italic">{c.scrub_note}</div>
                   )}
-                  <span className="ml-auto text-[10px] text-cortex-muted">{new Date(c.created_at).toLocaleString('zh-TW')}</span>
                 </div>
-                <div className="text-cortex-ink leading-relaxed line-clamp-3">{c.content}</div>
-                {c.scrub_note && (
-                  <div className="text-[10px] text-amber-700 mt-1 italic">{c.scrub_note}</div>
-                )}
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}

@@ -129,4 +129,139 @@ router.get('/notification-log', asyncHandler(async (req, res) => {
   });
 }));
 
+// ============================================================================
+// Sprint H — Role grants admin API(spec §17)
+// ============================================================================
+const userRoles = require('../services/userRoleService');
+const adminTesting = require('../services/adminTestingService');
+const _db = () => require('../../database-oracle').db;
+
+/** GET /roles — 13 role definitions */
+router.get('/roles', asyncHandler(async (req, res) => {
+  const roles = await userRoles.listRoleDefinitions(_db());
+  res.json({ roles, total: roles.length });
+}));
+
+/**
+ * GET /users/search?q= — admin 用 user LOV(不卡 project membership)
+ *   不帶 q → 前 30 active user
+ *   帶 q   → username / name / employee_id 模糊
+ */
+router.get('/users/search', asyncHandler(async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  const db = _db();
+  let rows;
+  if (q.length < 1) {
+    rows = await db.prepare(
+      `SELECT id, username, name, employee_id, email, dept_name
+         FROM users WHERE status = 'active' ORDER BY id DESC FETCH FIRST 30 ROWS ONLY`,
+    ).all().catch(() => []);
+  } else {
+    rows = await db.prepare(
+      `SELECT id, username, name, employee_id, email, dept_name
+         FROM users WHERE status = 'active'
+           AND (UPPER(username) LIKE UPPER(?) OR UPPER(name) LIKE UPPER(?) OR employee_id LIKE ?)
+         ORDER BY username FETCH FIRST 30 ROWS ONLY`,
+    ).all(`%${q}%`, `%${q}%`, `%${q}%`).catch(() => []);
+  }
+  res.json({
+    users: rows.map((u) => ({
+      user_id: Number(u.id),
+      username: u.username,
+      name: u.name,
+      employee_id: u.employee_id,
+      email: u.email,
+      dept_name: u.dept_name,
+    })),
+  });
+}));
+
+/** GET /role-grants — list all grants(可 filter role_code)*/
+router.get('/role-grants', asyncHandler(async (req, res) => {
+  const grants = await userRoles.listAllGrants(_db(), {
+    roleCode: req.query.role_code || null,
+    includeRevoked: req.query.include_revoked === '1',
+  });
+  res.json({ grants, total: grants.length });
+}));
+
+/** GET /role-grants/user/:userId — list grants for a specific user */
+router.get('/role-grants/user/:userId', asyncHandler(async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!userId) return res.status(400).json({ error: 'invalid userId' });
+  const grants = await userRoles.listGrants(_db(), userId, {
+    includeRevoked: req.query.include_revoked === '1',
+  });
+  res.json({ user_id: userId, grants });
+}));
+
+/**
+ * POST /role-grants — admin grant a role
+ *  body: { user_id, role_code, scope_type='GLOBAL', scope_values?, expires_at?, reason? }
+ */
+router.post('/role-grants', asyncHandler(async (req, res) => {
+  try {
+    const r = await userRoles.grant(_db(), {
+      adminUserId: req.user.id,
+      userId: Number(req.body?.user_id),
+      roleCode: req.body?.role_code,
+      scopeType: req.body?.scope_type,
+      scopeValues: req.body?.scope_values,
+      expiresAt: req.body?.expires_at,
+      reason: req.body?.reason,
+    });
+    res.status(201).json(r);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+}));
+
+/** DELETE /role-grants/:grantId — revoke */
+router.delete('/role-grants/:grantId', asyncHandler(async (req, res) => {
+  try {
+    const r = await userRoles.revoke(
+      _db(),
+      Number(req.params.grantId),
+      req.user.id,
+      req.body?.reason,
+    );
+    res.json(r);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+}));
+
+// ─── Admin testing mode ────────────────────────────────────────────────────
+/** POST /testing-mode/enter — admin 切入 testing mode */
+router.post('/testing-mode/enter', asyncHandler(async (req, res) => {
+  try {
+    const r = await adminTesting.enter(_db(), {
+      userId: req.user.id,
+      reason: req.body?.reason,
+      durationMinutes: req.body?.duration_minutes,
+    });
+    res.status(201).json(r);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+}));
+
+/** POST /testing-mode/exit — 結束 */
+router.post('/testing-mode/exit', asyncHandler(async (req, res) => {
+  const r = await adminTesting.exit(_db(), { userId: req.user.id });
+  res.json(r);
+}));
+
+/** GET /testing-mode/active — 看自己是否在 testing mode */
+router.get('/testing-mode/active', asyncHandler(async (req, res) => {
+  const r = await adminTesting.getActiveSession(_db(), req.user.id);
+  res.json({ in_testing_mode: !!r, session: r });
+}));
+
+/** GET /testing-mode/sessions — 列最近 N 筆(audit)*/
+router.get('/testing-mode/sessions', asyncHandler(async (req, res) => {
+  const list = await adminTesting.listRecent(_db(), { limit: Number(req.query.limit) || 50 });
+  res.json({ sessions: list });
+}));
+
 module.exports = router;

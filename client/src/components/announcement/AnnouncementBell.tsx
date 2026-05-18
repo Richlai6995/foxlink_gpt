@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Bell, X, Info, CheckCircle, XCircle, Mic } from 'lucide-react'
+import { Bell, X, Info, CheckCircle, XCircle, Mic, AlertTriangle, Briefcase, Pause } from 'lucide-react'
 import api from '../../lib/api'
 import { useAuth } from '../../context/AuthContext'
 import { useAnnouncementSocket } from '../../hooks/useAnnouncementSocket'
@@ -98,7 +98,8 @@ export default function AnnouncementBell() {
   }, [fetchActive, fetchNotifications])
 
   // socket.io push:admin 變動公告時即時 refetch(秒級)
-  useAnnouncementSocket(fetchActive)
+  // 也 listen projects-platform 通知,收到即時 refetch user_notifications(不等 20s poll)
+  useAnnouncementSocket(fetchActive, () => fetchNotifications())
 
   useEffect(() => {
     if (!open) return
@@ -174,6 +175,14 @@ export default function AnnouncementBell() {
   const notifIcon = (type: string) => {
     if (type === 'transcribe_job_done') return <CheckCircle size={14} className="text-green-500" />
     if (type === 'transcribe_job_failed') return <XCircle size={14} className="text-red-500" />
+    // projects-platform 通知(notificationEngine)
+    if (type?.startsWith('proj_')) {
+      if (type.includes('BLOCKER'))      return <AlertTriangle size={14} className="text-red-500" />
+      if (type.includes('STAGE_GATE'))   return <CheckCircle size={14} className="text-amber-500" />
+      if (type.includes('PAUSED'))       return <Pause size={14} className="text-slate-500" />
+      if (type.includes('high_'))        return <AlertTriangle size={14} className="text-red-500" />
+      return <Briefcase size={14} className="text-cyan-600" />
+    }
     return <Mic size={14} className="text-blue-500" />
   }
 

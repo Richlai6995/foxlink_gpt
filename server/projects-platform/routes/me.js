@@ -23,7 +23,7 @@ const router = express.Router();
  *   }
  */
 router.get('/visibility', asyncHandler(async (req, res) => {
-  const v = determineVisibility(req.user);
+  const v = await determineVisibility(req.user);
   res.json({
     can_see: v.can_see,
     mode: v.mode,
@@ -32,7 +32,7 @@ router.get('/visibility', asyncHandler(async (req, res) => {
       internal_admin: v.mode === 'admin',
       dashboard:      v.can_see,
       projects_list:  v.can_see,
-      wizard:         v.can_see && (v.mode === 'admin' || v.mode === 'pilot'),
+      wizard:         v.can_see && (v.mode === 'admin' || v.mode === 'pilot' || v.mode === 'user'),
     },
     // 給診斷頁顯示用 — admin 可以照這個 id 抄進 PILOT_USERS
     user: req.user ? {
@@ -41,6 +41,17 @@ router.get('/visibility', asyncHandler(async (req, res) => {
       role: req.user.role,
     } : null,
   });
+}));
+
+/**
+ * GET /api/projects/me/roles — 列當前 user 的 active role grants
+ * Sprint H 新增,給 sidebar / wizard / WarRoom 判定 super_user / director 等
+ */
+router.get('/roles', asyncHandler(async (req, res) => {
+  if (!req.user?.id) return res.json({ roles: [] });
+  const userRoles = require('../services/userRoleService');
+  const roles = await userRoles.getEffectiveRoles(require('../../database-oracle').db, req.user.id);
+  res.json({ roles, total: roles.length, user_id: req.user.id });
 }));
 
 module.exports = router;

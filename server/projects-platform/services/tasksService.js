@@ -183,9 +183,36 @@ async function update(db, taskId, patch) {
     `UPDATE project_tasks SET ${updates.join(', ')} WHERE id = ?`,
   ).run(...params);
 
-  // 若 status 到 DONE,觸發下游 dependency 算 due_at
+  // 若 status 到 DONE,觸發下游 dependency 算 due_at + 寫 Live KB chunk(spec §7)
   if (patch.status === 'DONE') {
     await _recomputeDownstream(db, taskId);
+
+    // Sprint J:task DONE 自動寫 KB chunk(讓沉澱時帶上 task 完成軌跡)
+    try {
+      const t = await db.prepare(`
+        SELECT id, project_id, title, description, accountable_role, primary_owner_user_id, is_confidential
+          FROM project_tasks WHERE id = ?
+      `).get(taskId);
+      if (t) {
+        const kb = require('./kbPipeline');
+        const content = [
+          `[task DONE] ${t.title || ''}`,
+          t.description ? String(t.description).slice(0, 500) : '',
+          t.accountable_role ? `accountable: ${t.accountable_role}` : '',
+        ].filter(Boolean).join('\n');
+        await kb.writeLiveChunk(db, {
+          projectId: Number(t.project_id),
+          kind: 'task',
+          sourceId: Number(t.id),
+          content,
+          title: t.title,
+          tags: ['task_done', t.accountable_role].filter(Boolean),
+          isConfidential: Number(t.is_confidential) === 1,
+        });
+      }
+    } catch (e) {
+      log.warn(`task DONE writeLiveChunk failed: ${e.message}`);
+    }
   }
 
   log.log(`task ${taskId} updated`);

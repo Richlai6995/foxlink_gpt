@@ -170,6 +170,34 @@ projectScoped.get('/:cid/messages/pinned', asyncHandler(async (req, res) => {
   res.json({ messages });
 }));
 
+// ─── POST /:cid/bot — Sprint I AI Bot 詢問 ────────────────────────
+// Body: { question }
+// 回 { message_id, content, llm_used, fallback_reason?, context, scrub_keys_count }
+projectScoped.post('/:cid/bot', asyncHandler(async (req, res) => {
+  const db = getDb();
+  const cid = Number(req.params.cid);
+  await _assertChannelInProject(db, cid, req.project.id);
+  await _assertCanReadChannel(db, cid, req);
+
+  const question = String(req.body?.question || '').trim();
+  if (!question) return res.status(400).json({ error: 'question required' });
+
+  const botService = require('../services/botService');
+  const { getDemoRole } = require('../middleware/confidentialityMiddleware');
+  try {
+    const r = await botService.ask(db, {
+      projectId: req.project.id,
+      channelId: cid,
+      user: req.user,
+      question,
+      demoRole: getDemoRole(req),
+    });
+    res.status(201).json(r);
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+}));
+
 // Body: { content, message_type?, reply_to_message_id?, attachment_ids?, requires_read_receipt? }
 projectScoped.post('/:cid/messages', asyncHandler(async (req, res) => {
   const db = getDb();

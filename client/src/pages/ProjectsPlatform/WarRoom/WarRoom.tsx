@@ -15,7 +15,7 @@
 
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, MessageSquare, Kanban, FileText, Users, Lock, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, MessageSquare, Kanban, FileText, Users, Lock, BarChart3, type LucideIcon } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
 import { api, type ProjectDetail } from '../api'
 import { useCrumbs, usePlatform } from '../Shell/PlatformContext'
@@ -24,15 +24,18 @@ import StageRibbon from './StageRibbon'
 import ChatTab from './ChatTab'
 import TasksTab from './TasksTab'
 import MembersTab from './MembersTab'
+import BiTab from './BiTab'
 import WarRoomHeaderActions from './WarRoomHeaderActions'
+import { useProjectsPlatformSocket } from '../../../hooks/useProjectsPlatformSocket'
 
-type Tab = 'chat' | 'tasks' | 'form' | 'members'
+type Tab = 'chat' | 'tasks' | 'form' | 'members' | 'bi'
 
 const TABS: { key: Tab; label: string; icon: LucideIcon }[] = [
   { key: 'chat',    label: '聊天',     icon: MessageSquare },
   { key: 'tasks',   label: '任務看板', icon: Kanban },
   { key: 'form',    label: '報價 Form', icon: FileText },
   { key: 'members', label: '成員',     icon: Users },
+  { key: 'bi',      label: 'BI 戰情',  icon: BarChart3 },
 ]
 
 export default function WarRoom() {
@@ -68,6 +71,19 @@ export default function WarRoom() {
     reload()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, token, demoRole])  // demoRole 變 → 重拉(機密案 OUTSIDER 看 403)
+
+  // WebSocket — stage 推進 / lifecycle 變動時自動 reload(別人推 stage 後本機也跟上)
+  const { lastEvent } = useProjectsPlatformSocket({
+    projectId: project?.id || null,
+  })
+  useEffect(() => {
+    if (!lastEvent) return
+    if (lastEvent.type === 'proj_stage_advanced' || lastEvent.type === 'proj_lifecycle_changed') {
+      // 自己推的也會收到(server 沒 filter),但 reload 是 idempotent,沒問題
+      reload()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastEvent])
 
   if (err) {
     return (
@@ -148,6 +164,7 @@ export default function WarRoom() {
         {tab === 'tasks'   && <TasksTab   project={project} />}
         {tab === 'form'    && <FormStub   project={project} />}
         {tab === 'members' && <MembersTab project={project} />}
+        {tab === 'bi'      && <BiTab      project={project} />}
       </div>
     </div>
   )

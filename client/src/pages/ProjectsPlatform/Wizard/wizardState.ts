@@ -15,10 +15,26 @@
 export type WizardData = {
   // Step 1
   rfqFileName: string
+  rfqFilePath?: string         // server 端暫存路徑(extract-rfq 回來的)
+  rfqMimeType?: string
   customer: string
   partNo: string
   quantity: string
   dueDate: string
+  specs?: string               // AI #1 抽出的規格摘要
+  notes?: string               // AI #1 抽出的備註
+  rfqConfidence?: {            // 每欄位 + 整體 confidence(0-100)
+    customer?: number
+    part_no?: number
+    quantity?: number
+    due_date?: number
+    specs?: number
+    notes?: number
+    overall?: number
+  }
+  rfqMissing?: string[]        // AI 未找到的欄位 key 列表
+  rfqWarnings?: string[]       // AI 警示(電壓不清、RoHS 未提等)
+  rfqIsStub?: boolean          // true = LLM 不可用 fallback stub mock
 
   // Step 2
   selectedHistoryId: string | null

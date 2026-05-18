@@ -182,6 +182,61 @@ router.post('/:projectId/lifecycle',
   }),
 );
 
+// ─── POST /:projectId/super-join ───────────────────────────────────
+// Sprint H — bu_super / hq_super 主動加入專案(spec §13.3)
+router.post('/:projectId/super-join',
+  asyncHandler(async (req, res) => {
+    const db = getDb();
+    const projectSuperUserService = require('../services/projectSuperUserService');
+    try {
+      const r = await projectSuperUserService.selfJoin(db, {
+        userId: req.user.id,
+        projectId: Number(req.params.projectId),
+        reason: req.body?.reason,
+      });
+      res.status(201).json(r);
+    } catch (e) {
+      if (/not authorized|not found/.test(e.message)) {
+        return res.status(403).json({ error: e.message });
+      }
+      throw e;
+    }
+  }),
+);
+
+// ─── POST /:projectId/super-leave ──────────────────────────────────
+router.post('/:projectId/super-leave',
+  asyncHandler(async (req, res) => {
+    const projectSuperUserService = require('../services/projectSuperUserService');
+    const r = await projectSuperUserService.selfLeave(getDb(), {
+      userId: req.user.id,
+      projectId: Number(req.params.projectId),
+    });
+    res.json(r);
+  }),
+);
+
+// ─── GET /:projectId/super-users ───────────────────────────────────
+// 列某專案的所有 active super_users
+router.get('/:projectId/super-users',
+  loadProject(),
+  asyncHandler(async (req, res) => {
+    const projectSuperUserService = require('../services/projectSuperUserService');
+    const list = await projectSuperUserService.listForProject(getDb(), Number(req.params.projectId));
+    res.json({ super_users: list });
+  }),
+);
+
+// ─── GET /me/super-projects ────────────────────────────────────────
+// 列當前 user 自己 self-joined 的專案
+router.get('/me/super-projects',
+  asyncHandler(async (req, res) => {
+    const projectSuperUserService = require('../services/projectSuperUserService');
+    const list = await projectSuperUserService.listForUser(getDb(), req.user.id);
+    res.json({ projects: list });
+  }),
+);
+
 // ─── helpers ────────────────────────────────────────────────────────
 function safeJson(v, fallback) {
   if (!v) return fallback;

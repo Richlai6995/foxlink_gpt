@@ -28,6 +28,8 @@ import TaskTemplates from './Admin/TaskTemplates'
 import NotificationRules from './Admin/NotificationRules'
 import Connections from './Admin/Connections'
 import ConfidentialPolicies from './Admin/ConfidentialPolicies'
+import RoleGrants from './Admin/RoleGrants'
+import MessagesPage from './Messages/MessagesPage'
 import InternalAdminOverview from './InternalAdmin/Overview'
 import SystemHealthPage from './InternalAdmin/SystemHealth'
 
@@ -105,12 +107,14 @@ export default function ProjectsPlatformPage() {
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="ai-acceleration" element={<AiAcceleration />} />
           <Route path="kb" element={<KnowledgeBase />} />
+          <Route path="messages" element={<MessagesPage />} />
           <Route path="projects/:id" element={<WarRoom />} />
           <Route path="admin/form-templates" element={<FormTemplates />} />
           <Route path="admin/task-templates" element={<TaskTemplates />} />
           <Route path="admin/notification-rules" element={<NotificationRules />} />
           <Route path="admin/connections" element={<Connections />} />
           <Route path="admin/confidential-policies" element={<ConfidentialPolicies />} />
+          <Route path="admin/role-grants" element={<AdminGuard mode={v.mode}><RoleGrants /></AdminGuard>} />
           <Route path="internal-admin/overview" element={<AdminGuard mode={v.mode}><InternalAdminOverview /></AdminGuard>} />
           <Route path="internal-admin/system-health" element={<AdminGuard mode={v.mode}><SystemHealthPage /></AdminGuard>} />
           <Route path="*" element={<Navigate to="" replace />} />

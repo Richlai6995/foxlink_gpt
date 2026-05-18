@@ -597,10 +597,13 @@ export default function AiDashboardPage() {
     )
   }
 
+  // Sprint L · spec §10.5 embed mode:projects-platform 從 WarRoom iframe 進來時,隱藏左側欄(專案頁已有導覽)
+  const embedMode = searchParams.get('embed') === '1'
+
   return (
     <div className="h-screen bg-gray-50 flex">
-      {/* 左側欄 — 主題/任務 */}
-      <div data-region="sidebar" className="w-64 bg-white border-r border-gray-200 flex flex-col flex-shrink-0">
+      {/* 左側欄 — 主題/任務 · embed 模式隱藏 */}
+      <div data-region="sidebar" className={`w-64 bg-white border-r border-gray-200 flex flex-col flex-shrink-0 ${embedMode ? 'hidden' : ''}`}>
         <div className="p-4 border-b border-gray-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <BarChart3 size={16} className="text-orange-400" />

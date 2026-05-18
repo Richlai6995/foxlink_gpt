@@ -61,8 +61,9 @@ function initSocket(httpServer) {
     const user = socket.user;
     if (!user) return socket.disconnect();
 
-    // 自動加入個人房間
+    // 自動加入個人房間(feedback 既有 + projects-platform 共用同一個 user room)
     socket.join(`feedback:user:${user.id}`);
+    socket.join(`user:${user.id}`);  // 通用 user channel(projects 用)
 
     // 管理員自動加入 admin 房間
     if (user.role === 'admin') {
@@ -78,7 +79,7 @@ function initSocket(httpServer) {
       if (ticketId) socket.leave(`ticket:${ticketId}`);
     });
 
-    // Typing indicator
+    // Typing indicator(feedback ticket)
     socket.on('typing', ({ ticketId }) => {
       socket.to(`ticket:${ticketId}`).emit('user_typing', {
         ticketId,
@@ -92,6 +93,57 @@ function initSocket(httpServer) {
         ticketId,
         userId: user.id,
       });
+    });
+
+    // ─── Projects-Platform rooms ───────────────────────────────────────
+    // 加入專案房間 / 頻道房間(ACL 由 server 端 check)
+    socket.on('join_project', async ({ projectId }) => {
+      if (!projectId) return;
+      if (await _canAccessProject(user, projectId)) {
+        socket.join(`proj:${projectId}`);
+      }
+    });
+    socket.on('leave_project', ({ projectId }) => {
+      if (projectId) socket.leave(`proj:${projectId}`);
+    });
+
+    socket.on('join_project_channel', async ({ projectId, channelId }) => {
+      if (!projectId || !channelId) return;
+      if (await _canAccessProjectChannel(user, projectId, channelId)) {
+        socket.join(`proj:channel:${channelId}`);
+      }
+    });
+    socket.on('leave_project_channel', ({ channelId }) => {
+      if (channelId) socket.leave(`proj:channel:${channelId}`);
+    });
+
+    // Project channel typing
+    socket.on('proj_typing', ({ channelId }) => {
+      if (channelId) {
+        socket.to(`proj:channel:${channelId}`).emit('proj_user_typing', {
+          channelId,
+          userId: user.id,
+          name: user.name || user.username,
+        });
+      }
+    });
+    socket.on('proj_stop_typing', ({ channelId }) => {
+      if (channelId) {
+        socket.to(`proj:channel:${channelId}`).emit('proj_user_stop_typing', {
+          channelId, userId: user.id,
+        });
+      }
+    });
+
+    // ─── Comm rooms(Sprint K)─────────────────────────────────────────
+    socket.on('join_comm_room', async ({ roomId }) => {
+      if (!roomId) return;
+      if (await _canAccessCommRoom(user, roomId)) {
+        socket.join(`comm:room:${roomId}`);
+      }
+    });
+    socket.on('leave_comm_room', ({ roomId }) => {
+      if (roomId) socket.leave(`comm:room:${roomId}`);
     });
 
     socket.on('disconnect', () => {});
@@ -146,6 +198,98 @@ function emitAnnouncementChanged(payload = {}) {
   io.emit('announcement:changed', { kind: payload.kind || 'invalidate', at: Date.now() });
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Projects-Platform emit helpers
+// ─────────────────────────────────────────────────────────────────────
+
+/** 推送新訊息到專案頻道(ChatTab 即時更新)*/
+function emitProjectMessage(channelId, message) {
+  if (!io || !channelId) return;
+  io.to(`proj:channel:${channelId}`).emit('proj_new_message', { channel_id: channelId, message });
+}
+
+/** 推送 stage 推進到全專案 room(WarRoom ribbon refresh)*/
+function emitProjectStageAdvanced(projectId, data) {
+  if (!io || !projectId) return;
+  io.to(`proj:${projectId}`).emit('proj_stage_advanced', { project_id: projectId, ...data });
+}
+
+/** 推送 lifecycle 變動到全專案 room */
+function emitProjectLifecycleChanged(projectId, data) {
+  if (!io || !projectId) return;
+  io.to(`proj:${projectId}`).emit('proj_lifecycle_changed', { project_id: projectId, ...data });
+}
+
+/** 推送 user 個人通知(in_app_badge — 鈴鐺立即跳)*/
+function emitProjectUserNotification(userId, payload) {
+  if (!io || !userId) return;
+  io.to(`user:${userId}`).emit('proj_notification', payload);
+}
+
+/** 推送跨專案 comm room 訊息(Sprint K · 域內通訊)*/
+function emitCommMessage(roomId, message) {
+  if (!io || !roomId) return;
+  io.to(`comm:room:${roomId}`).emit('comm_new_message', { room_id: roomId, message });
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// ACL helpers
+// ─────────────────────────────────────────────────────────────────────
+
+async function _canAccessProject(user, projectId) {
+  if (!user?.id) return false;
+  if (user.role === 'admin') return true;
+  try {
+    const db = require('../database-oracle').db;
+    const row = await db.prepare(
+      `SELECT id FROM projects WHERE id = ?
+        AND (pm_user_id = ? OR sales_user_id = ? OR created_by_user_id = ?
+             OR id IN (SELECT project_id FROM project_members WHERE user_id = ?))`,
+    ).get(projectId, user.id, user.id, user.id, user.id);
+    return !!row;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function _canAccessCommRoom(user, roomId) {
+  if (!user?.id) return false;
+  try {
+    const db = require('../database-oracle').db;
+    const commRoomService = require('../projects-platform/services/commRoomService');
+    const room = await commRoomService.get(db, roomId);
+    if (!room) return false;
+    return commRoomService.canAccess(db, user.id, room);
+  } catch (e) {
+    return false;
+  }
+}
+
+async function _canAccessProjectChannel(user, projectId, channelId) {
+  if (!user?.id) return false;
+  if (user.role === 'admin') return true;
+  if (!(await _canAccessProject(user, projectId))) return false;
+  try {
+    const db = require('../database-oracle').db;
+    // PM 全 channel 看;一般 member 看 default channel + 自己 participant 的 channel
+    const proj = await db.prepare(
+      `SELECT pm_user_id FROM projects WHERE id = ?`,
+    ).get(projectId);
+    if (Number(proj?.pm_user_id) === Number(user.id)) return true;
+    const ch = await db.prepare(
+      `SELECT is_default FROM project_channels WHERE id = ? AND project_id = ?`,
+    ).get(channelId, projectId);
+    if (!ch) return false;
+    if (Number(ch.is_default) === 1) return true;
+    const cp = await db.prepare(
+      `SELECT id FROM channel_participants WHERE channel_id = ? AND user_id = ? AND left_at IS NULL`,
+    ).get(channelId, user.id);
+    return !!cp;
+  } catch (e) {
+    return false;
+  }
+}
+
 module.exports = {
   initSocket,
   getIO,
@@ -155,4 +299,10 @@ module.exports = {
   emitUserNotification,
   emitTicketAssigned,
   emitAnnouncementChanged,
+  // projects-platform
+  emitProjectMessage,
+  emitProjectStageAdvanced,
+  emitProjectLifecycleChanged,
+  emitProjectUserNotification,
+  emitCommMessage,
 };

@@ -21,19 +21,24 @@ function getOrCreateSocket(): Socket | null {
   return sharedSocket
 }
 
-export function useAnnouncementSocket(onChanged: () => void) {
+export function useAnnouncementSocket(onChanged: () => void, onProjectNotification?: (n: any) => void) {
   // 用 ref 抓最新 callback 避免 socket 反覆重連
   const cbRef = useRef(onChanged)
   cbRef.current = onChanged
+  const projNotifRef = useRef(onProjectNotification)
+  projNotifRef.current = onProjectNotification
 
   useEffect(() => {
     const socket = getOrCreateSocket()
     if (!socket) return
     refCount++
-    const handler = () => cbRef.current?.()
+    const handler      = () => cbRef.current?.()
+    const projHandler  = (n: any) => projNotifRef.current?.(n)
     socket.on('announcement:changed', handler)
+    socket.on('proj_notification', projHandler)
     return () => {
       socket.off('announcement:changed', handler)
+      socket.off('proj_notification', projHandler)
       refCount--
       if (refCount <= 0 && sharedSocket) {
         sharedSocket.disconnect()

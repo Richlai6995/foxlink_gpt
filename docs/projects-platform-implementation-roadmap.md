@@ -717,45 +717,156 @@ server/projects-platform/
 
 ### Phase 2 任務切片
 
-#### Sprint H — super_user 機制 + 13 角色身份完整(1 週)
+#### Sprint H — super_user 機制 + 13 角色身份完整 ✅ ship 2026-05-18
 
-- migration 011:`user_role_definitions` / `user_role_grants` / `organization_units` / `user_organization_memberships`
-- 13 個 role seed(對齊 spec §17):project.* 6 + system / workflow / data / notification / confidential.policy_editor / admin / admin.testing 7
-- `project_super_users` 表 + self-join 機制(BU/HQ 經管讀,admin 開放寫)
-- Admin UI 真實授權介面(目前 stub)
+- ✅ migration 008(原 plan 011 — 整理改名):`user_role_definitions` / `user_role_grants` / `organization_units` / `user_organization_memberships` / `project_super_users` / `admin_testing_sessions`
+- ✅ 13 個 role seed(對齊 spec §17):project.* 6 + workflow.* 2 + data / notification / confidential 3 + admin / admin.testing 2
+- ✅ `project_super_users` 表 + self-join 機制(`POST /projects/:id/super-join`,bu_super 卡 BU scope / hq_super GLOBAL)
+- ✅ Admin UI 真實授權介面 `Admin/RoleGrants.tsx`(13 role 左欄 + grants 表格 + 新增 modal + 撤回 + LOV user 搜尋)
+- ✅ `userRoleService.hasRole / getEffectiveRoles / grant / revoke` 完整
+- ✅ `adminTestingService.enter / exit / getActiveSession`(1h timeout)
+- ✅ Visibility middleware GA mode 真接 `user_role_grants`(有 project.* role 自動 visible)
+- ✅ Project ACL 中 super_user + director 算 member(可進 WarRoom)
+- ✅ `notification engine admin + super_user` target 真 union user_role_grants 撈
 
-#### Sprint I — Bot 整合(Cortex 既有 Bot 4 類能力)(1 週)
+API:
+- `GET /api/projects/internal-admin/roles` — 13 role definitions
+- `GET /api/projects/internal-admin/role-grants?role_code=` — 列 grants
+- `POST /api/projects/internal-admin/role-grants` — 授予
+- `DELETE /api/projects/internal-admin/role-grants/:id` — 撤回
+- `POST /api/projects/internal-admin/testing-mode/enter|exit`
+- `POST /api/projects/projects/:id/super-join | super-leave`
+- `GET /api/projects/projects/me/super-projects` — 自己 self-joined 的
+- `GET /api/projects/me/roles` — 自己 active grants
 
-- 接 Cortex existing skill / MCP / DIFY infrastructure
-- Bot 4 類能力分級:
-  1. 問答檢索(RAG,預設開放)
-  2. 執行工具 read-only(沿用 user 權限)
-  3. 產生內容(draft → user confirm)
-  4. 執行動作 write(白名單 + 二次確認)
-- @AI / @bot in any channel,scrub 機密前送 LLM,結果替回 alias
+#### Sprint I — Bot 整合(Phase 1 MVP) ✅ ship 2026-05-18
 
-#### Sprint J — 結案 fork + KB sediment production(1.5 週)
+Phase 1 MVP 範圍:
+- ✅ `@bot` / `@ai` mention in any channel(MessageInput 自動偵測 prefix)
+- ✅ Tier 1 問答檢索 — RAG over `project_kb_chunks`(live+sediment)+ 最近 25 channel 訊息
+- ✅ Tier 3 內容生成 — Bot 回 AI_INSIGHT 訊息(自動同步 #announcement,user 可 Pin)
+- ✅ **兩段 scrub**:
+  1. confidentialityMiddleware 套 user 視角(機密欄位 Tier-? / [CUST_REDACTED])
+  2. plugin scrub_rules 把 customer / amount 等 raw 換成 [CUST_01] / [PRICE_01] 才送 LLM
+  3. LLM 回應 unscrub 替回 user 視角
+- ✅ Bot 永遠以發起 user 身份(spec §12.3)— 機密 / KB / ERP 都受 user 權限
+- ✅ LLM 失敗 graceful fallback(post stub message + log 原因,demo 不炸)
+- ✅ Gemini Flash + llmQueue token bucket 限速
 
-- migration 014:`kb_chunks` 加 `embedding VECTOR(768)` + Oracle Text 索引
-- Phase 1 minimal fork(規則 scrub) → production:
-  - 嚴格 audit trail(誰 fork、何時、scrub 哪幾欄)
-  - 不可逆 + admin override
-  - embedding pipeline(Gemini embedding-001 → 768 vec)
-  - Title embedding 強化(spec §7.9.3)
-  - RAG 跨沉澱召回 production
-- Live KB 自動 chunk(form / task / attach 也接,不只 chat)
+Phase 2 補:
+- ⏳ Tier 2 read-only tool(ERP procedure / MCP / Cortex skill registry)
+- ⏳ Tier 4 write action(白名單 + 二次確認 UI:改 form / 建任務 / 推進 stage)
+- ⏳ Multi-turn 對話 context(Bot 記得上次問題)
+- ⏳ Token 計量 per-project + 不卡 user(spec §12.6)
+- ⏳ Form 內「✨ AI 建議」按鈕(Surface 2,spec §12.1)
+- ⏳ Plugin scrub_rules production(目前 botService 內 hardcoded base map)
 
-#### Sprint K — 域內通訊(跨專案 channel)(1 週)
+新增:
+- backend `services/botService.js` — 主入口 `ask(db, {projectId, channelId, user, question, demoRole})`
+- backend route `POST /api/projects/projects/:id/channels/:cid/bot`
+- frontend `MessageInput.tsx` — `@bot` / `@ai` prefix 偵測 + 紫色 mode UI + bot thinking indicator
 
-- spec §13.5 + §B.2:同事業處內,跨專案討論的 group channel
-- migration:`organization_channels` 表
-- 跨專案 member 自動可看 BU-level channel
-- 訊息流跟 project channel 一樣 schema,只是 scope = organization
+#### Sprint J — 結案 fork + KB sediment production ✅ ship 2026-05-18
 
-#### Sprint L — AI 戰情 embed(0.5 週)
+- ✅ migration 009(原 plan 014 — 整理改名):
+  - `project_kb_chunks.embedding VECTOR(768, FLOAT32)`(spec §7.9 主信號)
+  - `project_kb_chunks.title_embedding VECTOR(768, FLOAT32)`(spec §7.9.3 Title boost)
+  - `project_kb_chunks.title / embedding_model / embedded_at / scrub_map_json`
+  - `project_kb_sediment_audit` 表(audit trail)
+  - 3 個索引:VECTOR INDEX × 2(content + title) + Oracle Text INDEX(content)+ SYNC 1min
+- ✅ Production fork:
+  - 嚴格 audit trail(誰 fork、何時、chunks_total/copied/scrubbed、scrub_map JSON、duration_ms)
+  - **不可逆**(預設一次性 — 已 fork → skip + audit 留 `skip` action)
+  - **admin override**(`force:true` 刪舊重 fork,audit 留 `re_fork` action)
+  - `scrub_map_json` 記下每個被替的 raw → placeholder 對應
+  - 自動 kick off embedding pipeline(背景非同步,失敗 graceful)
+- ✅ Embedding pipeline:
+  - `kbEmbeddingService.embedChunk / embedProjectChunks`
+  - Gemini embedding-001 → 768 vec(env override 換模型 / dim)
+  - **三層 embedding**:content + title + (P3 可加 question-rewrite)
+  - p-limit(8 並行)+ llmQueue token bucket 限速
+  - Auto-embed on writeLiveChunk + on forkToSediment(可 `PROJECTS_KB_AUTO_EMBED=false` 關)
+- ✅ Hybrid search production:
+  - `mode=auto` — vector cosine + Oracle Text BM25 → Reciprocal Rank Fusion (K=60)
+  - `mode=vector` / `fulltext` / `like` 手動切
+  - Title embedding boost(content 70% + title 30%)
+  - Graceful fallback:vector 失敗 → full-text → LIKE
+- ✅ Live KB 自動 chunk:
+  - chat(messagesService 既有)
+  - **task DONE**(tasksService.update 加 hook,Sprint J 補)
+  - form(待 Sprint 後續 form builder ship)
+  - attach(待 Sprint 後續 attachment service ship)
 
-- 把 Cortex 既有 AI 戰情(BI dashboard)嵌進 ProjectsPlatform 詳細頁
-- 沿用 Cortex `/dashboard/boards` 路由,iframe 或 module federation 嵌入
+API:
+- `GET /api/projects/kb/search?q=&layer=&project_id=&mode=auto|vector|fulltext|like`
+- `GET /api/projects/kb/chunks/:projectId?layer=` — 補 `embedding_model / embedded_at / has_embedding / has_title_embedding`
+- `GET /api/projects/kb/audit/:projectId` — audit log
+- `POST /api/projects/kb/fork/:projectId { force, notes }` — PM/admin 手動 (re-)fork
+- `POST /api/projects/kb/embed/:projectId { sediment_only, force, limit }` — admin 批次 embed
+
+UI:
+- `KnowledgeBase.tsx` 加 mode 下拉 + project_id filter + 審計 toggle + admin 重 fork 按鈕
+- 搜尋結果每筆顯 signal badge(向量/全文索引/混合 RRF/LIKE 退化)+ score + embedding model
+
+#### Sprint K — 域內通訊(跨專案 channel) ✅ ship 2026-05-18
+
+對齊 spec §10.4 + §13.5。
+
+- ✅ migration 010(原 plan 用 `organization_channels` — 改名 `communication_rooms` 對齊 spec §10.4.2):
+  - `communication_rooms`(`room_type='org_group' | 'org_dm'`,`scope='cross_org' | 'cross_project' | 'global'`,DM 用 `dm_user_a_id / dm_user_b_id` UNIQUE)
+  - `comm_room_participants`(`user_id × room_id` UNIQUE,role + last_read_at + muted)
+  - `comm_room_messages`(獨立 schema,鏡像 project_messages 但不含 announcement_sync / project_id)
+- ✅ Service:
+  - `commRoomService.createGroup / findOrCreateDm / listForUser / listForBu / canAccess / selfJoin / addParticipant / removeParticipant / archive / markRead`
+  - `commMessageService.post / list / get / pin / unpin / softDelete`
+- ✅ ACL(spec §10.4 + §17):
+  - admin / hq_super / top_director 全看
+  - DM:只 dm_user_a_id / dm_user_b_id + admin
+  - global group(bu_id NULL):所有 user 可看
+  - BU group:`user_organization_memberships`(該 BU 成員)+ `project.bu_director / bu_super` scope_values 含 bu_id
+- ✅ Socket.io 即時推播:`comm:room:{roomId}` + `emitCommMessage` + `join_comm_room / leave_comm_room` + ACL check
+- ✅ Routes(`/api/projects/comm-rooms/*`):
+  - `GET /` — 我的 rooms(含 unread_count / last_message_at)
+  - `GET /bu/:buId` — 列 BU group rooms(super_user / director)
+  - `POST /groups` / `POST /dm` — 建立
+  - `GET / POST / DELETE /:roomId/participants/*`
+  - `POST /:roomId/join` — self-join BU room
+  - `POST /:roomId/read` — mark read
+  - `POST /:roomId/archive` — archive(owner / admin)
+  - `GET / POST /:roomId/messages`
+  - `POST /messages/:mid/pin | unpin` + `DELETE /messages/:mid`
+- ✅ Frontend:
+  - 新頁 `Messages/MessagesPage.tsx`(sidebar 「💌 訊息 · 域內」入口)
+  - 分割 layout:左欄 room 列表(含未讀紅點)+ 右欄 chat header / messages / input
+  - 「+ 新 Group」modal(name + description + bu_id + confidential)
+  - 「+ 新 DM」modal(user LOV 搜尋,reuse `/internal-admin/users/search`)
+  - Socket 即時推 `comm_new_message` → 自動 reload messages
+  - 不寫 KB(spec §10.4.4 DM 永不寫 / Group 預設不寫,P2C 補可選 pipeline)
+
+未來(Phase 2C+):
+- ⏳ Group 訊息可選寫 KB(spec §10.4.5)
+- ⏳ 機密 group 雙簽邀請 enforcement
+- ⏳ DM/Group typing indicator + read receipts
+- ⏳ `comm_room_messages.content` 加 Bot mention(`@bot`)— 套 botService(Sprint I)
+
+#### Sprint L — AI 戰情 embed ✅ ship 2026-05-18
+
+對齊 spec §10.5。
+
+- ✅ 走 **iframe 同源 embed**(非 module federation),零後端 migration
+- ✅ WarRoom 加第 5 個 tab「📊 BI 戰情」(`BiTab.tsx`):
+  - 左欄 design 清單 + 搜尋 + 「只看本案 BU」filter(client-side filter,reuse 既有 `GET /api/dashboard/topics`)
+  - 右欄 iframe `/dashboard?design={id}&project_id={pid}&embed=1`
+  - 「新分頁打開」link → 跳完整 AI 戰情頁
+- ✅ `AiDashboardPage.tsx` 加 `?embed=1` URL param 偵測,**自動隱藏內建左側 sidebar**(避免 iframe 雙層導覽)
+- ✅ 機密欄位繼承平台 `confidentialityMiddleware`(spec §10.5.2)— 不另寫 BI scrub
+- ✅ Same-origin 不另設 sandbox,沿用 user 既有 cookie auth
+
+未來(Phase 2C+):
+- ⏳ Backend `/api/dashboard/topics?bu_id=N` filter(目前 client-side filter)
+- ⏳ Dashboard query 真正吃 `project_id` filter(目前 URL 中是 metadata 不影響 query)
+- ⏳ 加 CSP header 強化 iframe 安全(spec §10.5.2 提到的選配)
+- ⏳ 主管「關注專案」頁的儀表板 tile / widget pin(spec §10.5.2)
 
 #### Sprint M — AI 13 項深化(2 週)
 

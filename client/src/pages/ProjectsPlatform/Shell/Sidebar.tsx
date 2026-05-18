@@ -21,7 +21,7 @@ import {
   Briefcase, CheckCircle2, LayoutGrid, BookOpen, Sparkles,
   DollarSign, Server, GraduationCap,
   FileText, ListTodo, ShieldCheck, Bell, Plug, Settings,
-  ShieldAlert, HeartPulse,
+  ShieldAlert, HeartPulse, Shield, MessageSquareText,
 } from 'lucide-react'
 import { useProjectsPlatformVisibility } from '../../../hooks/useProjectsPlatformVisibility'
 import { usePlatform } from './PlatformContext'
@@ -109,6 +109,7 @@ export default function Sidebar() {
           <NavItem to="/projects-platform" icon={Briefcase} label="我的專案" count={0} />
           <NavItem icon={CheckCircle2} label="我的任務" count={0} stub />
           <NavItem to="/projects-platform/dashboard" icon={LayoutGrid} label="跨專案儀表板" />
+          <NavItem to="/projects-platform/messages" icon={MessageSquareText} label={<>💌 訊息 <span className="ml-1 text-[9px] text-cortex-teal font-bold">域內</span></>} />
           <NavItem to="/projects-platform/kb" icon={BookOpen} label="KB / 知識庫" />
           <NavItem to="/projects-platform/ai-acceleration" icon={Sparkles} label={<span className="flex items-center gap-1.5">AI 加速 <span className="bg-gradient-to-br from-cortex-cyan to-cortex-teal text-white text-[9px] px-1.5 py-px rounded font-bold">10</span></span>} />
         </Section>
@@ -130,6 +131,7 @@ export default function Sidebar() {
 
         {v.mode === 'admin' && (
           <Section label="內部 Admin">
+            <NavItem to="/projects-platform/admin/role-grants" icon={Shield} label={<>角色授予 <span className="ml-1 text-[9px] text-cortex-cyan font-bold">13</span></>} />
             <NavItem to="/projects-platform/internal-admin/overview" icon={ShieldAlert} label="Internal Admin" />
             <NavItem to="/projects-platform/internal-admin/system-health" icon={HeartPulse} label="System Health" />
           </Section>
