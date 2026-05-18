@@ -228,6 +228,12 @@ export default function MCPServersPanel() {
         form.passthrough_md  ? 'text/markdown' : null,
         form.passthrough_html ? 'text/html'    : null,
       ].filter(Boolean).join(',') || 'text/html,text/markdown'
+      // 改名/改描述時,完全不送任何翻譯欄位,讓後端走 translateFields() retranslate
+      // (後端 PUT /:id 判斷是 binary:只要 name_zh !== undefined 就直接覆寫全部 6 欄,
+      //  所以不能只刪一半,否則另一半會被舊值覆寫)
+      const nameChanged = !!editing && form.name !== editing.name
+      const descChanged = !!editing && (form.description || null) !== (editing.description || null)
+      const finalTrans: TranslationData = (nameChanged || descChanged) ? {} : { ...trans }
       const payload = {
         ...form,
         api_key: form.api_key || null,
@@ -240,7 +246,7 @@ export default function MCPServersPanel() {
         passthrough_enabled: form.passthrough_enabled,
         passthrough_max_bytes: Math.max(1024, Number(form.passthrough_max_kb) * 1024),
         passthrough_mime_whitelist: mimeList,
-        ...trans,
+        ...finalTrans,
       }
       let res: any
       if (editing) {
