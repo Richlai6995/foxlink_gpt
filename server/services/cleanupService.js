@@ -205,7 +205,18 @@ async function runCleanup(db, settings) {
     stats.token_usage = r9.changes;
   }
 
-  // ── 9. session_files/(xlsx 等持久化上傳檔)— 比 session 短的 TTL ───────
+  // ── 9. API key usage log (外部 API 呼叫歷史紀錄) ───────────────────────────
+  const api_key_usage_days = parseInt(settings.api_key_usage_days || '90');
+  if (api_key_usage_days > 0) {
+    const apiCutoff = isoDate(api_key_usage_days);
+    const rA = await db.prepare(`
+      DELETE FROM api_key_usage_log
+      WHERE called_at < TO_TIMESTAMP(?, 'YYYY-MM-DD"T"HH24:MI:SS.FF3"Z"')
+    `).run(apiCutoff);
+    stats.api_key_usage_log = rA.changes;
+  }
+
+  // ── 10. session_files/(xlsx 等持久化上傳檔)— 比 session 短的 TTL ──────
   //    files_json 仍指這個路徑,被刪後 excel_query skill 會回「檔案已過期」
   //    給 LLM,LLM 可請使用者重新上傳。
   const session_files_days = parseInt(settings.session_files_days || '7');
@@ -331,6 +342,8 @@ async function loadSettings(db) {
     research_days:       parseInt(map.cleanup_research_days        || '90'),
     token_usage_days:    parseInt(map.cleanup_token_usage_days     || '365'),
     session_files_days:  parseInt(map.cleanup_session_files_days   || '7'),
+    // 外部 API 呼叫紀錄(api_key_usage_log)— 預設 90 天
+    api_key_usage_days:  parseInt(map.cleanup_api_key_usage_days   || '90'),
     // 訓練平台孤兒檔保護期(沒對應 DB course 且 N 天沒 touch 才清)。
     // 0 = 不啟用。預設 0 維持原本行為,使用者主動開才會清。
     training_orphan_grace_days: parseInt(map.cleanup_training_orphan_grace_days || '0'),

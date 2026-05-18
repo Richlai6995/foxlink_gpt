@@ -12,6 +12,7 @@ interface CleanupSettings {
   skill_days: number
   research_days: number
   token_usage_days: number
+  api_key_usage_days: number
   training_orphan_grace_days: number  // 0 = 不啟用
   auto_enabled: boolean
   auto_hour: number
@@ -27,6 +28,7 @@ interface CleanupStats {
   skill_call_logs: number
   research_jobs: number
   token_usage: number
+  api_key_usage_log?: number
   training_orphans_purged?: number
 }
 
@@ -36,6 +38,7 @@ const DEFAULT: CleanupSettings = {
   dify_days: 90, kb_query_days: 90,
   skill_days: 90, research_days: 90,
   token_usage_days: 365,
+  api_key_usage_days: 90,
   training_orphan_grace_days: 0,
   auto_enabled: false, auto_hour: 2,
 }
@@ -206,6 +209,15 @@ export default function DbMaintenance() {
         desc="清除早於此天數的深度研究任務及產出附件。"
       >
         <DaysInput label="研究任務保留天數" value={settings.research_days} onChange={(v) => set('research_days', v)} />
+      </Section>
+
+      {/* 外部 API 呼叫紀錄 */}
+      <Section
+        icon={<Zap size={16} className="text-amber-500" />}
+        title="外部 API 呼叫紀錄清除"
+        desc="清除早於此天數的 api_key_usage_log（每次外部 API 呼叫一筆,含 endpoint/狀態/acts_as/IP/錯誤訊息）。"
+      >
+        <DaysInput label="外部 API 紀錄保留天數" value={settings.api_key_usage_days} onChange={(v) => set('api_key_usage_days', v)} />
       </Section>
 
       {/* Token 使用統計 */}

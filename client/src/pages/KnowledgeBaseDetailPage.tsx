@@ -6,7 +6,7 @@ import {
   Upload, Trash2, RefreshCw, CheckCircle, XCircle, Clock,
   AlertCircle, Globe, Lock, ChevronDown, ChevronUp, Plus, X,
   User, Building2, Layers, BookOpen, Save, Target, Image, History,
-  Pencil, Check, Mail, ShieldAlert,
+  Pencil, Check, Mail, ShieldAlert, Activity, Key, UserCog,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import api from '../lib/api'
@@ -67,9 +67,9 @@ interface Grant {
 
 interface OrgOption { code?: string; name: string }
 
-type TabKey = 'docs' | 'images' | 'settings' | 'share' | 'search' | 'history'
+type TabKey = 'docs' | 'images' | 'settings' | 'share' | 'search' | 'history' | 'external'
 
-const TAB_KEYS: TabKey[] = ['docs', 'images', 'settings', 'share', 'search', 'history']
+const TAB_KEYS: TabKey[] = ['docs', 'images', 'settings', 'share', 'search', 'history', 'external']
 
 function DocIcon({ type }: { type: string }) {
   const t = (type || '').toLowerCase()
@@ -163,6 +163,7 @@ export default function KnowledgeBaseDetailPage() {
       case 'share':    return t('kb.detail.tabShare')
       case 'search':   return t('kb.detail.tabSearch')
       case 'history':  return t('kb.detail.tabHistory')
+      case 'external': return t('kb.detail.tabExternal')
     }
   }
 
@@ -308,6 +309,7 @@ export default function KnowledgeBaseDetailPage() {
                   {key === 'share'    && <Share2    size={14} className="inline mr-1.5" />}
                   {key === 'search'   && <Search    size={14} className="inline mr-1.5" />}
                   {key === 'history'  && <History   size={14} className="inline mr-1.5" />}
+                  {key === 'external' && <Activity  size={14} className="inline mr-1.5" />}
                   {tabLabel(key)}
                 </button>
               ))}
@@ -321,6 +323,7 @@ export default function KnowledgeBaseDetailPage() {
               {tab === 'share'    && <ShareTab     kb={kb} isOwner={kb.is_owner || isAdmin} />}
               {tab === 'search'   && <SearchTab    kb={kb} />}
               {tab === 'history'  && <QueryHistoryTab kbId={kb.id} />}
+              {tab === 'external' && <ExternalAccessLogTab kbId={kb.id} />}
             </div>
           </>
         )}
@@ -1630,6 +1633,166 @@ function QueryHistoryTab({ kbId }: { kbId: string }) {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+// ─── External Access Log Tab ───────────────────────────────────────────────
+// 給 KB owner / 編輯者看「過去 N 天我的 KB 被外部 API 動了什麼」。
+// 對應 GET /api/kb/:id/external-access-log。
+interface ExternalLogRow {
+  endpoint: string
+  method: string
+  status_code: number
+  resource_id: string | null
+  tokens_in: number
+  tokens_out: number
+  bytes_out: number
+  duration_ms: number
+  client_ip: string | null
+  error_message: string | null
+  called_at: string
+  api_key_id: string
+  api_key_name: string | null
+  key_prefix: string | null
+  acts_as_user_id: number | null
+  acts_as_name: string | null
+  acts_as_username: string | null
+}
+
+interface ExternalLogResp {
+  days: number
+  limit: number
+  summary: {
+    req_total: number
+    req_errors: number
+    bytes_out: number
+    distinct_keys: number
+    distinct_users: number
+  }
+  rows: ExternalLogRow[]
+}
+
+function ExternalAccessLogTab({ kbId }: { kbId: string }) {
+  const [data, setData] = useState<ExternalLogResp | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [days, setDays] = useState(30)
+
+  const load = useCallback(async () => {
+    setLoading(true); setError('')
+    try {
+      const res = await api.get(`/kb/${kbId}/external-access-log`, { params: { days, limit: 300 } })
+      setData(res.data)
+    } catch (e: any) {
+      setError(e.response?.data?.error || e.message)
+      setData(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [kbId, days])
+
+  useEffect(() => { load() }, [load])
+
+  if (loading) return <div className="p-6 text-center text-slate-400 text-sm">載入中...</div>
+  if (error) return (
+    <div className="p-10 text-center text-rose-500">
+      <AlertCircle size={36} className="mx-auto mb-3 opacity-50" />
+      <p className="text-sm">{error}</p>
+    </div>
+  )
+  if (!data || data.rows.length === 0) return (
+    <div className="p-4">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs text-slate-400">過去 {days} 天沒有外部 API 對此 KB 的存取紀錄。</p>
+        <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="text-xs border border-slate-300 rounded px-2 py-1">
+          <option value={7}>7 天</option>
+          <option value={30}>30 天</option>
+          <option value={90}>90 天</option>
+        </select>
+      </div>
+      <div className="p-10 text-center text-slate-400">
+        <Activity size={36} className="mx-auto mb-3 opacity-30" />
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <p className="text-xs text-slate-400">外部 API 透過金鑰呼叫此 KB 的紀錄。撤銷外部寫入權:把對應 service user 從「共享設定」移除。</p>
+        <div className="flex items-center gap-2">
+          <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="text-xs border border-slate-300 rounded px-2 py-1">
+            <option value={7}>過去 7 天</option>
+            <option value={30}>過去 30 天</option>
+            <option value={90}>過去 90 天</option>
+          </select>
+          <button onClick={load} className="p-1 text-slate-400 hover:text-slate-600" title="重新整理">
+            <RefreshCw size={14} />
+          </button>
+        </div>
+      </div>
+
+      {/* 總覽 */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+        <Stat label="呼叫總數" value={data.summary.req_total} />
+        <Stat label="錯誤數"   value={data.summary.req_errors} color={data.summary.req_errors > 0 ? 'text-rose-600' : ''} />
+        <Stat label="流量 KB"  value={Math.round(data.summary.bytes_out / 1024)} />
+        <Stat label="金鑰數"   value={data.summary.distinct_keys} />
+        <Stat label="Acts As 人數" value={data.summary.distinct_users} />
+      </div>
+
+      {/* 明細表 */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
+              <th className="py-2 pr-2 whitespace-nowrap">時間</th>
+              <th className="py-2 pr-2">Endpoint</th>
+              <th className="py-2 pr-2">狀態</th>
+              <th className="py-2 pr-2">API Key</th>
+              <th className="py-2 pr-2">Acts As</th>
+              <th className="py-2 pr-2">IP</th>
+              <th className="py-2 pr-2">操作資源</th>
+              <th className="py-2 pr-2">錯誤</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.rows.map((r, i) => (
+              <tr key={i} className="border-b border-slate-100 align-top hover:bg-slate-50">
+                <td className="py-1.5 pr-2 text-slate-500 whitespace-nowrap">{r.called_at}</td>
+                <td className="py-1.5 pr-2"><code className="text-xs">{r.method} {r.endpoint}</code></td>
+                <td className={`py-1.5 pr-2 ${r.status_code >= 400 ? 'text-rose-600' : 'text-emerald-600'}`}>{r.status_code}</td>
+                <td className="py-1.5 pr-2">
+                  <span className="inline-flex items-center gap-1 text-slate-600">
+                    <Key size={10} />
+                    <span title={r.key_prefix || ''}>{r.api_key_name || '—'}</span>
+                  </span>
+                </td>
+                <td className="py-1.5 pr-2">
+                  {r.acts_as_name ? (
+                    <span className="inline-flex items-center gap-1 text-slate-600">
+                      <UserCog size={10} />{r.acts_as_name}
+                    </span>
+                  ) : <span className="text-slate-300">—</span>}
+                </td>
+                <td className="py-1.5 pr-2 text-slate-500 font-mono">{r.client_ip || '—'}</td>
+                <td className="py-1.5 pr-2 text-slate-600 max-w-48 truncate" title={r.resource_id || ''}>{r.resource_id || '—'}</td>
+                <td className="py-1.5 pr-2 text-rose-600 max-w-40 truncate" title={r.error_message || ''}>{r.error_message || ''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function Stat({ label, value, color = '' }: { label: string; value: number | string; color?: string }) {
+  return (
+    <div className="bg-slate-50 rounded-lg p-3">
+      <p className="text-xs text-slate-500">{label}</p>
+      <p className={`text-lg font-semibold ${color || 'text-slate-800'}`}>{typeof value === 'number' ? value.toLocaleString() : value}</p>
     </div>
   )
 }

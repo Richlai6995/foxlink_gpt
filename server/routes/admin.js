@@ -1214,6 +1214,7 @@ router.put('/settings/cleanup', async (req, res) => {
       llm_days, scheduled_task_days, dify_days,
       kb_query_days, skill_days, research_days,
       token_usage_days,
+      api_key_usage_days,
       training_orphan_grace_days,
       auto_enabled, auto_hour,
     } = req.body;
@@ -1235,6 +1236,7 @@ router.put('/settings/cleanup', async (req, res) => {
       cleanup_skill_days:           clamp(skill_days, 90),
       cleanup_research_days:        clamp(research_days, 90),
       cleanup_token_usage_days:     clamp(token_usage_days, 365),
+      cleanup_api_key_usage_days:   clamp(api_key_usage_days, 90),
       cleanup_training_orphan_grace_days: clamp0(training_orphan_grace_days, 0),
       cleanup_auto_enabled:         auto_enabled ? '1' : '0',
       cleanup_auto_hour:            String(Math.min(23, Math.max(0, parseInt(auto_hour) || 2))),

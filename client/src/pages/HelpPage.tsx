@@ -5603,60 +5603,236 @@ VERTEX_MODEL_ALIAS_GEMINI_3_PRO_IMAGE_PREVIEW=gemini-2.5-flash-image-preview`}
 
       <Section id="a-api-keys" icon={<Key size={22} />} iconColor="text-amber-600" title="外部 API 金鑰管理">
         <Para>
-          外部 API 金鑰管理讓第三方系統可透過 REST API 安全存取 Cortex 的知識庫查詢服務，
-          位於後台管理的「外部 API 金鑰」頁籤（僅系統管理員可見）。
+          外部 API 金鑰讓第三方系統透過 REST API 存取知識庫(讀取、檢索、問答、上傳文件/圖、修改設定)。
+          位於後台「外部 API 金鑰」頁籤,僅系統管理員可見。金鑰格式為 <code className="bg-slate-100 px-1 rounded">fxlk_</code> 開頭、共 56 字。
         </Para>
 
-        <SubSection title="建立 API 金鑰">
-          <div className="space-y-3">
-            <StepItem num={1} title="點擊「新增 API 金鑰」" />
-            <StepItem num={2} title="填寫名稱（必填）與說明（選填）" desc="建議使用有意義的名稱，如「ERP 整合系統」「測試環境」" />
-            <StepItem num={3} title="選擇可存取的知識庫" desc="留空 = 可存取所有啟用的知識庫；勾選特定知識庫 = 限制存取範圍" />
-            <StepItem num={4} title="設定到期日期（選填）" desc="到期後金鑰自動停用，建議為對外提供的金鑰設定到期日" />
-            <StepItem num={5} title="點「建立」" desc="系統一次性顯示完整金鑰（格式 fk_sk_xxxx），請立即複製並安全保管，關閉後無法再查看" />
-          </div>
-          <NoteBox>金鑰建立後系統只儲存雜湊值，不保留明文。若遺失金鑰，只能刪除後重新建立。</NoteBox>
+        <NoteBox>
+          外部 API 端點為 <code>/api/v1/*</code>。預設 access control 把 <code>/api/v1</code> 列為 internal-only(外網一律 403)。
+          要對外開放需 ops 設定環境變數 <code>INTERNAL_ONLY_PATHS</code>(把 /api/v1 從清單移除)或 <code>EXTERNAL_ALLOWED_IPS</code> 指定來源 CIDR;同時建議搭配 API key 自身的 allowed_ips 做二層保護。
+        </NoteBox>
+
+        <SubSection title="架構:Service Account 模式">
+          <Para>
+            寫入操作(上傳文件、上傳圖、改 KB 設定等)<strong>必須綁定一個 real user</strong>(acts_as_user)。
+            所有寫入動作以該 user 身分執行,權限完全套用該 user 既有的 kb_access / owner / 配額;audit log 也記錄為該 user,並額外標記 via_api_key=&lt;id&gt;。
+          </Para>
+          <Table
+            headers={['層級', '檢查項目', '由誰負責']}
+            rows={[
+              ['1. API key',         'is_active / 未過期',                              'requireApiKey'],
+              ['2. IP allowlist',    'CIDR 比對(若有設)',                              'requireApiKey'],
+              ['3. Rate limit',      'per-key-per-minute(redis bucket)',              'requireApiKey'],
+              ['4. Scope',           '對應 endpoint 的 scope 是否勾選',                 'requireScope'],
+              ['5. Acts-As-User',    '寫入操作必須有綁定 user',                          'requireActsAsUser'],
+              ['6. KB 白名單',       'kbId 是否在 accessible_kbs 內',                   'checkKbAccessForWrite / getAccessibleKb'],
+              ['7. 保密 KB 開關',    'is_confidential=1 且 allow_confidential=0 → 擋',  'checkKbAccessForWrite / getAccessibleKb'],
+              ['8. 內部權限',        '走 user 的 kb_access / owner / 配額',             'internal handler(getEditableKb)'],
+            ]}
+          />
+          <TipBox>
+            八層由淺到深。寫入要全過,讀取走 1-4 + 6-7 + getAccessibleKb 內建檢查。設計原則:<strong>外部 API 不能繞過任何內部規則</strong>,只能在內部允許的範圍內動作。
+          </TipBox>
         </SubSection>
 
-        <SubSection title="API 金鑰管理欄位">
+        <SubSection title="建立 API 金鑰 SOP">
+          <div className="space-y-3">
+            <StepItem num={1} title="(建議)先建 service user" desc="到「使用者管理」開一個專用帳號,例如 svc_webhook_a / svc_erp_sync。專供 API 用,不給人登入。" />
+            <StepItem num={2} title="(若要寫保密 KB)KB owner 把 service user 加入共享" desc="KB 共享頁 → 新增 → grantee=該 user → permission=edit。owner 隨時可撤,立即生效。" />
+            <StepItem num={3} title="點「新增 API 金鑰」,填名稱、(選填)說明、到期日" />
+            <StepItem num={4} title="設定 Rate Limit / Acts As User / IP allowlist" desc="rate_limit_per_min 預設 60(0=不限);有寫 scope 時 Acts As User 必填;IP allowlist 接受換行或逗號分隔的 CIDR" />
+            <StepItem num={5} title="勾選 Scopes(分讀/寫兩區)" desc="預設只給 read-only 全套。寫入 scope 紅色標示,勾選後 Acts As User 必填" />
+            <StepItem num={6} title="(可選)勾「允許保密 KB」allow_confidential" desc="要對保密 KB 動作的話必勾。寫入仍要 KB owner 把 acts_as user 加進共享(步驟 2)" />
+            <StepItem num={7} title="勾選可存取 KB(留空 = 全部)" desc="白名單只控 KB 範圍。搭配 acts_as user 既有 kb_access 一起做雙層收斂" />
+            <StepItem num={8} title="點「建立金鑰」→ 立即複製 fxlk_..." desc="系統只儲存 sha256 hash,關閉視窗無法再查看。給外部系統前先存到 Vault / K8s Secret" />
+          </div>
+        </SubSection>
+
+        <SubSection title="可用 Scopes">
+          <Para>Scope 由前後端 catalog(<code>GET /api/api-keys/scopes</code>)同步,前端依 group 分讀寫兩區渲染。</Para>
           <Table
-            headers={['欄位', '說明']}
+            headers={['Scope', '群組', '對應端點', '需 Acts As']}
             rows={[
-              ['名稱', '金鑰識別標籤'],
-              ['前綴', '金鑰的可見前幾位（如 fk_sk_Ab...），用於識別但不洩漏完整金鑰'],
-              ['可存取知識庫', '顯示已授權的知識庫清單，或「全部」'],
-              ['狀態', '啟用 / 停用 / 已到期（超過到期日）'],
-              ['到期日期', '留空 = 永不過期'],
-              ['最後使用時間', '記錄上次使用此金鑰呼叫 API 的時間，可監控使用情況'],
-              ['建立者', '建立此金鑰的管理員帳號'],
+              ['kb:read',               '讀', 'GET /kb/list',                                                                  '—'],
+              ['kb:search',             '讀', 'POST /kb/search',                                                               '—'],
+              ['kb:chat',               '讀', 'POST /kb/chat(吃 LLM token,記在 KB owner 帳上)',                              '—'],
+              ['kb:image:read',         '讀', 'POST /kb/images/list、GET /kb/images/:id',                                      '—'],
+              ['kb:settings:write',     '寫', 'PUT /kb/:kbId',                                                                 '✓'],
+              ['kb:document:write',     '寫', 'POST/DELETE /kb/:kbId/documents/*、reparse',                                    '✓'],
+              ['kb:image:write',        '寫', 'POST/PATCH/DELETE /kb/:kbId/images/*、batch-delete、retry-caption',            '✓'],
+              ['kb:confidential:write', '寫', '附加給 settings:write,允許切換 is_confidential(acts_as 必須是 KB owner)',     '✓'],
             ]}
           />
         </SubSection>
 
-        <SubSection title="外部 API 使用方式">
-          <Para>第三方系統取得金鑰後，可呼叫以下 API 端點：</Para>
-          <CodeBlock>{`# 請求標頭
-Authorization: Bearer fk_sk_your_api_key_here
+        <SubSection title="完整端點清單">
+          <CodeBlock>{`# Header
+Authorization: Bearer fxlk_xxxxxxxxxxxxxxxxxxxxxxxx
 
-# 列出可用知識庫
-GET /api/v1/kb/list
+# ── 自描述(無需驗證)──
+GET    /api/v1/openapi.json
 
-# 語意搜尋知識庫
-POST /api/v1/kb/search
-{
-  "kb_id": 1,         // 知識庫 ID
-  "query": "產品規格",  // 搜尋問題
-  "top_k": 5          // 回傳筆數
-}
+# ── 讀取 ──
+GET    /api/v1/kb/list                                # 列可存取 KB(含 doc_count、tags、保密旗標、多語言名稱)
+POST   /api/v1/kb/search        { kb_id, query, top_k? }
+POST   /api/v1/kb/chat          { kb_id, question, model? }   # model 白名單:gemini-*
+POST   /api/v1/kb/images/list   { kb_id, limit?, offset? }
+GET    /api/v1/kb/images/:imageId                     # 直接回圖片 binary
 
-# 知識庫問答（AI 整合回答）
-POST /api/v1/kb/chat
-{
-  "kb_id": 1,
-  "question": "FL-X100 的最大電流是多少？",
-  "model": "flash"    // 使用的 LLM 模型 key
-}`}</CodeBlock>
-          <TipBox>API 金鑰存取受知識庫權限限制，若呼叫未授權的知識庫 ID 會回傳 403 錯誤。金鑰啟用/停用可即時生效，無需重啟服務。</TipBox>
+# ── 寫入(全部需 acts_as_user_id + 對應 scope)──
+PUT    /api/v1/kb/:kbId                               # { name?, description?, retrieval_mode?, ... }
+POST   /api/v1/kb/:kbId/documents                     # multipart files[](最多 20,單檔 200 MB)
+DELETE /api/v1/kb/:kbId/documents/:docId
+POST   /api/v1/kb/:kbId/documents/:docId/reparse      # { parse_mode?, pdf_ocr_mode?, extract_images? }
+POST   /api/v1/kb/:kbId/images                        # multipart files[](最多 10,單張 20 MB)
+PATCH  /api/v1/kb/:kbId/images/:imageId               # { caption } — 會自動重 embed 對應 chunk
+DELETE /api/v1/kb/:kbId/images/:imageId
+POST   /api/v1/kb/:kbId/images/batch-delete           # { ids: string[] } — 單次最多 200
+POST   /api/v1/kb/:kbId/images/:imageId/retry-caption # 重跑 vision caption(僅 manual 上傳的圖)`}</CodeBlock>
+        </SubSection>
+
+        <SubSection title="保密 KB 三條規則">
+          <Table
+            headers={['操作', '需要的條件']}
+            rows={[
+              ['讀取 / 檢索 / 問答 保密 KB',    'API key 勾 allow_confidential=1'],
+              ['寫入(上傳/改設定/刪)保密 KB',   'allow_confidential=1 + KB owner 把 acts_as user 加入 kb_access permission=edit'],
+              ['切換 is_confidential 旗標',     '上述兩條 + 勾 kb:confidential:write + acts_as user 必須是 KB owner(非分享 edit)'],
+            ]}
+          />
+          <NoteBox>
+            撤銷外部寫入權有兩個獨立 kill switch:(a) owner 從 kb_access 移除 acts_as user(立即,不影響 key 本身);(b) admin 停用 API key(立即,所有 KB 一起停)。建議優先用 (a),把控制權留給 owner。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="Rate Limit 與用量稽核">
+          <Para>
+            每把 key 設 <code>rate_limit_per_min</code>(預設 60,0=不限)。實作走 Redis sliding 1-min bucket,多 pod 共享。超量回 429 + Retry-After: 60;回應 Header 帶 X-RateLimit-Limit / X-RateLimit-Remaining。
+          </Para>
+          <Para>
+            每次呼叫(含被擋的 429 / 403)都會寫一筆 <code>api_key_usage_log</code>,完整稽核欄位:
+          </Para>
+          <Table
+            headers={['欄位', '內容']}
+            rows={[
+              ['endpoint / method / status_code', '哪條 API、HTTP 方法、回應碼'],
+              ['kb_id',                            '對哪個 KB(若有)'],
+              ['acts_as_user_id',                  '寫入操作的 service user(讀取通常為 null)'],
+              ['client_ip',                        '來源 IP(IPv4-mapped IPv6 已自動 normalize)'],
+              ['resource_id',                      '次級資源:doc:<docId> / image:<imageId> / upload:<檔名> / batch:<ids>'],
+              ['error_message',                    '4xx/5xx 時的原因(如 "Missing scope: kb:document:write")'],
+              ['tokens_in / tokens_out',           'chat 端點的 LLM token 消耗'],
+              ['bytes_out / duration_ms',          '流量 + 耗時'],
+              ['called_at',                        '時間戳'],
+            ]}
+          />
+          <Para>
+            Admin UI 點任一 key 的 📊 BarChart 圖示開「用量明細」modal,查 7 天總覽 + 依端點分布 + 最近 50 筆(每一筆都顯示 Acts As / IP / 資源 / 錯誤)。
+          </Para>
+          <NoteBox>
+            <strong>保留期</strong>:預設 90 天(<code>cleanup_api_key_usage_days</code>),由排程每天清理。可在「資料庫維護」頁籤的「外部 API 呼叫紀錄清除」區調整(1-3650 天)。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="KB Owner 自助稽核(外部存取記錄 tab)">
+          <Para>
+            KB 詳情頁多了一個「外部存取記錄」tab,owner / 編輯權限者進去可看「我的 KB 過去 N 天被外部 API 動了什麼」,不用麻煩 admin 撈 SQL。
+          </Para>
+          <Table
+            headers={['面板', '內容']}
+            rows={[
+              ['時間範圍切換',     '過去 7 / 30 / 90 天'],
+              ['總覽卡片',         '呼叫總數 / 錯誤數 / 流量 KB / 不同 API Key 數 / 不同 Acts As 人數'],
+              ['明細表(最多 300 筆)', '時間 / Endpoint / 狀態 / API Key / Acts As / IP / 操作資源 / 錯誤訊息'],
+            ]}
+          />
+          <TipBox>
+            <strong>撤銷外部寫入權的快路徑</strong>:owner 不用懂 API key 機制 — 直接到「共享設定」tab,把對應 service user 移除,所有透過該 user 的寫入立即失效(不影響其他 acts_as / 不影響該 key 對其他 KB)。
+          </TipBox>
+          <NoteBox>
+            權限對齊「能編輯這個 KB 的人」:owner / kb_access permission=edit / admin(非保密 KB)。保密 KB 即使 admin 也看不到別人 KB 的存取記錄,對齊保密 KB owner-only 設計。
+          </NoteBox>
+        </SubSection>
+
+        <SubSection title="Audit Log via_api_key 欄位">
+          <Para>
+            <code>audit_logs.via_api_key</code> 欄位記「這筆 audit 是透過哪把 API key 進來」。當前實作只在「切換 is_confidential」事件寫入(對齊內部 SOC 需求),其他寫入操作(上傳文件/圖等)只走 <code>api_key_usage_log</code> 追蹤。
+          </Para>
+          <TipBox>
+            想擴大 audit_logs 覆蓋(把所有外部寫入都記)只需在 internal handler 內追加 INSERT — 欄位已預留。目前不做的原因是 <code>api_key_usage_log</code> + KB owner tab 已能滿足 SOC + 自助稽核需求,不重複記。
+          </TipBox>
+        </SubSection>
+
+        <SubSection title="安全注意事項">
+          <div className="space-y-2 text-sm text-slate-600">
+            <p>🔴 <strong>不要把 admin user 設為 Acts As User</strong> — admin 對所有非保密 KB 有 bypass,等於 service account 變全域寫權。永遠用低權限 service user。</p>
+            <p>🟡 金鑰建立後系統只保留 sha256 hash,raw key 無法找回。遺失需刪除重建。</p>
+            <p>🟡 設定到期日對「臨時對接專案」是好習慣。長期 service 改用 rotation:每 3-6 個月建新 key、舊 key 停用。</p>
+            <p>🟢 寫入 scope 強制要綁 acts_as_user;PATCH 時若拿掉 acts_as_user 但保留寫 scope,後端會擋 400。</p>
+            <p>🟢 IP allowlist 是雙保險:即使 key 外洩,只要不是受信任 IP 也用不了。建議連對內部 service 也設(K8s pod 出口 IP)。</p>
+            <p>🟢 Rate limit 不只防濫用,也是「key 被洩偵測訊號」:24h 用量飆升,admin 應立即停用調查。</p>
+          </div>
+        </SubSection>
+
+        <SubSection title="呼叫範例 — 上傳文件到保密 KB">
+          <CodeBlock>{`# Step 0(一次性):admin 建 svc_external_a 並把它加入目標 KB 的 kb_access(permission=edit)
+# Step 0(一次性):admin 建 API key,勾:
+#   scopes  = ["kb:read", "kb:search", "kb:document:write"]
+#   acts_as = svc_external_a
+#   allow_confidential = 1
+#   allowed_ips = ["10.8.0.0/16"]
+#   rate_limit_per_min = 30
+
+# 上傳文件
+curl -X POST https://flgpt.foxlink.com.tw/api/v1/kb/<kb-uuid>/documents \\
+  -H "Authorization: Bearer fxlk_xxxxx" \\
+  -F "files=@./spec.pdf" \\
+  -F "files=@./changelog.docx" \\
+  -F "parse_mode=text_only" \\
+  -F "pdf_ocr_mode=auto"
+
+# 202 Accepted, body:
+# [{ id: "uuid", filename: "spec.pdf", status: "processing" }, ...]`}</CodeBlock>
+        </SubSection>
+
+        <SubSection title="金鑰列表欄位">
+          <Table
+            headers={['欄位', '說明']}
+            rows={[
+              ['名稱',           '金鑰識別標籤'],
+              ['前綴',           '可見前 12 字元(如 fxlk_a1b2c3d4),不洩漏完整 key'],
+              ['Scopes',         '已勾的權限(藍色=讀、紅色=寫)'],
+              ['Acts As',        '寫入時代表的 service user(寫入 scope 必填)'],
+              ['KB 白名單',      '已授權的 KB 清單,或「全部」'],
+              ['限速',           '每分鐘呼叫上限(0=不限)'],
+              ['保密 KB',        '是否允許存取 is_confidential=1 的 KB'],
+              ['Allowed IPs',    'CIDR 白名單(若有設),空=不限'],
+              ['狀態',           '啟用 / 停用 / 已到期'],
+              ['24h 用量',       '過去 24 小時呼叫次數 + 錯誤數(可點開看明細)'],
+              ['到期日',         '到期後自動視為停用'],
+              ['最後使用',       '上次呼叫時間'],
+              ['建立者',         '建立此金鑰的管理員'],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection title="排錯(常見錯誤)">
+          <Table
+            headers={['HTTP', '訊息', '處理']}
+            rows={[
+              ['401', 'Missing API key / Invalid API key',                       '檢查 Header:Authorization: Bearer xxx'],
+              ['403', 'API key is disabled / has expired',                       'admin 重新啟用 / 延後到期日'],
+              ['403', 'IP not allowed',                                          '呼叫端 IP 不在 allowed_ips,要 admin 調整 CIDR'],
+              ['403', 'Missing scope: xxx',                                      'admin 補勾對應 scope'],
+              ['403', 'This operation requires API key with acts_as_user_id',    'admin 為此 key 綁定 service user'],
+              ['403', 'API key does not allow confidential KB operations',       'admin 勾選 allow_confidential=1'],
+              ['403', 'KB not in API key whitelist',                             'admin 把目標 KB 加入 accessible_kbs'],
+              ['403', '僅擁有者可變更保密狀態 / 僅 KB owner 可刪 ...',          'acts_as user 不是 owner,要請 owner 操作或換 acts_as'],
+              ['404', 'KB not found or not accessible',                          'KB id 錯,或 acts_as user 沒被 owner 加入共享'],
+              ['429', 'Rate limit exceeded',                                     '等 60 秒重試或 admin 調高 rate_limit_per_min'],
+              ['413', 'PayloadTooLargeError',                                    '文件超 200 MB 或圖片超 20 MB,單檔切分上傳'],
+            ]}
+          />
         </SubSection>
       </Section>
 

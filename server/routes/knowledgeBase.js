@@ -575,7 +575,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // ─── PUT /api/kb/:id  ─────────────────────────────────────────────────────────
-router.put('/:id', async (req, res) => {
+async function putKbHandler(req, res) {
   const db = getDb();
   try {
     const target = await getEditableKb(db, req.params.id, req.user.id, req.user.role);
@@ -663,15 +663,15 @@ router.put('/:id', async (req, res) => {
     if (confidentialChanged) {
       try {
         await db.prepare(`
-          INSERT INTO audit_logs (user_id, content, has_sensitive)
-          VALUES (?, ?, 0)
+          INSERT INTO audit_logs (user_id, content, has_sensitive, via_api_key)
+          VALUES (?, ?, 0, ?)
         `).run(req.user.id, JSON.stringify({
           event: 'kb_confidential_toggle',
           kb_id: req.params.id,
           kb_name: target.name,
           from: Number(target.is_confidential) === 1 ? 1 : 0,
           to:   finalConfidential,
-        }));
+        }), req.viaApiKey || null);
       } catch (auditErr) {
         console.warn('[KB] audit log (confidential toggle) failed:', auditErr.message);
       }
@@ -701,7 +701,8 @@ router.put('/:id', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-});
+}
+router.put('/:id', putKbHandler);
 
 // ─── DELETE /api/kb/:id  ──────────────────────────────────────────────────────
 router.delete('/:id', async (req, res) => {
@@ -747,7 +748,7 @@ router.get('/:id/documents', async (req, res) => {
 });
 
 // ─── POST /api/kb/:id/documents  (upload) ─────────────────────────────────────
-router.post('/:id/documents', upload.array('files', 20), async (req, res) => {
+async function uploadDocumentsHandler(req, res) {
   const db = getDb();
   try {
     const target = await getEditableKb(db, req.params.id, req.user.id, req.user.role);
@@ -817,10 +818,11 @@ router.post('/:id/documents', upload.array('files', 20), async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-});
+}
+router.post('/:id/documents', upload.array('files', 20), uploadDocumentsHandler);
 
 // ─── DELETE /api/kb/:id/documents/:docId  ─────────────────────────────────────
-router.delete('/:id/documents/:docId', async (req, res) => {
+async function deleteDocumentHandler(req, res) {
   const db = getDb();
   try {
     const kbRow = await db.prepare('SELECT id, creator_id, is_confidential FROM knowledge_bases WHERE id=?').get(req.params.id);
@@ -862,11 +864,12 @@ router.delete('/:id/documents/:docId', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-});
+}
+router.delete('/:id/documents/:docId', deleteDocumentHandler);
 
 // ─── POST /api/kb/:id/documents/:docId/reparse  ──────────────────────────────
 // Re-parse a single document with optional new pdf_ocr_mode / parse_mode override.
-router.post('/:id/documents/:docId/reparse', async (req, res) => {
+async function reparseDocumentHandler(req, res) {
   const db = getDb();
   try {
     const target = await getEditableKb(db, req.params.id, req.user.id, req.user.role);
@@ -906,7 +909,8 @@ router.post('/:id/documents/:docId/reparse', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-});
+}
+router.post('/:id/documents/:docId/reparse', reparseDocumentHandler);
 
 // ─── POST /api/kb/:id/reparse-all  ────────────────────────────────────────────
 // Re-parse ALL documents in the KB. Used when the user changes KB-level pdf_ocr_mode.
@@ -1274,6 +1278,64 @@ router.get('/:id/retrieval-tests', async (req, res) => {
   }
 });
 
+// ─── GET /api/kb/:id/external-access-log ─────────────────────────────────────
+// 給 KB owner 查「我的 KB 過去 N 天被外部 API 動了什麼」。
+// 權限對齊「能編輯這個 KB 的人」(owner / kb_access edit / admin 非保密) — 否則 SOC 不夠。
+// 純 read-only 看歷史,不會修改任何資料。
+//
+// Query: ?days=30&limit=200
+router.get('/:id/external-access-log', async (req, res) => {
+  const db = getDb();
+  try {
+    const editable = await getEditableKb(db, req.params.id, req.user.id, req.user.role);
+    if (!editable) return res.status(403).json({ error: '需 KB 編輯權限才能查看外部存取記錄' });
+
+    const days  = Math.min(365, Math.max(1, Number(req.query.days)  || 30));
+    const limit = Math.min(1000, Math.max(1, Number(req.query.limit) || 200));
+
+    const summary = await db.prepare(`
+      SELECT
+        COUNT(*)                                                       AS req_total,
+        NVL(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0)    AS req_errors,
+        NVL(SUM(bytes_out),  0)                                        AS bytes_out,
+        COUNT(DISTINCT api_key_id)                                     AS distinct_keys,
+        COUNT(DISTINCT acts_as_user_id)                                AS distinct_users
+      FROM api_key_usage_log
+      WHERE kb_id = ? AND called_at >= SYSTIMESTAMP - NUMTODSINTERVAL(?, 'DAY')
+    `).get(req.params.id, days);
+
+    const rows = await db.prepare(`
+      SELECT l.endpoint, l.method, l.status_code,
+             l.resource_id, l.tokens_in, l.tokens_out, l.bytes_out, l.duration_ms,
+             l.client_ip, l.error_message,
+             TO_CHAR(l.called_at,'YYYY-MM-DD HH24:MI:SS') AS called_at,
+             l.api_key_id, k.name AS api_key_name, k.key_prefix,
+             l.acts_as_user_id, u.name AS acts_as_name, u.username AS acts_as_username
+      FROM api_key_usage_log l
+      LEFT JOIN api_keys k ON k.id = l.api_key_id
+      LEFT JOIN users    u ON u.id = l.acts_as_user_id
+      WHERE l.kb_id = ? AND l.called_at >= SYSTIMESTAMP - NUMTODSINTERVAL(?, 'DAY')
+      ORDER BY l.called_at DESC
+      FETCH FIRST ${limit} ROWS ONLY
+    `).all(req.params.id, days);
+
+    res.json({
+      days, limit,
+      summary: {
+        req_total:      Number(summary?.req_total      || 0),
+        req_errors:     Number(summary?.req_errors     || 0),
+        bytes_out:      Number(summary?.bytes_out      || 0),
+        distinct_keys:  Number(summary?.distinct_keys  || 0),
+        distinct_users: Number(summary?.distinct_users || 0),
+      },
+      rows,
+    });
+  } catch (e) {
+    console.error('[KB External Log]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Embed concurrency — Vertex AI 企業配額約 2000+ RPM 實測；20 並發
 // 對應 ~1500 RPM，穩定不撞上限。若走 AI Studio free tier (100 RPM)
 // 需改 env KB_EMBED_CONCURRENCY=2 以下才不會 429。
@@ -1582,7 +1644,7 @@ async function captionImage(imageBuffer, mimeType) {
 
 // ─── POST /api/kb/:id/images  (上傳圖片) ─────────────────────────────────────
 // 方案 B:user 主動上傳獨立圖片
-router.post('/:id/images', imageUpload.array('files', 10), async (req, res) => {
+async function uploadImagesHandler(req, res) {
   const db = getDb();
   try {
     const target = await getEditableKb(db, req.params.id, req.user.id, req.user.role);
@@ -1623,7 +1685,8 @@ router.post('/:id/images', imageUpload.array('files', 10), async (req, res) => {
     console.error('[KB Image] upload error:', e);
     res.status(500).json({ error: e.message });
   }
-});
+}
+router.post('/:id/images', imageUpload.array('files', 10), uploadImagesHandler);
 
 // ─── GET /api/kb/:id/images  (列出 KB 內所有圖片) ────────────────────────────
 router.get('/:id/images', async (req, res) => {
@@ -1645,7 +1708,7 @@ router.get('/:id/images', async (req, res) => {
 });
 
 // ─── PATCH /api/kb/:id/images/:imageId  (更新 caption) ──────────────────────
-router.patch('/:id/images/:imageId', async (req, res) => {
+async function patchImageHandler(req, res) {
   const db = getDb();
   try {
     const target = await getEditableKb(db, req.params.id, req.user.id, req.user.role);
@@ -1677,10 +1740,11 @@ router.patch('/:id/images/:imageId', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-});
+}
+router.patch('/:id/images/:imageId', patchImageHandler);
 
 // ─── POST /api/kb/:id/images/batch-delete  (批次刪除) ────────────────────────
-router.post('/:id/images/batch-delete', async (req, res) => {
+async function batchDeleteImagesHandler(req, res) {
   const db = getDb();
   try {
     const target = await getEditableKb(db, req.params.id, req.user.id, req.user.role);
@@ -1712,10 +1776,11 @@ router.post('/:id/images/batch-delete', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-});
+}
+router.post('/:id/images/batch-delete', batchDeleteImagesHandler);
 
 // ─── POST /api/kb/:id/images/:imageId/retry-caption  (重試 vision caption) ──
-router.post('/:id/images/:imageId/retry-caption', async (req, res) => {
+async function retryCaptionHandler(req, res) {
   const db = getDb();
   try {
     const target = await getEditableKb(db, req.params.id, req.user.id, req.user.role);
@@ -1741,10 +1806,11 @@ router.post('/:id/images/:imageId/retry-caption', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-});
+}
+router.post('/:id/images/:imageId/retry-caption', retryCaptionHandler);
 
 // ─── DELETE /api/kb/:id/images/:imageId ─────────────────────────────────────
-router.delete('/:id/images/:imageId', async (req, res) => {
+async function deleteImageHandler(req, res) {
   const db = getDb();
   try {
     const target = await getEditableKb(db, req.params.id, req.user.id, req.user.role);
@@ -1767,7 +1833,8 @@ router.delete('/:id/images/:imageId', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-});
+}
+router.delete('/:id/images/:imageId', deleteImageHandler);
 
 // ─── GET /api/kb/images/:imageId  (公開下載,走 KB access check) ────────────
 // 路徑特意不帶 :id,讓 LLM 引用 `kb-img://{uuid}` 不用記 kb_id;
@@ -1796,4 +1863,23 @@ router.get('/images/:imageId', async (req, res) => {
   }
 });
 
-module.exports = router;
+// Express Router 物件是 function,可以掛 properties 給 external API wrapper reuse。
+// externalKb.js 會用這些 named handler + multer instance 在 acts_as_user 模式下做寫入操作,
+// 完整套用既有保密 KB / kb_access / 配額 / audit 規則,不重複實作 logic。
+module.exports = Object.assign(router, {
+  handlers: {
+    putKbHandler,
+    uploadDocumentsHandler,
+    deleteDocumentHandler,
+    reparseDocumentHandler,
+    uploadImagesHandler,
+    deleteImageHandler,
+    patchImageHandler,
+    batchDeleteImagesHandler,
+    retryCaptionHandler,
+  },
+  multer: {
+    upload,        // 文件上傳(200 MB,full classifyUpload)
+    imageUpload,   // 圖片上傳(20 MB,僅 png/jpeg/gif/webp/bmp)
+  },
+});

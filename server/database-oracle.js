@@ -1284,6 +1284,61 @@ async function runMigrations(db) {
   await addCol('API_KEYS', 'IS_ACTIVE',     'NUMBER(1) DEFAULT 1');
   await addCol('API_KEYS', 'LAST_USED_AT',  'TIMESTAMP');
   await addCol('API_KEYS', 'EXPIRES_AT',    'TIMESTAMP');
+  // 2026-05-18 外部 API 擴充:scope 細分 / rate limit / 是否允許保密 KB
+  // 預設 scopes 是 read-only set(向下相容,既有 key 沒寫欄位時也可以呼叫 list/search/chat/images:read)
+  await addCol('API_KEYS', 'SCOPES',              'CLOB DEFAULT \'["kb:read","kb:search","kb:chat","kb:image:read"]\'');
+  await addCol('API_KEYS', 'RATE_LIMIT_PER_MIN',  'NUMBER DEFAULT 60');
+  await addCol('API_KEYS', 'ALLOW_CONFIDENTIAL',  'NUMBER(1) DEFAULT 0');
+
+  // 2026-05-18 Service-account 模式:寫入操作必須掛 acts_as_user_id
+  //   - acts_as_user_id:這個 key 代表的 real user。寫入端點走 internal handler,
+  //     權限 / 配額 / 保密 KB 規則沿用 user 既有 kb_access。
+  //   - allowed_ips:CIDR list(JSON),null=不限。可選的網路層保護。
+  await addCol('API_KEYS', 'ACTS_AS_USER_ID', 'NUMBER REFERENCES users(id) ON DELETE SET NULL');
+  await addCol('API_KEYS', 'ALLOWED_IPS',     'CLOB');
+
+  // audit_logs 多加一欄記「這筆操作是透過哪把 API key 進來」 — owner 在自己 KB 動態
+  // 頁可看到 "service_bot (via API key 'webhook-system-A') 上傳了 3 個文件"
+  await addCol('AUDIT_LOGS', 'VIA_API_KEY', 'VARCHAR2(36)');
+
+  // 2026-05-18 API key 用量稽核 — 用於 admin UI 顯示流量/錯誤率/成本
+  await createTable('API_KEY_USAGE_LOG', `CREATE TABLE api_key_usage_log (
+    id           NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    api_key_id   VARCHAR2(36) NOT NULL,
+    endpoint     VARCHAR2(100),
+    method       VARCHAR2(10),
+    status_code  NUMBER(3),
+    kb_id        VARCHAR2(36),
+    tokens_in    NUMBER DEFAULT 0,
+    tokens_out   NUMBER DEFAULT 0,
+    bytes_out    NUMBER DEFAULT 0,
+    duration_ms  NUMBER,
+    called_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT api_key_usage_log_fk FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE CASCADE
+  )`);
+  await addCol('API_KEY_USAGE_LOG', 'KB_ID',  'VARCHAR2(36)');
+  await addCol('API_KEY_USAGE_LOG', 'METHOD', 'VARCHAR2(10)');
+  // 2026-05-18 鑑識深度補強:
+  //   - acts_as_user_id:該次呼叫的 service account user(寫入操作必有,讀取可能為 null)
+  //   - client_ip:來源 IP(對齊 IP allowlist 比對時的解析結果)
+  //   - resource_id:操作的次級資源(docId / imageId / 上傳檔名),給 owner 稽核用
+  //   - error_message:4xx/5xx 時記下被擋原因,讓 admin 不用反推 status code
+  await addCol('API_KEY_USAGE_LOG', 'ACTS_AS_USER_ID', 'NUMBER');
+  await addCol('API_KEY_USAGE_LOG', 'CLIENT_IP',       'VARCHAR2(45)');
+  await addCol('API_KEY_USAGE_LOG', 'RESOURCE_ID',     'VARCHAR2(200)');
+  await addCol('API_KEY_USAGE_LOG', 'ERROR_MESSAGE',   'VARCHAR2(500)');
+  // 查詢加速:依 api_key_id + 時間查最近 N 筆 / 統計
+  try {
+    await db.prepare(`CREATE INDEX api_key_usage_log_idx ON api_key_usage_log (api_key_id, called_at)`).run();
+  } catch (e) {
+    if (!/ORA-00955/.test(e.message)) console.warn('[Migration] api_key_usage_log_idx:', e.message);
+  }
+  // KB owner 查「我的 KB 被外部動了什麼」會走 kb_id 過濾 → 加 (kb_id, called_at) 索引
+  try {
+    await db.prepare(`CREATE INDEX api_key_usage_log_kb_idx ON api_key_usage_log (kb_id, called_at)`).run();
+  } catch (e) {
+    if (!/ORA-00955/.test(e.message)) console.warn('[Migration] api_key_usage_log_kb_idx:', e.message);
+  }
 
   await createTable('RESEARCH_JOBS', `CREATE TABLE research_jobs (
     id             VARCHAR2(36)  PRIMARY KEY,
