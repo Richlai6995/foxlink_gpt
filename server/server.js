@@ -289,8 +289,24 @@ app.get('/api/version', (req, res) => {
       console.error('[Socket.io] Failed to initialize:', e.message);
     }
 
+    // ─── 全域 scheduler gate ──────────────────────────────────────────────────
+    // K8s 環境下 web pods 設 RUN_SCHEDULERS=false 完全不掛任何 cron / 一次性 seed /
+    // 背景 recovery / 定時 sync;只有 foxlink-gpt-scheduler(replicas=1)會跑這些。
+    // 本機 / docker-compose 預設 true,維持單機行為。
+    //
+    // ⚠️ 不 gate 的項目(必須每個 pod 都跑或自己有 leader election):
+    //   - webexListener:自有 Redis leader lock(webex:ws:leader / webex:poll:leader)
+    //   - skillRunner.autoRestoreRunners + startHealthMonitor:pod-local child processes
+    //   - socketService.initSocket:處理 feedback 即時聊天的 web traffic
+    //   - factoryCache 暖快取:pod-local in-memory cache
+    //   - autoScanUserDomains:啟動時 union 一次 email 白名單,idempotent 重複跑無妨
+    const RUN_SCHEDULERS = process.env.RUN_SCHEDULERS !== 'false';
+    if (!RUN_SCHEDULERS) {
+      console.log('[Schedulers] RUN_SCHEDULERS=false → this pod skips all cron / seed / recovery / sync init');
+    }
+
     // Feedback SLA cron job
-    try {
+    if (RUN_SCHEDULERS) try {
       const { startSLACron } = require('./services/feedbackSLAService');
       startSLACron();
     } catch (e) {
@@ -312,7 +328,7 @@ app.get('/api/version', (req, res) => {
     console.log('[PM] Forecast accuracy / prompt self-improve cron 已停用(2026-05-11 user 決定)');
 
     // Phase 5 Track C-3: PM Webex Push cron(每分鐘檢查訂閱觸發)
-    try {
+    if (RUN_SCHEDULERS) try {
       const { startPmWebexPushCron } = require('./services/pmWebexPushService');
       startPmWebexPushCron();
     } catch (e) {
@@ -320,30 +336,30 @@ app.get('/api/version', (req, res) => {
     }
 
     // Phase 5 Track F-3: PM Source 健康監控(每 6h 驗 18 sources)
-    try {
+    if (RUN_SCHEDULERS) try {
       const { startSourceHealthCron } = require('./services/pmSourceHealthService');
       startSourceHealthCron();
     } catch (e) { console.error('[PmSourceHealth] Failed to start:', e.message); }
 
     // Phase 5 Track F-2 + F-5: PM Token 預算 + cost aggregator(每 1h)
-    try {
+    if (RUN_SCHEDULERS) try {
       const { startTokenBudgetCron } = require('./services/pmTokenBudgetService');
       startTokenBudgetCron();
     } catch (e) { console.error('[PmTokenBudget] Failed to start:', e.message); }
 
     // Phase 5 Track F-4: PM KB 維護(每 7d archive 90 天前 PM-新聞庫 chunks,預設 dry_run)
-    try {
+    if (RUN_SCHEDULERS) try {
       const { startKbMaintenanceCron } = require('./services/pmKbMaintenanceService');
       startKbMaintenanceCron();
     } catch (e) { console.error('[PmKbMaint] Failed to start:', e.message); }
 
     // Phase 5 Track A: PM ERP Sync framework + auto-seed 3 template jobs(預設 dry_run + inactive)
-    try {
+    if (RUN_SCHEDULERS) try {
       const { autoSeedPmErpSyncJobs } = require('./services/pmErpSyncSeed');
       const { db } = require('./database-oracle');
       await autoSeedPmErpSyncJobs(db);
     } catch (e) { console.error('[PmErpSyncSeed] Failed:', e.message); }
-    try {
+    if (RUN_SCHEDULERS) try {
       const { startErpSyncCron } = require('./services/pmErpSyncService');
       startErpSyncCron();
     } catch (e) { console.error('[PmErpSync] Failed to start:', e.message); }
@@ -418,7 +434,7 @@ app.get('/api/version', (req, res) => {
     const { db } = require('./database-oracle');
 
     // Cleanup scheduler
-    try {
+    if (RUN_SCHEDULERS) try {
       const enabledRow = await db.prepare(`SELECT value FROM system_settings WHERE key = 'cleanup_auto_enabled'`).get();
       if (enabledRow?.value === '1') {
         const hourRow = await db.prepare(`SELECT value FROM system_settings WHERE key = 'cleanup_auto_hour'`).get();
@@ -430,7 +446,7 @@ app.get('/api/version', (req, res) => {
     }
 
     // PM retention cleanup scheduler — 預設凌晨清過期資料,時間在 PmSettingsPanel 可改
-    try {
+    if (RUN_SCHEDULERS) try {
       const { startScheduler } = require('./services/pmRetentionCleanup');
       await startScheduler(db);
     } catch (e) {
@@ -438,7 +454,7 @@ app.get('/api/version', (req, res) => {
     }
 
     // Research job recovery scheduler:啟動時跑一次 + 每 5 分鐘掃一次 stale jobs
-    try {
+    if (RUN_SCHEDULERS) try {
       const { recoverStaleJobs } = require('./services/researchService');
       // 啟動時跑一次(撿起前次 server crash 留下的 running jobs)
       recoverStaleJobs(db).catch((e) => console.warn('[Research] startup recovery:', e.message));
@@ -451,7 +467,7 @@ app.get('/api/version', (req, res) => {
     }
 
     // Transcribe job recovery scheduler:同上 pattern,負責長音訊背景轉錄
-    try {
+    if (RUN_SCHEDULERS) try {
       const transcribeJobService = require('./services/transcribeJobService');
       transcribeJobService.recoverStaleJobs(db).catch((e) => console.warn('[TranscribeJob] startup recovery:', e.message));
       setInterval(() => {
@@ -468,7 +484,7 @@ app.get('/api/version', (req, res) => {
     }
 
     // KB maintenance scheduler（orphan chunks cleanup, Phase 1 of kb-retrieval v2）
-    try {
+    if (RUN_SCHEDULERS) try {
       const enabledRow = await db.prepare(`SELECT value FROM system_settings WHERE key='kb_cleanup_enabled'`).get();
       if (enabledRow?.value !== '0') {
         const { startScheduler, runOnce } = require('./services/kbMaintenance');
@@ -483,7 +499,7 @@ app.get('/api/version', (req, res) => {
     }
 
     // Backup scheduler (Oracle mode: schedule-settings preserved, actual backup disabled)
-    try {
+    if (RUN_SCHEDULERS) try {
       const rows = await db.prepare(
         `SELECT key, value FROM system_settings WHERE key IN ('backup_schedule_enabled','backup_schedule_type','backup_schedule_hour','backup_schedule_weekday')`
       ).all();
@@ -502,7 +518,7 @@ app.get('/api/version', (req, res) => {
     }
 
     // Org sync scheduler
-    try {
+    if (RUN_SCHEDULERS) try {
       const enabledRow = await db.prepare(`SELECT value FROM system_settings WHERE key='org_sync_enabled'`).get();
       if (enabledRow?.value === '1') {
         const hourRow = await db.prepare(`SELECT value FROM system_settings WHERE key='org_sync_hour'`).get();
@@ -513,8 +529,8 @@ app.get('/api/version', (req, res) => {
       console.error('[OrgSync] Failed to start scheduler:', e.message);
     }
 
-    // Init scheduled tasks
-    try {
+    // Init scheduled tasks(注:service 內部也讀 RUN_SCHEDULERS,雙重 gate 為了 require cost 跟可見性)
+    if (RUN_SCHEDULERS) try {
       const { initScheduler } = require('./services/scheduledTaskService');
       initScheduler(db);
     } catch (e) {
@@ -522,7 +538,7 @@ app.get('/api/version', (req, res) => {
     }
 
     // Init Phase 3.1 standalone alert rule scheduler (1-min tick polling)
-    try {
+    if (RUN_SCHEDULERS) try {
       const { initAlertRuleScheduler } = require('./services/alertRuleScheduler');
       initAlertRuleScheduler(db);
     } catch (e) {
@@ -530,7 +546,7 @@ app.get('/api/version', (req, res) => {
     }
 
     // Init AI 戰情 ETL Scheduler
-    try {
+    if (RUN_SCHEDULERS) try {
       const { initEtlScheduler } = require('./services/dashboardService');
       initEtlScheduler(db);
     } catch (e) {
@@ -538,7 +554,7 @@ app.get('/api/version', (req, res) => {
     }
 
     // AI 戰情「費用分析」seed(冪等,只在第一次啟動或表缺時建立)
-    try {
+    if (RUN_SCHEDULERS) try {
       const { runSeed } = require('./data/aiDashboardCostAnalysisSeed');
       runSeed(db).catch(e => console.warn('[CostAnalysisSeed] unhandled:', e.message));
     } catch (e) {
@@ -547,7 +563,7 @@ app.get('/api/version', (req, res) => {
 
     // AI 戰情「金屬行情分析」seed(冪等,沿用 cost analysis seed 的本地 DB source)
     // 必須在 cost analysis seed 之後跑(因為要 lookup 已建好的 ai_db_sources entry)
-    setTimeout(() => {
+    if (RUN_SCHEDULERS) setTimeout(() => {
       try {
         const { runSeed: runMetalSeed } = require('./data/aiDashboardMetalPriceSeed');
         runMetalSeed(db).catch(e => console.warn('[MetalPriceSeed] unhandled:', e.message));
@@ -557,7 +573,7 @@ app.get('/api/version', (req, res) => {
     }, 3000);
 
     // Factory code lookup + 間接員工計數同步(啟動後 5 秒跑,避免拖慢啟動)
-    setTimeout(async () => {
+    if (RUN_SCHEDULERS) setTimeout(async () => {
       try {
         const { db } = require('./database-oracle');
         const { syncFactoryCodeLookup } = require('./services/factoryCodeLookupSync');
@@ -570,7 +586,7 @@ app.get('/api/version', (req, res) => {
     }, 5000);
 
     // System sync cron 排程(daily / weekly / monthly,設定存於 system_settings,admin 在 ETL 排程頁維護)
-    try {
+    if (RUN_SCHEDULERS) try {
       const { db } = require('./database-oracle');
       const { loadAndStart } = require('./services/systemSyncScheduler');
       loadAndStart(db).catch(e => console.warn('[SystemSyncScheduler] unhandled:', e.message));
@@ -579,7 +595,7 @@ app.get('/api/version', (req, res) => {
     }
 
     // Init System Monitor Metrics Collector
-    try {
+    if (RUN_SCHEDULERS) try {
       const { startMetricsCollector } = require('./services/metricsCollector');
       startMetricsCollector(db);
     } catch (e) {
@@ -587,7 +603,7 @@ app.get('/api/version', (req, res) => {
     }
 
     // Init Training Cron (auto-complete, reminders, overdue)
-    try {
+    if (RUN_SCHEDULERS) try {
       const { initTrainingCron } = require('./services/trainingCronService');
       initTrainingCron(db);
     } catch (e) {
@@ -595,7 +611,7 @@ app.get('/api/version', (req, res) => {
     }
 
     // Init ERP Tool metadata drift check cron
-    try {
+    if (RUN_SCHEDULERS) try {
       const { initErpToolCron } = require('./services/erpToolCronService');
       initErpToolCron(db);
     } catch (e) {
@@ -603,7 +619,7 @@ app.get('/api/version', (req, res) => {
     }
 
     // Auto-sync Help KB (non-blocking, runs in background)
-    setImmediate(async () => {
+    if (RUN_SCHEDULERS) setImmediate(async () => {
       try {
         const { syncHelpKb } = require('./services/helpKbSync');
         await syncHelpKb(db);
@@ -613,7 +629,7 @@ app.get('/api/version', (req, res) => {
     });
 
     // Auto-seed Help Sections (compare last_modified, upsert changed sections)
-    setImmediate(async () => {
+    if (RUN_SCHEDULERS) setImmediate(async () => {
       try {
         const { autoSeedHelp } = require('./services/helpAutoSeed');
         await autoSeedHelp(db);
@@ -633,7 +649,7 @@ app.get('/api/version', (req, res) => {
     // });
 
     // Auto-seed Excel 精確查詢 code skill (DuckDB SQL on uploaded xlsx)
-    setImmediate(async () => {
+    if (RUN_SCHEDULERS) setImmediate(async () => {
       try {
         const { autoSeedExcelQuerySkill } = require('./services/excelQuerySkillSeed');
         await autoSeedExcelQuerySkill(db);
@@ -643,7 +659,7 @@ app.get('/api/version', (req, res) => {
     });
 
     // Auto-seed PM Multi-Agent Workflow skill (pm_deep_analysis_workflow)
-    setImmediate(async () => {
+    if (RUN_SCHEDULERS) setImmediate(async () => {
       try {
         const { autoSeedPmWorkflowSkill } = require('./services/pmWorkflowSeed');
         await autoSeedPmWorkflowSkill(db);
@@ -653,7 +669,7 @@ app.get('/api/version', (req, res) => {
     });
 
     // Auto-seed PM BOM What-if skill (pm_what_if_cost_impact) — Phase 4 14.1
-    setImmediate(async () => {
+    if (RUN_SCHEDULERS) setImmediate(async () => {
       try {
         const { autoSeedPmBomSkill } = require('./services/pmBomSkillSeed');
         await autoSeedPmBomSkill(db);
@@ -665,7 +681,7 @@ app.get('/api/version', (req, res) => {
     // Auto-seed PM (precious metals platform) KBs + scheduled tasks
     // 順序:KBs 先建 → 拿 ID Map → 餵給 task seed,task 的 kb_write 節點直接綁好 kb_id。
     // 兩者都 idempotent;task 預設 status='paused',admin 改 prompt / 加收件人後再 enable。
-    setImmediate(async () => {
+    if (RUN_SCHEDULERS) setImmediate(async () => {
       try {
         const { autoSeedPmKnowledgeBases } = require('./services/pmKnowledgeBaseSeed');
         const { autoSeedPmScheduledTasks } = require('./services/pmScheduledTaskSeed');
@@ -678,7 +694,7 @@ app.get('/api/version', (req, res) => {
 
     // Auto-seed PM AI 戰情 Dashboard(project + topics + designs)
     // 依賴:LOCAL ai_db_sources + 5 張 PM 表的 ai_schema_definitions(由 D5 + aiSchemaAutoRegister 建)
-    setImmediate(async () => {
+    if (RUN_SCHEDULERS) setImmediate(async () => {
       try {
         const { autoSeedPmDashboard } = require('./services/pmDashboardSeed');
         await autoSeedPmDashboard(db);
@@ -726,9 +742,11 @@ app.get('/api/version', (req, res) => {
         }
       }
     };
-    // 啟動後立即執行一次，之後每小時執行
-    cleanupStaleTmpFiles();
-    setInterval(cleanupStaleTmpFiles, 60 * 60 * 1000);
+    // 啟動後立即執行一次，之後每小時執行(NFS shared,scheduler pod 跑就夠了)
+    if (RUN_SCHEDULERS) {
+      cleanupStaleTmpFiles();
+      setInterval(cleanupStaleTmpFiles, 60 * 60 * 1000);
+    }
   } catch (error) {
     console.error('Failed to initialize:', error);
     process.exit(1);
