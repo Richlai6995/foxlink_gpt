@@ -109,49 +109,72 @@ function getByJsonPath(obj, path) {
   return cur;
 }
 
-// ── 取資料(回傳 number 或 number[] 或 null)──────────────────────────────
+// ── 取資料 ────────────────────────────────────────────────────────────────
+// 回傳 shape: { data: number | number[] | null, rows: array }
+//   data = 第一欄的數值(供 comparison 用)
+//   rows = 原始 row objects(供 executeAlert 抽 date metadata 等)
+//
+// 為了向下相容,export 包了 fetchValueLegacy 給舊 caller 用(只回 data)。
 async function fetchValue(db, dataSource, dataConfig, sourceText) {
   const cfg = safeJsonParse(dataConfig, {});
 
   if (dataSource === 'literal') {
-    return cfg.value != null ? Number(cfg.value) : null;
+    const v = cfg.value != null ? Number(cfg.value) : null;
+    return { data: v, rows: [] };
   }
 
   if (dataSource === 'upstream_json') {
-    // 從上游 sourceText 抽 JSON,再用 jsonpath 取
     let parsed;
     try {
-      // 找 fenced block
       const fenced = String(sourceText || '').match(/```(?:json)?\s*\n([\s\S]*?)```/i);
       const raw = fenced ? fenced[1] : sourceText;
       parsed = JSON.parse(raw);
     } catch (_) {
-      // 可能是純 JSON 也可能整段都是 markdown,試大括號 / 中括號抽取
       const arrM = String(sourceText || '').match(/(\[[\s\S]*\])/);
       const objM = String(sourceText || '').match(/(\{[\s\S]*\})/);
       if (arrM) { try { parsed = JSON.parse(arrM[1]); } catch (_) {} }
       if (!parsed && objM) { try { parsed = JSON.parse(objM[1]); } catch (_) {} }
     }
-    if (parsed == null) return null;
+    if (parsed == null) return { data: null, rows: [] };
     const v = getByJsonPath(parsed, cfg.jsonpath || '$.value');
-    if (Array.isArray(v)) return v.map(Number).filter(Number.isFinite);
-    return Number.isFinite(Number(v)) ? Number(v) : null;
+    if (Array.isArray(v)) return { data: v.map(Number).filter(Number.isFinite), rows: [] };
+    return { data: Number.isFinite(Number(v)) ? Number(v) : null, rows: [] };
   }
 
   if (dataSource === 'sql_query') {
     if (!cfg.sql) throw new Error('sql_query mode 需 data_config.sql');
-    // 限制:只允許 SELECT
     if (!/^\s*SELECT/i.test(cfg.sql)) throw new Error('alert sql_query 只允許 SELECT');
     const rows = await db.prepare(cfg.sql).all();
-    if (!rows || !rows.length) return null;
-    // 取第一個欄位的所有值;若 single value 就回 number
+    if (!rows || !rows.length) return { data: null, rows: [] };
     const firstKey = Object.keys(rows[0])[0];
     const vals = rows.map(r => Number(r[firstKey])).filter(Number.isFinite);
-    if (vals.length === 1) return vals[0];
-    return vals;
+    const data = vals.length === 1 ? vals[0] : vals;
+    return { data, rows };
   }
 
-  return null;
+  return { data: null, rows: [] };
+}
+
+// 從 rows 抽出 base_date / current_date(如果 SQL 多 select 了日期欄)
+// rows[0] 是基準價對應的 row,rows[last] 是當前價對應的 row(因 SQL ORDER BY as_of_date ASC)
+function extractDates(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return {};
+  const findDate = (row) => {
+    if (!row || typeof row !== 'object') return null;
+    for (const v of Object.values(row)) {
+      if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
+      if (v instanceof Date) {
+        try { return v.toISOString().slice(0, 10); } catch (_) {}
+      }
+    }
+    return null;
+  };
+  const out = {};
+  const b = findDate(rows[0]);
+  const c = findDate(rows[rows.length - 1]);
+  if (b) out.base_date = b;
+  if (c) out.current_date = c;
+  return out;
 }
 
 // ── 4 種比較模式 ───────────────────────────────────────────────────────────
@@ -495,12 +518,14 @@ async function executeAlert(db, node, sourceText, context = {}) {
   }
 
   // ─── 1. 取資料 ──────────────────────────────────────────────────────────
-  let dataValue;
+  let fetched;
   try {
-    dataValue = await fetchValue(db, rule.data_source, rule.data_config, sourceText);
+    fetched = await fetchValue(db, rule.data_source, rule.data_config, sourceText);
   } catch (e) {
     return { triggered: false, error: `fetch value failed: ${e.message}`, dryRun };
   }
+  const dataValue = fetched?.data;
+  const rawRows = Array.isArray(fetched?.rows) ? fetched.rows : [];
 
   // 對 historical 模式而言,sql_query 應回 array(歷史 series),current 從另外管道
   // 為簡化:single value 模式只用 threshold;array 模式分開處理
@@ -545,6 +570,7 @@ async function executeAlert(db, node, sourceText, context = {}) {
   }
 
   // ─── 4. 訊息組合 ────────────────────────────────────────────────────────
+  const dateVars = extractDates(rawRows);  // 從 SQL rows 自動抽 base_date / current_date
   const vars = {
     rule_name: rule.rule_name,
     severity: rule.severity,
@@ -555,6 +581,8 @@ async function executeAlert(db, node, sourceText, context = {}) {
     reason: result.reason,
     runId: context.runId || null,
     date: new Date().toISOString().slice(0, 10),
+    ...dateVars,                       // base_date / current_date(若 SQL 內有 date 欄)
+    ...(context.extraVars || {}),      // scheduler 注入的 schedule_key / timeframe_label / lookback_days 等
   };
   const message = renderTemplate(rule.message_template || `[${rule.severity}] ${rule.rule_name} — ${result.reason}`, vars);
 
@@ -591,5 +619,6 @@ module.exports = {
   compareRateChange,
   compareZscore,
   fetchValue,
+  extractDates,
   renderTemplate,
 };

@@ -52,6 +52,7 @@ const args = process.argv.slice(2);
 const DELETE_V1 = args.includes('--delete-v1');
 const DELETE_OLD_TASKS = args.includes('--delete-old-tasks');
 const SYNC_EMAILS = args.includes('--sync-emails');  // 用新 email 清單覆寫既有 rule 的 email action
+const SYNC_CONTENT = args.includes('--sync-content');  // 用新 SQL + message_template 覆寫既有 rule(seed 即 SOT)
 
 // 11 個 metal 全套:6 基本金屬(LME via Westmetall)+ 5 貴金屬(PGM via JM + AU/AG)
 // sourceFilter:寫成 SQL fragment(放在 WHERE 內), 不確定 source 時用 '1=1'(等於不過濾)
@@ -82,8 +83,12 @@ const SCHEDULES = [
 
 // SQL template:取 metal 的「最新 + {{lookback_days}} 個交易日前」兩筆,排成 [base, current]
 // sourceFilter 由 metal 設定帶入(基本金屬=Westmetall,PT/PD/RH=JM,AU/AG=不過濾)
+//
+// 外層額外 SELECT TO_CHAR(as_of_date,'YYYY-MM-DD') 暴露日期欄,
+// pipelineAlerter.extractDates 會從 raw rows 內找出來 → vars 加 {{base_date}} / {{current_date}}。
+// fetchValue 仍只取第一欄(price_usd)當數值用於比較,加 date 欄不影響原邏輯。
 function buildSqlTemplate(metalCode, sourceFilter) {
-  return `SELECT price_usd FROM (
+  return `SELECT price_usd, TO_CHAR(as_of_date,'YYYY-MM-DD') AS as_of_date_str FROM (
   SELECT price_usd, as_of_date,
          ROW_NUMBER() OVER (ORDER BY as_of_date DESC) rn
   FROM pm_price_history
@@ -127,10 +132,10 @@ function buildRule(metal) {
       { type: 'email', to: NOTIFY_EMAILS.slice() },
     ]),
     message_template:
-      `${metal.emoji} **${metal.name}({{entity_code}})** 價格變動觸發警示\n` +
+      `${metal.emoji} **${metal.name}({{entity_code}})** {{timeframe_label}}漲幅警示\n` +
       `\n` +
-      `• 當前報價:USD $\{{trigger_value}} (${unit})\n` +
-      `• 基準價:USD $\{{threshold_value}} (${unit})\n` +
+      `• 當前報價({{current_date}}):USD $\{{trigger_value}} (${unit})\n` +
+      `• 基準價({{base_date}}, {{lookback_days}} 交易日前):USD $\{{threshold_value}} (${unit})\n` +
       `• 變動:{{reason}}\n` +
       `\n` +
       `資料源:${sourceDesc}(pm_price_history)`,
@@ -152,6 +157,7 @@ function isoToOracleTs(d) {
   console.log(`砍 v1 (legacy rule): ${DELETE_V1}`);
   console.log(`砍 scheduled_tasks: ${DELETE_OLD_TASKS}`);
   console.log(`Sync 既有 rule 的 email: ${SYNC_EMAILS}`);
+  console.log(`Sync 既有 rule 的 SQL+message: ${SYNC_CONTENT}`);
   console.log('═'.repeat(60));
 
   const db = await oracleDb.init();
@@ -177,6 +183,26 @@ function isoToOracleTs(d) {
     process.exit(1);
   }
   console.log('✓ alert_schedules 表 ready\n');
+
+  // 1.4. (選配)sync 既有 rule 的 SQL data_config + message_template + 同步 schedules 內 lookback_days
+  // 用途:當 seed 邏輯改了(例:加 timeframe 變數 / 加 date 欄),把 prod 既有規則跟 seed 對齊
+  if (SYNC_CONTENT) {
+    let synced = 0;
+    for (const metal of METALS) {
+      const ruleName = `[PM] ${metal.code} ${metal.name} 漲幅警示 (>${THRESHOLD_PCT}%)`;
+      const existing = await db.prepare(`SELECT id FROM alert_rules WHERE rule_name=?`).get(ruleName);
+      if (!existing) continue;
+      const ruleId = existing.id ?? existing.ID;
+      const rebuilt = buildRule(metal);
+      await db.prepare(`UPDATE alert_rules SET
+        data_config=?, message_template=?, last_modified=SYSTIMESTAMP WHERE id=?`).run(
+        rebuilt.data_config, rebuilt.message_template, ruleId
+      );
+      synced++;
+      console.log(`  📝 sync content "${ruleName}"`);
+    }
+    console.log(`\n✓ sync content 完成 ${synced} 條 rule\n`);
+  }
 
   // 1.5. (選配)只 sync 既有 rule 的 email recipients,保留 webex/webhook 等其他 action
   if (SYNC_EMAILS) {

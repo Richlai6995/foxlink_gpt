@@ -143,6 +143,14 @@ async function tickOnce(db) {
           inlineRule.data_config = injectLookback(inlineRule.data_config, lookbackDays);
         }
 
+        // 把 schedule meta 注入 vars(message_template 可用 {{timeframe_label}} 等)
+        const TIMEFRAME_LABELS = { daily: '日', weekly: '週', monthly: '月', interval: '間隔' };
+        const extraVars = {
+          schedule_key: schedKey,
+          timeframe_label: TIMEFRAME_LABELS[schedKey] || schedKey,
+          lookback_days: lookbackDays != null ? String(lookbackDays) : '',
+        };
+
         const result = await executeAlert(db, {
           id: `standalone_${ruleId}_sched_${schedId}`,
           _inline_rule: inlineRule,
@@ -153,6 +161,7 @@ async function tickOnce(db) {
           taskId: null,
           nodeId: `standalone_${ruleId}_sched_${schedId}`,
           dryRun: false,
+          extraVars,
         });
         if (result.triggered) resultLabel = `triggered → ${(result.channels_sent || []).join(',')}`;
         else if (result.skipped) resultLabel = `skipped: ${result.reason || ''}`;
