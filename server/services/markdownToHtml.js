@@ -28,18 +28,22 @@ function escapeHtml(s) {
 // 燈號 emoji → 純 CSS 圓點:Lotus Notes / 老 mail client 對 U+1F7E2 🟢 / U+1F7E1 🟡 等
 // 2019 新 emoji 渲染為黑點(fallback 字型不認),用純 CSS color + `●` (U+25CF 廣泛支援)
 // 保證 Notes / Outlook / Gmail / Web 都看得到顏色。
+//
+// User 實測:Notes 對 hex #dc2626(red-600)不知為何渲染為黑,但 #16a34a/#eab308 正常。
+// 解法:用 CSS named color(red/green/gold)— 90 年代就有的 spec,所有 mail client 一致認得。
+// 同時 background 也加 named bg,避免某些 client 對深紅 hex 過濾(spam-like color)。
 const COLORED_DOT = (color) =>
-  `<span style="color:${color};font-size:1.15em;line-height:1;font-family:'Microsoft JhengHei',Arial,sans-serif">●</span>`;
+  `<span style="color:${color};font-size:1.2em;line-height:1;font-weight:bold;font-family:'Microsoft JhengHei',Arial,sans-serif">●</span>`;
 const EMOJI_TO_DOT = {
-  '🔴': COLORED_DOT('#dc2626'),  // red-600 漲
-  '🟢': COLORED_DOT('#16a34a'),  // green-600 跌
-  '🟡': COLORED_DOT('#eab308'),  // yellow-500 持平
-  '🔵': COLORED_DOT('#2563eb'),  // blue-600
-  '🟣': COLORED_DOT('#9333ea'),  // purple-600
-  '🟠': COLORED_DOT('#ea580c'),  // orange-600
-  '⚪': COLORED_DOT('#94a3b8'),  // slate-400 灰
-  '⚫': COLORED_DOT('#1e293b'),  // slate-800 黑
-  '🟤': COLORED_DOT('#92400e'),  // amber-800 褐
+  '🔴': COLORED_DOT('red'),       // 漲(named color,Notes 100% 認)
+  '🟢': COLORED_DOT('green'),     // 跌
+  '🟡': COLORED_DOT('gold'),      // 持平(gold 比 yellow 飽和度高,看起來更像燈號)
+  '🔵': COLORED_DOT('blue'),
+  '🟣': COLORED_DOT('purple'),
+  '🟠': COLORED_DOT('orange'),
+  '⚪': COLORED_DOT('lightgray'),
+  '⚫': COLORED_DOT('black'),
+  '🟤': COLORED_DOT('brown'),
 };
 
 // inline markdown 處理:**bold** / *italic* / `code` / [text](url) + emoji → CSS 圓點
