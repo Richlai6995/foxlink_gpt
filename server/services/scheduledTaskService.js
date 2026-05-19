@@ -825,9 +825,22 @@ async function runTask(db, taskId, opts = {}) {
         return parts.length > 0 ? `使用工具：${parts.join('；')}` : '';
       })();
 
+      // Plain-text body(純文字 mail client fallback)
       let bodyText = substituteVars(bodyTemplate, task.name)
         .replace(/\{\{ai_response\}\}/g, stripMarkdownForEmail(responseText.slice(0, 4000)))
         .replace(/\{\{tools_used\}\}/g, toolsSummary);
+
+      // HTML body — 用 markdown 直接 render 成漂亮 HTML(table / list / heading 都套 inline CSS)
+      // user 收信端 99% 支援 HTML → 看到表格 + emoji + 樣式;不支援的用 text fallback
+      const { mdToHtml } = require('./markdownToHtml');
+      const aiResponseHtml = mdToHtml(responseText.slice(0, 20000));
+      let bodyHtml = substituteVars(bodyTemplate, task.name)
+        .replace(/\{\{ai_response\}\}/g, '__AI_RESPONSE_PLACEHOLDER__')
+        .replace(/\{\{tools_used\}\}/g, toolsSummary);
+      bodyHtml = bodyHtml
+        .replace(/\n/g, '<br>')
+        .replace(/(https?:\/\/[^\s<,()]+)/g, '<a href="$1" style="color:#2563eb">$1</a>')
+        .replace('__AI_RESPONSE_PLACEHOLDER__', aiResponseHtml);
 
       // 失敗節點段:塞在 body 最開頭,讓使用者一打開就看到
       if (failedNodes.length > 0) {
@@ -835,6 +848,11 @@ async function runTask(db, taskId, opts = {}) {
           + failedNodes.map(f => `• 節點「${f.label}」(${f.type}) 失敗：${f.error}`).join('\n')
           + `\n\n下方為其他節點的產出 ↓\n\n──────────────────────────────\n\n`;
         bodyText = failBlock + bodyText;
+        const failHtml = `<div style="background:#fef2f2;border-left:4px solid #ef4444;padding:12px 16px;margin-bottom:16px;color:#991b1b;font-family:'Microsoft JhengHei',sans-serif">`
+          + `<strong>⚠️ 本次執行有 ${failedNodes.length} 個節點失敗</strong><br><br>`
+          + failedNodes.map(f => `• 節點「${f.label}」(${f.type}) 失敗:${f.error}`).join('<br>')
+          + `<br><br><small style="color:#7f1d1d">下方為其他節點的產出 ↓</small></div>`;
+        bodyHtml = failHtml + bodyHtml;
       }
 
       // Build attachments from generated files
@@ -845,9 +863,7 @@ async function runTask(db, taskId, opts = {}) {
       const sent = await sendMail({
         to: recipients.join(','),
         subject,
-        html: bodyText
-          .replace(/\n/g, '<br>')
-          .replace(/(https?:\/\/[^\s<,()]+)/g, '<a href="$1">$1</a>'),
+        html: bodyHtml,
         text: bodyText,
         attachments: attachments.length > 0 ? attachments : undefined,
       });
