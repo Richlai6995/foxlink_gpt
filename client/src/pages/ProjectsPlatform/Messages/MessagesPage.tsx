@@ -22,6 +22,38 @@ import { useAuth } from '../../../context/AuthContext'
 import { api } from '../api'
 import { useCrumbs } from '../Shell/PlatformContext'
 
+// ─── Module-level shared socket(全程式共用一條 comm socket,類似 useProjectsPlatformSocket)
+let _commSocket: any = null
+let _commRefCount = 0
+
+function _getCommSocket(io: any) {
+  if (_commSocket) {
+    _commRefCount++
+    return _commSocket
+  }
+  const token = localStorage.getItem('token')
+  if (!token) return null
+  _commSocket = io({
+    path: '/socket.io',
+    auth: { token },
+    transports: ['websocket', 'polling'],
+    reconnection: true,
+    reconnectionDelay: 1000,
+    reconnectionAttempts: 20,
+  })
+  _commRefCount = 1
+  return _commSocket
+}
+
+function _releaseCommSocket() {
+  _commRefCount--
+  if (_commRefCount <= 0 && _commSocket) {
+    _commSocket.disconnect()
+    _commSocket = null
+    _commRefCount = 0
+  }
+}
+
 type Room = {
   id: number
   room_type: 'org_group' | 'org_dm'
@@ -530,43 +562,54 @@ function useCommRoomSocket(roomId: number | null) {
   const [connected, setConnected] = useState(false)
   const [lastEvent, setLastEvent] = useState<{ type: string; data: any; _seq: number } | null>(null)
 
-  // reuse projects-platform socket connection — register comm_new_message listener
-  // 用 vanilla socket.io-client(同 useProjectsPlatformSocket 的 _shared)
-  // 這裡簡化:直接 fetch 共用 socket 並 listen
+  // module-level shared singleton + ref count(同 useProjectsPlatformSocket 模式)
+  // 切 room 不重連,只 emit join/leave
   useEffect(() => {
     if (!roomId) return
-    let socket: any = null
+    let cancelled = false
     let seq = 0
+    let socketRef: any = null
 
-    import('socket.io-client').then(({ io }) => {
-      const token = localStorage.getItem('token')
-      if (!token) return
-      socket = io({
-        path: '/socket.io',
-        auth: { token },
-        transports: ['websocket', 'polling'],
-        reconnection: true,
-      })
+    const setup = async () => {
+      const { io } = await import('socket.io-client')
+      if (cancelled) return
+      socketRef = _getCommSocket(io)
+      if (!socketRef) return
+
       const onConnect = () => {
         setConnected(true)
-        socket.emit('join_comm_room', { roomId })
+        socketRef.emit('join_comm_room', { roomId })
       }
+      const onReconnect = () => socketRef.emit('join_comm_room', { roomId })
       const onDisc = () => setConnected(false)
       const onMsg = (d: any) => {
+        if (Number(d?.room_id) !== Number(roomId)) return  // filter:只接收本 room 的訊息
         seq++
         setLastEvent({ type: 'comm_new_message', data: d, _seq: seq })
       }
-      socket.on('connect', onConnect)
-      socket.on('disconnect', onDisc)
-      socket.on('comm_new_message', onMsg)
-      if (socket.connected) onConnect()
-    })
+      socketRef.on('connect',           onConnect)
+      socketRef.on('reconnect',         onReconnect)
+      socketRef.on('disconnect',        onDisc)
+      socketRef.on('comm_new_message',  onMsg)
+
+      // 已連線 → 立即 join + handlers
+      if (socketRef.connected) onConnect()
+
+      // cleanup
+      (setup as any)._cleanup = () => {
+        socketRef.off('connect',          onConnect)
+        socketRef.off('reconnect',        onReconnect)
+        socketRef.off('disconnect',       onDisc)
+        socketRef.off('comm_new_message', onMsg)
+        try { socketRef.emit('leave_comm_room', { roomId }) } catch {}
+        _releaseCommSocket()
+      }
+    }
+    setup()
 
     return () => {
-      if (socket) {
-        try { socket.emit('leave_comm_room', { roomId }) } catch {}
-        socket.disconnect()
-      }
+      cancelled = true
+      if ((setup as any)._cleanup) (setup as any)._cleanup()
     }
   }, [roomId])
 

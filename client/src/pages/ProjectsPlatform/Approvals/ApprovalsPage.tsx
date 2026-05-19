@@ -27,6 +27,7 @@ type Pending = {
   project_id: number
   project_code: string
   project_title?: string | null
+  requested_by_user_id?: number | null
   requester_name?: string | null
   requester_username?: string | null
   expires_at?: string | null

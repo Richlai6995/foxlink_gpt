@@ -81,7 +81,7 @@ module.exports = async function migrate011(db) {
       decision                 VARCHAR2(20),                  -- approved | rejected | skipped
       decided_by_user_id       NUMBER,
       decided_at               TIMESTAMP,
-      comment                  VARCHAR2(2000),
+      decision_comment         VARCHAR2(2000),
       created_at               TIMESTAMP DEFAULT SYSTIMESTAMP,
       CONSTRAINT uq_pas UNIQUE (chain_id, step_order)
     )

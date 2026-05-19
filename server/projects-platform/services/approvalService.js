@@ -130,7 +130,7 @@ async function decide(db, { chainId, stepOrder, decision, decidedByUserId, comme
   // 寫 decision
   await db.prepare(`
     UPDATE project_approval_steps
-       SET decision = ?, decided_by_user_id = ?, decided_at = SYSTIMESTAMP, comment = ?
+       SET decision = ?, decided_by_user_id = ?, decided_at = SYSTIMESTAMP, decision_comment = ?
      WHERE id = ?
   `).run(decision, decidedByUserId, comment ? String(comment).slice(0, 2000) : null, step.id);
 
@@ -254,7 +254,7 @@ async function listForProject(db, projectId) {
   for (const c of chains) {
     c.steps = await db.prepare(`
       SELECT s.id, s.step_order, s.approver_user_id, s.approver_role, s.step_kind,
-             s.decision, s.decided_by_user_id, s.decided_at, s.comment,
+             s.decision, s.decided_by_user_id, s.decided_at, s.decision_comment AS comment,
              u1.name AS approver_name, u1.username AS approver_username,
              u2.name AS decided_by_name
         FROM project_approval_steps s

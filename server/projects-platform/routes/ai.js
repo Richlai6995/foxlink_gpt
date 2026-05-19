@@ -95,7 +95,7 @@ router.post('/what-if-analyze', asyncHandler(async (req, res) => {
   if (!projectId) return res.status(400).json({ error: 'project_id required' });
   if (!req.body?.baseline) return res.status(400).json({ error: 'baseline required' });
   try {
-    const r = await whatIf.analyze(_db(), {
+    const r = await whatIf.analyze(getDb(), {
       projectId,
       baseline: req.body.baseline,
       scenario: req.body.scenario || {},
@@ -108,8 +108,6 @@ router.post('/what-if-analyze', asyncHandler(async (req, res) => {
   }
 }));
 
-// _db helper(reuse cross-route)
-function _db() { return require('../../database-oracle').db; }
 
 /**
  * POST /win-rate-predict — Sprint O #17 贏單機率預測
@@ -119,7 +117,7 @@ router.post('/win-rate-predict', asyncHandler(async (req, res) => {
   const projectId = Number(req.body?.project_id);
   if (!projectId) return res.status(400).json({ error: 'project_id required' });
   try {
-    const r = await winRate.predict(_db(), { projectId, user: req.user });
+    const r = await winRate.predict(getDb(), { projectId, user: req.user });
     res.json(r);
   } catch (e) {
     if (/not found|required/.test(e.message)) return res.status(400).json({ error: e.message });
@@ -133,7 +131,7 @@ router.post('/win-rate-predict', asyncHandler(async (req, res) => {
  */
 router.post('/win-rate-batch', asyncHandler(async (req, res) => {
   try {
-    const r = await winRate.predictBatch(_db(), {
+    const r = await winRate.predictBatch(getDb(), {
       projectIds: req.body?.project_ids,
       limit: Number(req.body?.limit) || 50,
     });
