@@ -276,6 +276,61 @@ curl -i -H "Authorization: Bearer $TOKEN" -H "X-Demo-Role: OUTSIDER" \
 
 ---
 
+## ⭐ Phase 3 Sprint O/P/Q — 贏單預測 + 多級簽核 + ML widget(2026-05-19 ship)
+
+Phase 3 一氣呵成 3 個 sprint。
+
+### Sprint O · 贏單機率預測
+
+1. 進任一專案 WarRoom
+2. header 右上點紫色「贏單機率」按鈕
+3. modal 開:
+   - 環形 ring 顯示 WIN%(0-100)
+   - confidence badge(high/mid/low based on sample size)
+   - 案件特徵 grid(customer / part_no / quantity / BU / priority / season / BU win rate / tasks)
+   - 影響因素列表(綠 ↑ / 紅 ↓ 排序)
+   - LLM 解讀 markdown(若 USE_LLM=true)
+4. API:`POST /api/projects/ai/win-rate-predict { project_id }`
+
+### Sprint P · 多級簽核
+
+1. WarRoom header(ACTIVE 專案)看到琥珀「申請結案簽核」按鈕
+2. 點 → prompt 輸理由 → 送出
+3. 預設規則:`lifecycle_close` chain 需 `project.bu_director` 1 票
+4. BU director 收到 in_app_badge 通知
+5. director 進 sidebar「📝 待批」看到該 chain → 批准 / 拒絕
+6. 全批准 → 自動呼叫 `projectsService.updateLifecycle(CLOSED)`
+7. requester 收到通知「✅ 簽核已通過」
+
+**4 個 default chainKinds**:
+- `high_amount` — bu_director + sales 雙簽
+- `confidential_upgrade` — confidential.policy_editor + admin
+- `lifecycle_close` — bu_director
+- `stage_gate` — bu_director
+
+### Sprint Q · ML 預測警示 widget C
+
+1. 進跨專案儀表板
+2. 找到底部紫色 widget「ML 預測模型 widget C」
+3. 點「跑批次預測」→ 對 active 專案批次跑規則式預測
+4. 兩欄分組:
+   - 🚨 高風險(WIN < 40%):點專案直接跳 WarRoom 看 detail
+   - ⭐ 高機率(WIN ≥ 70%)
+5. 每筆顯 project_code + customer + win% + top_factor(影響最強因素)
+
+API:`POST /api/projects/ai/win-rate-batch { limit: 30 }`
+
+### Phase 3 ship 全圖
+
+| Sprint | 狀態 | commit |
+|---|---|---|
+| N · What-if 模擬器 | ✅ | (前一輪) |
+| O · 贏單機率預測 | ✅ | c05756c |
+| P · 多級簽核 + reviewer | ✅ | 8278514 |
+| Q · ML 預測警示 widget C | ✅ | (本 commit) |
+
+---
+
 ## ⭐ Phase 3 Sprint N — What-if 模擬器(2026-05-19 ship)
 
 對齊 spec §16.5(預測能力 B 層)+ slide 16。改參數即時看影響。

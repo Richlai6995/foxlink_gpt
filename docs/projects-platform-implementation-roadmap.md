@@ -955,23 +955,48 @@ UI:
 - ⏳ 廠區 cost 不用 hardcode ±5%,改吃 Cleansheet 已輸入的三廠 cost(若 user 已填)
 - ⏳ Sprint O ML 模型上線後,規則式 + ML 混合預測
 
-#### Sprint O — 贏單機率預測 ML 模型(3-4 週)
+#### Sprint O — 贏單機率預測(MVP) ✅ ship 2026-05-19
 
-- 對齊 spec §16.4 + Demo §8.5「Phase 3 ML 預測模型」
-- 基於 BOM 結構 / 客戶等級 / 季節 / 競品 預測 W/L
-- 訓練資料:沉澱 KB 結案案(需要先有 Phase 2 sediment 累積)
-- 模型 serving:獨立 service(Python sklearn / 走 Vertex AI Custom Predictor)
+對齊 spec §16.4 + Demo §8.5「Phase 3 ML 預測模型」。
 
-#### Sprint P — 多級簽核 + reviewer(2 週)
+- ✅ `winRatePredictorService.extractFeatures` — 從沉澱 KB + projects 表抽 features
+  - 歷史相似案 win/loss/hold ratio(沉澱 KB chunks LIKE)
+  - BU 整體 win rate
+  - priority_score / 季節 / task 健康度
+- ✅ `_ruleBasedPredict` — 加權規則式(歷史 .7 / BU .15 / priority +.05 / blocker -.10 / Q4 -.03)
+- ✅ LLM 解讀(optional Gemini Flash markdown)
+- ✅ `WinRatePanel.tsx` — 環形 ring + features + factors + reasoning
+- ✅ WarRoom header「贏單機率」紫色按鈕
 
-- 高金額 / 跨 BU / 機密升級需多人簽核
-- migration:`project_approval_chains` + `project_approval_steps`
-- 跟 Stage Gate 整合(某 stage advance 前先過 approval)
+未來(待 ML data 累積):
+- ⏳ ML backend(Python sklearn / Vertex AI Custom Predictor)— 框架已備 `PROJECTS_WIN_RATE_BACKEND` env
+- ⏳ 訓練資料:結案專案累積到 50+ 後試訓 logistic regression baseline
 
-#### Sprint Q — ML 預測警示(1-2 週)
+#### Sprint P — 多級簽核 + reviewer ✅ ship 2026-05-19
 
-- 對齊儀表板 §16.4「C · ML 預測模型」格(目前 stub「○ Phase 3 待評估」)
-- 接 Sprint O 模型,跑每天批次預測,warn 高風險專案
+- ✅ migration 011:`project_approval_chains` + `project_approval_steps` + `project_approval_triggers`
+- ✅ `approvalService.createChain / decide / cancel / listPendingForUser / listForProject`
+- ✅ 4 default chainKinds:`high_amount` / `confidential_upgrade` / `lifecycle_close` / `stage_gate`
+- ✅ ACL:approver_user_id / approver_role(走 userRoleService.hasRole)/ admin override
+- ✅ 通知 in_app_badge(per step approver · 鈴鐺紅點)
+- ✅ Approved → 自動 apply target action(`stagesService.advance` / `projectsService.updateLifecycle` / confidential upgrade)
+- ✅ `ApprovalsPage.tsx`「📝 待批」+ sidebar 入口
+- ✅ WarRoom header「申請結案簽核」琥珀按鈕(ACTIVE 才顯)
+- ⏳ trigger 條件自動偵測(目前手動觸發 / 未來偵測 amount >= 100k 自動建 chain)
+
+#### Sprint Q — ML 預測警示 widget C ✅ ship 2026-05-19
+
+對齊儀表板 spec §16.4「C · ML 預測模型」格(原 stub「○ Phase 3 待評估」)。
+
+- ✅ Backend `winRatePredictor.predictBatch(db, { projectIds?, limit })` — 跳過 LLM 純規則式
+- ✅ Route `POST /api/projects/ai/win-rate-batch`
+- ✅ Dashboard 新 `WidgetC` 元件:
+  - 「跑批次預測」按鈕(on-demand)
+  - 兩欄分組:🚨 高風險(WIN < 40%)/ ⭐ 高機率(WIN ≥ 70%)
+  - 每筆顯 project_code + customer + win% + top_factor
+  - 點 → 直接跳該 project WarRoom
+- ✅ AI 預測警示 3 卡片改為 Phase A/B/C 全綠 ✓
+- ⏳ Scheduled batch(每天 09:00 預跑 + cache)— Phase 3+ 補 cron
 
 ---
 

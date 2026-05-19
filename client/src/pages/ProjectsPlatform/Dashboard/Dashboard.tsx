@@ -233,17 +233,20 @@ export default function Dashboard() {
           <AiPhaseCard
             phase="B · RAG 類似案推論"
             example="「歷史 5 案 → 3W/2L · 平均 Tier-M」"
-            status="⏳ Phase 2 規劃中"
-            statusColor="text-cortex-amber"
+            status="✓ Phase 2 Sprint M-11"
+            statusColor="text-cortex-green"
           />
           <AiPhaseCard
             phase="C · ML 預測模型"
             example="「贏單機率 73%(BOM/客戶/季節)」"
-            status="○ Phase 3 待評估"
-            statusColor="text-cortex-muted"
+            status="✓ Phase 3 Sprint O+Q"
+            statusColor="text-cortex-green"
           />
         </div>
       </Widget>
+
+      {/* Sprint Q · widget C(贏單機率批次預測 + risky projects)*/}
+      <WidgetC />
 
       <div className="text-[11px] text-cortex-muted text-right">
         Generated at {new Date(data.generated_at).toLocaleString('zh-TW')} ·
@@ -355,6 +358,142 @@ function AiPhaseCard({ phase, example, status, statusColor }: { phase: string; e
       <div className="text-[10px] font-bold text-cortex-teal tracking-wide mb-1">{phase}</div>
       <div className="text-[11px] text-cortex-text leading-relaxed">{example}</div>
       <div className={`text-[10px] font-bold mt-1.5 ${statusColor}`}>{status}</div>
+    </div>
+  )
+}
+
+// ─── Sprint Q · ML 預測警示 widget C ────────────────────────────────
+type Prediction = {
+  project_id: number
+  project_code: string
+  customer?: string | null
+  win_rate_percent: number
+  confidence: 'low' | 'mid' | 'high'
+  history_sample: number
+  top_factor?: { name: string; value: any; direction: 'positive' | 'negative' } | null
+}
+
+function WidgetC() {
+  const { token } = useAuth() as any
+  const navigate = useNavigate()
+  const [list, setList] = useState<Prediction[]>([])
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [loadedAt, setLoadedAt] = useState<Date | null>(null)
+
+  const load = async () => {
+    setLoading(true)
+    setErr(null)
+    try {
+      const r = await api.post<{ predictions: Prediction[] }>(token, '/ai/win-rate-batch', { limit: 30 })
+      setList(r.predictions || [])
+      setLoadedAt(new Date())
+    } catch (e: any) {
+      setErr(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Sort by win_rate ascending(最危險的先列)
+  const sorted = [...list].sort((a, b) => a.win_rate_percent - b.win_rate_percent)
+  const risky = sorted.filter((p) => p.win_rate_percent < 40)
+  const promising = sorted.filter((p) => p.win_rate_percent >= 70).reverse().slice(0, 5)
+
+  return (
+    <div className="bg-gradient-to-b from-purple-50 to-white border border-purple-200 rounded-xl p-3.5 shadow-cortex-sm">
+      <div className="flex items-end justify-between mb-2 flex-wrap gap-2">
+        <div className="flex items-center gap-2 text-[13px] font-bold text-cortex-ink">
+          <Sparkles size={14} className="text-purple-600" />
+          ML 預測模型 · widget C(spec §16.4)
+          <span className="text-[9px] font-bold text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">Phase 3</span>
+        </div>
+        <button
+          onClick={load}
+          disabled={loading}
+          className="px-2.5 py-1 text-[11px] bg-purple-500 text-white rounded font-bold hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-1"
+        >
+          {loading ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+          {loading ? '預測中…' : (loadedAt ? '重新預測' : '跑批次預測')}
+        </button>
+      </div>
+
+      {err && (
+        <div className="bg-cortex-red-bg/40 border border-red-200 rounded p-2 text-[11px] text-red-700">{err}</div>
+      )}
+
+      {!err && list.length === 0 && !loading && (
+        <div className="text-center text-cortex-muted text-[11px] py-3 italic">
+          點「跑批次預測」對 active 專案算贏單機率(規則式 + 沉澱 KB 歷史)
+        </div>
+      )}
+
+      {list.length > 0 && (
+        <>
+          <div className="text-[10px] text-cortex-muted mb-2 inline-flex items-center gap-2">
+            <span>共 {list.length} 個 active 專案</span>
+            {loadedAt && <span>· 預測於 {loadedAt.toLocaleTimeString('zh-TW')}</span>}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            {/* Risky */}
+            <div>
+              <div className="text-[10px] font-bold text-red-700 uppercase tracking-widest mb-1.5">
+                🚨 高風險(WIN &lt; 40%)· {risky.length}
+              </div>
+              {risky.length === 0 && (
+                <div className="text-[10px] text-cortex-muted italic">無</div>
+              )}
+              {risky.slice(0, 6).map((p) => (
+                <button
+                  key={p.project_id}
+                  onClick={() => navigate(`/projects-platform/projects/${p.project_id}`)}
+                  className="block w-full text-left px-2 py-1.5 mb-1 rounded text-[11px] bg-white border border-red-200 hover:bg-cortex-red-bg/30 transition"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono font-bold text-cortex-ocean">{p.project_code}</span>
+                    <span className="font-mono font-bold text-red-600">{p.win_rate_percent}%</span>
+                  </div>
+                  {p.customer && <div className="text-[10px] text-cortex-muted truncate">{p.customer}</div>}
+                  {p.top_factor && (
+                    <div className="text-[9px] text-cortex-text mt-0.5">
+                      💡 {p.top_factor.name}
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* Promising */}
+            <div>
+              <div className="text-[10px] font-bold text-cortex-green uppercase tracking-widest mb-1.5">
+                ⭐ 高機率(WIN ≥ 70%)· {promising.length}
+              </div>
+              {promising.length === 0 && (
+                <div className="text-[10px] text-cortex-muted italic">無</div>
+              )}
+              {promising.map((p) => (
+                <button
+                  key={p.project_id}
+                  onClick={() => navigate(`/projects-platform/projects/${p.project_id}`)}
+                  className="block w-full text-left px-2 py-1.5 mb-1 rounded text-[11px] bg-white border border-cortex-green/30 hover:bg-cortex-green-bg/30 transition"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono font-bold text-cortex-ocean">{p.project_code}</span>
+                    <span className="font-mono font-bold text-cortex-green">{p.win_rate_percent}%</span>
+                  </div>
+                  {p.customer && <div className="text-[10px] text-cortex-muted truncate">{p.customer}</div>}
+                  {p.top_factor && (
+                    <div className="text-[9px] text-cortex-text mt-0.5">
+                      ↑ {p.top_factor.name}
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }
