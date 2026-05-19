@@ -311,18 +311,24 @@ router.get('/news', verifyToken, verifyMetalsAccess, async (req, res) => {
   try {
     const db = require('../database-oracle').db;
     const limit = Math.min(Math.max(Number(req.query.limit || 30), 1), 200);
-    const date = String(req.query.date || '').trim();    // 'YYYY-MM-DD' 看那天 scraped 的
-    const todayOnly = !date && String(req.query.today || '1') === '1';
+    const date = String(req.query.date || '').trim();    // 'YYYY-MM-DD' anchor 日期(預設今天)
+    const todayOnly = !date && String(req.query.today || '0') === '1';
+    // days 範圍:從 anchor 日期往前回顧 N 天(預設 7)
+    // 1 = 只看當天、3 = 近 3 天、7 = 近一週、14 = 近兩週、30 = 近一個月
+    const days = Math.min(Math.max(Number(req.query.days || 7), 1), 90);
     const where = [];
     const params = [];
     if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      // 那天 scraped 的(00:00 ~ 隔天 00:00)
-      where.push(`scraped_at >= TO_DATE(?, 'YYYY-MM-DD') AND scraped_at < TO_DATE(?, 'YYYY-MM-DD') + 1`);
-      params.push(date, date);
+      // anchor 日往前 days 天的新聞(含當天)
+      where.push(`scraped_at >= TO_DATE(?, 'YYYY-MM-DD') - ? AND scraped_at < TO_DATE(?, 'YYYY-MM-DD') + 1`);
+      params.push(date, days - 1, date);
     } else if (todayOnly) {
+      // 強制只看當天(legacy 兼容)
       where.push(`scraped_at >= TRUNC(SYSDATE)`);
     } else {
-      where.push(`scraped_at >= TRUNC(SYSDATE) - 7`);
+      // 預設:今天往前 days 天
+      where.push(`scraped_at >= TRUNC(SYSDATE) - ?`);
+      params.push(days - 1);
     }
     const rows = await db.prepare(`
       SELECT id, url, title, source, language,
@@ -350,22 +356,47 @@ router.get('/reports', verifyToken, verifyMetalsAccess, async (req, res) => {
     const db = require('../database-oracle').db;
     const type = String(req.query.type || 'weekly').toLowerCase();
     if (!['weekly', 'monthly'].includes(type)) return res.status(400).json({ error: 'type 必須 weekly/monthly' });
+    const date = String(req.query.date || '').trim();
 
     // v2:從 pm_purchaser_reports 撈採購自寫的 published 版本
     // 一般 user 看不到 LLM 自動草稿(那只是採購的素材)
-    const row = await db.prepare(`
-      SELECT pr.id, pr.report_type,
-             TO_CHAR(pr.as_of_date, 'YYYY-MM-DD') AS as_of_date,
-             pr.title, pr.content,
-             pr.source_type,
-             TO_CHAR(pr.published_at, 'YYYY-MM-DD HH24:MI') AS published_at,
-             pr.created_by, u.name AS creator_name
-      FROM pm_purchaser_reports pr
-      LEFT JOIN users u ON u.id = pr.created_by
-      WHERE pr.report_type = ? AND pr.is_published = 1
-      ORDER BY pr.as_of_date DESC, pr.published_at DESC
-      FETCH FIRST 1 ROWS ONLY
-    `).get(type);
+    // 日期切換邏輯:
+    //   - weekly:找 as_of_date 等於 anchor 日期所在週的週一(Oracle TRUNC(...,'IW') = ISO 週一)
+    //   - monthly:找 as_of_date 等於 anchor 日期所在月的 1 號(TRUNC(...,'MM'))
+    //   - 沒給 date → fallback 取最新 published
+    let row;
+    if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      const truncUnit = type === 'weekly' ? 'IW' : 'MM';
+      row = await db.prepare(`
+        SELECT pr.id, pr.report_type,
+               TO_CHAR(pr.as_of_date, 'YYYY-MM-DD') AS as_of_date,
+               pr.title, pr.content,
+               pr.source_type,
+               TO_CHAR(pr.published_at, 'YYYY-MM-DD HH24:MI') AS published_at,
+               pr.created_by, u.name AS creator_name
+        FROM pm_purchaser_reports pr
+        LEFT JOIN users u ON u.id = pr.created_by
+        WHERE pr.report_type = ?
+          AND pr.is_published = 1
+          AND TRUNC(pr.as_of_date, '${truncUnit}') = TRUNC(TO_DATE(?, 'YYYY-MM-DD'), '${truncUnit}')
+        ORDER BY pr.published_at DESC
+        FETCH FIRST 1 ROWS ONLY
+      `).get(type, date);
+    } else {
+      row = await db.prepare(`
+        SELECT pr.id, pr.report_type,
+               TO_CHAR(pr.as_of_date, 'YYYY-MM-DD') AS as_of_date,
+               pr.title, pr.content,
+               pr.source_type,
+               TO_CHAR(pr.published_at, 'YYYY-MM-DD HH24:MI') AS published_at,
+               pr.created_by, u.name AS creator_name
+        FROM pm_purchaser_reports pr
+        LEFT JOIN users u ON u.id = pr.created_by
+        WHERE pr.report_type = ? AND pr.is_published = 1
+        ORDER BY pr.as_of_date DESC, pr.published_at DESC
+        FETCH FIRST 1 ROWS ONLY
+      `).get(type);
+    }
 
     res.json({ report: row || null });
   } catch (e) {

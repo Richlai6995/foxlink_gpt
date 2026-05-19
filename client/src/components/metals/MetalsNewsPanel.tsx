@@ -26,34 +26,47 @@ interface Props {
   viewDate?: string  // 'YYYY-MM-DD'
 }
 
+const NEWS_DAYS_KEY = 'metals.newsDays'
+const NEWS_DAYS_OPTIONS = [1, 3, 7, 14, 30] as const
+
 export default function MetalsNewsPanel({ viewDate }: Props) {
   const [tab, setTab] = useState<Tab>('news')
   const [news, setNews] = useState<NewsItem[]>([])
   const [report, setReport] = useState<any>(null)
   const [loading, setLoading] = useState(false)
+  // 新聞抓取天數 selector — 預設 7 天,localStorage 記憶
+  const [newsDays, setNewsDays] = useState<number>(() => {
+    const saved = Number(localStorage.getItem(NEWS_DAYS_KEY))
+    return NEWS_DAYS_OPTIONS.includes(saved as any) ? saved : 7
+  })
+  const changeDays = (d: number) => {
+    setNewsDays(d)
+    localStorage.setItem(NEWS_DAYS_KEY, String(d))
+  }
 
   useEffect(() => {
     setLoading(true)
     if (tab === 'news') {
-      const params: Record<string, any> = { limit: 30 }
+      const params: Record<string, any> = { limit: 30, days: newsDays }
       if (viewDate) params.date = viewDate
-      else params.today = 1
       api.get('/metals/news', { params })
         .then(r => setNews(r.data?.rows || []))
         .finally(() => setLoading(false))
     } else {
-      api.get('/metals/reports', { params: { type: tab } })
+      const params: Record<string, any> = { type: tab }
+      if (viewDate) params.date = viewDate
+      api.get('/metals/reports', { params })
         .then(r => setReport(r.data?.report || null))
         .finally(() => setLoading(false))
     }
-  }, [tab, viewDate])
+  }, [tab, viewDate, newsDays])
 
   return (
     <div className="bg-white border rounded-lg flex flex-col flex-1 min-h-0 overflow-hidden">
       {/* Tab header — 黃色色帶配合 user 設計 */}
       <div className="flex items-center border-b bg-gradient-to-r from-amber-100 to-yellow-50">
         {([
-          { id: 'news', label: '今日新聞', icon: <Newspaper size={12} /> },
+          { id: 'news', label: '新聞', icon: <Newspaper size={12} /> },
           { id: 'weekly', label: '週報', icon: <BarChart3 size={12} /> },
           { id: 'monthly', label: '月報', icon: <FileText size={12} /> },
         ] as { id: Tab; label: string; icon: React.ReactNode }[]).map(s => (
@@ -69,6 +82,26 @@ export default function MetalsNewsPanel({ viewDate }: Props) {
         ))}
       </div>
 
+      {/* news tab 限定:抓取天數 selector(localStorage 記憶) */}
+      {tab === 'news' && (
+        <div className="flex items-center gap-1 px-2 py-1 border-b bg-slate-50 text-[10px] text-slate-500">
+          <span className="text-slate-400">近</span>
+          {NEWS_DAYS_OPTIONS.map(d => (
+            <button
+              key={d}
+              onClick={() => changeDays(d)}
+              className={`px-1.5 py-0.5 rounded transition ${
+                newsDays === d
+                  ? 'bg-amber-600 text-white font-medium'
+                  : 'text-slate-500 hover:bg-amber-100 hover:text-amber-700'
+              }`}
+            >
+              {d}{d === 1 ? '日' : '天'}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="flex-1 min-h-0 overflow-y-auto p-2">
         {loading ? (
           <div className="flex items-center justify-center py-6 text-slate-400 text-xs gap-1.5">
@@ -76,7 +109,9 @@ export default function MetalsNewsPanel({ viewDate }: Props) {
           </div>
         ) : tab === 'news' ? (
           news.length === 0 ? (
-            <div className="text-xs text-slate-400 text-center py-4">今日尚無新聞</div>
+            <div className="text-xs text-slate-400 text-center py-4">
+              {viewDate ? `${viewDate} 起往前 ${newsDays} 天無新聞` : `近 ${newsDays} 天無新聞`}
+            </div>
           ) : (
             // 緊湊版:每則一列(title 一行 + meta 一行),不 show summary 預覽 → 同空間多顯示 N 倍新聞
             <div className="divide-y">
