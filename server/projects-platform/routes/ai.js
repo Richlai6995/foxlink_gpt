@@ -17,6 +17,7 @@ const { asyncHandler } = require('../middleware/errorBoundary');
 const pricing = require('../services/aiPricingService');
 const cleansheet = require('../services/aiCleansheetService');
 const dailyReport = require('../services/dailyReportService');
+const whatIf = require('../services/aiWhatIfService');
 
 const router = express.Router();
 function getDb() { return require('../../database-oracle').db; }
@@ -81,6 +82,33 @@ router.post('/daily-report/run', asyncHandler(async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 }));
+
+/**
+ * POST /what-if-analyze — Sprint N What-if 模擬器(spec §16.5)
+ *   body: { project_id, baseline, scenario }
+ *   - baseline:{ quantity, cost_total, margin_pct, due_date_days, factory_code }
+ *   - scenario:{ quantity_pct?, raw_material_pct?, fx_pct?, factory_code? }
+ */
+router.post('/what-if-analyze', asyncHandler(async (req, res) => {
+  const projectId = Number(req.body?.project_id);
+  if (!projectId) return res.status(400).json({ error: 'project_id required' });
+  if (!req.body?.baseline) return res.status(400).json({ error: 'baseline required' });
+  try {
+    const r = await whatIf.analyze(_db(), {
+      projectId,
+      baseline: req.body.baseline,
+      scenario: req.body.scenario || {},
+      user: req.user,
+    });
+    res.json(r);
+  } catch (e) {
+    if (/required|invalid/.test(e.message)) return res.status(400).json({ error: e.message });
+    res.status(500).json({ error: e.message });
+  }
+}));
+
+// _db helper(reuse cross-route)
+function _db() { return require('../../database-oracle').db; }
 
 /**
  * POST /daily-report/run-all — admin 批次跑(scheduled job 用)

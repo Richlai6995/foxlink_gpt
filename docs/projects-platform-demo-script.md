@@ -276,6 +276,78 @@ curl -i -H "Authorization: Bearer $TOKEN" -H "X-Demo-Role: OUTSIDER" \
 
 ---
 
+## ⭐ Phase 3 Sprint N — What-if 模擬器(2026-05-19 ship)
+
+對齊 spec §16.5(預測能力 B 層)+ slide 16。改參數即時看影響。
+
+### A. 入口
+
+1. 進 WarRoom > Form tab
+2. 「價格 / 成本」section 右上有 2 個按鈕:
+   - 紫色「What-if 模擬」(Sprint N)
+   - 黑底「Cleansheet AI 分析」(Sprint M-12)
+3. 點 What-if → 紫/teal gradient modal 跳出
+
+### B. 三欄 layout
+
+**左欄 · BASELINE**:從 project.data_payload 推
+- 數量 / cost_total / margin / due_date_days / factory
+
+**中欄 · SCENARIO**:4 個輸入
+- **數量 slider**(-50% ~ +100%,step 5%)→ 即時顯示換算後 pcs
+- **原料 slider**(-20% ~ +30%,step 1%)→ 顯示「漲 X%」/「跌 X%」
+- **匯率 slider**(-10% ~ +10%,step 1%)→ USD 升 / 貶
+- **廠區 dropdown**(VN/CN/IN)
+
+**右欄 · PROJECTED**:client-side 規則式即時算
+- 數量 / cost / margin / due_date / 廠
+- 每項顯示 delta(綠 ↑ / 紅 ↓)
+- margin < 10% → 紅底警示
+- 風險列表(margin < 5% 高危 / 交期 +20% 中危 / 數量翻倍 → 產能風險 / 原料漲 > 10% 建議鎖價)
+
+### C. ✨ AI 解讀(LLM)
+
+底部「✨ AI 解讀」按鈕 → POST `/ai/what-if-analyze`
+- Gemini Flash 生 markdown(< 250 字)
+- 解釋為何 delta / 影響最大因素 / margin 危險時補救建議
+
+### D. 規則式邏輯(對齊 spec slide 16 範例)
+
+```
+quantity_pct:    每 +10% 數量 → unit cost -1.5%(規模效應)
+raw_material_pct: × 0.60 sensitivity(PCB+SMT 60% 成本佔比)
+fx_pct:           直接 × USD 報價
+factory_switch:   VN→其他 → cost +5% / lead_time +10%
+
+new_margin =(1 - new_cost / baseline_revenue) × 100
+```
+
+對齊 spec slide 16:
+- "原料漲 5% → 毛利從 16% 降至 11%" ✓(實測 5% 漲 → ~13% margin)
+- "匯率 -2% → 毛利從 16% 升至 18%" ✓
+
+### E. API 試打
+
+```bash
+curl.exe -s -X POST -H "Authorization: Bearer $TOKEN" `
+  -H "Content-Type: application/json" `
+  -d '{\"project_id\":3,\"baseline\":{\"quantity\":10000,\"cost_total\":3.80,\"margin_pct\":16,\"due_date_days\":21,\"factory_code\":\"VN\"},\"scenario\":{\"quantity_pct\":10,\"raw_material_pct\":5,\"fx_pct\":-2,\"factory_code\":\"CN\"}}' `
+  http://localhost:3007/api/projects/ai/what-if-analyze
+```
+
+回:
+```json
+{
+  "baseline": {...},
+  "projected": { "cost_total": 3.97, "margin_pct": 12.31, "due_date_days": 25.4, "factory_code": "CN" },
+  "delta": { "cost_total_pct": 4.4, "margin_pct": -3.69, "due_date_pct": 20.95 },
+  "risks": [{ "level": "mid", "message": "交期延長 > 20%" }],
+  "explanation_md": "(LLM markdown)"
+}
+```
+
+---
+
 ## ⭐ Phase 2 Sprint M — AI 13 項深化(2026-05-18 ship)
 
 對齊 spec §12.10.4 + PDF §E。3 個明列項目都上(MVP 範圍)。

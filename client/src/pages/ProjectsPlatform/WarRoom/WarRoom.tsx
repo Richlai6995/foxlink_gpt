@@ -15,7 +15,7 @@
 
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, MessageSquare, Kanban, FileText, Users, Lock, BarChart3, Sparkles, Factory, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, MessageSquare, Kanban, FileText, Users, Lock, BarChart3, Sparkles, Factory, Activity, type LucideIcon } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
 import { api, type ProjectDetail } from '../api'
 import { useCrumbs, usePlatform } from '../Shell/PlatformContext'
@@ -27,6 +27,7 @@ import MembersTab from './MembersTab'
 import BiTab from './BiTab'
 import AiSuggestionModal from './AiSuggestionModal'
 import CleansheetPanel from './CleansheetPanel'
+import WhatIfPanel from './WhatIfPanel'
 import WarRoomHeaderActions from './WarRoomHeaderActions'
 import { useProjectsPlatformSocket } from '../../../hooks/useProjectsPlatformSocket'
 
@@ -181,6 +182,8 @@ function FormStub({ project }: { project: ProjectDetail }) {
   const [aiAccepted, setAiAccepted] = useState<Record<string, any>>({})
   // Sprint M-12 Cleansheet panel
   const [showCleansheet, setShowCleansheet] = useState(false)
+  // Sprint N What-if panel
+  const [showWhatIf, setShowWhatIf] = useState(false)
   // AI 建議按鈕只對「報價金額 / 毛利率 / cost_breakdown / priorityScore」開放
   const AI_SUGGEST_FIELDS = new Set(['amount', 'margin', 'cost_breakdown', 'priorityScore'])
 
@@ -261,13 +264,22 @@ function FormStub({ project }: { project: ProjectDetail }) {
             <div className="text-[12px] font-bold text-cortex-teal mb-2 flex items-center justify-between">
               <span>{sec.label}</span>
               {sec.label.includes('價格 / 成本') && (
-                <button
-                  onClick={() => setShowCleansheet(true)}
-                  className="text-[10px] inline-flex items-center gap-1 px-2 py-0.5 rounded bg-gradient-to-r from-cortex-navy to-cortex-teal text-white font-bold hover:opacity-90"
-                  title="AI #12 Cleansheet 三廠成本拆解 + 對比分析"
-                >
-                  <Factory size={10} /> Cleansheet AI 分析
-                </button>
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => setShowWhatIf(true)}
+                    className="text-[10px] inline-flex items-center gap-1 px-2 py-0.5 rounded bg-gradient-to-r from-purple-600 to-cortex-teal text-white font-bold hover:opacity-90"
+                    title="AI #18 What-if 模擬器(spec §16.5)"
+                  >
+                    <Activity size={10} /> What-if 模擬
+                  </button>
+                  <button
+                    onClick={() => setShowCleansheet(true)}
+                    className="text-[10px] inline-flex items-center gap-1 px-2 py-0.5 rounded bg-gradient-to-r from-cortex-navy to-cortex-teal text-white font-bold hover:opacity-90"
+                    title="AI #12 Cleansheet 三廠成本拆解 + 對比分析"
+                  >
+                    <Factory size={10} /> Cleansheet AI 分析
+                  </button>
+                </div>
               )}
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -333,6 +345,11 @@ function FormStub({ project }: { project: ProjectDetail }) {
       {/* Cleansheet panel */}
       {showCleansheet && (
         <CleansheetPanel project={project} onClose={() => setShowCleansheet(false)} />
+      )}
+
+      {/* What-if panel(Sprint N) */}
+      {showWhatIf && (
+        <WhatIfPanel project={project} onClose={() => setShowWhatIf(false)} />
       )}
     </div>
   )

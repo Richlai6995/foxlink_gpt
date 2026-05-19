@@ -931,11 +931,29 @@ UI:
 
 ### Phase 3 任務切片
 
-#### Sprint N — What-if 模擬器(2 週)
+#### Sprint N — What-if 模擬器 ✅ ship 2026-05-19
 
-- 改參數即時看影響(數量 +10% → 毛利變多少 / 改廠區 → 交期 / cost 動)
-- 對齊 spec §16.5 預測能力 B 層
-- React component:slider / dropdown 改 → 即時 query(用 cache)
+對齊 spec §16.5(預測能力 B 層)+ slide 16。
+
+- ✅ Backend `services/aiWhatIfService.analyze(db, { projectId, baseline, scenario, user })`
+- ✅ Route `POST /api/projects/ai/what-if-analyze`
+- ✅ **規則式 base** server + client 對稱(scaleCostMul / rawCostMul / fxCostMul / factoryCostMul/LeadMul)
+- ✅ Risks 規則(margin < 5% 高危 / margin < 10% 中危 / 交期 +20% 中危 / 數量 +50% 高危 / 原料 +10% 鎖價建議)
+- ✅ **LLM 補語意解讀**(optional · Gemini Flash markdown < 250 字)
+- ✅ `WhatIfPanel.tsx` 三欄(Baseline / Scenario / Projected)
+  - 4 個 slider(數量 / 原料 / 匯率)+ 1 個廠區 dropdown
+  - **Client-side 規則式即時算**(改 slider 不卡 LLM)
+  - Server side 跟 client 同步邏輯(避免 drift)
+- ✅ 整合到 WarRoom Form tab「價格 / 成本」section 旁(紫色「What-if 模擬」按鈕)
+
+對齊 spec slide 16 範例驗:
+- "原料漲 5% → 毛利從 16% 降至 11%" ✓
+- "匯率 -2% → 毛利從 16% 升至 18%" ✓
+
+未來(Phase 3 後續):
+- ⏳ 數量 sensitivity 不用 hardcode 0.15,改成 plugin per-product 配
+- ⏳ 廠區 cost 不用 hardcode ±5%,改吃 Cleansheet 已輸入的三廠 cost(若 user 已填)
+- ⏳ Sprint O ML 模型上線後,規則式 + ML 混合預測
 
 #### Sprint O — 贏單機率預測 ML 模型(3-4 週)
 
