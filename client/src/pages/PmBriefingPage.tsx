@@ -18,6 +18,8 @@ import {
 import api from '../lib/api'
 import PmReviewQueueView from '../components/pm/PmReviewQueueView'
 import PmFeedbackThumbs from '../components/pm/PmFeedbackThumbs'
+import PmReportAttachments from '../components/pm/PmReportAttachments'
+import PmReportSendModal from '../components/pm/PmReportSendModal'
 import MetalsShareInline from '../components/metals/MetalsShareInline'
 import ReactECharts from 'echarts-for-react'
 
@@ -1810,6 +1812,8 @@ function ReportsTab({ type }: { type: 'weekly' | 'monthly' }) {
   const [draftSourceLlmId, setDraftSourceLlmId] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
   const [statusMsg, setStatusMsg] = useState('')
+  // 寄信 modal 狀態:存當前要寄哪個 report id
+  const [sendingReportId, setSendingReportId] = useState<number | null>(null)
 
   const reloadLlm = () => {
     setLoadingLlm(true)
@@ -2048,6 +2052,15 @@ function ReportsTab({ type }: { type: 'weekly' | 'monthly' }) {
                 placeholder="(輸入週/月報內容,純文字或 Markdown)"
                 className="w-full min-h-[280px] border rounded p-2 text-sm font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-emerald-300"
               />
+              {/* 附件區 — 只在編輯既有 report 時顯示(editingId 是 number);新建還沒 reportId */}
+              {typeof editingId === 'number' && (
+                <PmReportAttachments reportId={editingId} />
+              )}
+              {editingId === 'new' && (
+                <div className="text-[11px] text-slate-400 italic px-2">
+                  💡 先儲存草稿後,即可上傳附件
+                </div>
+              )}
               <div className="flex items-center gap-2 flex-wrap">
                 <button
                   onClick={() => save(false)}
@@ -2115,6 +2128,12 @@ function ReportsTab({ type }: { type: 'weekly' | 'monthly' }) {
                       }`}
                     >{isPub ? '取消發布' : '發布'}</button>
                     <button
+                      onClick={() => setSendingReportId(r.id)}
+                      disabled={saving}
+                      className="px-2 py-0.5 text-[11px] rounded bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-30 flex items-center gap-1"
+                      title="寄信給指定 mailing list"
+                    >✉ 寄信</button>
+                    <button
                       onClick={() => deleteReport(r)}
                       disabled={saving}
                       className="px-2 py-0.5 text-[11px] rounded border border-rose-200 text-rose-600 hover:bg-rose-50 disabled:opacity-30"
@@ -2132,6 +2151,19 @@ function ReportsTab({ type }: { type: 'weekly' | 'monthly' }) {
           </div>
         )}
       </div>
+
+      {/* 寄信 modal — 點報告 row 的「✉ 寄信」按鈕觸發 */}
+      {sendingReportId != null && (() => {
+        const r = myReports.find(rr => Number(rr.id) === sendingReportId)
+        return (
+          <PmReportSendModal
+            reportId={sendingReportId}
+            reportTitle={r?.title || (type === 'weekly' ? `週報 — ${r?.as_of_date}` : `月報 — ${r?.as_of_date}`)}
+            onClose={() => setSendingReportId(null)}
+            onSent={() => {/* 可選:更新狀態提示已寄出 */}}
+          />
+        )
+      })()}
     </div>
   )
 }

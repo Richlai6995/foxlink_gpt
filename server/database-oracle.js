@@ -4479,6 +4479,59 @@ async function runMigrations(db) {
   try { await db.prepare(`CREATE INDEX idx_ppr_type_pub ON pm_purchaser_reports(report_type, is_published, as_of_date)`).run(); } catch (_) {}
   try { await db.prepare(`CREATE INDEX idx_ppr_creator ON pm_purchaser_reports(created_by)`).run(); } catch (_) {}
 
+  // ── PM 報告寄信功能 4 張表(2026-05-19 ship) ─────────────────────────────
+  // 1. pm_mailing_lists — 收信清單(全採購共用,無 owner 隔離,unique by name)
+  await createTable('PM_MAILING_LISTS', `CREATE TABLE pm_mailing_lists (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name            VARCHAR2(200) NOT NULL UNIQUE,
+    description     VARCHAR2(1000),
+    created_by      NUMBER REFERENCES users(id) ON DELETE SET NULL,
+    is_active       NUMBER(1) DEFAULT 1,
+    creation_date   TIMESTAMP DEFAULT SYSTIMESTAMP,
+    last_modified   TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+
+  // 2. pm_mailing_list_recipients — list 內的 email 收件人(同 list 內 email unique)
+  await createTable('PM_MAILING_LIST_RECIPIENTS', `CREATE TABLE pm_mailing_list_recipients (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    list_id         NUMBER NOT NULL REFERENCES pm_mailing_lists(id) ON DELETE CASCADE,
+    email           VARCHAR2(200) NOT NULL,
+    display_name    VARCHAR2(200),
+    creation_date   TIMESTAMP DEFAULT SYSTIMESTAMP,
+    CONSTRAINT uq_pm_ml_recip_list_email UNIQUE (list_id, email)
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_pm_ml_recip_list ON pm_mailing_list_recipients(list_id)`).run(); } catch (_) {}
+
+  // 3. pm_report_attachments — 採購報告附件 metadata(實體檔案在 UPLOAD_DIR/pm-reports/{report_id}/)
+  await createTable('PM_REPORT_ATTACHMENTS', `CREATE TABLE pm_report_attachments (
+    id              NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    report_id       NUMBER NOT NULL REFERENCES pm_purchaser_reports(id) ON DELETE CASCADE,
+    filename        VARCHAR2(500) NOT NULL,
+    stored_path     VARCHAR2(1000) NOT NULL,
+    size_bytes      NUMBER,
+    mime_type       VARCHAR2(200),
+    uploaded_by     NUMBER REFERENCES users(id) ON DELETE SET NULL,
+    uploaded_at     TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_pm_attach_report ON pm_report_attachments(report_id)`).run(); } catch (_) {}
+
+  // 4. pm_report_send_log — 寄信歷史紀錄(誰寄過給哪個 list,什麼時候,成不成功)
+  await createTable('PM_REPORT_SEND_LOG', `CREATE TABLE pm_report_send_log (
+    id                  NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    report_id           NUMBER NOT NULL REFERENCES pm_purchaser_reports(id) ON DELETE CASCADE,
+    list_id             NUMBER REFERENCES pm_mailing_lists(id) ON DELETE SET NULL,
+    list_name_snapshot  VARCHAR2(200),
+    recipient_count     NUMBER,
+    recipients_snapshot CLOB,
+    subject             VARCHAR2(500),
+    attachment_count    NUMBER DEFAULT 0,
+    sent_by             NUMBER REFERENCES users(id) ON DELETE SET NULL,
+    sent_at             TIMESTAMP DEFAULT SYSTIMESTAMP,
+    status              VARCHAR2(20),
+    error_msg           VARCHAR2(2000)
+  )`);
+  try { await db.prepare(`CREATE INDEX idx_pm_send_log_report ON pm_report_send_log(report_id, sent_at)`).run(); } catch (_) {}
+
   // help_books seed 'metals-public'(精簡版閱讀權限,獨立於採購用 'precious-metals')
   try {
     const metalsBook = await db.prepare(

@@ -1381,4 +1381,339 @@ router.put('/preferences', verifyToken, verifyPmUser, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ═════════════════════════════════════════════════════════════════════════════
+// PM Mailing Lists / Report Attachments / Send Email(2026-05-19 ship)
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// 設計重點:
+//   - mailing list 全採購共用,無 owner 隔離(verifyPmUser 內所有 user 可看可改)
+//   - 附件存 UPLOAD_DIR/pm-reports/{report_id}/{ts}_{filename}
+//   - 寄信 = 撈 list recipients + 撈 report content(markdown)+ mdToHtml render + sendMail
+//   - 每次寄信 snapshot list_name + recipients → pm_report_send_log(防之後改 list 失對應)
+
+const multer = require('multer');
+const fs = require('fs');
+const path = require('path');
+
+const _UPLOAD_DIR = process.env.UPLOAD_DIR
+  ? path.resolve(process.env.UPLOAD_DIR)
+  : path.join(__dirname, '..', 'uploads');
+
+const _reportAttachmentStorage = multer.diskStorage({
+  destination: (req, _file, cb) => {
+    const reportId = String(req.params.id || 'unknown').replace(/[^0-9]/g, '');
+    const dir = path.join(_UPLOAD_DIR, 'pm-reports', reportId);
+    try { fs.mkdirSync(dir, { recursive: true }); cb(null, dir); }
+    catch (e) { cb(e, ''); }
+  },
+  filename: (_req, file, cb) => {
+    const ts = Date.now();
+    const safe = file.originalname.replace(/[\\/:*?"<>|]/g, '_').slice(0, 200);
+    cb(null, `${ts}_${safe}`);
+  },
+});
+const _uploadAttachment = multer({
+  storage: _reportAttachmentStorage,
+  limits: { fileSize: 20 * 1024 * 1024 },  // 20MB / file
+});
+
+// ── Mailing Lists ─────────────────────────────────────────────────────────────
+
+router.get('/mailing-lists', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const rows = await db.prepare(`
+      SELECT ml.id, ml.name, ml.description, ml.is_active,
+             TO_CHAR(ml.creation_date, 'YYYY-MM-DD HH24:MI') AS creation_date,
+             ml.created_by, u.name AS creator_name,
+             (SELECT COUNT(*) FROM pm_mailing_list_recipients r WHERE r.list_id=ml.id) AS recipient_count
+      FROM pm_mailing_lists ml
+      LEFT JOIN users u ON u.id = ml.created_by
+      ORDER BY ml.is_active DESC, ml.name
+    `).all();
+    res.json({ lists: rows || [] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/mailing-lists/:id', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const id = Number(req.params.id);
+    const list = await db.prepare(`SELECT * FROM pm_mailing_lists WHERE id=?`).get(id);
+    if (!list) return res.status(404).json({ error: 'not found' });
+    const recipients = await db.prepare(
+      `SELECT id, email, display_name, TO_CHAR(creation_date,'YYYY-MM-DD') AS creation_date
+       FROM pm_mailing_list_recipients WHERE list_id=? ORDER BY id`
+    ).all(id);
+    res.json({ list, recipients });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/mailing-lists', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { name, description, recipients } = req.body || {};
+    if (!name || !String(name).trim()) return res.status(400).json({ error: 'name 必填' });
+    const ins = await db.prepare(
+      `INSERT INTO pm_mailing_lists (name, description, created_by) VALUES (?, ?, ?)`
+    ).run(String(name).trim(), description || null, req.user.id);
+    const newId = ins.lastInsertRowid;
+    if (Array.isArray(recipients) && recipients.length) {
+      for (const r of recipients) {
+        const email = String(r.email || '').trim();
+        if (!email) continue;
+        try {
+          await db.prepare(
+            `INSERT INTO pm_mailing_list_recipients (list_id, email, display_name) VALUES (?, ?, ?)`
+          ).run(newId, email, r.display_name || null);
+        } catch (_) { /* dup email 略過 */ }
+      }
+    }
+    res.json({ id: newId, ok: true });
+  } catch (e) {
+    if (/ORA-00001|UNIQUE/i.test(e.message)) return res.status(409).json({ error: '同名 list 已存在' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.put('/mailing-lists/:id', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { name, description, is_active } = req.body || {};
+    await db.prepare(`
+      UPDATE pm_mailing_lists SET
+        name = COALESCE(?, name),
+        description = COALESCE(?, description),
+        is_active = COALESCE(?, is_active),
+        last_modified = SYSTIMESTAMP
+      WHERE id = ?
+    `).run(
+      name ? String(name).trim() : null,
+      description !== undefined ? description : null,
+      is_active !== undefined ? Number(is_active ? 1 : 0) : null,
+      Number(req.params.id)
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/mailing-lists/:id', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    await db.prepare(`DELETE FROM pm_mailing_lists WHERE id=?`).run(Number(req.params.id));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/mailing-lists/:id/recipients', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { email, display_name } = req.body || {};
+    const e = String(email || '').trim();
+    if (!e) return res.status(400).json({ error: 'email 必填' });
+    await db.prepare(
+      `INSERT INTO pm_mailing_list_recipients (list_id, email, display_name) VALUES (?, ?, ?)`
+    ).run(Number(req.params.id), e, display_name || null);
+    res.json({ ok: true });
+  } catch (err) {
+    if (/ORA-00001|UNIQUE/i.test(err.message)) return res.status(409).json({ error: '該 email 已在 list 內' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/mailing-lists/:listId/recipients/:recipientId', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    await db.prepare(
+      `DELETE FROM pm_mailing_list_recipients WHERE id=? AND list_id=?`
+    ).run(Number(req.params.recipientId), Number(req.params.listId));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Report Attachments ─────────────────────────────────────────────────────────
+
+router.get('/purchaser-reports/:id/attachments', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const rows = await db.prepare(`
+      SELECT a.id, a.filename, a.size_bytes, a.mime_type,
+             TO_CHAR(a.uploaded_at, 'YYYY-MM-DD HH24:MI') AS uploaded_at,
+             a.uploaded_by, u.name AS uploader_name
+      FROM pm_report_attachments a
+      LEFT JOIN users u ON u.id = a.uploaded_by
+      WHERE a.report_id = ?
+      ORDER BY a.uploaded_at DESC
+    `).all(Number(req.params.id));
+    res.json({ attachments: rows || [] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/purchaser-reports/:id/attachments',
+  verifyToken, verifyPmUser, _uploadAttachment.array('files', 5),
+  async (req, res) => {
+    try {
+      const db = require('../database-oracle').db;
+      const reportId = Number(req.params.id);
+      const r = await db.prepare(`SELECT id FROM pm_purchaser_reports WHERE id=?`).get(reportId);
+      if (!r) return res.status(404).json({ error: 'report not found' });
+
+      const saved = [];
+      for (const f of (req.files || [])) {
+        const relPath = path.relative(_UPLOAD_DIR, f.path).replace(/\\/g, '/');
+        const ins = await db.prepare(`
+          INSERT INTO pm_report_attachments
+            (report_id, filename, stored_path, size_bytes, mime_type, uploaded_by)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(reportId, f.originalname, relPath, f.size, f.mimetype, req.user.id);
+        saved.push({ id: ins.lastInsertRowid, filename: f.originalname, size_bytes: f.size });
+      }
+      res.json({ ok: true, attachments: saved });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  }
+);
+
+router.delete('/purchaser-reports/:id/attachments/:attId', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const att = await db.prepare(
+      `SELECT stored_path FROM pm_report_attachments WHERE id=? AND report_id=?`
+    ).get(Number(req.params.attId), Number(req.params.id));
+    if (!att) return res.status(404).json({ error: 'attachment not found' });
+    try {
+      const fullPath = path.join(_UPLOAD_DIR, att.stored_path || att.STORED_PATH);
+      fs.unlinkSync(fullPath);
+    } catch (_) {}
+    await db.prepare(`DELETE FROM pm_report_attachments WHERE id=?`).run(Number(req.params.attId));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/purchaser-reports/:id/attachments/:attId/download', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const att = await db.prepare(
+      `SELECT filename, stored_path, mime_type FROM pm_report_attachments WHERE id=? AND report_id=?`
+    ).get(Number(req.params.attId), Number(req.params.id));
+    if (!att) return res.status(404).json({ error: 'attachment not found' });
+    const filename = att.filename || att.FILENAME;
+    const storedPath = att.stored_path || att.STORED_PATH;
+    const mimeType = att.mime_type || att.MIME_TYPE || 'application/octet-stream';
+    const fullPath = path.join(_UPLOAD_DIR, storedPath);
+    if (!fs.existsSync(fullPath)) return res.status(404).json({ error: '檔案不存在(磁碟)' });
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
+    fs.createReadStream(fullPath).pipe(res);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Send Email ─────────────────────────────────────────────────────────────────
+
+router.post('/purchaser-reports/:id/send-email', verifyToken, verifyPmUser, async (req, res) => {
+  const db = require('../database-oracle').db;
+  const reportId = Number(req.params.id);
+  const { list_id, subject: customSubject, extra_message, include_attachments = true } = req.body || {};
+
+  const report = await db.prepare(`
+    SELECT id, report_type, TO_CHAR(as_of_date,'YYYY-MM-DD') as_of_date, title, content
+    FROM pm_purchaser_reports WHERE id=?
+  `).get(reportId);
+  if (!report) return res.status(404).json({ error: 'report not found' });
+
+  const list = await db.prepare(`SELECT id, name FROM pm_mailing_lists WHERE id=? AND is_active=1`).get(Number(list_id));
+  if (!list) return res.status(400).json({ error: 'mailing list 不存在或已停用' });
+  const listName = list.name || list.NAME;
+  const listId = list.id || list.ID;
+
+  const recipients = await db.prepare(
+    `SELECT email, display_name FROM pm_mailing_list_recipients WHERE list_id=?`
+  ).all(listId);
+  if (!recipients.length) return res.status(400).json({ error: '該 list 沒有任何收件人' });
+  const toEmails = recipients.map(r => r.email || r.EMAIL).filter(Boolean);
+
+  let attachmentList = [];
+  if (include_attachments) {
+    const atts = await db.prepare(
+      `SELECT filename, stored_path FROM pm_report_attachments WHERE report_id=?`
+    ).all(reportId);
+    for (const a of (atts || [])) {
+      const fname = a.filename || a.FILENAME;
+      const sp = a.stored_path || a.STORED_PATH;
+      const full = path.join(_UPLOAD_DIR, sp);
+      if (fs.existsSync(full)) {
+        attachmentList.push({ filename: fname, path: full });
+      }
+    }
+  }
+
+  const reportTitle = report.title || report.TITLE ||
+    ((report.report_type || report.REPORT_TYPE) === 'weekly'
+      ? `金屬市場週報 — ${report.as_of_date || report.AS_OF_DATE}`
+      : `金屬市場月報 — ${report.as_of_date || report.AS_OF_DATE}`);
+  const finalSubject = (customSubject && String(customSubject).trim())
+    || `[PM] ${reportTitle}`;
+
+  const content = report.content || report.CONTENT || '';
+  const fullMd = (extra_message ? String(extra_message).trim() + '\n\n---\n\n' : '') + content;
+
+  const { mdToHtml } = require('../services/markdownToHtml');
+  const html = mdToHtml(fullMd);
+  const text = String(fullMd).replace(/[#*`]/g, '').slice(0, 8000);
+
+  const { sendMail } = require('../services/mailService');
+  let status = 'ok';
+  let errorMsg = null;
+  try {
+    const sent = await sendMail({
+      to: toEmails.join(','),
+      subject: finalSubject,
+      html,
+      text,
+      attachments: attachmentList.length ? attachmentList : undefined,
+    });
+    if (!sent) {
+      status = 'fail';
+      errorMsg = 'sendMail 回傳 false(SMTP 未設或寄信失敗,看 server log)';
+    }
+  } catch (e) {
+    status = 'fail';
+    errorMsg = e.message;
+  }
+
+  await db.prepare(`
+    INSERT INTO pm_report_send_log
+      (report_id, list_id, list_name_snapshot, recipient_count, recipients_snapshot,
+       subject, attachment_count, sent_by, status, error_msg)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    reportId, listId, listName,
+    toEmails.length, JSON.stringify(toEmails),
+    finalSubject.slice(0, 500), attachmentList.length,
+    req.user.id, status, (errorMsg || '').slice(0, 2000)
+  );
+
+  if (status === 'ok') {
+    res.json({ ok: true, recipient_count: toEmails.length, attachment_count: attachmentList.length });
+  } else {
+    res.status(500).json({ error: errorMsg || '寄信失敗', recipient_count: toEmails.length });
+  }
+});
+
+router.get('/purchaser-reports/:id/send-log', verifyToken, verifyPmUser, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const rows = await db.prepare(`
+      SELECT sl.id, sl.list_name_snapshot, sl.recipient_count, sl.subject,
+             sl.attachment_count, sl.status, sl.error_msg,
+             TO_CHAR(sl.sent_at, 'YYYY-MM-DD HH24:MI:SS') AS sent_at,
+             sl.sent_by, u.name AS sender_name
+      FROM pm_report_send_log sl
+      LEFT JOIN users u ON u.id = sl.sent_by
+      WHERE sl.report_id = ?
+      ORDER BY sl.sent_at DESC
+    `).all(Number(req.params.id));
+    res.json({ logs: rows || [] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;
