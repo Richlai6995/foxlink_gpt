@@ -13,6 +13,30 @@ FULL_IMAGE="${REGISTRY}/${IMAGE}:${TAG}"
 NAMESPACE="foxlink"
 DEPLOY="foxlink-gpt"
 
+# ── 先 git pull(避免 prod server 本地 source 落後 origin 害 docker build 打到舊版)
+# 可用 --no-pull 旗標跳過(離線部署 / 已手動 sync 過時用)
+if [ "$1" = "--no-pull" ] || [ "$2" = "--no-pull" ]; then
+  echo "▶ Skipping git pull (--no-pull 旗標)"
+else
+  cd "$(dirname "$0")"
+  if [ -d .git ]; then
+    echo "▶ Pulling latest from origin/$(git rev-parse --abbrev-ref HEAD)"
+    BEFORE=$(git rev-parse --short HEAD)
+    git pull --ff-only origin "$(git rev-parse --abbrev-ref HEAD)" || {
+      echo "  ⚠️  git pull failed(衝突 / 本地未 commit?)— abort,請手動處理"
+      exit 1
+    }
+    AFTER=$(git rev-parse --short HEAD)
+    if [ "$BEFORE" = "$AFTER" ]; then
+      echo "  本地已是最新 ($AFTER)"
+    else
+      echo "  Pulled: $BEFORE → $AFTER"
+    fi
+  else
+    echo "  ⚠️  非 git repo,跳過 pull"
+  fi
+fi
+
 # Build-time version — 同 image 全 pod 共用,client 端 /api/version polling 才會穩定
 APP_VERSION="$(git rev-parse --short HEAD 2>/dev/null || date -u +%Y%m%d%H%M%S)"
 
