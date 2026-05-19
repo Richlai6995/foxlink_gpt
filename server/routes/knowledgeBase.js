@@ -1258,21 +1258,25 @@ router.post('/:id/request-public', async (req, res) => {
 });
 
 // ─── GET /api/kb/:id/retrieval-tests  ─────────────────────────────────────────
+// 隱私:僅 use 權限的 user 只能看到自己的紀錄;editable(owner / kb_access edit / admin 非保密)看全部。
 router.get('/:id/retrieval-tests', async (req, res) => {
   const db = getDb();
   try {
     const kb = await getAccessibleKb(db, req.params.id, req.user.id);
     if (!kb) return res.status(404).json({ error: '無存取權限' });
+    const canEdit = !!(await getEditableKb(db, req.params.id, req.user.id, req.user.role));
+    const params = canEdit ? [req.params.id] : [req.params.id, req.user.id];
     const tests = await db.prepare(`
       SELECT rt.id, rt.query_text, rt.retrieval_mode, rt.top_k, rt.elapsed_ms,
              TO_CHAR(rt.created_at,'YYYY-MM-DD HH24:MI:SS') AS created_at,
              u.name AS user_name
       FROM kb_retrieval_tests rt
       LEFT JOIN users u ON u.id = rt.user_id
-      WHERE rt.kb_id=? ORDER BY rt.created_at DESC
+      WHERE rt.kb_id=?${canEdit ? '' : ' AND rt.user_id=?'}
+      ORDER BY rt.created_at DESC
       FETCH FIRST 50 ROWS ONLY
-    `).all(req.params.id);
-    res.json(tests);
+    `).all(...params);
+    res.json({ restricted: !canEdit, tests });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

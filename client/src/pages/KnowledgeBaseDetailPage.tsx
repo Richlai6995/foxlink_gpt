@@ -1592,11 +1592,20 @@ interface QueryLog {
 function QueryHistoryTab({ kbId }: { kbId: string }) {
   const { t } = useTranslation()
   const [logs, setLogs] = useState<QueryLog[]>([])
+  const [restricted, setRestricted] = useState(false)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     api.get(`/kb/${kbId}/retrieval-tests`).then((res) => {
-      setLogs(res.data)
+      // 回傳格式:{ restricted, tests }(僅 use 權限 restricted=true,只回自己的紀錄)
+      // 舊格式相容:res.data 是 array
+      if (Array.isArray(res.data)) {
+        setLogs(res.data)
+        setRestricted(false)
+      } else {
+        setLogs(res.data.tests || [])
+        setRestricted(!!res.data.restricted)
+      }
     }).catch(() => {}).finally(() => setLoading(false))
   }, [kbId])
 
@@ -1604,7 +1613,7 @@ function QueryHistoryTab({ kbId }: { kbId: string }) {
   if (logs.length === 0) return (
     <div className="p-10 text-center text-slate-400">
       <History size={36} className="mx-auto mb-3 opacity-30" />
-      <p className="text-sm">{t('kb.history.empty')}</p>
+      <p className="text-sm">{restricted ? t('kb.history.emptyMine') : t('kb.history.empty')}</p>
     </div>
   )
 
@@ -1613,7 +1622,7 @@ function QueryHistoryTab({ kbId }: { kbId: string }) {
 
   return (
     <div className="p-4">
-      <p className="text-xs text-slate-400 mb-3">{t('kb.history.hint')}</p>
+      <p className="text-xs text-slate-400 mb-3">{restricted ? t('kb.history.hintMine') : t('kb.history.hint')}</p>
       <div className="space-y-2">
         {logs.map((log) => (
           <div key={log.id} className="flex items-start gap-3 bg-slate-50 rounded-lg px-4 py-3 hover:bg-slate-100 transition">

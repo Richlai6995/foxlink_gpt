@@ -1313,7 +1313,9 @@
     "history": {
       "loading": "Loading...",
       "empty": "No call records yet",
+      "emptyMine": "You haven't called this knowledge base yet",
       "hint": "Showing last 100 records (chat queries and recall tests)",
+      "hintMine": "To protect other users' privacy, you can only see your own call records",
       "sourceChat": "Chat",
       "sourceTest": "Recall Test"
     }

@@ -1313,7 +1313,9 @@
     "history": {
       "loading": "Đang tải...",
       "empty": "Chưa có nhật ký gọi",
+      "emptyMine": "Bạn chưa gọi cơ sở tri thức này",
       "hint": "Hiển thị 100 bản ghi gần nhất (truy vấn chat và kiểm tra truy xuất)",
+      "hintMine": "Để bảo vệ quyền riêng tư của người dùng khác, bạn chỉ có thể xem nhật ký gọi của chính mình",
       "sourceChat": "Trò chuyện",
       "sourceTest": "Kiểm tra truy xuất"
     }
