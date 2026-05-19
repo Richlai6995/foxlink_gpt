@@ -66,7 +66,22 @@ async function processGenerateBlocks(responseText, sessionId) {
     const type = match[1]; // xlsx, docx, pdf, pptx, txt
     // Strip trailing metadata AI may append (space, [, backtick).
     // Note: do NOT split on `{` — it breaks {{date}} and other template variables.
-    const filename = match[2].trim().split(/[\s\[\`]/)[0];
+    let filename = match[2].trim().split(/[\s\[\`]/)[0];
+    // 防御式替換:若 LLM 直接複製 prompt 的 {{date}} {{weekday}} {{today}} 進 filename(沒被
+    // 上游 interpolate 處理到),用今天日期填回去,避免磁碟上真實存 `{{date}}` 字串害下載壞。
+    if (/\{\{[^}]+\}\}/.test(filename)) {
+      const now = new Date();
+      const today = now.toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-');
+      const weekday = ['日','一','二','三','四','五','六'][now.getDay()];
+      const before = filename;
+      filename = filename
+        .replace(/\{\{\s*date\s*\}\}/g, today)
+        .replace(/\{\{\s*today\s*\}\}/g, today)
+        .replace(/\{\{\s*weekday\s*\}\}/g, weekday)
+        // 任何剩餘 {{xxx}} 都當作未知變數,改用今天日期當 fallback(寧可重複也別讓檔名含 `{{}}`)
+        .replace(/\{\{[^}]+\}\}/g, today);
+      console.log(`[FileGen] filename {{var}} fallback: "${before}" → "${filename}"`);
+    }
     const content = match[3].trim();
     console.log(`[FileGen] Block #${matchCount}: type=${type}, filename=${filename}, content.length=${content.length}`);
 
@@ -230,25 +245,117 @@ async function generateXlsx(content, outputPath) {
 
 async function generateDocx(content, outputPath) {
   console.log(`[FileGen] generateDocx: ${content.length} chars → ${path.basename(outputPath)}`);
-  const { Document, Packer, Paragraph, TextRun, HeadingLevel } = require('docx');
+  const {
+    Document, Packer, Paragraph, TextRun, HeadingLevel,
+    Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle, ShadingType,
+  } = require('docx');
 
   const lines = content.split('\n');
   const children = [];
 
-  for (const line of lines) {
+  // Markdown table 判定:行以 `|` 開頭結尾 → 視為 table 行
+  const isTableLine = (s) => /^\|.*\|\s*$/.test(s.trim());
+  // separator 行:|---|:---:| 之類(只 -, : 跟 |)
+  const isTableSeparator = (s) => /^\|[\s\-:|]+\|\s*$/.test(s.trim()) && /-/.test(s);
+
+  // 解析 markdown table 區塊 → docx.Table
+  function buildTable(blockLines) {
+    // 第一行 header,第二行 separator(可選),其餘 data
+    const cleanCells = (l) => l.trim().replace(/^\|/, '').replace(/\|\s*$/, '').split('|').map(c => c.trim());
+    const headerCells = cleanCells(blockLines[0]);
+    const colCount = headerCells.length;
+    let dataStart = 1;
+    if (blockLines.length > 1 && isTableSeparator(blockLines[1])) dataStart = 2;
+    const dataLines = blockLines.slice(dataStart);
+
+    // 建 header row
+    const HEADER_FILL = 'E5E7EB';  // tailwind slate-200
+    const BORDER = { style: BorderStyle.SINGLE, size: 4, color: '94A3B8' };  // slate-400
+    const borders = { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER };
+    const mkCell = (text, opts = {}) => new TableCell({
+      width: { size: 100 / colCount, type: WidthType.PERCENTAGE },
+      shading: opts.header ? { type: ShadingType.CLEAR, fill: HEADER_FILL, color: 'auto' } : undefined,
+      children: [new Paragraph({
+        alignment: opts.center ? AlignmentType.CENTER : AlignmentType.LEFT,
+        children: [new TextRun({ text: stripInlineMarkdown(text || ''), bold: !!opts.header, size: 20 })],
+      })],
+    });
+
+    const headerRow = new TableRow({
+      tableHeader: true,
+      children: headerCells.map(h => mkCell(h, { header: true, center: true })),
+    });
+    const dataRows = dataLines
+      .filter(l => isTableLine(l))
+      .map(l => {
+        const cells = cleanCells(l);
+        // 對齊 column 數:不夠補空,多餘截掉
+        while (cells.length < colCount) cells.push('');
+        cells.length = colCount;
+        return new TableRow({
+          children: cells.map((c, idx) => mkCell(c, {
+            // 第 1 欄(排名)跟最後幾欄(數字)置中
+            center: idx === 0 || /^[\d\-+.%]+$/.test(c.trim()) || /^[🟢🔴🟡]/.test(c.trim()),
+          })),
+        });
+      });
+
+    return new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      borders: {
+        top: BORDER, bottom: BORDER, left: BORDER, right: BORDER,
+        insideHorizontal: BORDER, insideVertical: BORDER,
+      },
+      rows: [headerRow, ...dataRows],
+    });
+  }
+
+  // 主迴圈:逐行處理,遇到 table 行就收集連續區塊一次轉成 Table
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (isTableLine(line)) {
+      // 收集連續的 table 行
+      const blockLines = [];
+      while (i < lines.length && isTableLine(lines[i])) {
+        blockLines.push(lines[i]);
+        i++;
+      }
+      // 至少 2 行才視為合法 table(header + 1 row),否則當普通段落
+      if (blockLines.length >= 2) {
+        children.push(buildTable(blockLines));
+        // 表格後加個空白段落避免下個元素貼太近
+        children.push(new Paragraph({ children: [new TextRun('')] }));
+      } else {
+        // 單行 |x| → 當普通文字
+        for (const bl of blockLines) {
+          children.push(new Paragraph({ children: [new TextRun(stripInlineMarkdown(bl))] }));
+        }
+      }
+      continue;
+    }
+
     if (line.startsWith('# ')) {
       children.push(new Paragraph({ text: stripInlineMarkdown(line.slice(2)), heading: HeadingLevel.HEADING_1 }));
     } else if (line.startsWith('## ')) {
       children.push(new Paragraph({ text: stripInlineMarkdown(line.slice(3)), heading: HeadingLevel.HEADING_2 }));
     } else if (line.startsWith('### ')) {
       children.push(new Paragraph({ text: stripInlineMarkdown(line.slice(4)), heading: HeadingLevel.HEADING_3 }));
+    } else if (/^---+\s*$/.test(line)) {
+      // markdown 分隔線 → 空段落(避免畫一條線會佔太多空間,純留白)
+      children.push(new Paragraph({ children: [new TextRun('')] }));
     } else if (line.startsWith('- ') || line.startsWith('* ')) {
       children.push(new Paragraph({ text: stripInlineMarkdown(line.slice(2)), bullet: { level: 0 } }));
     } else if (/^[●•]\s/.test(line)) {
       children.push(new Paragraph({ text: stripInlineMarkdown(line.replace(/^[●•]\s*/, '')), bullet: { level: 0 } }));
+    } else if (/^\s+[●•\-*]\s/.test(line)) {
+      // 縮排子彈點 → level 1 bullet
+      children.push(new Paragraph({ text: stripInlineMarkdown(line.replace(/^\s+[●•\-*]\s*/, '')), bullet: { level: 1 } }));
     } else {
       children.push(new Paragraph({ children: [new TextRun(stripInlineMarkdown(line))] }));
     }
+    i++;
   }
 
   const doc = new Document({ sections: [{ children }] });

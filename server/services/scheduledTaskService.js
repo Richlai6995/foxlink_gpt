@@ -466,18 +466,55 @@ async function runTask(db, taskId, opts = {}) {
     generateDocumentFromJson,
   } = require('./docTemplateService');
 
-  // 註:多 pod 排程鎖移到 scheduleTask 的 cron handler(slot-based key, TTL 600s)。
-  // runTask 故意不再 lock,讓 admin UI「立刻執行」/ retry / pipeline 內部呼叫都能直通。
+  // 註:多 pod 排程鎖原本只在 scheduleTask 的 cron handler 做(slot-based key, TTL 600s)。
+  // 實務上看到 50 秒間隔 2 次 trigger(09:02+09:03)— 證明 cron handler lock 有繞過路徑
+  // (Redis 短暫失敗降級、pod restart、其他 enqueue 路徑等),所以在 runTask 開頭加第二道
+  // slot-based dedup 作為防線。force=true(admin Run Now)繞過。
 
   const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(taskId);
   if (!task) { console.error(`[Scheduled] Task ${taskId} not found`); return; }
 
-  // 防線:cron 觸發路徑下,只要 DB status 不是 active 就不跑(擋掉多 pod 環境下因
-  // cron handler DB fetch 失敗 fallback 到舊 closure task 而繞過暫停檢查的情況)。
-  // run-now 手動觸發傳 force=true 可繞過,讓 admin 暫停 cron 後仍能手動測試一次。
+  // 防線:cron 觸發路徑下,只要 DB status 不是 active 就不跑
   if (!force && task.status !== 'active') {
     console.log(`[Scheduled] Task ${task.id} "${task.name}" status=${task.status}, skip execution`);
     return;
+  }
+
+  // 防線 2(slot-based dedup,2026-05-19 加):
+  // 對 daily / weekly / monthly schedule_type,同一個 slot 只允許跑一次。
+  // 雙重保險:Redis SET NX EX(快)+ DB 查 scheduled_task_runs 近 5 分鐘 ok run(Redis 掛時保底)。
+  // interval / multi_time / cron_raw 合法在同一 hour 內多次觸發,不擋。
+  if (!force && ['daily', 'weekly', 'monthly'].includes(task.schedule_type)) {
+    const lockKey = buildLockKey(task) + ':runonce';  // 跟 cron handler 的 key 不同,獨立判斷
+    let dedupSkip = false;
+    try {
+      const { tryLock } = require('./redisClient');
+      const acquired = await tryLock(lockKey, 1800);  // 30 分鐘 TTL,夠擋同 slot 重複
+      if (!acquired) {
+        console.log(`[Scheduled] Task ${task.id} "${task.name}" runonce lock ${lockKey} held, skip duplicate`);
+        return;
+      }
+    } catch (e) {
+      console.warn(`[Scheduled] runonce Redis lock failed (${e.message}) — fallback to DB dedup`);
+    }
+    // DB-based 防線:就算 Redis 失敗也擋(避免 50 秒內 2 次跑)
+    try {
+      const recent = await db.prepare(`
+        SELECT id FROM scheduled_task_runs
+        WHERE task_id = ?
+          AND run_at >= SYSTIMESTAMP - NUMTODSINTERVAL(5, 'MINUTE')
+          AND status = 'ok'
+        FETCH FIRST 1 ROWS ONLY
+      `).get(task.id);
+      if (recent) {
+        const rid = recent.id ?? recent.ID;
+        console.log(`[Scheduled] Task ${task.id} "${task.name}" has recent ok run #${rid} (5min), skip duplicate`);
+        dedupSkip = true;
+      }
+    } catch (e) {
+      console.warn(`[Scheduled] runonce DB dedup query failed: ${e.message}`);
+    }
+    if (dedupSkip) return;
   }
 
   // Check expiry
