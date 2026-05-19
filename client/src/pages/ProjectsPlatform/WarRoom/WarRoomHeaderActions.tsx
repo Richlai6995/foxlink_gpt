@@ -11,7 +11,7 @@
  */
 
 import { useState } from 'react'
-import { ChevronDown, Gavel, Loader2, Trophy } from 'lucide-react'
+import { ChevronDown, Gavel, Loader2, Trophy, FileCheck } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
 import { api, type ProjectDetail } from '../api'
 import { TOKENS } from '../tokens'
@@ -82,6 +82,27 @@ export default function WarRoomHeaderActions({ project, onChanged }: Props) {
 
   const transitions = LIFECYCLE_TRANSITIONS[project.lifecycle_status] || []
 
+  // Sprint P · 申請結案簽核(只在 ACTIVE 顯示)
+  const requestCloseApproval = async () => {
+    const reason = prompt('申請結案簽核(走多級簽核流程,需 BU director 批准)\n\n理由:')
+    if (reason === null) return
+    setBusy(true)
+    try {
+      await api.post(token, '/approvals/chains', {
+        project_id: project.id,
+        chain_kind: 'lifecycle_close',
+        title: `結案簽核 · ${project.project_code}`,
+        reason,
+        target_payload: { to_lifecycle: 'CLOSED' },
+      })
+      alert('已送出簽核 · BU director 會收到通知')
+    } catch (e: any) {
+      alert('送出失敗:' + e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="flex items-center gap-2 ml-2">
       {/* Sprint O · 贏單機率預測按鈕 */}
@@ -93,6 +114,19 @@ export default function WarRoomHeaderActions({ project, onChanged }: Props) {
       >
         <Trophy size={11} /> 贏單機率
       </button>
+
+      {/* Sprint P · 申請結案簽核(ACTIVE 才顯)*/}
+      {project.lifecycle_status === 'ACTIVE' && (
+        <button
+          onClick={requestCloseApproval}
+          disabled={busy}
+          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] rounded border transition hover:bg-cortex-amber-bg disabled:opacity-50"
+          style={{ background: '#fff', borderColor: TOKENS.amber, color: TOKENS.amber }}
+          title="走多級簽核流程結案(BU director 批准 · spec roadmap Sprint P)"
+        >
+          <FileCheck size={11} /> 申請結案簽核
+        </button>
+      )}
 
       {/* Stage Gate 按鈕(只在有 active stage 時顯示)*/}
       {activeStage && (

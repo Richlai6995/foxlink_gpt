@@ -30,6 +30,7 @@ import Connections from './Admin/Connections'
 import ConfidentialPolicies from './Admin/ConfidentialPolicies'
 import RoleGrants from './Admin/RoleGrants'
 import MessagesPage from './Messages/MessagesPage'
+import ApprovalsPage from './Approvals/ApprovalsPage'
 import InternalAdminOverview from './InternalAdmin/Overview'
 import SystemHealthPage from './InternalAdmin/SystemHealth'
 
@@ -108,6 +109,7 @@ export default function ProjectsPlatformPage() {
           <Route path="ai-acceleration" element={<AiAcceleration />} />
           <Route path="kb" element={<KnowledgeBase />} />
           <Route path="messages" element={<MessagesPage />} />
+          <Route path="approvals" element={<ApprovalsPage />} />
           <Route path="projects/:id" element={<WarRoom />} />
           <Route path="admin/form-templates" element={<FormTemplates />} />
           <Route path="admin/task-templates" element={<TaskTemplates />} />

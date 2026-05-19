@@ -89,6 +89,9 @@ function buildRouter() {
   // Sprint M — AI 13 項深化(pricing / cleansheet / daily-report)
   router.use('/ai', require('./routes/ai'));
 
+  // Sprint P — 多級簽核
+  router.use('/approvals', require('./routes/approvals'));
+
   // Phase 1 polish — AI #1 RFQ extract(Wizard helper)
   router.use('/wizard', require('./routes/wizard'));
 
@@ -132,6 +135,7 @@ async function runMigrations(db) {
     await require('./migrations/008_roles')(db);
     await require('./migrations/009_kb_sediment')(db);
     await require('./migrations/010_comm_rooms')(db);
+    await require('./migrations/011_approvals')(db);
     console.log('[projects-platform] migrations ✓');
   } catch (e) {
     console.error('[projects-platform] migrations failed:', e.message, e.stack);
