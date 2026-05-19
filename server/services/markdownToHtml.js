@@ -25,7 +25,24 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
-// inline markdown 處理:**bold** / *italic* / `code` / [text](url)
+// 燈號 emoji → 純 CSS 圓點:Lotus Notes / 老 mail client 對 U+1F7E2 🟢 / U+1F7E1 🟡 等
+// 2019 新 emoji 渲染為黑點(fallback 字型不認),用純 CSS color + `●` (U+25CF 廣泛支援)
+// 保證 Notes / Outlook / Gmail / Web 都看得到顏色。
+const COLORED_DOT = (color) =>
+  `<span style="color:${color};font-size:1.15em;line-height:1;font-family:'Microsoft JhengHei',Arial,sans-serif">●</span>`;
+const EMOJI_TO_DOT = {
+  '🔴': COLORED_DOT('#dc2626'),  // red-600 漲
+  '🟢': COLORED_DOT('#16a34a'),  // green-600 跌
+  '🟡': COLORED_DOT('#eab308'),  // yellow-500 持平
+  '🔵': COLORED_DOT('#2563eb'),  // blue-600
+  '🟣': COLORED_DOT('#9333ea'),  // purple-600
+  '🟠': COLORED_DOT('#ea580c'),  // orange-600
+  '⚪': COLORED_DOT('#94a3b8'),  // slate-400 灰
+  '⚫': COLORED_DOT('#1e293b'),  // slate-800 黑
+  '🟤': COLORED_DOT('#92400e'),  // amber-800 褐
+};
+
+// inline markdown 處理:**bold** / *italic* / `code` / [text](url) + emoji → CSS 圓點
 // 也順手剝掉 LLM 可能塞的 <span style="..."> 之類的 HTML(避免雙重渲染 + 移除壞樣式)
 function inlineMd(text) {
   let out = String(text);
@@ -35,12 +52,16 @@ function inlineMd(text) {
   out = out.replace(/<(b|strong|i|em|u|small)\s+[^>]*>([\s\S]*?)<\/\1>/gi, '$2');
   // 把任何剩餘 inline HTML tag escape 掉(已過濾常見的,剩餘的當文字顯示)
   out = escapeHtml(out);
-  // 再把 markdown 轉換套回去
+  // 套 markdown 語法
   out = out
     .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, `<a href="$2" style="color:${LINK_COLOR};text-decoration:underline">$1</a>`)
     .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
     .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>')
     .replace(/`([^`\n]+)`/g, '<code style="background:#f1f5f9;padding:1px 4px;border-radius:3px;font-family:monospace;font-size:0.92em">$1</code>');
+  // 最後把燈號 emoji 替換成 CSS 圓點(用 raw HTML 不能再 escape)
+  for (const [emoji, dot] of Object.entries(EMOJI_TO_DOT)) {
+    out = out.split(emoji).join(dot);  // split-join 比 RegExp 安全(emoji 含特殊 codepoint)
+  }
   return out;
 }
 
