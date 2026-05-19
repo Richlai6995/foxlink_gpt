@@ -18,6 +18,7 @@ const pricing = require('../services/aiPricingService');
 const cleansheet = require('../services/aiCleansheetService');
 const dailyReport = require('../services/dailyReportService');
 const whatIf = require('../services/aiWhatIfService');
+const winRate = require('../services/winRatePredictorService');
 
 const router = express.Router();
 function getDb() { return require('../../database-oracle').db; }
@@ -109,6 +110,38 @@ router.post('/what-if-analyze', asyncHandler(async (req, res) => {
 
 // _db helper(reuse cross-route)
 function _db() { return require('../../database-oracle').db; }
+
+/**
+ * POST /win-rate-predict — Sprint O #17 贏單機率預測
+ *   body: { project_id }
+ */
+router.post('/win-rate-predict', asyncHandler(async (req, res) => {
+  const projectId = Number(req.body?.project_id);
+  if (!projectId) return res.status(400).json({ error: 'project_id required' });
+  try {
+    const r = await winRate.predict(_db(), { projectId, user: req.user });
+    res.json(r);
+  } catch (e) {
+    if (/not found|required/.test(e.message)) return res.status(400).json({ error: e.message });
+    res.status(500).json({ error: e.message });
+  }
+}));
+
+/**
+ * POST /win-rate-batch — Sprint Q 批次預測(Dashboard widget C 用)
+ *   body: { project_ids?, limit? }
+ */
+router.post('/win-rate-batch', asyncHandler(async (req, res) => {
+  try {
+    const r = await winRate.predictBatch(_db(), {
+      projectIds: req.body?.project_ids,
+      limit: Number(req.body?.limit) || 50,
+    });
+    res.json({ predictions: r, count: r.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+}));
 
 /**
  * POST /daily-report/run-all — admin 批次跑(scheduled job 用)

@@ -11,10 +11,11 @@
  */
 
 import { useState } from 'react'
-import { ChevronDown, Gavel, Loader2 } from 'lucide-react'
+import { ChevronDown, Gavel, Loader2, Trophy } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
 import { api, type ProjectDetail } from '../api'
 import { TOKENS } from '../tokens'
+import WinRatePanel from './WinRatePanel'
 
 const LIFECYCLE_TRANSITIONS: Record<string, { to: string; label: string }[]> = {
   DRAFT:    [{ to: 'ACTIVE', label: '啟動 → ACTIVE' }],
@@ -33,6 +34,7 @@ export default function WarRoomHeaderActions({ project, onChanged }: Props) {
   const { token } = useAuth() as any
   const [busy, setBusy] = useState(false)
   const [lcOpen, setLcOpen] = useState(false)
+  const [showWinRate, setShowWinRate] = useState(false)
 
   // 找當前 stage(ACTIVE 或 READY_FOR_GATE)— Stage Gate 按鈕用
   const activeStage =
@@ -82,6 +84,16 @@ export default function WarRoomHeaderActions({ project, onChanged }: Props) {
 
   return (
     <div className="flex items-center gap-2 ml-2">
+      {/* Sprint O · 贏單機率預測按鈕 */}
+      <button
+        onClick={() => setShowWinRate(true)}
+        className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] rounded font-bold transition hover:brightness-110"
+        style={{ background: 'linear-gradient(90deg,#5b21b6,#0F3D5C)', color: '#fff' }}
+        title="AI #17 贏單機率預測(spec §16.4)"
+      >
+        <Trophy size={11} /> 贏單機率
+      </button>
+
       {/* Stage Gate 按鈕(只在有 active stage 時顯示)*/}
       {activeStage && (
         <button
@@ -98,6 +110,11 @@ export default function WarRoomHeaderActions({ project, onChanged }: Props) {
           {busy ? <Loader2 size={11} className="animate-spin" /> : <Gavel size={11} />}
           {isGate ? '⚖ 業務確認 → 下一 Stage' : '推進 Stage'}
         </button>
+      )}
+
+      {/* Sprint O · WinRate modal */}
+      {showWinRate && (
+        <WinRatePanel project={project} onClose={() => setShowWinRate(false)} />
       )}
 
       {/* Lifecycle dropdown */}
