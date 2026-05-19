@@ -761,8 +761,8 @@ function buildWeeklyReportTask(kbMap, models = {}) {
 2. ❌ 不可用 \`<font color=...>\` / \`<strong style=...>\` 等任何 inline HTML 樣式
 3. ❌ 不可用 \`「紅」「綠」「黃」\` 中文字代替 emoji
 4. ❌ 不可寫 \`(紅燈)\` \`(red)\` 這種文字註記取代 emoji
-**正確示範**:`| 🔴 | 銅 (Cu) | +5.2% |`
-**錯誤示範**:`| <span style="color:red">+5.2%</span> | 銅 | red |`
+**正確示範**:\`| 🔴 | 銅 (Cu) | +5.2% |\`
+**錯誤示範**:\`| <span style="color:red">+5.2%</span> | 銅 | red |\`
 
 採用台股 / 中股慣例(紅漲綠跌),**絕對不要**用西方慣例(綠漲紅跌)。
 
@@ -882,8 +882,8 @@ function buildMonthlyReportTask(kbMap, models = {}) {
 2. ❌ 不可用 \`<font color=...>\` / \`<strong style=...>\` 等任何 inline HTML 樣式
 3. ❌ 不可用 \`「紅」「綠」「黃」\` 中文字代替 emoji
 4. ❌ 不可寫 \`(紅燈)\` \`(red)\` 這種文字註記取代 emoji
-**正確示範**:`| 🔴 | 銅 (Cu) | +5.2% |`
-**錯誤示範**:`| <span style="color:red">+5.2%</span> | 銅 | red |`
+**正確示範**:\`| 🔴 | 銅 (Cu) | +5.2% |\`
+**錯誤示範**:\`| <span style="color:red">+5.2%</span> | 銅 | red |\`
 
 採用台股 / 中股慣例(紅漲綠跌),**絕對不要**用西方慣例(綠漲紅跌)。
 
@@ -2344,4 +2344,9 @@ async function patchExistingTaskModels(db, models) {
 module.exports = {
   autoSeedPmScheduledTasks,
   SEED_VERSION,
+  // export builders 供 admin sync prompt 等 ad-hoc 維護 script 用
+  buildNewsTask,
+  buildDailyReportTask,
+  buildWeeklyReportTask,
+  buildMonthlyReportTask,
 };
