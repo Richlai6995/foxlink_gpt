@@ -2939,7 +2939,15 @@
       "total": "總分",
       "status": "狀態",
       "times": "次",
-      "noData": "尚無資料"
+      "noData": "尚無資料",
+      "examStarted": "是否開始測驗",
+      "browseProgress": "測驗進度",
+      "attemptCount": "考過幾次",
+      "lastScore": "最後成績",
+      "lastAttemptAt": "最後測驗日期",
+      "passResult": "是否及格",
+      "started": "已開始",
+      "notStarted": "未開始"
     },
     "share": {
       "title": "課程分享設定",

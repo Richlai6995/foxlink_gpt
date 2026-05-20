@@ -2939,7 +2939,15 @@
       "total": "Total",
       "status": "Status",
       "times": " times",
-      "noData": "No data"
+      "noData": "No data",
+      "examStarted": "Exam Started",
+      "browseProgress": "Browse Progress",
+      "attemptCount": "Attempts",
+      "lastScore": "Last Score",
+      "lastAttemptAt": "Last Attempt",
+      "passResult": "Passed",
+      "started": "Started",
+      "notStarted": "Not Started"
     },
     "share": {
       "title": "Course Sharing Settings",

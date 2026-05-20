@@ -4379,6 +4379,7 @@ router.get('/programs/:id/report', async (req, res) => {
       let browseTotal = 0, browseViewed = 0;
       let programTotal = 0, programMax = 0;
       let allPassed = true;
+      let programLastTotal = 0, programLastMax = 0, programLastAt = null, programAttempts = 0;
       const courseDetails = [];
 
       for (const pc of courses) {
@@ -4412,6 +4413,16 @@ router.get('/programs/:id/report', async (req, res) => {
                  SUM(COALESCE(weighted_max, max_score)) AS session_max
           FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test'
           GROUP BY session_id ORDER BY SUM(COALESCE(weighted_score, score)) DESC
+          FETCH FIRST 1 ROW ONLY
+        `).get(u.user_id, pc.course_id);
+
+        // Last attempt (most recent session)
+        const last = await db.prepare(`
+          SELECT SUM(COALESCE(weighted_score, score)) AS session_score,
+                 SUM(COALESCE(weighted_max, max_score)) AS session_max,
+                 MAX(created_at) AS last_at
+          FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test'
+          GROUP BY session_id ORDER BY MAX(created_at) DESC
           FETCH FIRST 1 ROW ONLY
         `).get(u.user_id, pc.course_id);
 
@@ -4454,17 +4465,37 @@ router.get('/programs/:id/report', async (req, res) => {
         programTotal += weighted;
         programMax += courseTotalScore;
 
+        // Last-attempt weighted score (course-level)
+        const lastScoreRaw = last?.session_score || 0;
+        const lastMaxRaw = last?.session_max || 0;
+        const lastRatio = lastMaxRaw > 0 ? lastScoreRaw / lastMaxRaw : 0;
+        const lastWeighted = lastMaxRaw > 0
+          ? (hasLessonWeights
+              ? browseOnlyScore + Math.round(lastRatio * (interactiveWeight > 0 ? interactiveWeight : courseTotalScore))
+              : Math.round(lastRatio * courseTotalScore))
+          : 0;
+        const lastAt = last?.last_at || null;
+        const cAttempts = attempts?.cnt || 0;
+        if (cAttempts > 0) {
+          programLastTotal += lastWeighted;
+          programLastMax += courseTotalScore;
+          programAttempts += cAttempts;
+          if (lastAt && (!programLastAt || new Date(lastAt) > new Date(programLastAt))) programLastAt = lastAt;
+        }
+
         courseDetails.push({
           course_id: pc.course_id, title: pc.course_title,
           browse_total: total, browse_viewed: viewed,
-          best_score: bestScore, attempts: attempts?.cnt || 0,
+          best_score: bestScore, attempts: cAttempts,
+          last_score: lastWeighted, last_attempt_at: lastAt,
           weighted, total_score: courseTotalScore, passed
         });
       }
 
       const pPassScore = program.program_pass_score || 60;
       const pPassed = allPassed && (programMax > 0 ? programTotal / programMax * 100 >= pPassScore : false);
-      const status = browseViewed === 0 && programTotal === 0 ? 'not_started' : pPassed ? 'passed' : 'in_progress';
+      const examStarted = programAttempts > 0;
+      const status = browseViewed === 0 && !examStarted ? 'not_started' : pPassed ? 'passed' : 'in_progress';
       if (status === 'not_started') totalNotStarted++;
       else if (status === 'passed') totalPassed++;
 
@@ -4472,7 +4503,9 @@ router.get('/programs/:id/report', async (req, res) => {
         user_id: u.user_id, name: u.name, employee_id: u.employee_id, dept_code: u.dept_code,
         browse_total: browseTotal, browse_viewed: browseViewed, browse_pct: browseTotal > 0 ? Math.round(browseViewed / browseTotal * 100) : 0,
         courses: courseDetails,
-        program_total: programTotal, program_max: programMax, program_passed: pPassed, status
+        program_total: programTotal, program_max: programMax, program_passed: pPassed, status,
+        last_score: programLastTotal, last_score_max: programLastMax,
+        last_attempt_at: programLastAt, total_attempts: programAttempts, exam_started: examStarted
       });
     }
 
@@ -4520,17 +4553,26 @@ router.get('/programs/:id/report/export', async (req, res) => {
     // Build Excel — i18n headers based on request language
     const XLSX = require('xlsx');
     const lang = req.query.lang || req.headers['accept-language']?.split(',')[0]?.split('-')[0] || 'zh';
-    const labels = lang === 'en' ? { name: 'Name', eid: 'Employee ID', dept: 'Department', browse: 'Browse', browseAll: 'Browse Progress', score: 'Score', total: 'Program Total', pass: 'Pass' }
-      : lang === 'vi' ? { name: 'Tên', eid: 'Mã NV', dept: 'Phòng ban', browse: 'Duyệt', browseAll: 'Tiến độ', score: 'Điểm', total: 'Tổng điểm', pass: 'Đạt' }
-      : { name: '姓名', eid: '工號', dept: '部門', browse: '導覽', browseAll: '導覽進度', score: '成績', total: '專案總分', pass: '及格' };
-    const headers = [labels.name, labels.eid, labels.dept, labels.browseAll];
-    for (const c of courses) { headers.push(`${c.course_title} ${labels.browse}`, `${c.course_title} ${labels.score}`); }
-    headers.push(labels.total, labels.pass);
+    const labels = lang === 'en'
+      ? { name: 'Name', eid: 'Employee ID', dept: 'Department', started: 'Exam Started', browse: 'Browse Progress', attempts: 'Attempts', lastScore: 'Last Score', lastAt: 'Last Attempt', pass: 'Passed', yes: 'Yes', no: 'No', dash: '—' }
+      : lang === 'vi'
+      ? { name: 'Tên', eid: 'Mã NV', dept: 'Phòng ban', started: 'Đã bắt đầu thi', browse: 'Tiến độ duyệt', attempts: 'Số lần thi', lastScore: 'Điểm gần nhất', lastAt: 'Lần thi gần nhất', pass: 'Đạt', yes: 'Có', no: 'Không', dash: '—' }
+      : { name: '姓名', eid: '工號', dept: '部門', started: '是否開始測驗', browse: '導覽進度', attempts: '考過幾次', lastScore: '最後成績', lastAt: '最後測驗日期', pass: '是否及格', yes: '是', no: '否', dash: '—' };
+
+    const headers = [labels.name, labels.eid, labels.dept, labels.started, labels.browse, labels.attempts, labels.lastScore, labels.lastAt, labels.pass];
+
+    const fmtAt = (d) => {
+      if (!d) return labels.dash;
+      const t = new Date(d);
+      if (Number.isNaN(t.getTime())) return labels.dash;
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}`;
+    };
 
     const rows = [];
     for (const u of users) {
-      const row = [u.name, u.employee_id || '', u.dept_name || u.dept_code || ''];
-      let browseTotal = 0, browseViewed = 0, programTotal = 0, programMax = 0;
+      let browseTotal = 0, browseViewed = 0, programMax = 0, programTotal = 0;
+      let programLastTotal = 0, programLastMax = 0, programLastAt = null, programAttempts = 0;
       let allPassed = true;
 
       for (const pc of courses) {
@@ -4550,9 +4592,7 @@ router.get('/programs/:id/report/export', async (req, res) => {
         const vc = await db.prepare('SELECT COUNT(*) AS cnt FROM user_slide_views WHERE user_id=? AND course_id=? AND program_id=?').get(u.user_id, pc.course_id, progId);
         const total = sc?.cnt || 0; const viewed = Math.min(vc?.cnt || 0, total);
         browseTotal += total; browseViewed += viewed;
-        row.push(`${viewed}/${total}`);
 
-        // Browse-only score for non-interactive lessons
         const eLessonWeights = examConfig.lesson_weights || {};
         const eHasLW = Object.keys(eLessonWeights).length > 0;
         let eBrowseScore = 0;
@@ -4571,23 +4611,50 @@ router.get('/programs/:id/report/export', async (req, res) => {
             }
           }
         }
+
         const best = await db.prepare(`SELECT SUM(COALESCE(weighted_score,score)) AS session_score, SUM(COALESCE(weighted_max,max_score)) AS session_max FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test' GROUP BY session_id ORDER BY SUM(COALESCE(weighted_score,score)) DESC FETCH FIRST 1 ROW ONLY`).get(u.user_id, pc.course_id);
         const bs = best?.session_score || 0;
         const bm = best?.session_max || 100;
-        const ratio = bm > 0 ? bs / bm : 0;
-        const weighted = eHasLW ? eBrowseScore + Math.round(ratio * (courseTotalScore - eBrowseScore)) : Math.round(ratio * courseTotalScore);
-        const scorePct = courseTotalScore > 0 ? (weighted / courseTotalScore) * 100 : 0;
-        if (pc.is_required && scorePct < coursePassScore) allPassed = false;
-        programTotal += weighted; programMax += courseTotalScore;
-        row.push(bs > 0 ? `${bs}` : '—');
+        const bestRatio = bm > 0 ? bs / bm : 0;
+        const bestWeighted = eHasLW ? eBrowseScore + Math.round(bestRatio * (courseTotalScore - eBrowseScore)) : Math.round(bestRatio * courseTotalScore);
+        const bestPct = courseTotalScore > 0 ? (bestWeighted / courseTotalScore) * 100 : 0;
+        if (pc.is_required && bestPct < coursePassScore) allPassed = false;
+        programTotal += bestWeighted;
+        programMax += courseTotalScore;
+
+        const last = await db.prepare(`SELECT SUM(COALESCE(weighted_score,score)) AS session_score, SUM(COALESCE(weighted_max,max_score)) AS session_max, MAX(created_at) AS last_at FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test' GROUP BY session_id ORDER BY MAX(created_at) DESC FETCH FIRST 1 ROW ONLY`).get(u.user_id, pc.course_id);
+        const lsRaw = last?.session_score || 0;
+        const lmRaw = last?.session_max || 0;
+        const lastRatio = lmRaw > 0 ? lsRaw / lmRaw : 0;
+        const lastWeighted = lmRaw > 0
+          ? (eHasLW ? eBrowseScore + Math.round(lastRatio * (courseTotalScore - eBrowseScore)) : Math.round(lastRatio * courseTotalScore))
+          : 0;
+        const at = await db.prepare("SELECT COUNT(DISTINCT session_id) AS cnt FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test'").get(u.user_id, pc.course_id);
+        const cAttempts = at?.cnt || 0;
+        if (cAttempts > 0) {
+          programLastTotal += lastWeighted;
+          programLastMax += courseTotalScore;
+          programAttempts += cAttempts;
+          if (last?.last_at && (!programLastAt || new Date(last.last_at) > new Date(programLastAt))) programLastAt = last.last_at;
+        }
       }
 
-      row.splice(3, 0, `${browseViewed}/${browseTotal}`);
       const pPass = allPassed && (programMax > 0 ? programTotal / programMax * 100 >= (program.program_pass_score || 60) : false);
-      const passYes = lang === 'en' ? 'Yes' : lang === 'vi' ? 'Có' : '是';
-      const passNo = lang === 'en' ? 'No' : lang === 'vi' ? 'Không' : '否';
-      row.push(`${programTotal}/${programMax}`, pPass ? passYes : passNo);
-      rows.push(row);
+      const browsePct = browseTotal > 0 ? `${Math.round(browseViewed / browseTotal * 100)}% (${browseViewed}/${browseTotal})` : labels.dash;
+      const examStarted = programAttempts > 0;
+      const lastScoreStr = examStarted ? `${programLastTotal}/${programLastMax}` : labels.dash;
+
+      rows.push([
+        u.name,
+        u.employee_id || '',
+        u.dept_name || u.dept_code || '',
+        examStarted ? labels.yes : labels.no,
+        browsePct,
+        examStarted ? programAttempts : labels.dash,
+        lastScoreStr,
+        fmtAt(programLastAt),
+        pPass ? labels.yes : labels.no
+      ]);
     }
 
     const wb = XLSX.utils.book_new();

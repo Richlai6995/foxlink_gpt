@@ -2939,7 +2939,15 @@
       "total": "Tổng",
       "status": "Trạng thái",
       "times": " lần",
-      "noData": "Không có dữ liệu"
+      "noData": "Không có dữ liệu",
+      "examStarted": "Đã bắt đầu thi",
+      "browseProgress": "Tiến độ duyệt",
+      "attemptCount": "Số lần thi",
+      "lastScore": "Điểm gần nhất",
+      "lastAttemptAt": "Lần thi gần nhất",
+      "passResult": "Đạt",
+      "started": "Đã bắt đầu",
+      "notStarted": "Chưa bắt đầu"
     },
     "share": {
       "title": "Cài đặt chia sẻ khóa học",
