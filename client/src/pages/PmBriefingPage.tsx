@@ -58,13 +58,13 @@ export default function PmBriefingPage() {
   const [showPrefs, setShowPrefs] = useState(false)
   const [showMetalsShare, setShowMetalsShare] = useState(false)
   const [showMailingLists, setShowMailingLists] = useState(false)
-  // 全螢幕模式 — fixed inset-0 + z-50 蓋外部 sidebar(Projects Platform / chat 等)
-  // localStorage 記憶 user 上次選擇,避免每次進來都重設
-  const [fullscreen, setFullscreen] = useState<boolean>(() => localStorage.getItem('pm.fullscreen') === '1')
-  const toggleFullscreen = () => {
-    const next = !fullscreen
-    setFullscreen(next)
-    localStorage.setItem('pm.fullscreen', next ? '1' : '0')
+  // tabs section 放大 — fixed inset-0 蓋掉外部 sidebar(Projects Platform / chat 等),
+  // 讓「新聞列表/歷史價格/週報/月報」全頁編輯。localStorage 記憶。
+  const [tabsFullscreen, setTabsFullscreen] = useState<boolean>(() => localStorage.getItem('pm.tabsFullscreen') === '1')
+  const toggleTabsFullscreen = () => {
+    const next = !tabsFullscreen
+    setTabsFullscreen(next)
+    localStorage.setItem('pm.tabsFullscreen', next ? '1' : '0')
   }
   const [reviewPendingCount, setReviewPendingCount] = useState(0)
   const [bannerExpanded, setBannerExpanded] = useState(false)
@@ -96,9 +96,7 @@ export default function PmBriefingPage() {
   }
 
   return (
-    <div className={fullscreen
-      ? 'fixed inset-0 z-50 flex flex-col h-screen bg-slate-50'
-      : 'flex flex-col h-screen bg-slate-50'}>
+    <div className="flex flex-col h-screen bg-slate-50">
       {/* Top bar */}
       <header className="bg-white border-b px-6 py-3 flex items-center gap-4 shadow-sm">
         <button onClick={() => navigate(backTo)} className="text-slate-500 hover:text-slate-800 text-sm flex items-center gap-1">
@@ -132,18 +130,6 @@ export default function PmBriefingPage() {
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border border-blue-200 text-blue-700 hover:bg-blue-50"
             title="匯出當前關注金屬 30 天價格"
           ><Download size={14} /> 匯出 CSV</button>
-          <button
-            onClick={toggleFullscreen}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border ${
-              fullscreen
-                ? 'border-amber-400 bg-amber-50 text-amber-700 hover:bg-amber-100'
-                : 'border-slate-200 text-slate-700 hover:bg-slate-50'
-            }`}
-            title={fullscreen ? '退出全螢幕(顯示外部 sidebar)' : '全螢幕(蓋過外部 sidebar,獲得最大編輯空間)'}
-          >
-            {fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-            {fullscreen ? '退出全螢幕' : '全螢幕'}
-          </button>
         </div>
       </header>
 
@@ -162,37 +148,55 @@ export default function PmBriefingPage() {
       {/* 排程資料健康度面板 */}
       <DataHealthPanel />
 
-      {/* Tabs */}
-      <div className="bg-white border-b border-t flex items-center gap-1 px-4">
-        {/* 2026-05-11 user 決定:預測功能(7 天)效益有限,Prompt 審核 tab 拿掉 */}
-        {([
-          { id: 'news',    label: '新聞列表', icon: <Newspaper size={14} /> },
-          { id: 'history', label: '歷史價格', icon: <BarChart3 size={14} /> },
-          { id: 'weekly',  label: '週報',     icon: <BarChart3 size={14} /> },
-          { id: 'monthly', label: '月報',     icon: <FileText size={14} /> },
-        ] as { id: Tab; label: string; icon: React.ReactNode; badge?: number }[]).map(s => (
-          <button
-            key={s.id}
-            onClick={() => setTab(s.id)}
-            className={`flex items-center gap-1.5 px-4 py-3 text-sm transition border-b-2 ${
-              tab === s.id ? 'text-blue-600 border-blue-600 font-medium' : 'text-slate-500 border-transparent hover:text-slate-800'
-            }`}
-          >
-            {s.icon}{s.label}
-            {s.badge != null && s.badge > 0 && (
-              <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-500 text-white text-[10px]">{s.badge}</span>
-            )}
-          </button>
-        ))}
-      </div>
+      {/* Tabs section wrapper — fullscreen 時 fixed inset-0 蓋外部 sidebar/chat */}
+      <div className={tabsFullscreen
+        ? 'fixed inset-0 z-50 bg-white flex flex-col'
+        : 'flex flex-col flex-1 min-h-0'}>
 
-      <div className="flex-1 overflow-hidden">
-        {tab === 'news'    && <NewsTab focusedSet={focusedSet} default24h={prefs.default_24h_only === 1} />}
+        {/* Tabs header(+ 右側「全螢幕」toggle) */}
+        <div className="bg-white border-b border-t flex items-center gap-1 px-4">
+          {/* 2026-05-11 user 決定:預測功能(7 天)效益有限,Prompt 審核 tab 拿掉 */}
+          {([
+            { id: 'news',    label: '新聞列表', icon: <Newspaper size={14} /> },
+            { id: 'history', label: '歷史價格', icon: <BarChart3 size={14} /> },
+            { id: 'weekly',  label: '週報',     icon: <BarChart3 size={14} /> },
+            { id: 'monthly', label: '月報',     icon: <FileText size={14} /> },
+          ] as { id: Tab; label: string; icon: React.ReactNode; badge?: number }[]).map(s => (
+            <button
+              key={s.id}
+              onClick={() => setTab(s.id)}
+              className={`flex items-center gap-1.5 px-4 py-3 text-sm transition border-b-2 ${
+                tab === s.id ? 'text-blue-600 border-blue-600 font-medium' : 'text-slate-500 border-transparent hover:text-slate-800'
+              }`}
+            >
+              {s.icon}{s.label}
+              {s.badge != null && s.badge > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-500 text-white text-[10px]">{s.badge}</span>
+              )}
+            </button>
+          ))}
+          <button
+            onClick={toggleTabsFullscreen}
+            className={`ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border my-1 ${
+              tabsFullscreen
+                ? 'border-amber-400 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+            title={tabsFullscreen ? '退出全螢幕' : '把這個 tabs 區段放大到全螢幕(蓋外部 sidebar)'}
+          >
+            {tabsFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+            {tabsFullscreen ? '退出全螢幕' : '全螢幕'}
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-hidden">
+          {tab === 'news'    && <NewsTab focusedSet={focusedSet} default24h={prefs.default_24h_only === 1} />}
         {tab === 'history' && <PriceHistoryTab focusedMetals={Array.from(focusedSet)} />}
         {tab === 'weekly'  && <ReportsTab type="weekly" />}
         {tab === 'monthly' && <ReportsTab type="monthly" />}
         {/* {tab === 'review' && <PmReviewQueueView embedded onPendingCountChange={setReviewPendingCount} />} — 2026-05-11 預測功能停用 */}
-      </div>
+        </div>
+      </div>{/* tabs section wrapper end */}
 
       {showPrefs && <PrefsModal prefs={prefs} onClose={() => setShowPrefs(false)} onSaved={(p) => { setPrefs(p); setShowPrefs(false) }} />}
       {showMetalsShare && <MetalsShareModal onClose={() => setShowMetalsShare(false)} />}
