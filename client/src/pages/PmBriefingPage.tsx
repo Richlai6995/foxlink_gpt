@@ -13,7 +13,7 @@ import {
   ArrowLeft, Settings, Download, ChevronDown, ChevronUp, Loader2, RefreshCw,
   X, Filter, Pin, ExternalLink, Calendar, Search, FileText, BarChart3, Newspaper,
   Sparkles, AlertCircle, Bookmark, Activity, CheckCircle2, XCircle, Clock,
-  BookOpen, Copy, Mail,
+  BookOpen, Copy, Mail, Maximize2, Minimize2,
 } from 'lucide-react'
 import api from '../lib/api'
 import PmReviewQueueView from '../components/pm/PmReviewQueueView'
@@ -58,6 +58,14 @@ export default function PmBriefingPage() {
   const [showPrefs, setShowPrefs] = useState(false)
   const [showMetalsShare, setShowMetalsShare] = useState(false)
   const [showMailingLists, setShowMailingLists] = useState(false)
+  // 全螢幕模式 — fixed inset-0 + z-50 蓋外部 sidebar(Projects Platform / chat 等)
+  // localStorage 記憶 user 上次選擇,避免每次進來都重設
+  const [fullscreen, setFullscreen] = useState<boolean>(() => localStorage.getItem('pm.fullscreen') === '1')
+  const toggleFullscreen = () => {
+    const next = !fullscreen
+    setFullscreen(next)
+    localStorage.setItem('pm.fullscreen', next ? '1' : '0')
+  }
   const [reviewPendingCount, setReviewPendingCount] = useState(0)
   const [bannerExpanded, setBannerExpanded] = useState(false)
 
@@ -88,7 +96,9 @@ export default function PmBriefingPage() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-slate-50">
+    <div className={fullscreen
+      ? 'fixed inset-0 z-50 flex flex-col h-screen bg-slate-50'
+      : 'flex flex-col h-screen bg-slate-50'}>
       {/* Top bar */}
       <header className="bg-white border-b px-6 py-3 flex items-center gap-4 shadow-sm">
         <button onClick={() => navigate(backTo)} className="text-slate-500 hover:text-slate-800 text-sm flex items-center gap-1">
@@ -122,6 +132,18 @@ export default function PmBriefingPage() {
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border border-blue-200 text-blue-700 hover:bg-blue-50"
             title="匯出當前關注金屬 30 天價格"
           ><Download size={14} /> 匯出 CSV</button>
+          <button
+            onClick={toggleFullscreen}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border ${
+              fullscreen
+                ? 'border-amber-400 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+            }`}
+            title={fullscreen ? '退出全螢幕(顯示外部 sidebar)' : '全螢幕(蓋過外部 sidebar,獲得最大編輯空間)'}
+          >
+            {fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+            {fullscreen ? '退出全螢幕' : '全螢幕'}
+          </button>
         </div>
       </header>
 
