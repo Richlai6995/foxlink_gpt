@@ -259,7 +259,7 @@ export default function MetalsPage() {
         {/* 右欄 — 宏觀(精簡單欄)/ 新聞(展開吃滿) */}
         <div className="flex flex-col gap-3 min-h-0">
           <MetalsMacroPanel viewDate={viewDate} />
-          <MetalsNewsPanel viewDate={viewDate} />
+          <MetalsNewsPanel viewDate={viewDate} focusedMetals={prefs.focused_metals} />
         </div>
       </div>
 

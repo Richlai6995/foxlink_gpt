@@ -5,16 +5,34 @@
  * 完全 reuse 採購版 NewsTab(篩選器 / 搜尋 / 摘要 / 釘選 / 匯出 PDF),
  * 沒複製程式碼 — 採購版改善時自動繼承。
  */
+import { useMemo } from 'react'
 import { X } from 'lucide-react'
 import { NewsTab } from '../../pages/PmBriefingPage'
 
 interface Props {
   onClose: () => void
-  focusedSet?: Set<string>     // 預設帶入的金屬篩選(精簡版用 user prefs)
-  default24h?: boolean          // 預設只看 24h(精簡版預設 false 看近期)
+  focusedSet?: Set<string>
+  focusedMetals?: string[]      // 精簡版 user 偏好金屬,優先於 focusedSet
+  default24h?: boolean
+  defaultDays?: number          // 精簡版「近 N 天」selector,蓋過 NewsTab sticky 的 from
 }
 
-export default function PmNewsExplorerModal({ onClose, focusedSet, default24h = false }: Props) {
+export default function PmNewsExplorerModal({ onClose, focusedSet, focusedMetals, default24h = false, defaultDays }: Props) {
+  // 把 focusedMetals(陣列)轉成 Set,優先於 focusedSet
+  const finalFocusedSet = useMemo(() => {
+    if (focusedMetals && focusedMetals.length > 0) return new Set(focusedMetals)
+    return focusedSet || new Set<string>()
+  }, [focusedMetals, focusedSet])
+
+  // 算 freshDefaults — 蓋掉 NewsTab 的 sticky filter
+  const freshDefaults = useMemo(() => {
+    if (defaultDays == null) return undefined
+    // 從今天往前 (defaultDays - 1) 天到今天
+    const today = new Date().toISOString().slice(0, 10)
+    const from = new Date(Date.now() - (defaultDays - 1) * 86400000).toISOString().slice(0, 10)
+    return { from, to: today, metals: focusedMetals && focusedMetals.length > 0 ? focusedMetals : undefined }
+  }, [defaultDays, focusedMetals])
+
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-2">
       <div className="bg-slate-50 rounded-xl w-full h-full max-w-7xl max-h-[95vh] overflow-hidden shadow-2xl flex flex-col">
@@ -27,7 +45,7 @@ export default function PmNewsExplorerModal({ onClose, focusedSet, default24h = 
           </button>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto p-3">
-          <NewsTab focusedSet={focusedSet || new Set()} default24h={default24h} />
+          <NewsTab focusedSet={finalFocusedSet} default24h={default24h} freshDefaults={freshDefaults} />
         </div>
       </div>
     </div>

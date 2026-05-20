@@ -853,7 +853,12 @@ export interface NewsItem {
   is_pinned: number | null
 }
 
-export function NewsTab({ focusedSet, default24h }: { focusedSet: Set<string>; default24h: boolean }) {
+export function NewsTab({ focusedSet, default24h, freshDefaults }: {
+  focusedSet: Set<string>;
+  default24h: boolean;
+  // freshDefaults: 精簡版 modal 用 — 蓋過 sticky filter,確保每次打開都對齊外面 selector
+  freshDefaults?: { from?: string; to?: string; metals?: string[] };
+}) {
   // 從 localStorage 讀 sticky filter
   // v2: sources state 從 source 字串改存 url domain(2026-04-29);舊版 v1 自動失效
   const stickyKey = 'pm_news_filters_v2'
@@ -862,11 +867,16 @@ export function NewsTab({ focusedSet, default24h }: { focusedSet: Set<string>; d
   const today = new Date().toISOString().slice(0, 10)
   const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
 
-  const [from, setFrom] = useState(sticky.from || (default24h ? yesterday : ''))
-  const [to, setTo] = useState(sticky.to || '')
+  // freshDefaults 蓋過 sticky:精簡版 modal 打開時帶外部 selector 的 days + user 偏好金屬
+  const [from, setFrom] = useState(freshDefaults?.from ?? sticky.from ?? (default24h ? yesterday : ''))
+  const [to, setTo] = useState(freshDefaults?.to ?? sticky.to ?? '')
   // date_field='published' = 篩文章發表日;'scraped' = 篩抓回來的時間(看「我這週抓了什麼」)
   const [dateField, setDateField] = useState<'published' | 'scraped'>(sticky.date_field || 'published')
-  const [metals, setMetals] = useState<string[]>(sticky.metals || (focusedSet.size > 0 ? Array.from(focusedSet) : []))
+  const [metals, setMetals] = useState<string[]>(
+    freshDefaults?.metals && freshDefaults.metals.length > 0
+      ? freshDefaults.metals
+      : (sticky.metals || (focusedSet.size > 0 ? Array.from(focusedSet) : []))
+  )
   // sources state 內容存 url domain(news.smm.cn / mining.com)而非 source 字串
   // 原因:LLM 對同一網站常寫多個變體(SMM / SMM 上海有色网 / SMM上海有色網),
   //      用 domain 篩選才能匹到所有變體
@@ -994,11 +1004,28 @@ export function NewsTab({ focusedSet, default24h }: { focusedSet: Set<string>; d
             <input type="date" value={to} onChange={e => { setTo(e.target.value); setPage(1) }} className="border rounded px-2 py-1 text-xs flex-1" />
           </div>
           <div className="flex gap-1 mt-1 text-[10px]">
-            <button onClick={() => { setFrom(today); setTo(today); setPage(1) }} className="px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200">今日</button>
-            <button onClick={() => { setFrom(yesterday); setTo(''); setPage(1) }} className="px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200">24h</button>
-            <button onClick={() => { setFrom(new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10)); setTo(''); setPage(1) }} className="px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200">7d</button>
-            <button onClick={() => { setFrom(new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)); setTo(''); setPage(1) }} className="px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200">30d</button>
-            <button onClick={() => { setFrom(''); setTo(''); setPage(1) }} className="px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200">清除</button>
+            {(() => {
+              const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10)
+              const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
+              const shortcuts = [
+                { label: '今日',  from: today,         to: today, active: from === today && to === today },
+                { label: '24h',  from: yesterday,     to: '',    active: from === yesterday && to === '' },
+                { label: '7d',   from: sevenDaysAgo,  to: '',    active: from === sevenDaysAgo && to === '' },
+                { label: '30d',  from: thirtyDaysAgo, to: '',    active: from === thirtyDaysAgo && to === '' },
+                { label: '清除', from: '',            to: '',    active: from === '' && to === '' },
+              ]
+              return shortcuts.map(s => (
+                <button
+                  key={s.label}
+                  onClick={() => { setFrom(s.from); setTo(s.to); setPage(1) }}
+                  className={`px-1.5 py-0.5 rounded transition ${
+                    s.active
+                      ? 'bg-blue-600 text-white font-semibold'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >{s.label}</button>
+              ))
+            })()}
           </div>
         </div>
 

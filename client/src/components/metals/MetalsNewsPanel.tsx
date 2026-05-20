@@ -25,12 +25,13 @@ interface NewsItem {
 
 interface Props {
   viewDate?: string  // 'YYYY-MM-DD'
+  focusedMetals?: string[]  // user 偏好金屬,放大 modal 自動帶入
 }
 
 const NEWS_DAYS_KEY = 'metals.newsDays'
 const NEWS_DAYS_OPTIONS = [1, 3, 7, 14, 30] as const
 
-export default function MetalsNewsPanel({ viewDate }: Props) {
+export default function MetalsNewsPanel({ viewDate, focusedMetals }: Props) {
   const [tab, setTab] = useState<Tab>('news')
   const [news, setNews] = useState<NewsItem[]>([])
   const [report, setReport] = useState<any>(null)
@@ -178,7 +179,12 @@ export default function MetalsNewsPanel({ viewDate }: Props) {
       </div>
 
       {showExplorer && (
-        <PmNewsExplorerModal onClose={() => setShowExplorer(false)} default24h={false} />
+        <PmNewsExplorerModal
+          onClose={() => setShowExplorer(false)}
+          default24h={false}
+          focusedMetals={focusedMetals}
+          defaultDays={newsDays}
+        />
       )}
     </div>
   )
