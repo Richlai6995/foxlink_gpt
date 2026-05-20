@@ -37,7 +37,6 @@ const PmBomPanel = lazy(() => import('../components/admin/PmBomPanel'))
 const PmSettingsPanel = lazy(() => import('../components/admin/PmSettingsPanel'))
 const PmHealthPanel = lazy(() => import('../components/admin/PmHealthPanel'))
 const PmErpSyncPanel = lazy(() => import('../components/admin/PmErpSyncPanel'))
-const PmMailingListsPanel = lazy(() => import('../components/admin/PmMailingListsPanel'))
 const WebexLogsPanel = lazy(() => import('../components/admin/WebexLogsPanel'))
 const HelpTranslationPanel = lazy(() => import('../components/admin/HelpTranslationPanel'))
 const SpecialManualsPanel = lazy(() => import('../components/admin/SpecialManualsPanel'))
@@ -49,9 +48,9 @@ const FeedbackStatsPanel = lazy(() => import('../components/feedback/FeedbackSta
 const VoiceInputSettingsPanel = lazy(() => import('../components/admin/VoiceInputSettings'))
 const AnnouncementsAdmin = lazy(() => import('../components/admin/AnnouncementsAdmin'))
 const TranscribeJobsPanel = lazy(() => import('../components/admin/TranscribeJobsPanel'))
-type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'auth-audit' | 'ip-blacklist' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'kb-retrieval' | 'kb-debug' | 'kb-synonyms' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'chart-adoption' | 'data-permissions' | 'monitor' | 'db-sources' | 'pipeline-whitelist' | 'alert-rules' | 'pm-bom' | 'pm-settings' | 'pm-health' | 'pm-erp-sync' | 'pm-mailing' | 'webex-logs' | 'help-translation' | 'special-manuals' | 'factory-translations' | 'training' | 'feedback' | 'voice-input' | 'announcements' | 'transcribe-jobs'
+type Tab = 'users' | 'roles' | 'tokens' | 'audit' | 'auth-audit' | 'ip-blacklist' | 'keywords' | 'db' | 'mail' | 'llm' | 'vector-defaults' | 'kb-retrieval' | 'kb-debug' | 'kb-synonyms' | 'cost' | 'scheduled' | 'mcp' | 'dify' | 'kb' | 'skills' | 'code-runners' | 'research' | 'api-keys' | 'ai-dashboard' | 'chart-adoption' | 'data-permissions' | 'monitor' | 'db-sources' | 'pipeline-whitelist' | 'alert-rules' | 'pm-bom' | 'pm-settings' | 'pm-health' | 'pm-erp-sync' | 'webex-logs' | 'help-translation' | 'special-manuals' | 'factory-translations' | 'training' | 'feedback' | 'voice-input' | 'announcements' | 'transcribe-jobs'
 
-const VALID_TABS: Tab[] = ['users', 'roles', 'tokens', 'audit', 'auth-audit', 'ip-blacklist', 'keywords', 'db', 'mail', 'llm', 'vector-defaults', 'kb-retrieval', 'kb-debug', 'kb-synonyms', 'cost', 'scheduled', 'mcp', 'dify', 'kb', 'skills', 'code-runners', 'research', 'api-keys', 'ai-dashboard', 'chart-adoption', 'data-permissions', 'monitor', 'db-sources', 'pipeline-whitelist', 'alert-rules', 'pm-bom', 'pm-settings', 'pm-health', 'pm-erp-sync', 'pm-mailing', 'webex-logs', 'help-translation', 'special-manuals', 'factory-translations', 'training', 'feedback', 'voice-input', 'announcements', 'transcribe-jobs']
+const VALID_TABS: Tab[] = ['users', 'roles', 'tokens', 'audit', 'auth-audit', 'ip-blacklist', 'keywords', 'db', 'mail', 'llm', 'vector-defaults', 'kb-retrieval', 'kb-debug', 'kb-synonyms', 'cost', 'scheduled', 'mcp', 'dify', 'kb', 'skills', 'code-runners', 'research', 'api-keys', 'ai-dashboard', 'chart-adoption', 'data-permissions', 'monitor', 'db-sources', 'pipeline-whitelist', 'alert-rules', 'pm-bom', 'pm-settings', 'pm-health', 'pm-erp-sync', 'webex-logs', 'help-translation', 'special-manuals', 'factory-translations', 'training', 'feedback', 'voice-input', 'announcements', 'transcribe-jobs']
 
 export default function AdminDashboard() {
   const navigate = useNavigate()
@@ -113,7 +112,6 @@ export default function AdminDashboard() {
     { id: 'pm-settings', label: t('admin.tabs.pmSettings', 'PM 平台設定'), icon: <Cpu size={16} className="text-amber-700" /> },
     { id: 'pm-health', label: t('admin.tabs.pmHealth', 'PM 平台健康'), icon: <Activity size={16} className="text-amber-500" /> },
     { id: 'pm-erp-sync', label: t('admin.tabs.pmErpSync', 'PM ERP 同步'), icon: <Database size={16} className="text-indigo-500" /> },
-    { id: 'pm-mailing', label: t('admin.tabs.pmMailing', 'PM 寄信清單'), icon: <Mail size={16} className="text-blue-500" /> },
     { id: 'mail', label: t('admin.tabs.mail'), icon: <Mail size={16} className="text-purple-600" /> },
     { id: 'voice-input', label: t('voice_input.settingsTitle', '語音輸入'), icon: <Mic size={16} className="text-blue-500" /> },
     { id: 'announcements', label: t('admin.tabs.announcements', '系統公告'), icon: <Megaphone size={16} className="text-cyan-600" /> },
@@ -194,7 +192,6 @@ export default function AdminDashboard() {
           {activeTab === 'pm-settings' && <PmSettingsPanel />}
           {activeTab === 'pm-health' && <PmHealthPanel />}
           {activeTab === 'pm-erp-sync' && <PmErpSyncPanel />}
-          {activeTab === 'pm-mailing' && <PmMailingListsPanel />}
           {activeTab === 'help-translation' && <HelpTranslationPanel />}
           {activeTab === 'special-manuals' && <SpecialManualsPanel />}
           {activeTab === 'factory-translations' && <FactoryTranslationsPanel />}
