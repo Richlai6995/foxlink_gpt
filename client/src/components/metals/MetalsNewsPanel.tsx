@@ -4,8 +4,9 @@
  *  - 週/月報:採購端 published 後的版本
  */
 import { useEffect, useState } from 'react'
-import { Newspaper, FileText, BarChart3, Loader2, ExternalLink } from 'lucide-react'
+import { Newspaper, FileText, BarChart3, Loader2, ExternalLink, Maximize2 } from 'lucide-react'
 import api from '../../lib/api'
+import PmNewsExplorerModal from '../pm/PmNewsExplorerModal'
 
 type Tab = 'news' | 'weekly' | 'monthly'
 
@@ -34,6 +35,7 @@ export default function MetalsNewsPanel({ viewDate }: Props) {
   const [news, setNews] = useState<NewsItem[]>([])
   const [report, setReport] = useState<any>(null)
   const [loading, setLoading] = useState(false)
+  const [showExplorer, setShowExplorer] = useState(false)
   // 新聞抓取天數 selector — 預設 7 天,localStorage 記憶
   const [newsDays, setNewsDays] = useState<number>(() => {
     const saved = Number(localStorage.getItem(NEWS_DAYS_KEY))
@@ -82,7 +84,7 @@ export default function MetalsNewsPanel({ viewDate }: Props) {
         ))}
       </div>
 
-      {/* news tab 限定:抓取天數 selector(localStorage 記憶) */}
+      {/* news tab 限定:抓取天數 selector(localStorage 記憶) + 放大按鈕 */}
       {tab === 'news' && (
         <div className="flex items-center gap-1 px-2 py-1 border-b bg-slate-50 text-[10px] text-slate-500">
           <span className="text-slate-400">近</span>
@@ -99,6 +101,14 @@ export default function MetalsNewsPanel({ viewDate }: Props) {
               {d}{d === 1 ? '日' : '天'}
             </button>
           ))}
+          <button
+            onClick={() => setShowExplorer(true)}
+            className="ml-auto flex items-center gap-1 px-2 py-0.5 rounded text-amber-700 hover:bg-amber-100 hover:text-amber-900 transition"
+            title="放大瀏覽(完整篩選器 / 關鍵字 / 來源 / 摘要)"
+          >
+            <Maximize2 size={11} />
+            <span className="hidden sm:inline">放大</span>
+          </button>
         </div>
       )}
 
@@ -166,6 +176,10 @@ export default function MetalsNewsPanel({ viewDate }: Props) {
           )
         )}
       </div>
+
+      {showExplorer && (
+        <PmNewsExplorerModal onClose={() => setShowExplorer(false)} default24h={false} />
+      )}
     </div>
   )
 }

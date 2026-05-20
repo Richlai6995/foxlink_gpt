@@ -13,13 +13,14 @@ import {
   ArrowLeft, Settings, Download, ChevronDown, ChevronUp, Loader2, RefreshCw,
   X, Filter, Pin, ExternalLink, Calendar, Search, FileText, BarChart3, Newspaper,
   Sparkles, AlertCircle, Bookmark, Activity, CheckCircle2, XCircle, Clock,
-  BookOpen, Copy,
+  BookOpen, Copy, Mail,
 } from 'lucide-react'
 import api from '../lib/api'
 import PmReviewQueueView from '../components/pm/PmReviewQueueView'
 import PmFeedbackThumbs from '../components/pm/PmFeedbackThumbs'
 import PmReportAttachments from '../components/pm/PmReportAttachments'
 import PmReportSendModal from '../components/pm/PmReportSendModal'
+import PmMailingListsModal from '../components/pm/PmMailingListsModal'
 import MetalsShareInline from '../components/metals/MetalsShareInline'
 import ReactECharts from 'echarts-for-react'
 
@@ -56,6 +57,7 @@ export default function PmBriefingPage() {
   const [tab, setTab] = useState<Tab>('news')
   const [showPrefs, setShowPrefs] = useState(false)
   const [showMetalsShare, setShowMetalsShare] = useState(false)
+  const [showMailingLists, setShowMailingLists] = useState(false)
   const [reviewPendingCount, setReviewPendingCount] = useState(0)
   const [bannerExpanded, setBannerExpanded] = useState(false)
 
@@ -105,6 +107,11 @@ export default function PmBriefingPage() {
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border border-purple-200 text-purple-700 hover:bg-purple-50"
             title="設定誰可看「金屬情報精簡版 (/metals)」"
           ><Bookmark size={14} /> 精簡版分享</button>
+          <button
+            onClick={() => setShowMailingLists(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border border-blue-200 text-blue-700 hover:bg-blue-50"
+            title="管理寄送週/月報用的收件清單"
+          ><Mail size={14} /> 郵件清單</button>
           <button
             onClick={() => navigate('/metals', { state: { from: '/pm/briefing' } })}
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
@@ -167,6 +174,7 @@ export default function PmBriefingPage() {
 
       {showPrefs && <PrefsModal prefs={prefs} onClose={() => setShowPrefs(false)} onSaved={(p) => { setPrefs(p); setShowPrefs(false) }} />}
       {showMetalsShare && <MetalsShareModal onClose={() => setShowMetalsShare(false)} />}
+      {showMailingLists && <PmMailingListsModal onClose={() => setShowMailingLists(false)} />}
     </div>
   )
 }
@@ -827,7 +835,9 @@ function DataHealthPanel() {
 }
 
 // ── 新聞 Tab ────────────────────────────────────────────────────────────────
-interface NewsItem {
+// 以下 NewsTab + NewsFullContentModal + NewsCard + NewsItem export 出去,
+// 供精簡版 MetalsPage 的「放大新聞」modal reuse(同一份程式碼,避免複製維護)。
+export interface NewsItem {
   id: number
   url: string
   title: string
@@ -843,7 +853,7 @@ interface NewsItem {
   is_pinned: number | null
 }
 
-function NewsTab({ focusedSet, default24h }: { focusedSet: Set<string>; default24h: boolean }) {
+export function NewsTab({ focusedSet, default24h }: { focusedSet: Set<string>; default24h: boolean }) {
   // 從 localStorage 讀 sticky filter
   // v2: sources state 從 source 字串改存 url domain(2026-04-29);舊版 v1 自動失效
   const stickyKey = 'pm_news_filters_v2'
@@ -1119,7 +1129,7 @@ function normalizeUrlForCompare(raw: string): string {
   } catch { return raw.trim().toLowerCase() }
 }
 
-function NewsFullContentModal({ newsId, onClose }: { newsId: number; onClose: () => void }) {
+export function NewsFullContentModal({ newsId, onClose }: { newsId: number; onClose: () => void }) {
   const [data, setData] = useState<{
     found: boolean
     news: {
@@ -1283,7 +1293,7 @@ function NewsFullContentModal({ newsId, onClose }: { newsId: number; onClose: ()
   )
 }
 
-function NewsCard({ item, onTogglePin, onOpenFull }: { item: NewsItem; onTogglePin: () => void; onOpenFull: () => void }) {
+export function NewsCard({ item, onTogglePin, onOpenFull }: { item: NewsItem; onTogglePin: () => void; onOpenFull: () => void }) {
   const sent = item.sentiment_label || ''
   const sentColor = /positive/i.test(sent) ? 'text-emerald-600 bg-emerald-50' :
                     /negative/i.test(sent) ? 'text-red-600 bg-red-50' :
