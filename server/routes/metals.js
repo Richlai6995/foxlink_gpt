@@ -416,6 +416,19 @@ router.get('/reports', verifyToken, verifyMetalsAccess, async (req, res) => {
       `).get(type);
     }
 
+    // 順手撈該 report 的附件清單(供精簡版下載)
+    if (row) {
+      const reportId = row.id ?? row.ID;
+      const atts = await db.prepare(`
+        SELECT id, filename, size_bytes, mime_type,
+               TO_CHAR(uploaded_at, 'YYYY-MM-DD HH24:MI') AS uploaded_at
+        FROM pm_report_attachments
+        WHERE report_id = ?
+        ORDER BY uploaded_at DESC
+      `).all(reportId);
+      row.attachments = atts || [];
+    }
+
     res.json({ report: row || null });
   } catch (e) {
     console.error('[Metals] /reports error:', e);
@@ -1174,6 +1187,50 @@ router.put('/preferences', verifyToken, verifyMetalsAccess, async (req, res) => 
     }
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /metals/reports/:reportId/attachments/:attId/download
+// 精簡版 user(verifyMetalsAccess)下載已發布週/月報的附件。
+// 採購端走 /pm/briefing/purchaser-reports/...,精簡版獨立 endpoint 限 published=1。
+router.get('/reports/:reportId/attachments/:attId/download', verifyToken, verifyMetalsAccess, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const fs = require('fs');
+    const path = require('path');
+    const reportId = Number(req.params.reportId);
+    const attId = Number(req.params.attId);
+
+    // 1. 驗 report 存在且 published(避免採購草稿附件被精簡版 user 抓到)
+    const pubCheck = await db.prepare(
+      `SELECT is_published FROM pm_purchaser_reports WHERE id = ?`
+    ).get(reportId);
+    if (!pubCheck) return res.status(404).json({ error: 'report not found' });
+    const isPub = pubCheck.is_published ?? pubCheck.IS_PUBLISHED;
+    if (!isPub) return res.status(403).json({ error: '該報告尚未發布,無法下載附件' });
+
+    // 2. 撈附件 metadata
+    const att = await db.prepare(`
+      SELECT filename, stored_path, mime_type FROM pm_report_attachments
+      WHERE id = ? AND report_id = ?
+    `).get(attId, reportId);
+    if (!att) return res.status(404).json({ error: 'attachment not found' });
+    const filename = att.filename || att.FILENAME;
+    const storedPath = att.stored_path || att.STORED_PATH;
+    const mimeType = att.mime_type || att.MIME_TYPE || 'application/octet-stream';
+
+    // 3. stream 檔案
+    const UPLOAD_DIR = process.env.UPLOAD_DIR
+      ? path.resolve(process.env.UPLOAD_DIR)
+      : path.join(__dirname, '..', 'uploads');
+    const fullPath = path.join(UPLOAD_DIR, storedPath);
+    if (!fs.existsSync(fullPath)) return res.status(404).json({ error: '檔案不存在(磁碟)' });
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
+    fs.createReadStream(fullPath).pipe(res);
+  } catch (e) {
+    console.error('[Metals] reports attachment download error:', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 module.exports = router;

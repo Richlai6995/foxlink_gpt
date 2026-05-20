@@ -4,7 +4,7 @@
  *  - 週/月報:採購端 published 後的版本
  */
 import { useEffect, useState } from 'react'
-import { Newspaper, FileText, BarChart3, Loader2, ExternalLink, Maximize2 } from 'lucide-react'
+import { Newspaper, FileText, BarChart3, Loader2, ExternalLink, Maximize2, Paperclip, Download } from 'lucide-react'
 import api from '../../lib/api'
 import PmNewsExplorerModal from '../pm/PmNewsExplorerModal'
 
@@ -169,6 +169,47 @@ export default function MetalsNewsPanel({ viewDate, focusedMetals }: Props) {
                 <span className="text-[10px] text-emerald-600">✓ 已發布 {report.published_at || ''}</span>
               </div>
               <pre className="whitespace-pre-wrap text-xs text-slate-700 leading-relaxed font-sans">{report.content || '(無內容)'}</pre>
+              {/* 附件列表 — 採購發布時上傳的檔案,user 可下載 */}
+              {Array.isArray(report.attachments) && report.attachments.length > 0 && (
+                <div className="mt-3 pt-2 border-t border-slate-200">
+                  <div className="text-[10px] font-semibold text-slate-500 mb-1 flex items-center gap-1">
+                    <Paperclip size={10} /> 附件({report.attachments.length})
+                  </div>
+                  <div className="space-y-1">
+                    {report.attachments.map((att: any) => (
+                      <button
+                        key={att.id}
+                        onClick={() => {
+                          // 透過 api.get blob 下載(帶 token)避免 SPA fallback
+                          api.get(`/metals/reports/${report.id}/attachments/${att.id}/download`, { responseType: 'blob' })
+                            .then(r => {
+                              const blob = new Blob([r.data], { type: r.headers['content-type'] || 'application/octet-stream' })
+                              const url = URL.createObjectURL(blob)
+                              const a = document.createElement('a')
+                              a.href = url
+                              a.download = att.filename
+                              document.body.appendChild(a); a.click()
+                              document.body.removeChild(a); URL.revokeObjectURL(url)
+                            })
+                            .catch(e => alert(e?.response?.data?.error || e.message))
+                        }}
+                        className="flex items-center gap-1.5 px-2 py-1 w-full text-left bg-slate-50 hover:bg-blue-50 hover:text-blue-700 rounded transition text-[11px] text-slate-700"
+                        title={`下載 ${att.filename}`}
+                      >
+                        <Download size={11} className="flex-shrink-0 text-slate-400" />
+                        <span className="truncate flex-1">{att.filename}</span>
+                        {att.size_bytes != null && (
+                          <span className="text-[10px] text-slate-400 flex-shrink-0">
+                            {att.size_bytes < 1024 ? `${att.size_bytes}B`
+                              : att.size_bytes < 1024 * 1024 ? `${(att.size_bytes / 1024).toFixed(1)}KB`
+                              : `${(att.size_bytes / 1024 / 1024).toFixed(1)}MB`}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </article>
           ) : (
             <div className="text-xs text-slate-400 text-center py-4">
