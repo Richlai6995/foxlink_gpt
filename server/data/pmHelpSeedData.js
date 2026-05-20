@@ -16,6 +16,7 @@ const bookIcon = 'gem';
 const bookIsSpecial = 1;
 const bookSortOrder = 10;
 const bookLastModified = '2026-04-29';
+const reportWorkflowLastModified = '2026-05-20';  // pm-reports-workflow ship
 // 2026-04-26 Phase 5 ship:更新 pm-architecture / pm-data-flow / pm-scheduled-tasks /
 // pm-dashboards / pm-ai-agent / pm-limits-faq 六個 sections
 const phase5LastModified = '2026-04-26';
@@ -500,6 +501,200 @@ const sections = [
         text: '🎯 **目標體驗**:採購早晨**進這個頁面 5 分鐘**搞定盯盤 + 看新聞 + 看 AI 重點 → 取代舊流程「開 LBMA 網頁 → 開台銀網頁 → 開 Bloomberg → 開 Email 看通知 → Excel 彙整」(原 30 分鐘)。'
       },
     ]
+  },
+
+  // ── 1.5 週/月報撰寫與寄送 SOP(2026-05-20 新增) ────────────────────────────
+  {
+    id: 'pm-reports-workflow',
+    sort_order: 15,
+    icon: 'FileText',
+    icon_color: 'text-blue-500',
+    last_modified: reportWorkflowLastModified,
+    title: '週/月報撰寫與寄送 SOP',
+    sidebar_label: '週/月報 SOP',
+    blocks: [
+      {
+        type: 'para',
+        text: '本章節說明採購端編輯「週報 / 月報」的完整流程:從 AI 自動草稿 → 採購自寫 → 加附件 → 寄信給指定收件人 → 看寄信歷史。對應 PM 平台 → 採購完整版 → tabs「週報 / 月報」。',
+      },
+      {
+        type: 'note',
+        text: '上下兩半架構:**上方 = AI 自動產出(僅參考)**,**下方 = 採購自寫(發布後一般 user 看到)**。AI 每週一/月初自動跑,**只是素材**,實際對外發布的是採購修過的版本。'
+      },
+
+      // === A. AI 自動草稿區 ===
+      {
+        type: 'subsection',
+        title: 'A. AI 自動草稿(歷史 dropdown)',
+        blocks: [
+          {
+            type: 'para',
+            text: '上方 AI 自動週/月報區會列出最近 50 份草稿,user 可在右上角下拉「日期 dropdown」直接跳到任一份歷史草稿,或用「‹ 新 / 舊 ›」按鈕翻頁(顯示「N/M」當前位置)。每份草稿對應一個 as_of_date(週報=該週週一,月報=該月 1 號)。',
+          },
+          {
+            type: 'tip',
+            text: '為什麼有多份草稿?AI 排程每週一 09:00 跑「[PM] 金屬市場週報」,每月 1 號 09:00 跑「[PM] 金屬市場月報」(可在 admin 排程頁看)。每跑一次就 INSERT 一筆新草稿,UI 預設顯示最新,但歷史都保留。',
+          },
+        ],
+      },
+
+      // === B. 複製到我的草稿 ===
+      {
+        type: 'subsection',
+        title: 'B. 複製 AI 草稿到「我的版本」',
+        blocks: [
+          {
+            type: 'steps',
+            items: [
+              { title: 'AI 自動區右上點「📋 複製到我的草稿編輯」', desc: '系統 INSERT 一筆 pm_purchaser_reports,複製 AI 內容 + title + as_of_date,自動進入編輯模式' },
+              { title: '修改內容', desc: '純 Markdown 編輯區,可自由改寫;支援表格(管道符 `|...|`)、列表、粗體、連結等' },
+              { title: '儲存草稿 或 儲存並發布', desc: '「💾 儲存草稿」未發布(只自己看);「🚀 儲存並發布」推到精簡版 /metals(一般 user 才看得到)' },
+            ],
+          },
+        ],
+      },
+
+      // === C. 自己寫一篇 ===
+      {
+        type: 'subsection',
+        title: 'C. 自己寫一篇(不依賴 AI 草稿)',
+        blocks: [
+          {
+            type: 'para',
+            text: '當期 AI 草稿不存在 / 不滿意時,點右上「➕ 自己寫一篇」直接從空白開始。',
+          },
+          {
+            type: 'tip',
+            text: '**資料日期智能對齊**:新建時系統自動帶入「週報 = 本週週一」、「月報 = 本月 1 號」(2026-05-20 行為)。資料日期輸入框旁邊有「自動」按鈕,改了之後想恢復智能值點下即可。',
+          },
+          {
+            type: 'note',
+            text: '若 user 想針對 5/4 那週重寫週報,不需要等到 5/4 — 任何時間都可以新建「資料日期=2026-05-04」的週報。但同一個 as_of_date + report_type 只能有一筆(`pm_purchaser_reports` 表 by name 不擋,但 UI 建議唯一)。',
+          },
+        ],
+      },
+
+      // === D. 附件 ===
+      {
+        type: 'subsection',
+        title: 'D. 上傳附件',
+        blocks: [
+          {
+            type: 'para',
+            text: '編輯中的報告(`editingId` 是既有 report id 才顯示)textarea 下方有「📎 附件」區。點「上傳附件」可一次選多檔,**最多 5 檔,每檔 ≤ 20MB**,支援 docx/pdf/xlsx/圖片等任意格式。',
+          },
+          {
+            type: 'note',
+            text: '**中文檔名支援**(2026-05-20 修正):之前 latin1 編碼會把中文檔名變亂碼(例 PM_æ-°è...),現在已修。舊的亂碼附件無法救,要重新上傳。',
+          },
+          {
+            type: 'tip',
+            text: '寄信時附件預設一起帶上(寄信 modal 內可取消「包含附件」)。已發布報告的附件,一般 user 在精簡版 /metals 也能下載(走 verifyMetalsAccess + is_published 守護)。',
+          },
+        ],
+      },
+
+      // === E. 寄信清單(mailing list) ===
+      {
+        type: 'subsection',
+        title: 'E. 收件清單管理(寄信前先設定)',
+        blocks: [
+          {
+            type: 'para',
+            text: '採購完整版 toolbar(頂端)的「📧 郵件清單」按鈕(在「精簡版分享」右邊)打開管理頁。**全採購共用**,無 owner 隔離。',
+          },
+          {
+            type: 'steps',
+            items: [
+              { title: '點 toolbar「📧 郵件清單」', desc: '彈出 modal,看現有清單與收件人數' },
+              { title: '點「+ 新增清單」', desc: '輸入名稱(如「採購主管群」「事業單位 A」「全集團通報」)+ 說明' },
+              { title: '一次貼多個 email', desc: '在 textarea 換行/逗號分隔,支援「顯示名稱 <email>」格式。例:`Ann Wang <ann_wang@foxlink.com>`' },
+              { title: '建立後可繼續加/刪收件人', desc: '展開該清單 row,直接 inline 加 email + 顯示名稱' },
+              { title: '停用 / 刪除清單', desc: '電源按鈕停用(寄信 dropdown 不會顯示)、垃圾桶刪除(cascade 帶走收件人)' },
+            ],
+          },
+        ],
+      },
+
+      // === F. 寄信流程 ===
+      {
+        type: 'subsection',
+        title: 'F. 寄信給指定清單',
+        blocks: [
+          {
+            type: 'steps',
+            items: [
+              { title: '進「我的版本」列表', desc: '看到報告 row 右側 4 個按鈕:編輯 / 發布 / **✉ 寄信** / 刪除' },
+              { title: '點「✉ 寄信」', desc: '打開寄送 modal' },
+              { title: '選收件清單', desc: 'dropdown 列出所有 is_active=1 的清單,顯示「N 位收件人」' },
+              { title: '(選填)自訂主旨', desc: '留空使用預設「[PM] {title}」' },
+              { title: '(選填)補充訊息', desc: 'markdown,放在報告最上方;例:「本期重點是 PT +8%,請主管關注」' },
+              { title: '✓ 包含附件', desc: '預設 ON,該報告所有附件自動帶上(取消可只寄正文)' },
+              { title: '點「寄出」', desc: '送出後顯示成功/失敗;寄信成功後 modal 顯示「已寄出給 N 位收件人,含 M 個附件」' },
+            ],
+          },
+          {
+            type: 'tip',
+            text: 'Email body 用 inline HTML 渲染 markdown(2026-05-19 改),收信端看到漂亮 HTML 表格 + 燈號 emoji(用純 CSS 圓點對應 Notes / Outlook 都認得)。',
+          },
+        ],
+      },
+
+      // === G. 寄信歷史 ===
+      {
+        type: 'subsection',
+        title: 'G. 寄信歷史紀錄',
+        blocks: [
+          {
+            type: 'para',
+            text: 'GET `/api/pm/briefing/purchaser-reports/:id/send-log` 可查該報告所有寄信紀錄(目前後端有 endpoint,UI 還沒掛 — 之後加)。紀錄欄位:`sent_at / list_name_snapshot / recipient_count / subject / attachment_count / status / error_msg`。',
+          },
+          {
+            type: 'note',
+            text: '為何用 snapshot?即使之後改清單名 / 收件人,紀錄裡仍保留當時實際寄到誰、用什麼主旨,稽核能對齊。',
+          },
+        ],
+      },
+
+      // === H. 全螢幕 ===
+      {
+        type: 'subsection',
+        title: 'H. 全螢幕編輯',
+        blocks: [
+          {
+            type: 'para',
+            text: 'tabs(新聞列表 / 歷史價格 / 週報 / 月報)header 最右側有「⛶ 全螢幕」按鈕(2026-05-20 加)。點下後整個 tabs section 變 `fixed inset-0 z-50`,**蓋過 Projects Platform sidebar / chat widget** 等右側卡住的元素,獲得最大編輯空間。',
+          },
+          {
+            type: 'tip',
+            text: 'localStorage 記憶選擇(`pm.tabsFullscreen`),退出全螢幕或下次進來都記得。退出按鈕變 amber 色 + Minimize2 icon。',
+          },
+        ],
+      },
+
+      // === I. 故障排除 ===
+      {
+        type: 'subsection',
+        title: 'I. 故障排除',
+        blocks: [
+          {
+            type: 'table',
+            headers: ['症狀', '原因 / 解法'],
+            rows: [
+              ['寄信 modal 看不到任何清單', '沒建任何 list。點 toolbar「📧 郵件清單」建第一個。'],
+              ['寄信 → 「該 list 沒有任何收件人」', '展開該 list 加 email。'],
+              ['寄信 → 「sendMail 回傳 false」', 'SMTP 設定缺(看 admin → 郵件設定),或 SMTP 連線壞。看 server log。'],
+              ['附件上傳 413 Payload Too Large', 'nginx ingress `client-max-body-size` 太小(預設 1MB),要調高(看 k8s/ingress.yaml)。'],
+              ['附件中文檔名亂碼', '已修(2026-05-20)。舊的需重傳。'],
+              ['一般 user 在 /metals 看不到附件', '報告需 is_published=1。採購端點「發布」才會顯示。'],
+              ['LLM 草稿 dropdown 沒看到我要的日期', 'LLM 排程 paused 時不會跑。確認 admin → 排程任務 → [PM] 金屬市場週報/月報 是 active 狀態。或手動 Run Now。'],
+              ['「自己寫一篇」資料日期沒自動帶週一', 'localStorage / 瀏覽器 cache 問題。重新整理頁面試;或用「自動」按鈕重新對齊。'],
+              ['全螢幕後外部 chat icon 還看得到', '某些 chat widget 用 z-index > 50,我們的 z-50 蓋不過。回報具體哪個 widget 處理(調 chat z-index 或自己往上加)。'],
+            ],
+          },
+        ],
+      },
+    ],
   },
 
   // ── 2. 系統邏輯與架構 ──────────────────────────────────────────────────────
