@@ -1399,6 +1399,13 @@ const _UPLOAD_DIR = process.env.UPLOAD_DIR
   ? path.resolve(process.env.UPLOAD_DIR)
   : path.join(__dirname, '..', 'uploads');
 
+// multer 預設 originalname 是 latin-1 編碼,中文檔名會變亂碼(看 user 截圖 「PM_æ-°è...」)
+// 用 Buffer latin1 → utf8 解回正確中文
+function decodeOriginalName(name) {
+  try { return Buffer.from(name, 'latin1').toString('utf8'); }
+  catch (_) { return name; }
+}
+
 const _reportAttachmentStorage = multer.diskStorage({
   destination: (req, _file, cb) => {
     const reportId = String(req.params.id || 'unknown').replace(/[^0-9]/g, '');
@@ -1408,7 +1415,10 @@ const _reportAttachmentStorage = multer.diskStorage({
   },
   filename: (_req, file, cb) => {
     const ts = Date.now();
-    const safe = file.originalname.replace(/[\\/:*?"<>|]/g, '_').slice(0, 200);
+    const decoded = decodeOriginalName(file.originalname);
+    const safe = decoded.replace(/[\\/:*?"<>|]/g, '_').slice(0, 200);
+    // 也順手把 file.originalname 更新為解碼版,後續 INSERT 用到不會踩雷
+    file.originalname = decoded;
     cb(null, `${ts}_${safe}`);
   },
 });

@@ -1835,8 +1835,9 @@ function MetricsCards({ metals, metricsMap }: { metals: string[]; metricsMap: Re
 
 function ReportsTab({ type }: { type: 'weekly' | 'monthly' }) {
   // ─ LLM 自動草稿(read-only,只當素材參考)
+  // 撈最近 50 筆,本地用 selectedLlmIndex 切換,UI 提供 dropdown 跳到任一日期 + 新/舊翻頁
   const [llmReports, setLlmReports] = useState<any[]>([])
-  const [llmOffset, setLlmOffset] = useState(0)
+  const [selectedLlmIndex, setSelectedLlmIndex] = useState(0)
   const [loadingLlm, setLoadingLlm] = useState(false)
 
   // ─ 我的版本(pm_purchaser_reports,可寫 + 發布)
@@ -1854,8 +1855,12 @@ function ReportsTab({ type }: { type: 'weekly' | 'monthly' }) {
 
   const reloadLlm = () => {
     setLoadingLlm(true)
-    api.get('/pm/briefing/reports', { params: { type, offset: llmOffset, limit: 1 } })
-      .then(r => setLlmReports(r.data?.rows || []))
+    // 一次撈最近 50 筆 LLM 草稿(by as_of_date desc),本地切換
+    api.get('/pm/briefing/reports', { params: { type, offset: 0, limit: 50 } })
+      .then(r => {
+        setLlmReports(r.data?.rows || [])
+        setSelectedLlmIndex(0)  // 預設指向最新一筆
+      })
       .finally(() => setLoadingLlm(false))
   }
   const reloadMy = () => {
@@ -1865,17 +1870,33 @@ function ReportsTab({ type }: { type: 'weekly' | 'monthly' }) {
       .finally(() => setLoadingMy(false))
   }
 
-  useEffect(() => { reloadLlm() }, [type, llmOffset])
+  useEffect(() => { reloadLlm() }, [type])
   useEffect(() => { reloadMy() }, [type])
 
-  const llm = llmReports[0]
+  const llm = llmReports[selectedLlmIndex] || null
 
   // ─── 編輯流程 ───────────────────────────────────────────────────────────
+  // 預設 as_of_date 智能對齊:週報 = 本週週一 / 月報 = 本月 1 號
+  // (user 可在編輯區改成任意日期)
+  const computeDefaultAsOfDate = () => {
+    const now = new Date()
+    if (type === 'weekly') {
+      // ISO weekday: 1=Mon..7=Sun;JS getDay(): 0=Sun..6=Sat
+      const d = now.getDay()
+      const daysToSubtract = d === 0 ? 6 : d - 1  // Sun → 6, Mon → 0, Tue → 1...
+      const monday = new Date(now)
+      monday.setDate(now.getDate() - daysToSubtract)
+      return monday.toISOString().slice(0, 10)
+    }
+    // monthly:本月 1 號
+    return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
+  }
+
   const startNew = () => {
     setEditingId('new')
     setDraftTitle('')
     setDraftContent('')
-    setDraftAsOfDate(new Date().toISOString().slice(0, 10))
+    setDraftAsOfDate(computeDefaultAsOfDate())
     setDraftSourceLlmId(null)
     setStatusMsg('')
   }
@@ -2000,20 +2021,35 @@ function ReportsTab({ type }: { type: 'weekly' | 'monthly' }) {
           <header className="flex items-center gap-2 px-3 py-2 border-b bg-white rounded-t-lg flex-wrap">
             <Sparkles size={14} className="text-amber-500" />
             <span className="text-sm font-semibold text-slate-700">AI 自動 {type === 'weekly' ? '週' : '月'}報(僅參考)</span>
-            {llm && (
-              <span className="text-xs text-slate-500">{llm.as_of_date}</span>
-            )}
             <div className="ml-auto flex items-center gap-2">
+              {/* dropdown:列出所有歷史草稿日期,直接跳 */}
+              {llmReports.length > 0 && (
+                <select
+                  value={selectedLlmIndex}
+                  onChange={e => setSelectedLlmIndex(Number(e.target.value))}
+                  className="px-2 py-0.5 text-xs rounded border border-slate-200 bg-white"
+                  title="切換查看歷史草稿"
+                >
+                  {llmReports.map((r, i) => (
+                    <option key={r.id || i} value={i}>
+                      {r.as_of_date}{i === 0 ? '(最新)' : ''}
+                    </option>
+                  ))}
+                </select>
+              )}
               <button
-                onClick={() => setLlmOffset(Math.max(0, llmOffset - 1))}
-                disabled={llmOffset === 0}
+                onClick={() => setSelectedLlmIndex(Math.max(0, selectedLlmIndex - 1))}
+                disabled={selectedLlmIndex === 0}
                 className="px-2 py-0.5 text-xs rounded border border-slate-200 disabled:opacity-30"
-              >新</button>
-              <span className="text-xs text-slate-400">第 {llmOffset + 1} 筆</span>
+                title="新一份"
+              >‹ 新</button>
+              <span className="text-xs text-slate-400">{selectedLlmIndex + 1}/{llmReports.length || 0}</span>
               <button
-                onClick={() => setLlmOffset(llmOffset + 1)}
-                className="px-2 py-0.5 text-xs rounded border border-slate-200"
-              >舊</button>
+                onClick={() => setSelectedLlmIndex(Math.min(llmReports.length - 1, selectedLlmIndex + 1))}
+                disabled={selectedLlmIndex >= llmReports.length - 1}
+                className="px-2 py-0.5 text-xs rounded border border-slate-200 disabled:opacity-30"
+                title="舊一份"
+              >舊 ›</button>
               {llm && (
                 <button
                   onClick={startCopyFromLlm}
@@ -2066,7 +2102,11 @@ function ReportsTab({ type }: { type: 'weekly' | 'monthly' }) {
                   </span>
                 )}
                 <div className="ml-auto flex items-center gap-1.5 text-[11px]">
-                  <span className="text-slate-500">資料日期</span>
+                  <span className="text-slate-500">
+                    資料日期 <span className="text-slate-400 text-[10px]">
+                      ({type === 'weekly' ? '建議用週一' : '建議用 1 號'})
+                    </span>
+                  </span>
                   <input
                     type="date"
                     value={draftAsOfDate}
@@ -2074,6 +2114,14 @@ function ReportsTab({ type }: { type: 'weekly' | 'monthly' }) {
                     className="border rounded px-1 py-0.5 text-xs"
                     disabled={editingId !== 'new'}
                   />
+                  {editingId === 'new' && (
+                    <button
+                      type="button"
+                      onClick={() => setDraftAsOfDate(computeDefaultAsOfDate())}
+                      className="px-1.5 py-0.5 text-[10px] rounded border border-slate-300 text-slate-600 hover:bg-slate-100"
+                      title={type === 'weekly' ? '對齊本週週一' : '對齊本月 1 號'}
+                    >自動</button>
+                  )}
                 </div>
               </div>
               <input
