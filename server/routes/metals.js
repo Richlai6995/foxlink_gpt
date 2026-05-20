@@ -174,6 +174,24 @@ router.get('/prices', verifyToken, verifyMetalsAccess, async (req, res) => {
       const monthChg = Number.isFinite(price30) && price30 > 0
         ? ((latestPrice - price30) / price30) * 100 : null;
 
+      // D% 處理:優先讀 DB 欄位 day_change_pct;
+      //   - 用 ?? 而非 ||(避免 0 漲跌被當 falsy 誤報「---」)
+      //   - 欄位 null / NaN 時自己用 fetchPriceAt(1) 算前一日漲跌(對齊 W%/M% 邏輯)
+      //     避免某些 source(LBMA 即時抓 / 台銀)沒寫 day_change_pct 害 UI 看不到
+      const dayChgFromCol = (() => {
+        const v = r.day_change_pct ?? r.DAY_CHANGE_PCT;
+        if (v == null) return null;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : null;
+      })();
+      let dayChg = dayChgFromCol;
+      if (dayChg == null) {
+        const price1 = await fetchPriceAt(1);
+        if (Number.isFinite(price1) && price1 > 0) {
+          dayChg = ((latestPrice - price1) / price1) * 100;
+        }
+      }
+
       result.push({
         metal_code: code,
         metal_name: r.metal_name || r.METAL_NAME || METAL_ZH_NAMES[code] || code,
@@ -181,7 +199,7 @@ router.get('/prices', verifyToken, verifyMetalsAccess, async (req, res) => {
         price_usd: latestPrice,
         as_of_date: r.as_of_date || r.AS_OF_DATE,
         source: r.source || r.SOURCE,
-        day_change_pct: Number(r.day_change_pct ?? r.DAY_CHANGE_PCT) || null,
+        day_change_pct: dayChg != null && Number.isFinite(dayChg) ? Number(dayChg.toFixed(2)) : null,
         week_change_pct: weekChg != null && Number.isFinite(weekChg) ? Number(weekChg.toFixed(2)) : null,
         month_change_pct: monthChg != null && Number.isFinite(monthChg) ? Number(monthChg.toFixed(2)) : null,
       });
@@ -856,13 +874,26 @@ router.get('/export.xlsx', verifyToken, verifyMetalsAccess, async (req, res) => 
       };
       const price7 = await fetchPriceAt(7);
       const price30 = await fetchPriceAt(30);
+      // D% 同 /prices endpoint 邏輯:?? 而非 ||,null 時 fallback fetchPriceAt(1) 自算
+      let dayChg = (() => {
+        const v = r.day_change_pct ?? r.DAY_CHANGE_PCT;
+        if (v == null) return null;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : null;
+      })();
+      if (dayChg == null) {
+        const price1 = await fetchPriceAt(1);
+        if (Number.isFinite(price1) && price1 > 0) {
+          dayChg = ((latestPrice - price1) / price1) * 100;
+        }
+      }
       priceRows.push({
         metal_code: code,
         metal_name: r.metal_name || r.METAL_NAME || METAL_ZH_NAMES[code] || code,
         group: groupOf(code),
         price_usd: Number.isFinite(latestPrice) ? latestPrice : null,
         as_of_date: r.as_of_date || r.AS_OF_DATE,
-        day_change_pct: Number(r.day_change_pct ?? r.DAY_CHANGE_PCT) || null,
+        day_change_pct: dayChg != null && Number.isFinite(dayChg) ? Number(dayChg.toFixed(2)) : null,
         week_change_pct: Number.isFinite(price7) && price7 > 0 ? Number((((latestPrice - price7) / price7) * 100).toFixed(2)) : null,
         month_change_pct: Number.isFinite(price30) && price30 > 0 ? Number((((latestPrice - price30) / price30) * 100).toFixed(2)) : null,
         source: r.source || r.SOURCE,
