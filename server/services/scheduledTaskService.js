@@ -436,6 +436,30 @@ async function substituteVarsAsync(template, taskName, outBag) {
   return result;
 }
 
+// ── Audit helper(每次 runTask 進入 / 退出都記到 scheduled_task_run_audits)──
+// 為什麼:scheduled_task_runs 只在跑完才寫 + kubectl log 會被 rotate。出現
+// 「paused 卻跑了」這種事件時無從追查觸發來源。這個 audit 表把所有進 runTask 的
+// 呼叫都記下:force flag / status_at_entry / pod_host / caller_hint(誰呼叫的)。
+// audit insert 失敗不影響主流程(warn log 就好,排程任務不能被 audit 拖死)。
+async function _auditRunDecision(db, taskId, decision, info = {}) {
+  try {
+    await db.prepare(`
+      INSERT INTO scheduled_task_run_audits
+        (task_id, decision, force_flag, status_at_entry, pod_host, caller_hint)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      taskId,
+      decision,
+      info.force ? 'Y' : 'N',
+      info.status || null,
+      process.env.HOSTNAME || process.env.POD_NAME || null,
+      (info.hint || '').slice(0, 500),
+    );
+  } catch (e) {
+    console.warn(`[Scheduled] audit insert failed (task=${taskId}, decision=${decision}): ${e.message}`);
+  }
+}
+
 // ── Retry wrapper ─────────────────────────────────────────────────────────────
 async function withRetry(fn, maxAttempts) {
   let lastErr;
@@ -454,7 +478,8 @@ async function withRetry(fn, maxAttempts) {
 // ── Core runner ───────────────────────────────────────────────────────────────
 async function runTask(db, taskId, opts = {}) {
   // opts.force = true:run-now 手動觸發,繞過 status='active' 檢查,允許跑 paused 任務測試
-  const { force = false } = opts;
+  // opts.callerHint = string:呼叫來源(寫進 audit 給 debug,如 'cron'、'run-now:user=5'、pipeline node 等)
+  const { force = false, callerHint = '' } = opts;
   const { generateTextSync, generateTitle } = require('./gemini');
   const { processGenerateBlocks } = require('./fileGenerator');
   const { sendMail } = require('./mailService');
@@ -472,11 +497,20 @@ async function runTask(db, taskId, opts = {}) {
   // slot-based dedup 作為防線。force=true(admin Run Now)繞過。
 
   const task = await db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(taskId);
-  if (!task) { console.error(`[Scheduled] Task ${taskId} not found`); return; }
+  if (!task) {
+    console.error(`[Scheduled] Task ${taskId} not found`);
+    await _auditRunDecision(db, taskId, 'blocked_not_found', { force, hint: callerHint });
+    return;
+  }
+
+  // Audit:每次進 runTask 都記一筆,事後追查觸發來源
+  const _auditInfo = { force, status: task.status, hint: callerHint };
+  await _auditRunDecision(db, task.id, 'entered', _auditInfo);
 
   // 防線:cron 觸發路徑下,只要 DB status 不是 active 就不跑
   if (!force && task.status !== 'active') {
     console.log(`[Scheduled] Task ${task.id} "${task.name}" status=${task.status}, skip execution`);
+    await _auditRunDecision(db, task.id, 'blocked_status', _auditInfo);
     return;
   }
 
@@ -492,6 +526,7 @@ async function runTask(db, taskId, opts = {}) {
       const acquired = await tryLock(lockKey, 1800);  // 30 分鐘 TTL,夠擋同 slot 重複
       if (!acquired) {
         console.log(`[Scheduled] Task ${task.id} "${task.name}" runonce lock ${lockKey} held, skip duplicate`);
+        await _auditRunDecision(db, task.id, 'blocked_dedup_lock', _auditInfo);
         return;
       }
     } catch (e) {
@@ -514,19 +549,24 @@ async function runTask(db, taskId, opts = {}) {
     } catch (e) {
       console.warn(`[Scheduled] runonce DB dedup query failed: ${e.message}`);
     }
-    if (dedupSkip) return;
+    if (dedupSkip) {
+      await _auditRunDecision(db, task.id, 'blocked_dedup_db', _auditInfo);
+      return;
+    }
   }
 
   // Check expiry
   if (task.expire_at && new Date(task.expire_at) < new Date()) {
     console.log(`[Scheduled] Task ${task.id} "${task.name}" expired, pausing`);
     await db.prepare(`UPDATE scheduled_tasks SET status='paused' WHERE id=?`).run(task.id);
+    await _auditRunDecision(db, task.id, 'blocked_expired', _auditInfo);
     return;
   }
   // Check max_runs
   if (task.max_runs > 0 && task.run_count >= task.max_runs) {
     console.log(`[Scheduled] Task ${task.id} "${task.name}" reached max_runs, pausing`);
     await db.prepare(`UPDATE scheduled_tasks SET status='paused' WHERE id=?`).run(task.id);
+    await _auditRunDecision(db, task.id, 'blocked_max_runs', _auditInfo);
     return;
   }
   // Phase 5 Track F-2: Token budget paused?(per-day,隔日 00:00 由 pmTokenBudgetService 解除)
@@ -535,6 +575,7 @@ async function runTask(db, taskId, opts = {}) {
     const today = new Date().toISOString().slice(0, 10);
     if (pausedDate === today) {
       console.log(`[Scheduled] Task ${task.id} "${task.name}" paused by token budget, skip until 00:00`);
+      await _auditRunDecision(db, task.id, 'blocked_token_budget', _auditInfo);
       return;
     }
   }
@@ -901,6 +942,12 @@ async function runTask(db, taskId, opts = {}) {
   ).run(runStatus, task.id);
 
   console.log(`[Scheduled] Task ${task.id} "${task.name}" done — status=${runStatus} duration=${durationMs}ms`);
+
+  // 最終 audit:'ran' = retry chain 過關有跑完 + 寫 run record;'error' = 全 retry 失敗(runStatus=fail)
+  await _auditRunDecision(db, task.id, runStatus === 'fail' ? 'error' : 'ran', {
+    force, status: task.status,
+    hint: `${callerHint}|duration=${durationMs}ms${runError ? '|err=' + runError.slice(0, 100) : ''}`,
+  });
 }
 
 // ── Cron management ───────────────────────────────────────────────────────────
@@ -1019,7 +1066,7 @@ function scheduleTask(db, task) {
     }
 
     console.log(`[Scheduled] Triggering task ${task.id} "${task.name}" (slot=${lockKey})`);
-    enqueue(() => runTask(db, task.id));
+    enqueue(() => runTask(db, task.id, { callerHint: `cron:slot=${lockKey}` }));
   }, { timezone: 'Asia/Taipei' });
 
   _cronJobs.set(task.id, { job, expr });

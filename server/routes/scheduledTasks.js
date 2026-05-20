@@ -355,7 +355,10 @@ router.post('/:id/run-now', async (req, res) => {
     if (task.expire_at && new Date(task.expire_at) < new Date())
       return res.status(400).json({ error: '任務已到期，請編輯到期日後再執行。' });
 
-    enqueue(() => runTask(db, parseInt(req.params.id), { force: true }));
+    enqueue(() => runTask(db, parseInt(req.params.id), {
+      force: true,
+      callerHint: `run-now:user=${req.user?.id || '?'}:host=${process.env.HOSTNAME || '?'}`,
+    }));
     res.json({ message: '任務已加入執行佇列' });
   } catch (e) {
     res.status(500).json({ error: e.message });

@@ -1778,6 +1778,32 @@ async function runMigrations(db) {
     pipeline_log_json    CLOB
   )`);
 
+  // ── Scheduled Task Run Audits (debug-only,每次 runTask 進入 / 退出都記)─────
+  // 為什麼有這張表:scheduled_task_runs 只在 runTask 跑完才寫,被防線擋掉的不寫;
+  // kubectl log 又會被 kubelet rotation 滾掉。出現「paused 還是跑了」這種怪事件
+  // 時無從追查觸發來源。這張表把所有進 runTask 的呼叫都記下來,包含:
+  //   - decision='entered':runTask 入口記錄(force/status_at_entry/caller_hint)
+  //   - decision='ran':真的跑完(對應一筆 scheduled_task_runs)
+  //   - decision='blocked_*':被各層防線擋掉
+  //   - decision='error':retry 全失敗
+  // 用法:撈過去 24h 該 task 的 audit 看誰呼叫,force 是否為 Y,status_at_entry 是啥
+  await createTable('SCHEDULED_TASK_RUN_AUDITS', `CREATE TABLE scheduled_task_run_audits (
+    id              NUMBER GENERATED AS IDENTITY PRIMARY KEY,
+    task_id         NUMBER NOT NULL,
+    attempted_at    TIMESTAMP DEFAULT SYSTIMESTAMP,
+    decision        VARCHAR2(40) NOT NULL,
+    force_flag      CHAR(1) DEFAULT 'N',
+    status_at_entry VARCHAR2(20),
+    pod_host        VARCHAR2(100),
+    caller_hint     VARCHAR2(500)
+  )`);
+  try {
+    await db.prepare('CREATE INDEX idx_stra_task_time ON scheduled_task_run_audits(task_id, attempted_at DESC)').run();
+    console.log('[Migration] idx_stra_task_time created ✓');
+  } catch (e) {
+    if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn('[Migration] idx_stra_task_time:', e.message);
+  }
+
   // ── Scheduled Tasks 工具引用支援 ─────────────────────────────────────────────
   await addCol('SCHEDULED_TASKS',     'TOOLS_CONFIG_JSON', "CLOB DEFAULT '[]'");
   await addCol('SCHEDULED_TASK_RUNS', 'TOOLS_USED_JSON',   'CLOB');
