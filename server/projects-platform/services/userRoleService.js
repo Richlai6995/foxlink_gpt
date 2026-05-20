@@ -280,7 +280,7 @@ async function getUserBuIds(db, userId) {
     SELECT m.org_unit_id
       FROM user_organization_memberships m
       JOIN organization_units o ON o.id = m.org_unit_id
-     WHERE m.user_id = ? AND m.left_at IS NULL AND o.level = 'BU'
+     WHERE m.user_id = ? AND m.left_at IS NULL AND o.org_level = 'BU'
   `).all(userId).catch(() => []);
   for (const r of memberRows) ids.add(Number(r.org_unit_id));
 

@@ -75,7 +75,7 @@ module.exports = async function migrate008(db) {
     CREATE TABLE organization_units (
       id                       NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
       parent_id                NUMBER,
-      level                    VARCHAR2(20) NOT NULL,  -- BG|BU|SUB_BU|DEPT
+      org_level                VARCHAR2(20) NOT NULL,  -- BG|BU|SUB_BU|DEPT(LEVEL 是 Oracle 保留字 → 改 org_level)
       code                     VARCHAR2(50) UNIQUE,
       name_i18n                CLOB,
       is_active                NUMBER(1) DEFAULT 1,
@@ -87,7 +87,7 @@ module.exports = async function migrate008(db) {
   `);
 
   await _idx(`CREATE INDEX idx_org_parent ON organization_units(parent_id, is_active)`, 'idx_org_parent');
-  await _idx(`CREATE INDEX idx_org_level  ON organization_units(level, is_active)`,  'idx_org_level');
+  await _idx(`CREATE INDEX idx_org_level  ON organization_units(org_level, is_active)`,  'idx_org_level');
 
   // ==========================================================================
   // 3. user_organization_memberships — user × org 多對多

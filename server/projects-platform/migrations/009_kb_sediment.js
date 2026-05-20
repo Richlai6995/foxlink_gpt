@@ -120,12 +120,13 @@ module.exports = async function migrate009(db) {
 
   // ==========================================================================
   // 4. Oracle Text index on content(BM25 / full-text)
-  //    SYNC every 1 minute(對齊 kb_chunks_ftx 的設計;bulk insert 不卡)
+  //    SYNC ON COMMIT — 同步寫入時 sync(避免 SYNC EVERY 在某些 Oracle 版本標 FAILED)
+  //    若仍掛掉:落 LIKE fallback,不影響 vector search
   // ==========================================================================
   await _idx(
     `CREATE INDEX pkb_chunks_ftx ON project_kb_chunks(content)
        INDEXTYPE IS CTXSYS.CONTEXT
-       PARAMETERS ('SYNC (EVERY ''SYSDATE+1/1440'')')`,
+       PARAMETERS ('SYNC (ON COMMIT)')`,
     'pkb_chunks_ftx',
   );
 
