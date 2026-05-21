@@ -159,7 +159,159 @@ async function runTrainingJobs() {
     console.error('[TrainingCron] Overdue error:', e.message);
   }
 
+  // ── 4. Auto-sync new active users to existing active programs ─
+  // 補:平台後續新進的 user(例如 LDAP/SSO 自動建檔)不會自動加入既有 active programs。
+  // 每天掃一次,把 program_targets 重新展開後,把缺少的 (user_id × course_id) 補進 program_assignments。
+  try {
+    const activePrograms = await db.prepare(`
+      SELECT id, title, learning_path_id, end_date
+      FROM training_programs WHERE status='active'
+    `).all();
+
+    for (const prog of activePrograms) {
+      // Resolve courses (mirrors activate endpoint)
+      let courseIds = [];
+      if (prog.learning_path_id) {
+        const pc = await db.prepare(
+          'SELECT course_id FROM learning_path_courses WHERE path_id=? ORDER BY sort_order'
+        ).all(prog.learning_path_id);
+        courseIds = pc.map(c => c.course_id);
+      } else {
+        const pc = await db.prepare(
+          'SELECT course_id FROM program_courses WHERE program_id=? ORDER BY sort_order'
+        ).all(prog.id);
+        courseIds = pc.map(c => c.course_id);
+      }
+      if (courseIds.length === 0) continue;
+
+      // Resolve target users (must mirror activate's target_type handling)
+      const targets = await db.prepare('SELECT * FROM program_targets WHERE program_id=?').all(prog.id);
+      const userIdSet = new Set();
+      for (const t of targets) {
+        let users = [];
+        if (t.target_type === 'public') {
+          users = await db.prepare("SELECT id FROM users WHERE status='active'").all();
+        } else if (t.target_type === 'user') {
+          users = [{ id: Number(t.target_id) }];
+        } else if (t.target_type === 'dept' || t.target_type === 'department') {
+          users = await db.prepare("SELECT id FROM users WHERE dept_code=? AND status='active'").all(t.target_id);
+        } else if (t.target_type === 'role') {
+          users = await db.prepare("SELECT id FROM users WHERE role_id=? AND status='active'").all(Number(t.target_id));
+        } else if (t.target_type === 'cost_center' || t.target_type === 'profit_center') {
+          users = await db.prepare("SELECT id FROM users WHERE profit_center=? AND status='active'").all(t.target_id);
+        } else if (t.target_type === 'division' || t.target_type === 'org_section') {
+          users = await db.prepare("SELECT id FROM users WHERE org_section=? AND status='active'").all(t.target_id);
+        } else if (t.target_type === 'factory') {
+          users = await db.prepare("SELECT id FROM users WHERE factory_code=? AND status='active'").all(t.target_id);
+        } else if (t.target_type === 'org_group') {
+          users = await db.prepare("SELECT id FROM users WHERE org_group_name=? AND status='active'").all(t.target_id);
+        }
+        for (const u of users) userIdSet.add(u.id);
+      }
+      if (userIdSet.size === 0) continue;
+
+      // Diff against existing assignments (user_id × course_id)
+      const existing = await db.prepare(
+        'SELECT user_id, course_id FROM program_assignments WHERE program_id=?'
+      ).all(prog.id);
+      const existingPair = new Set(existing.map(e => `${e.user_id}|${e.course_id}`));
+
+      let added = 0;
+      for (const uid of userIdSet) {
+        for (const cid of courseIds) {
+          if (existingPair.has(`${uid}|${cid}`)) continue;
+          try {
+            await db.prepare(`
+              INSERT INTO program_assignments (program_id, course_id, user_id, due_date, status)
+              VALUES (?, ?, ?, ?, 'pending')
+            `).run(prog.id, cid, uid, prog.end_date);
+            added++;
+          } catch (e) {
+            if (!e.message?.includes('UQ_PROG_ASSIGN')) throw e;
+          }
+        }
+      }
+      if (added > 0) {
+        console.log(`[TrainingCron] Auto-synced ${added} new assignments for program ${prog.id}: ${prog.title}`);
+      }
+    }
+  } catch (e) {
+    console.error('[TrainingCron] Auto-sync targets error:', e.message);
+  }
+
   console.log('[TrainingCron] Daily jobs completed');
 }
 
-module.exports = { initTrainingCron };
+/**
+ * 新進 user(SSO/LDAP 首次登入)即時掛入符合的 active programs。
+ * 不等到隔天 01:30 cron。fire-and-forget,失敗 log 但不擋登入。
+ * 注意:dept/role/factory 之類 target 需要 org 欄位已寫入。
+ *   呼叫端通常先 await syncOrgToUsers 再 call 本函式。
+ */
+async function assignNewUserToActivePrograms(db, userId) {
+  if (!db || !userId) return;
+  try {
+    const u = await db.prepare(`
+      SELECT id, status, dept_code, role_id, profit_center, org_section, factory_code, org_group_name
+      FROM users WHERE id=?
+    `).get(userId);
+    if (!u || u.status !== 'active') return;
+
+    const activePrograms = await db.prepare(`
+      SELECT id, title, learning_path_id, end_date FROM training_programs WHERE status='active'
+    `).all();
+
+    for (const prog of activePrograms) {
+      const targets = await db.prepare(
+        'SELECT target_type, target_id FROM program_targets WHERE program_id=?'
+      ).all(prog.id);
+
+      const matched = targets.some(t => {
+        if (t.target_type === 'public') return true;
+        if (t.target_type === 'user') return Number(t.target_id) === u.id;
+        if (t.target_type === 'dept' || t.target_type === 'department') return t.target_id === u.dept_code;
+        if (t.target_type === 'role') return Number(t.target_id) === u.role_id;
+        if (t.target_type === 'cost_center' || t.target_type === 'profit_center') return t.target_id === u.profit_center;
+        if (t.target_type === 'division' || t.target_type === 'org_section') return t.target_id === u.org_section;
+        if (t.target_type === 'factory') return t.target_id === u.factory_code;
+        if (t.target_type === 'org_group') return t.target_id === u.org_group_name;
+        return false;
+      });
+      if (!matched) continue;
+
+      let courseIds = [];
+      if (prog.learning_path_id) {
+        const pc = await db.prepare(
+          'SELECT course_id FROM learning_path_courses WHERE path_id=? ORDER BY sort_order'
+        ).all(prog.learning_path_id);
+        courseIds = pc.map(c => c.course_id);
+      } else {
+        const pc = await db.prepare(
+          'SELECT course_id FROM program_courses WHERE program_id=? ORDER BY sort_order'
+        ).all(prog.id);
+        courseIds = pc.map(c => c.course_id);
+      }
+      if (courseIds.length === 0) continue;
+
+      let added = 0;
+      for (const cid of courseIds) {
+        try {
+          await db.prepare(`
+            INSERT INTO program_assignments (program_id, course_id, user_id, due_date, status)
+            VALUES (?, ?, ?, ?, 'pending')
+          `).run(prog.id, cid, u.id, prog.end_date);
+          added++;
+        } catch (e) {
+          if (!e.message?.includes('UQ_PROG_ASSIGN')) throw e;
+        }
+      }
+      if (added > 0) {
+        console.log(`[TrainingAutoAssign] user=${u.id} → program=${prog.id} (${prog.title}): +${added} assignment(s)`);
+      }
+    }
+  } catch (e) {
+    console.warn('[TrainingAutoAssign] error:', e.message);
+  }
+}
+
+module.exports = { initTrainingCron, assignNewUserToActivePrograms };

@@ -482,11 +482,20 @@ router.get('/sso/callback', async (req, res) => {
       );
       dbUser = await db.prepare('SELECT * FROM users WHERE id=?').get(result.lastInsertRowid);
 
-      // Auto-sync org after first SSO login
+      // Auto-sync org + 自動掛入 active programs(dept/role-based target 要先寫 org 欄位)
       if (ssoUser.emp_cd) {
         try {
           const { syncOrgToUsers } = require('../services/orgSyncService');
-          syncOrgToUsers(db, [String(ssoUser.emp_cd)], 'sso-login').catch(() => {});
+          const { assignNewUserToActivePrograms } = require('../services/trainingCronService');
+          syncOrgToUsers(db, [String(ssoUser.emp_cd)], 'sso-login')
+            .then(() => assignNewUserToActivePrograms(db, dbUser.id))
+            .catch(() => {});
+        } catch (_) {}
+      } else {
+        // 沒 emp_cd → 跳 org sync,直接掛 public-target programs
+        try {
+          const { assignNewUserToActivePrograms } = require('../services/trainingCronService');
+          assignNewUserToActivePrograms(db, dbUser.id).catch(() => {});
         } catch (_) {}
       }
     }
@@ -639,12 +648,20 @@ router.post('/login', async (req, res) => {
               rolePerms?.allow_scheduled_tasks ?? 0
             );
             const newUser = await db.prepare('SELECT * FROM users WHERE id=?').get(result.lastInsertRowid);
-            // Auto-sync org after first LDAP login
+            // Auto-sync org + 自動掛入 active programs(dept/role-based target 要先寫 org 欄位)
             if (ldapUser.employeeId) {
               try {
                 const { syncOrgToUsers } = require('../services/orgSyncService');
-                syncOrgToUsers(db, [String(ldapUser.employeeId)], 'login').catch(() => { });
+                const { assignNewUserToActivePrograms } = require('../services/trainingCronService');
+                syncOrgToUsers(db, [String(ldapUser.employeeId)], 'login')
+                  .then(() => assignNewUserToActivePrograms(db, newUser.id))
+                  .catch(() => {});
               } catch (e) { /* ERP not configured */ }
+            } else {
+              try {
+                const { assignNewUserToActivePrograms } = require('../services/trainingCronService');
+                assignNewUserToActivePrograms(db, newUser.id).catch(() => {});
+              } catch (_) {}
             }
             return await proceedOrChallenge({ req, res, user: newUser, source: 'ldap-firstlogin', mode: 'json' });
           }
