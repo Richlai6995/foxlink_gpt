@@ -433,6 +433,68 @@ async function substituteVarsAsync(template, taskName, outBag) {
     result = result.replaceAll('{{pm_current_prices}}', priceText);
   }
 
+  // {{pm_weekly_changes}} / {{pm_monthly_changes}} — 11 金屬「最新價 vs N 天前」實際漲跌幅,
+  // 給週/月報 LLM 當 anchor,不要自由發揮推測漲跌幅(原 prompt 只給新聞 KB,LLM 從 narrative
+  // 推估常跟實際差 5-20%)。算法 = (latest - price_n_days_ago) / price_n_days_ago × 100
+  for (const [placeholder, daysBack, label] of [
+    ['{{pm_weekly_changes}}', 7, '近 7 天'],
+    ['{{pm_monthly_changes}}', 30, '近 30 天'],
+  ]) {
+    if (!result.includes(placeholder)) continue;
+    let txt = '';
+    try {
+      const db = require('../database-oracle').db;
+      const rows = await db.prepare(`
+        SELECT UPPER(metal_code) AS metal_code, price_usd,
+               TO_CHAR(as_of_date, 'YYYY-MM-DD') AS as_of_date
+        FROM pm_price_history p
+        WHERE as_of_date = (
+          SELECT MAX(as_of_date) FROM pm_price_history
+          WHERE UPPER(metal_code) = UPPER(p.metal_code) AND price_usd IS NOT NULL
+        )
+        ORDER BY metal_code
+      `).all();
+      if (rows && rows.length) {
+        const lines = [];
+        for (const r of rows) {
+          const code = r.metal_code || r.METAL_CODE;
+          const latest = Number(r.price_usd ?? r.PRICE_USD);
+          const latestDate = r.as_of_date || r.AS_OF_DATE;
+          // 拿 latestDate 往前 daysBack 天的最近一筆(allow ±7 天 window 容錯週末/假日)
+          const prev = await db.prepare(`
+            SELECT price_usd, TO_CHAR(as_of_date,'YYYY-MM-DD') AS d FROM (
+              SELECT price_usd, as_of_date FROM pm_price_history
+              WHERE UPPER(metal_code) = UPPER(?)
+                AND as_of_date <= TO_DATE(?, 'YYYY-MM-DD') - ?
+                AND as_of_date >= TO_DATE(?, 'YYYY-MM-DD') - ?
+                AND price_usd IS NOT NULL
+              ORDER BY as_of_date DESC
+            ) WHERE ROWNUM = 1
+          `).get(code, latestDate, daysBack, latestDate, daysBack + 7);
+          const prevPrice = Number(prev?.price_usd ?? prev?.PRICE_USD);
+          const prevDate = prev?.d || prev?.D || '—';
+          if (Number.isFinite(latest) && Number.isFinite(prevPrice) && prevPrice > 0) {
+            const chg = ((latest - prevPrice) / prevPrice) * 100;
+            const chgStr = `${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%`;
+            lines.push(`- ${code}: ${prevPrice.toLocaleString()} (${prevDate}) → ${latest.toLocaleString()} (${latestDate}) = **${chgStr}**`);
+          } else {
+            lines.push(`- ${code}: 資料不足(${prevDate || '?'} → ${latestDate})`);
+          }
+        }
+        txt = `\n═══ ${label} 11 金屬實際漲跌幅(MUST be your anchor for 報告表格漲跌幅欄)═══\n${lines.join('\n')}\n\n`
+          + `⚠️ **表格內「預估${label === '近 7 天' ? '週' : '月'}漲跌幅」欄必須以上面數字為準**,不准用新聞 narrative 推測。\n`
+          + `   你的工作是「解釋為什麼這個漲跌」(主要驅動因素欄),不是「推測漲跌幅」。\n`;
+        console.log(`[Scheduled] ${placeholder} injected ${rows.length} metals (vs ${daysBack}d)`);
+      } else {
+        txt = `\n═══ ${label} 漲跌幅 ═══\n(pm_price_history 暫無資料)\n`;
+      }
+    } catch (e) {
+      console.warn(`[Scheduled] ${placeholder} lookup failed:`, e.message);
+      txt = `\n═══ ${label} 漲跌幅 ═══\n(查詢失敗:${e.message})\n`;
+    }
+    result = result.replaceAll(placeholder, txt);
+  }
+
   return result;
 }
 

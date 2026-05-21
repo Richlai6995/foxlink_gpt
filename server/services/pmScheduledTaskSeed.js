@@ -742,6 +742,7 @@ function buildWeeklyReportTask(kbMap, models = {}) {
 ═══ 上下文 ═══
 {{kb:PM-新聞庫}}     ← 過去 7 天新聞 RAG
 {{kb:PM-分析庫}}     ← 過去 7 天日報 RAG
+{{pm_weekly_changes}}   ← 11 金屬實際週漲跌幅(MUST 用這個,不要自己推測)
 
 ═══ 撰寫要求 ═══
 1. 本週市場主軸(300 字內)
@@ -890,6 +891,7 @@ function buildMonthlyReportTask(kbMap, models = {}) {
 ═══ 上下文 ═══
 {{kb:PM-新聞庫}}     ← 過去 30 天重大新聞
 {{kb:PM-分析庫}}     ← 過去 30 天週報 / 日報
+{{pm_monthly_changes}}  ← 11 金屬實際月漲跌幅(MUST 用這個,不要自己推測)
 
 ═══ 撰寫要求 ═══
 1. 上月市場總覽(主旋律 / 結構性變化)
