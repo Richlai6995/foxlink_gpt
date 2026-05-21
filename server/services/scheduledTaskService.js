@@ -476,13 +476,17 @@ async function substituteVarsAsync(template, taskName, outBag) {
           if (Number.isFinite(latest) && Number.isFinite(prevPrice) && prevPrice > 0) {
             const chg = ((latest - prevPrice) / prevPrice) * 100;
             const chgStr = `${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%`;
-            lines.push(`- ${code}: ${prevPrice.toLocaleString()} (${prevDate}) → ${latest.toLocaleString()} (${latestDate}) = **${chgStr}**`);
+            lines.push(`- ${code}: 前收 **${prevPrice.toLocaleString()}** (${prevDate}) → 現價 ${latest.toLocaleString()} (${latestDate}) = 漲跌 **${chgStr}**`);
           } else {
             lines.push(`- ${code}: 資料不足(${prevDate || '?'} → ${latestDate})`);
           }
         }
-        txt = `\n═══ ${label} 11 金屬實際漲跌幅(MUST be your anchor for 報告表格漲跌幅欄)═══\n${lines.join('\n')}\n\n`
-          + `⚠️ **表格內「預估${label === '近 7 天' ? '週' : '月'}漲跌幅」欄必須以上面數字為準**,不准用新聞 narrative 推測。\n`
+        const periodLabel = label === '近 7 天' ? '週' : '月';
+        txt = `\n═══ ${label} 11 金屬實際報價 anchor(MUST be your source for 表格「上${periodLabel}收盤價」與「${periodLabel}漲跌幅」欄)═══\n${lines.join('\n')}\n\n`
+          + `⚠️ **表格欄位對應規則**:\n`
+          + `   - 「上${periodLabel}收盤價」欄 = 上面每行的「前收」數字(粗體那個)\n`
+          + `   - 「${periodLabel}漲跌幅」欄 = 上面每行的「漲跌」數字(最後那個粗體 %)\n`
+          + `   ❌ 禁止用新聞 narrative 推測,❌ 禁止自己 round 改數字,完全照抄上面。\n`
           + `   你的工作是「解釋為什麼這個漲跌」(主要驅動因素欄),不是「推測漲跌幅」。\n`;
         console.log(`[Scheduled] ${placeholder} injected ${rows.length} metals (vs ${daysBack}d)`);
       } else {
