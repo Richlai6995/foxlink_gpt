@@ -2765,7 +2765,11 @@
         "lessonScore": "điểm",
         "deactivate": "Hủy xuất bản",
         "confirmDeactivate": "Hủy xuất bản chương trình? Bạn có thể chỉnh sửa và xuất bản lại sau.",
-        "deactivated": "Đã hủy xuất bản. Bạn có thể chỉnh sửa."
+        "deactivated": "Đã hủy xuất bản. Bạn có thể chỉnh sửa.",
+        "resyncTargets": "Đồng bộ lại phân công",
+        "resyncHint": "Mở rộng lại đối tượng huấn luyện và thêm user phù hợp nhưng chưa được phân công (ví dụ nhân viên mới). Không xóa phân công/điểm hiện có.",
+        "confirmResync": "Đồng bộ lại ngay? User mới phù hợp sẽ được thêm vào; phân công và điểm hiện có không bị ảnh hưởng.",
+        "resynced": "Đồng bộ xong"
       }
     },
     "editCourse": "Chỉnh sửa",

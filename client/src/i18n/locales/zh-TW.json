@@ -2765,7 +2765,11 @@
         "lessonScore": "配分",
         "deactivate": "下架修改",
         "confirmDeactivate": "確定要下架？下架後可修改內容再重新上架。",
-        "deactivated": "已下架，可進行修改。"
+        "deactivated": "已下架，可進行修改。",
+        "resyncTargets": "重新同步指派",
+        "resyncHint": "重新展開訓練對象，把符合條件但尚未指派的 user（例如後續新進）補進來。不會刪除既有指派/成績。",
+        "confirmResync": "確定要重新同步？將把符合訓練對象但尚未指派的 user 補入名單，現有指派與成績不受影響。",
+        "resynced": "同步完成"
       }
     },
     "editCourse": "編輯課程",

@@ -6,7 +6,7 @@ import UserPicker from '../common/UserPicker'
 import ProgramReport from './ProgramReport'
 import {
   ArrowLeft, Save, Play, BookOpen, Users, Plus, X, Trash2,
-  GripVertical, Calendar, Mail, Bell, ChevronUp, ChevronDown, BarChart3
+  GripVertical, Calendar, Mail, Bell, ChevronUp, ChevronDown, BarChart3, RefreshCw
 } from 'lucide-react'
 
 type GranteeType = 'public' | 'user' | 'role' | 'factory' | 'department' | 'cost_center' | 'division' | 'org_group'
@@ -242,6 +242,24 @@ export default function ProgramEditor() {
       alert(e.response?.data?.error || 'Error')
     } finally {
       setSaving(false)
+    }
+  }
+
+  // Re-sync targets — 對已上架 program 重新展開 target,把後續新進 / 漏掉的 user 補進來。
+  // 共用 /activate endpoint(後端已用 UQ_PROG_ASSIGN 跳過 dupes)。預設不發通知避免吵到舊 user。
+  const [resyncing, setResyncing] = useState(false)
+  const handleResyncTargets = async () => {
+    if (targets.length === 0) return alert(t('training.program.editor.noTargets'))
+    if (!confirm(t('training.program.editor.confirmResync'))) return
+    setResyncing(true)
+    try {
+      const res = await api.post(`/training/programs/${id}/activate`, { send_notification: false })
+      alert(`${t('training.program.editor.resynced')}\n+${res.data.assignments_created} / ${t('training.program.users')}: ${res.data.users}`)
+      loadProgram()
+    } catch (e: any) {
+      alert(e.response?.data?.error || 'Error')
+    } finally {
+      setResyncing(false)
     }
   }
 
@@ -481,6 +499,15 @@ export default function ProgramEditor() {
           <div className="flex items-center gap-2 mb-3">
             <Users size={16} className="text-green-600" />
             <h2 className="text-sm font-semibold text-slate-700">{t('training.program.editor.targetsSection')}</h2>
+            <div className="flex-1" />
+            {isActive && !isNew && (
+              <button onClick={handleResyncTargets} disabled={resyncing}
+                title={t('training.program.editor.resyncHint')}
+                className="flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-2.5 py-1 rounded-lg text-xs font-medium transition disabled:opacity-50">
+                <RefreshCw size={12} className={resyncing ? 'animate-spin' : ''} />
+                {resyncing ? '...' : t('training.program.editor.resyncTargets')}
+              </button>
+            )}
           </div>
           {isEditable && (
             <div className="flex gap-2 mb-3">

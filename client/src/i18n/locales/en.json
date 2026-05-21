@@ -2765,7 +2765,11 @@
         "lessonScore": "pts",
         "deactivate": "Unpublish",
         "confirmDeactivate": "Unpublish this program? You can modify and re-publish later.",
-        "deactivated": "Unpublished. You can now modify it."
+        "deactivated": "Unpublished. You can now modify it.",
+        "resyncTargets": "Resync Assignments",
+        "resyncHint": "Re-expand training targets and add users who match but are not yet assigned (e.g. newly onboarded). Existing assignments/scores are kept.",
+        "confirmResync": "Resync now? New matching users will be added; existing assignments and scores are not affected.",
+        "resynced": "Sync complete"
       }
     },
     "editCourse": "Edit Course",
