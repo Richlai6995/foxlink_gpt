@@ -522,7 +522,12 @@ async function _auditRunDecision(db, taskId, decision, info = {}) {
       (info.hint || '').slice(0, 500),
     );
   } catch (e) {
-    console.warn(`[Scheduled] audit insert failed (task=${taskId}, decision=${decision}): ${e.message}`);
+    // 升 error level + 帶 ORA code:之前事件(5/22 task=182)audit silent fail,被 console.warn
+    // 吞掉沒人發現。改 console.error 至少 monitoring / log aggregator 容易抓。
+    console.error(
+      `[Scheduled] audit insert failed (task=${taskId}, decision=${decision}): `
+      + `msg=${e.message} | code=${e.code || '-'} | errorNum=${e.errorNum || '-'} | offset=${e.offset || '-'}`
+    );
   }
 }
 
@@ -1104,6 +1109,15 @@ function scheduleTask(db, task) {
 
   const expr = buildCronExpr(task);
   const job = cron.schedule(expr, async () => {
+    // ── Forensic audit:cron firing 進來就寫一筆(在所有 check 之前),這樣下次出現
+    // 「paused 卻跑了」事件能直接從 audit 表看到是否 cron 觸發、哪台 pod、什麼時間。
+    // 之前事件 5/22 08:03 task=182 paused 卻跑,audit 表完全沒紀錄 → 無從追查觸發點。
+    await _auditRunDecision(db, task.id, 'cron_fired', {
+      force: false,
+      status: '?',
+      hint: `cron_fired:expr=${expr}:host=${process.env.HOSTNAME || '?'}`,
+    });
+
     // Scheduler pod 觸發點。fetch 最新 task,reconcile loop 最壞延遲 30s 才會同步
     // 暫停狀態到 in-memory cron,這層 latest check 把 race window 收緊到秒級。
     let latest;
@@ -1113,9 +1127,20 @@ function scheduleTask(db, task) {
       // DB 查不到最新狀態時保守 skip 這次 slot — 寧可漏跑也不要跑到已暫停的 task。
       // 之前 fallback 到 closure 的 task(status='active' 才會掛上 cron)會繞過暫停檢查。
       console.warn(`[Scheduled] cron handler fetch task ${task.id} failed, skipping this slot: ${e.message}`);
+      await _auditRunDecision(db, task.id, 'cron_skip_fetch_fail', {
+        force: false, status: '?', hint: `fetch_err=${e.message?.slice(0, 200)}`,
+      });
       return;
     }
-    if (!latest || latest.status !== 'active') return;
+    if (!latest || latest.status !== 'active') {
+      // forensic:status check 擋住的也要記,事後對得起來 cron 觸發 vs 真正執行的差距
+      await _auditRunDecision(db, task.id, 'cron_skip_paused', {
+        force: false,
+        status: latest?.status || 'not_found',
+        hint: `expr=${expr}`,
+      });
+      return;
+    }
 
     // 分散式鎖(slot-based + TTL 600s):scheduler 改成單 pod 後此 lock 主要作為保險 —
     // 萬一未來放寬 replicas / K8s restart 瞬間 overlap / cron handler 重複觸發都擋得住。
