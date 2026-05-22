@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Edit, Trash2, Save, X, Check, Download, UserCog, FileText, Mic, Image, CalendarClock, RefreshCw, Building2, Search, ShieldCheck, Clock, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react'
+import { Plus, Edit, Trash2, Save, X, Check, Download, UserCog, FileText, Mic, Image, CalendarClock, RefreshCw, Building2, Search, ShieldCheck, Clock, ChevronDown, ChevronUp, AlertTriangle, LogOut } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { User } from '../../types'
 import api from '../../lib/api'
@@ -429,6 +429,17 @@ export default function UserManagement() {
       await load()
     } catch (e: unknown) {
       alert((e as { response?: { data?: { error?: string } } })?.response?.data?.error || t('users.deleteFailed'))
+    }
+  }
+
+  const handleForceLogout = async (id: number, label: string) => {
+    if (!confirm(t('users.forceLogoutConfirm', { user: label }))) return
+    try {
+      const res = await api.post(`/admin/users/${id}/force-logout`)
+      setSyncMsg(res.data.message || t('users.forceLogoutDone'))
+    } catch (e: unknown) {
+      const errMsg = (e as any)?.response?.data?.error || t('users.forceLogoutFailed')
+      setSyncMsg(errMsg)
     }
   }
 
@@ -1142,6 +1153,13 @@ export default function UserManagement() {
                             <RefreshCw size={14} className={syncingId === u.id ? 'animate-spin' : ''} />
                           </button>
                         )}
+                        <button
+                          onClick={() => handleForceLogout(u.id, u.name || u.username)}
+                          className="p-1.5 hover:bg-amber-50 rounded-lg text-slate-500 hover:text-amber-600 transition"
+                          title={t('users.forceLogout')}
+                        >
+                          <LogOut size={14} />
+                        </button>
                       </div>
                     </td>
                     <td className="px-4 py-3">

@@ -592,7 +592,11 @@
     "normalUser": "Người dùng",
     "ldapBadge": "LDAP",
     "manualBadge": "Thủ công",
-    "syncOrg": "Đồng bộ tổ chức"
+    "syncOrg": "Đồng bộ tổ chức",
+    "forceLogout": "Buộc đăng nhập lại",
+    "forceLogoutConfirm": "Buộc {{user}} đăng nhập lại? Tất cả session đang hoạt động của họ sẽ bị huỷ và họ sẽ bị chuyển về trang đăng nhập ở lần thao tác kế tiếp.",
+    "forceLogoutDone": "Đã buộc đăng nhập lại",
+    "forceLogoutFailed": "Buộc đăng xuất thất bại"
   },
   "audit": {
     "title": "Nhật ký kiểm toán",

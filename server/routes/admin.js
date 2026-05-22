@@ -73,6 +73,34 @@ router.post('/users/sync-org-all', async (req, res) => {
   }
 });
 
+// POST /api/admin/users/:id/force-logout — 強制使用者重新登入(踢掉所有 Redis session)
+//
+//   用途:當 DBA 補了 employee_id / 改了權限欄位,而 user 的 session 還凍在舊 payload
+//   (verifyToken 只 touchSession 延 TTL 不重 build)時,踢一次強迫重登 → 新 session
+//   payload 帶最新資料。也用於資安處理(疑似被冒用的帳號)。
+router.post('/users/:id/force-logout', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const redis = require('../services/redisClient');
+    const user = await db.prepare('SELECT id, username, name FROM users WHERE id=?').get(req.params.id);
+    if (!user) return res.status(404).json({ error: '使用者不存在' });
+    const adminAccount = (process.env.DEFAULT_ADMIN_ACCOUNT || 'admin').toUpperCase();
+    if (user.username?.toUpperCase() === adminAccount) {
+      return res.status(403).json({ error: '不能強制登出預設管理員' });
+    }
+    const revoked = await redis.revokeAllUserSessions(user.id);
+    res.json({
+      success: true,
+      revoked,
+      message: revoked > 0
+        ? `已強制 ${user.name || user.username} 重新登入(清除 ${revoked} 個 session)`
+        : `${user.name || user.username} 目前無 active session`,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /api/admin/users/:id/sync-org — 同步單一使用者組織資料
 router.post('/users/:id/sync-org', async (req, res) => {
   try {

@@ -592,7 +592,11 @@
     "normalUser": "User",
     "ldapBadge": "LDAP",
     "manualBadge": "Manual",
-    "syncOrg": "Sync Organization"
+    "syncOrg": "Sync Organization",
+    "forceLogout": "Force re-login",
+    "forceLogoutConfirm": "Force {{user}} to re-login? All their active sessions will be revoked and they will be redirected to the login page on their next action.",
+    "forceLogoutDone": "Forced re-login",
+    "forceLogoutFailed": "Force logout failed"
   },
   "audit": {
     "title": "Audit Logs",

@@ -501,9 +501,10 @@ router.post('/test-token', async (req, res) => {
   try {
     const { email, name, sub, dept } = req.body || {};
     if (!email) return res.status(400).json({ error: 'email 為必填（MCP 權限判斷依據）' });
+    if (!sub)   return res.status(400).json({ error: '工號 (sub) 為必填（MCP 權限判斷依據）' });
     const { token, jti } = mcpClient.signUserToken({
-      id: sub || 0,
-      employee_id: sub || null,
+      id: sub,
+      employee_id: sub,
       email,
       name: name || null,
       dept_code: dept || null,
@@ -513,6 +514,7 @@ router.post('/test-token', async (req, res) => {
     res.json({ token, jti, claims });
   } catch (e) {
     const status = e.code === 'MCP_JWT_EMAIL_REQUIRED' ? 400
+      : e.code === 'MCP_JWT_EMP_CD_REQUIRED' ? 400
       : e.code === 'MCP_JWT_PRIVATE_KEY_NOT_CONFIGURED' ? 503
       : 500;
     res.status(status).json({ error: e.code || 'INTERNAL', detail: e.message });

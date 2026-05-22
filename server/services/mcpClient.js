@@ -50,11 +50,21 @@ function getPrivateKey() {
   return _privateKey;
 }
 
-/** Sign an RS256 JWT for the given user ctx. Throws on missing email / private key. */
+/** Sign an RS256 JWT for the given user ctx. Throws on missing email / employee_id / private key.
+ *
+ *  sub / emp_cd 一律帶 users.employee_id(真工號)— 不再 fallback 到 userCtx.id(內部 PK),
+ *  因為 silent fallback 會把內部 PK 當工號送出去,造成 MCP 端用錯人身份(撞別人權限)。
+ *  缺工號 → 直接 throw,讓 chat 層 catch 給友善訊息,絕不偷送錯資料。
+ */
 function signUserToken(userCtx) {
   if (!userCtx?.email) {
     const err = new Error('MCP_JWT_EMAIL_REQUIRED: user has no email but MCP requires X-User-Token');
     err.code = 'MCP_JWT_EMAIL_REQUIRED';
+    throw err;
+  }
+  if (!userCtx?.employee_id || String(userCtx.employee_id).trim() === '') {
+    const err = new Error('MCP_JWT_EMP_CD_REQUIRED: user has no employee_id but MCP requires X-User-Token — 請聯絡管理員補工號(或請使用者重新登入以重建 session)');
+    err.code = 'MCP_JWT_EMP_CD_REQUIRED';
     throw err;
   }
   const privateKey = getPrivateKey();
@@ -64,13 +74,15 @@ function signUserToken(userCtx) {
     throw err;
   }
   const jti = randomUUID();
+  const empCd = String(userCtx.employee_id).trim();
   const token = jwt.sign(
     {
       jti,
-      sub:   String(userCtx.employee_id || userCtx.id),
-      email: userCtx.email,
-      name:  userCtx.name || null,
-      dept:  userCtx.dept_code || null,
+      sub:    empCd,
+      emp_cd: empCd,
+      email:  userCtx.email,
+      name:   userCtx.name || null,
+      dept:   userCtx.dept_code || null,
     },
     privateKey,
     { algorithm: 'RS256', expiresIn: '5m', issuer: 'foxlink-gpt' }
@@ -566,7 +578,17 @@ async function callTool(db, server, sessionId, userId, toolName, args, userCtx =
   } catch (e) {
     status = 'error';
     errorMsg = e.message;
-    resultContent = `[MCP tool error: ${e.message}]`;
+    // 對使用者身份簽發失敗的 case,給 LLM 一個明確 hint(callTool 不 re-throw,
+    // 改回字串給 LLM 後由它 surface 給使用者)
+    if (e.code === 'MCP_JWT_EMP_CD_REQUIRED') {
+      resultContent = `[MCP 身份簽發失敗] 您的帳號缺少工號(employee_id),無法呼叫需要身份驗證的工具「${toolName}」。請聯絡管理員補上工號;若 DBA 已補上,請登出後重新登入以更新 session。`;
+    } else if (e.code === 'MCP_JWT_EMAIL_REQUIRED') {
+      resultContent = `[MCP 身份簽發失敗] 您的帳號缺少 email,無法呼叫需要身份驗證的工具「${toolName}」。請聯絡管理員補上 email。`;
+    } else if (e.code === 'MCP_JWT_PRIVATE_KEY_NOT_CONFIGURED') {
+      resultContent = `[MCP 設定錯誤] FOXLINK GPT 端未配置 JWT 私鑰,無法簽發 X-User-Token。請通知系統管理員設定 MCP_JWT_PRIVATE_KEY_PATH。`;
+    } else {
+      resultContent = `[MCP tool error: ${e.message}]`;
+    }
     isError = true;
   }
 
