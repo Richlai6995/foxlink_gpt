@@ -1128,11 +1128,47 @@ export default function UserManagement() {
                 const budgetW = effectiveBudget(u, 'budget_weekly')
                 const budgetM = effectiveBudget(u, 'budget_monthly')
                 const hasBudget = budgetD != null || budgetW != null || budgetM != null
+                const empSrc = (u as any).employee_id_source as string | null | undefined
+                const empSrcLabel: Record<string, string> = {
+                  ldap_attr:          t('users.empSrc.ldapAttr'),
+                  displayName_prefix: t('users.empSrc.displayPrefix'),
+                  displayName_suffix: t('users.empSrc.displaySuffix'),
+                  displayName_only:   t('users.empSrc.displayOnly'),
+                  sAMAccountName:     t('users.empSrc.sam'),
+                  email_local_part:   t('users.empSrc.emailLocal'),
+                  sso_emp_cd:         t('users.empSrc.sso'),
+                  manual:             t('users.empSrc.manual'),
+                }
+                // 哪些 source 算「自動 fallback 抓的」需要 admin 複查 — manual / ldap_attr / sso_emp_cd 算可信
+                const empSrcIsAuto = empSrc && !['manual', 'ldap_attr', 'sso_emp_cd'].includes(empSrc)
                 return (
                   <tr key={u.id} className="hover:bg-slate-50 transition">
                     <td className="px-4 py-3 font-medium text-slate-800">{u.username}</td>
                     <td className="px-4 py-3">{u.name}</td>
-                    <td className="px-4 py-3 text-slate-500">{u.employee_id || '-'}</td>
+                    <td className="px-4 py-3 text-slate-500">
+                      {u.employee_id ? (
+                        <span className="flex items-center gap-1.5">
+                          <span>{u.employee_id}</span>
+                          {empSrc && (
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                empSrcIsAuto
+                                  ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                  : 'bg-slate-100 text-slate-500'
+                              }`}
+                              title={t('users.empSrc.tooltip', { source: empSrcLabel[empSrc] || empSrc })}
+                            >
+                              {empSrcLabel[empSrc] || empSrc}
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-amber-600" title={t('users.empSrc.missing')}>
+                          <AlertTriangle size={12} />
+                          <span>-</span>
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-slate-500">{u.email || '-'}</td>
                     {/* Actions — moved after Email */}
                     <td className="px-4 py-3">

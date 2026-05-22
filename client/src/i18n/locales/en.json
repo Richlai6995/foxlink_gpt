@@ -596,7 +596,19 @@
     "forceLogout": "Force re-login",
     "forceLogoutConfirm": "Force {{user}} to re-login? All their active sessions will be revoked and they will be redirected to the login page on their next action.",
     "forceLogoutDone": "Forced re-login",
-    "forceLogoutFailed": "Force logout failed"
+    "forceLogoutFailed": "Force logout failed",
+    "empSrc": {
+      "tooltip": "Employee ID source: {{source}} (amber = auto-fallback, please verify)",
+      "missing": "Missing employee ID — cannot call identity-bound MCP tools; please fill in manually",
+      "ldapAttr": "LDAP attr",
+      "displayPrefix": "DisplayName prefix",
+      "displaySuffix": "DisplayName suffix",
+      "displayOnly": "DisplayName only",
+      "sam": "sAMAccountName",
+      "emailLocal": "Email local-part",
+      "sso": "SSO",
+      "manual": "Manual"
+    }
   },
   "audit": {
     "title": "Audit Logs",

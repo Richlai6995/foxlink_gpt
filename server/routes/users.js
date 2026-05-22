@@ -31,7 +31,7 @@ router.get('/', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
     const { search } = req.query;
-    let sql = `SELECT u.id, u.username, u.name, u.employee_id, u.email, u.role,
+    let sql = `SELECT u.id, u.username, u.name, u.employee_id, u.employee_id_source, u.email, u.role,
                 TO_CHAR(u.start_date, 'YYYY-MM-DD') AS start_date,
                 TO_CHAR(u.end_date, 'YYYY-MM-DD') AS end_date,
                 u.status,
@@ -212,6 +212,12 @@ router.put('/:id', async (req, res) => {
     ];
     const hasOrgOverride = orgParams.some(v => v !== undefined);
 
+    // 偵測 admin 是否改了 employee_id — 改了就標 source='manual',沒改就保留原 source
+    // (COALESCE(?, employee_id_source): null bind = 不動)
+    const prevEmpIdForSrc = specificUser?.employee_id || null;
+    const newEmpIdForSrc  = employee_id || null;
+    const empIdSourceParam = (newEmpIdForSrc !== prevEmpIdForSrc) ? 'manual' : null;
+
     let sql, params;
     const D = `TO_DATE(?, 'YYYY-MM-DD')`;
     const baseSet = `name=?, employee_id=?, email=?, role=?, start_date=${D}, end_date=${D}, status=?,
@@ -221,7 +227,8 @@ router.put('/:id', async (req, res) => {
              allow_create_skill=?, allow_external_skill=?, allow_code_skill=?,
              can_create_kb=?, kb_max_size_mb=?, kb_max_count=?, can_deep_research=?,
              can_design_ai_select=?, can_use_ai_dashboard=?, training_permission=?,
-             webex_bot_enabled=?, name_manually_set=?, is_erp_admin=?, is_pipeline_admin=?`;
+             webex_bot_enabled=?, name_manually_set=?, is_erp_admin=?, is_pipeline_admin=?,
+             employee_id_source=COALESCE(?, employee_id_source)`;
     const orgSet = hasOrgOverride
       ? `, dept_code=?, dept_name=?, profit_center=?, profit_center_name=?,
            org_section=?, org_section_name=?, org_group_name=?, factory_code=?, org_end_date=${D}`
@@ -233,11 +240,11 @@ router.put('/:id', async (req, res) => {
       const hashedPw = await passwordService.hash(password);
       sql = `UPDATE users SET password=?, password_hashed='Y', ${baseSet}${orgSet} WHERE id=?`;
       params = [hashedPw, name, employee_id || null, cleanedEmail, role, start_date || null, end_date || null, status,
-        ...permParams, ...orgVals, id];
+        ...permParams, empIdSourceParam, ...orgVals, id];
     } else {
       sql = `UPDATE users SET ${baseSet}${orgSet} WHERE id=?`;
       params = [name, employee_id || null, cleanedEmail, role, start_date || null, end_date || null, status,
-        ...permParams, ...orgVals, id];
+        ...permParams, empIdSourceParam, ...orgVals, id];
     }
     const result = await db.prepare(sql).run(...params);
 

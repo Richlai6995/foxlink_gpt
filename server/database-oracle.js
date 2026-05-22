@@ -2580,6 +2580,12 @@ async function runMigrations(db) {
   // ── 姓名鎖定欄位（防止 LDAP/ERP 自動覆蓋手動修改的姓名）────────────────────
   await safeAddColumn('USERS', 'NAME_MANUALLY_SET', 'NUMBER(1) DEFAULT 0');
 
+  // ── 工號來源追蹤(2026-05-22 ship)────────────────────────────────────────
+  // 記錄 employee_id 是哪個 tier 自動 parse 出來的(ldap_attr / displayName_prefix /
+  // sAMAccountName / email_local_part / sso_emp_cd / manual / null)。Admin UI 用這個
+  // 顯示 badge 給管理員看哪些是 fallback 抓的,優先複查。
+  await safeAddColumn('USERS', 'EMPLOYEE_ID_SOURCE', 'VARCHAR2(40)');
+
   // ── 說明文件多語翻譯 ─────────────────────────────────────────────────────────
   await createTable('HELP_SECTIONS', `CREATE TABLE help_sections (
     id             VARCHAR2(60)  PRIMARY KEY,

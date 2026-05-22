@@ -596,7 +596,19 @@
     "forceLogout": "強制重新登入",
     "forceLogoutConfirm": "確定要強制 {{user}} 重新登入嗎？這會清除其所有 active session,該使用者下次操作會被導回登入頁。",
     "forceLogoutDone": "已強制重新登入",
-    "forceLogoutFailed": "強制登出失敗"
+    "forceLogoutFailed": "強制登出失敗",
+    "empSrc": {
+      "tooltip": "工號來源：{{source}}（橘色標籤表示自動 fallback 抓的，建議複查）",
+      "missing": "缺工號，無法呼叫需身份的 MCP 工具，請手動補上",
+      "ldapAttr": "LDAP 屬性",
+      "displayPrefix": "顯示名首碼",
+      "displaySuffix": "顯示名尾碼",
+      "displayOnly": "顯示名整串",
+      "sam": "AD 帳號",
+      "emailLocal": "Email 前綴",
+      "sso": "SSO",
+      "manual": "人工"
+    }
   },
   "audit": {
     "title": "稽核日誌",

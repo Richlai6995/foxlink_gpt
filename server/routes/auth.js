@@ -173,7 +173,10 @@ const authenticateLDAP = (account, password) => {
         const opts = {
           filter: `(sAMAccountName=${escapeLdapFilter(account)})`,
           scope: 'sub',
-          attributes: ['dn', 'sAMAccountName', 'displayName', 'mail'],
+          // 多撈幾個工號可能塞身的屬性,extractor tier 1 直接吃 employeeID/employeeNumber
+          // (不同子公司 AD 規則不同,extensionAttribute1 也常被當工號欄位)
+          attributes: ['dn', 'sAMAccountName', 'displayName', 'cn', 'mail',
+                       'employeeID', 'employeeNumber', 'extensionAttribute1'],
         };
 
         client.search(LDAP_CONFIG.baseDN, opts, (err, res) => {
@@ -208,27 +211,43 @@ const authenticateLDAP = (account, password) => {
               client.unbind();
               if (err) return reject({ type: 'auth', error: 'Invalid Credentials' });
 
-              const rawDisplayName = userEntry.displayName;
-              const displayName = Array.isArray(rawDisplayName)
-                ? rawDisplayName[0]
-                : rawDisplayName || '';
-              let employeeId = '';
-              let name = '';
-              if (displayName) {
-                const parts = displayName.trim().split(' ');
-                if (parts.length > 0 && /^\d+$/.test(parts[0])) {
-                  employeeId = parts[0];
-                  name = parts.slice(1).join(' ');
-                } else {
-                  name = displayName;
-                }
+              const pickFirst = (v) => Array.isArray(v) ? v[0] : (v ?? null);
+              const displayName = pickFirst(userEntry.displayName) || '';
+              const cn          = pickFirst(userEntry.cn) || '';
+              const email       = pickFirst(userEntry.mail) || null;
+
+              // Multi-tier 工號 extraction(2026-05-22 — 取代原本只認 "<empId> <name>" 的 hardcode)
+              const { extractEmpId } = require('../services/empIdExtractor');
+              const ldapEmpAttr = pickFirst(userEntry.employeeID)
+                              || pickFirst(userEntry.employeeNumber)
+                              || pickFirst(userEntry.extensionAttribute1)
+                              || null;
+              const extract = extractEmpId({
+                displayName, cn,
+                sAMAccountName: pickFirst(userEntry.sAMAccountName) || account,
+                mail: email,
+                ldapEmpAttr,
+              });
+
+              // name 解析:displayName_prefix/suffix 順便切出來;其他 tier 用 displayName 整串
+              const name = extract.parsedName
+                        || displayName
+                        || cn
+                        || account;
+
+              if (!extract.empId) {
+                console.warn(`[LDAP] empId 無法 parse — user=${account}, displayName="${displayName}", sAM="${userEntry.sAMAccountName}", mail="${email}". Admin 需手動補。`);
+              } else {
+                console.log(`[LDAP] empId="${extract.empId}" source=${extract.source} (user=${account})`);
               }
-              if (!name) name = account;
 
-              const rawMail = userEntry.mail;
-              const email = Array.isArray(rawMail) ? rawMail[0] : rawMail || null;
-
-              resolve({ account: account.toUpperCase(), name, employeeId, email });
+              resolve({
+                account: account.toUpperCase(),
+                name,
+                employeeId:       extract.empId || '',
+                employeeIdSource: extract.empId ? extract.source : null,
+                email,
+              });
             });
           });
 
@@ -412,9 +431,17 @@ router.get('/sso/callback', async (req, res) => {
     if (dbUser) {
       // Existing user — sync SSO info
       // name_manually_set=1 表示管理員已手動鎖定姓名，不讓 SSO 覆蓋
+      const ssoEmpId  = ssoUser.emp_cd ? String(ssoUser.emp_cd).trim() : '';
+      const empIdToWrite  = ssoEmpId || dbUser.employee_id || '';
+      const empSrcToWrite = ssoEmpId ? 'sso_emp_cd' : (dbUser.employee_id_source || null);
       await db.prepare(
-        'UPDATE users SET name=CASE WHEN name_manually_set=1 THEN name ELSE ? END, email=?, employee_id=CASE WHEN name_manually_set=1 THEN employee_id ELSE ? END, creation_method=COALESCE(NULLIF(creation_method,\'manual\'),?) WHERE id=?'
-      ).run(ssoUser.name, ssoUser.email, ssoUser.emp_cd || dbUser.employee_id, 'sso', dbUser.id);
+        `UPDATE users SET name=CASE WHEN name_manually_set=1 THEN name ELSE ? END,
+                          email=?,
+                          employee_id=CASE WHEN name_manually_set=1 THEN employee_id ELSE ? END,
+                          employee_id_source=CASE WHEN name_manually_set=1 THEN employee_id_source ELSE ? END,
+                          creation_method=COALESCE(NULLIF(creation_method,'manual'),?)
+                    WHERE id=?`
+      ).run(ssoUser.name, ssoUser.email, empIdToWrite, empSrcToWrite, 'sso', dbUser.id);
 
       if (dbUser.status !== 'active') {
         return res.redirect(`${baseUrl}/login?sso_error=${encodeURIComponent('帳號已停用，請聯絡系統管理員')}`);
@@ -464,13 +491,15 @@ router.get('/sso/callback', async (req, res) => {
       // SSO user 永不走 local 密碼登入,塞一個無人知的 random hash 作 sentinel,
       // 避免 password='' + password_hashed='N' 留下「空密碼 + 未 hashed」的曖昧狀態。
       const ssoPwSentinel = await passwordService.hash(`sso-sentinel-${Date.now()}-${Math.random()}`);
+      const ssoEmpIdInsert = ssoUser.emp_cd ? String(ssoUser.emp_cd).trim() : '';
       const result = await db.prepare(
-        `INSERT INTO users (username, name, email, role, status, password, password_hashed, employee_id, creation_method,
+        `INSERT INTO users (username, name, email, role, status, password, password_hashed, employee_id, employee_id_source, creation_method,
           role_id, allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
           allow_image_upload, image_max_mb, allow_scheduled_tasks)
-         VALUES (?,?,?,'user','active',?,'Y',?,?, ?,?,?,?,?,?,?,?)`
+         VALUES (?,?,?,'user','active',?,'Y',?,?,?, ?,?,?,?,?,?,?,?)`
       ).run(
-        username, ssoUser.name, ssoUser.email, ssoPwSentinel, ssoUser.emp_cd || '', 'sso',
+        username, ssoUser.name, ssoUser.email, ssoPwSentinel,
+        ssoEmpIdInsert, ssoEmpIdInsert ? 'sso_emp_cd' : null, 'sso',
         resolvedRoleId ?? null,
         rolePerms?.allow_text_upload ?? 1,
         rolePerms?.text_max_mb ?? 10,
@@ -584,12 +613,16 @@ router.post('/login', async (req, res) => {
             // name_manually_set=1 表示管理員已手動鎖定姓名，不讓 LDAP 覆蓋
             // password 存 bcrypt hash(LDAP 失敗時 fallback 用)— 永不存明文 AD 密碼
             const ldapPwHash = await passwordService.hash(password);
+            // LDAP extractor 抓不到 empId 時保留 DB 原值(避免把人工補過的工號清掉)
+            const empIdToWrite  = ldapUser.employeeId       || dbUser.employee_id        || '';
+            const empSrcToWrite = ldapUser.employeeIdSource || dbUser.employee_id_source || null;
             await db.prepare(
               `UPDATE users SET name=CASE WHEN name_manually_set=1 THEN name ELSE ? END,
                                 email=?,
                                 employee_id=CASE WHEN name_manually_set=1 THEN employee_id ELSE ? END,
+                                employee_id_source=CASE WHEN name_manually_set=1 THEN employee_id_source ELSE ? END,
                                 password=?, password_hashed='Y', creation_method=? WHERE id=?`
-            ).run(ldapUser.name, ldapUser.email, ldapUser.employeeId, ldapPwHash, 'ldap', dbUser.id);
+            ).run(ldapUser.name, ldapUser.email, empIdToWrite, empSrcToWrite, ldapPwHash, 'ldap', dbUser.id);
 
             if (dbUser.status !== 'active') {
               return res.status(403).json({ error: '帳號已停用，請聯絡系統管理員' });
@@ -632,12 +665,12 @@ router.post('/login', async (req, res) => {
               : null;
             const ldapPwHash = await passwordService.hash(password);
             const result = await db.prepare(
-              `INSERT INTO users (username, name, email, role, status, password, password_hashed, employee_id, creation_method,
+              `INSERT INTO users (username, name, email, role, status, password, password_hashed, employee_id, employee_id_source, creation_method,
                 role_id, allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
                 allow_image_upload, image_max_mb, allow_scheduled_tasks)
-               VALUES (?,?,?,'user','active',?,'Y',?,?, ?,?,?,?,?,?,?,?)`
+               VALUES (?,?,?,'user','active',?,'Y',?,?,?, ?,?,?,?,?,?,?,?)`
             ).run(
-              ldapUser.account, ldapUser.name, ldapUser.email, ldapPwHash, ldapUser.employeeId, 'ldap',
+              ldapUser.account, ldapUser.name, ldapUser.email, ldapPwHash, ldapUser.employeeId, ldapUser.employeeIdSource, 'ldap',
               resolvedRoleId ?? null,
               rolePerms?.allow_text_upload ?? 1,
               rolePerms?.text_max_mb ?? 10,
