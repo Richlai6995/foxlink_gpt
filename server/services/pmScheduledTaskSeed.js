@@ -1161,8 +1161,9 @@ B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;含 _kb_doc
 - **day_change_pct 一律輸出 null**(server 端會用前一日 JM 價格自動補算,LLM 不要猜)
 
 ═══ AG 寫入規則 ═══
-- **Westmetall 為主**(EUR/kg → USD/oz 換算)
-- Kitco 為備援/交叉驗證
+- **Westmetall 為主**(EUR/kg → USD/oz 換算),source = "Westmetall"
+- Kitco 為備援:**只在 Westmetall 完全抓不到時用**,source = "Kitco"
+- ⚠️ **絕對禁止 source = "Westmetall / Kitco"** 這種混合,實際數字從哪抓就填哪個
 
 ═══ 基本金屬寫入規則(CU/AL/NI/ZN/PB/SN)═══
 - **只從 Westmetall markdaten.php 解析**,source = "Westmetall"
@@ -2142,7 +2143,10 @@ Rhodium 備援: {{scrape:https://www.kitco.com/charts/liverhodium.html}}
 - \`price_type\`:\`spot\`/\`futures\`/\`fixing\`(JM Base Price / 台銀 / LBMA / LME 定盤)/\`estimate\`
 - \`market\`:\`LME\`(基本金屬)/\`BOT\`(台銀金)/\`LBMA\`(Westmetall Silver)/\`JM\`(JM PGM)/\`COMEX\`
 - \`grade\`:抓不到填 null
-- \`source\` + \`source_url\`:**台銀 → "台灣銀行"**;**JM → "JohnsonMatthey"**;Westmetall / Kitco 用品牌名(**不再有 TradingEconomics**)
+- \`source\` + \`source_url\`:**台銀 → "台灣銀行"**;**JM → "JohnsonMatthey"**;Westmetall / Kitco 用單一品牌名
+  ⚠️ **絕對禁止寫混合 source**(如 `"Westmetall / Kitco"`、`"Westmetall/TradingEconomics"`),
+  該筆數字實際從哪抓就填哪個,備援只是「主源失敗時的替代」,不是「同時來源」。一筆 row 只有一個 source。
+  (**不再有 TradingEconomics**)
 - \`as_of_date\`:
   - AU 台銀、PT/PD/RH JM → 今天 {{date}}
   - **Westmetall 基本金屬 + AG → Westmetall 表格那一行的日期**(可能 1-3 天前)
