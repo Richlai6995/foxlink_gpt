@@ -17,6 +17,8 @@ interface PriceRow {
   day_change_pct?: number | null
   week_change_pct?: number | null
   month_change_pct?: number | null
+  week_baseline_date?: string | null    // 2026-05-25: W% baseline 日期(上週末交易日)
+  month_baseline_date?: string | null   // 2026-05-25: M% baseline 日期(上月末交易日)
 }
 
 interface Props {
@@ -86,9 +88,18 @@ export default function MetalsPriceBlock({ title, rows, metalsAllowed, loading, 
               <span className="font-mono text-slate-700 text-right tabular-nums">
                 {noData ? '—' : Number(r.price_usd).toLocaleString(undefined, { maximumFractionDigits: 2 })}
               </span>
-              <ChangePct value={r.day_change_pct ?? null} />
-              <ChangePct value={r.week_change_pct ?? null} />
-              <ChangePct value={r.month_change_pct ?? null} />
+              <ChangePct
+                value={r.day_change_pct ?? null}
+                tooltip={`今日 vs 前一交易日`}
+              />
+              <ChangePct
+                value={r.week_change_pct ?? null}
+                tooltip={r.week_baseline_date ? `本週最新 vs 上週末 (${r.week_baseline_date})` : '本週最新 vs 上週末'}
+              />
+              <ChangePct
+                value={r.month_change_pct ?? null}
+                tooltip={r.month_baseline_date ? `本月最新 vs 上月末 (${r.month_baseline_date})` : '本月最新 vs 上月末'}
+              />
             </button>
           )
         })}
@@ -97,10 +108,14 @@ export default function MetalsPriceBlock({ title, rows, metalsAllowed, loading, 
   )
 }
 
-function ChangePct({ value }: { value: number | null }) {
+function ChangePct({ value, tooltip }: { value: number | null; tooltip?: string }) {
   if (value == null || !Number.isFinite(value)) {
-    return <span className="text-slate-300 text-right tabular-nums">—</span>
+    return <span className="text-slate-300 text-right tabular-nums" title={tooltip}>—</span>
   }
   const cls = value > 0 ? 'text-emerald-600' : value < 0 ? 'text-red-600' : 'text-slate-400'
-  return <span className={`${cls} text-right tabular-nums font-medium`}>{value > 0 ? '+' : ''}{value.toFixed(1)}%</span>
+  return (
+    <span className={`${cls} text-right tabular-nums font-medium`} title={tooltip}>
+      {value > 0 ? '+' : ''}{value.toFixed(1)}%
+    </span>
+  )
 }
