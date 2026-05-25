@@ -2457,4 +2457,5 @@ module.exports = {
   buildDailyReportTask,
   buildWeeklyReportTask,
   buildMonthlyReportTask,
+  buildMasterScrapeTask,
 };
