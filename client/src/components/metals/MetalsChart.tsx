@@ -261,29 +261,37 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
   const totalLines = 1 + overlay.length
   const useLogScale = totalLines >= 3  // 多金屬時自動 log scale
 
-  // X 軸時間範圍鎖定:[end - days, end]
-  // 不論 DB 資料多寡,切換時間區間都看得到 X 軸 scale 變化(否則 ECharts 會 auto-fit 資料)
-  const { xAxisMin, xAxisMax } = useMemo(() => {
-    const endDate = viewDate && /^\d{4}-\d{2}-\d{2}$/.test(viewDate)
-      ? new Date(viewDate + 'T23:59:59')
-      : new Date()
-    const max = endDate.getTime()
-    const min = max - days * 86400000
-    return { xAxisMin: min, xAxisMax: max }
-  }, [days, viewDate])
+  // 2026-05-25: 改 category axis(skip 非交易日),跟 Bloomberg / TradingView 顯示一致。
+  // unionDates = 所有 series 用到的 unique date,sorted。每個 series.data 用 index 對應。
+  // 這樣週末/假日不出現在 x 軸上,線圖不會出現「假期凹陷」假象。
+  const unionDates = useMemo(() => {
+    const set = new Set<string>()
+    for (const code of [primaryMetal, ...overlay]) {
+      for (const p of seriesByMetal[code] || []) set.add(p.date)
+    }
+    return Array.from(set).sort()
+  }, [primaryMetal, overlay.join(','), seriesByMetal])
+
+  // 把 PricePoint[] 轉成跟 unionDates 對齊的 value array(沒資料的日子填 null)
+  const alignToCategory = useCallback((pts: PricePoint[]): (number | null)[] => {
+    const map = new Map<string, number>()
+    for (const p of pts) map.set(p.date, p.price)
+    return unionDates.map(d => map.get(d) ?? null)
+  }, [unionDates])
 
   // ECharts option
   const option = useMemo(() => {
     const allMetals = [primaryMetal, ...overlay]
     const mainColor = METAL_COLORS[primaryMetal] || '#3b82f6'
 
-    // 主金屬 series
+    // 主金屬 series — 對齊 unionDates(category axis)
     const mainPriceSeries: any[] = [{
       name: primaryMetal,
       type: 'line',
-      data: primaryPoints.map(p => [p.date, p.price]),
+      data: alignToCategory(primaryPoints),
       smooth: true,
       symbol: 'none',
+      connectNulls: true,  // 缺資料的日子兩端用線連起來(視覺連貫)
       lineStyle: { width: 2, color: mainColor },
       itemStyle: { color: mainColor },
       yAxisIndex: 0,
@@ -295,9 +303,10 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
       mainPriceSeries.push({
         name: code,
         type: 'line',
-        data: pts.map(p => [p.date, p.price]),
+        data: alignToCategory(pts),
         smooth: true,
         symbol: 'none',
+        connectNulls: true,
         lineStyle: { width: 1.5, color: c },
         itemStyle: { color: c },
         yAxisIndex: 0,
@@ -398,12 +407,22 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
         ]
       : [{ left: 60, right: 30, top: 30, bottom: 60 }]
 
+    // category axis:只顯示 unionDates 內的交易日,週末/假日不出現,圖橫向更緊湊
+    // formatter 把 'YYYY-MM-DD' 縮成 'M/D'(範圍超過 1 年再顯示完整)
+    const xAxisFormatter = (val: string) => {
+      if (typeof val !== 'string') return String(val)
+      const m = val.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+      if (!m) return val
+      // > 365 天範圍時帶年份避免混淆
+      if (days > 365) return `${m[1].slice(2)}/${Number(m[2])}/${Number(m[3])}`
+      return `${Number(m[2])}/${Number(m[3])}`
+    }
     const xAxes = hasSub
       ? [
-          { type: 'time', gridIndex: 0, min: xAxisMin, max: xAxisMax, axisLabel: { fontSize: 10 } },
-          { type: 'time', gridIndex: 1, min: xAxisMin, max: xAxisMax, axisLabel: { fontSize: 10 } },
+          { type: 'category', gridIndex: 0, data: unionDates, axisLabel: { fontSize: 10, formatter: xAxisFormatter } },
+          { type: 'category', gridIndex: 1, data: unionDates, axisLabel: { fontSize: 10, formatter: xAxisFormatter } },
         ]
-      : [{ type: 'time', min: xAxisMin, max: xAxisMax, axisLabel: { fontSize: 10 } }]
+      : [{ type: 'category', data: unionDates, axisLabel: { fontSize: 10, formatter: xAxisFormatter } }]
 
     const yAxes: any[] = hasSub
       ? [
@@ -431,7 +450,7 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
       ],
       series: [...mainPriceSeries, ...subSeriesArr],
     }
-  }, [primaryMetal, overlay.join(','), seriesByMetal, indMain, indSub, useLogScale, hasSub, xAxisMin, xAxisMax, annotations, trendlineFirst, activeTool])
+  }, [primaryMetal, overlay.join(','), seriesByMetal, indMain, indSub, useLogScale, hasSub, unionDates, alignToCategory, days, annotations, trendlineFirst, activeTool])
 
   const headerCls = theme === 'precious'
     ? 'bg-gradient-to-r from-emerald-100 to-green-50 border-emerald-200 text-emerald-900'

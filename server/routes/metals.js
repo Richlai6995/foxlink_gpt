@@ -133,51 +133,57 @@ router.get('/prices', verifyToken, verifyMetalsAccess, async (req, res) => {
       ORDER BY metal_code
     `).all(...priceBinds, ...params);
 
-    // 2) 對每金屬撈 -7d / -30d 最近一筆,算漲跌
+    // 2) 對每金屬算 W% / M% — 改用「上週/上月結束對齊」(2026-05-25)
     //
-    // 2 個 bug fix(2026-05-11):
-    //   (a) 之前用 r.as_of_date_raw 結果 lowercaseKeys 把 JS Date → ISO 字串,
-    //       oracledb bind 跟 DATE 欄比較 implicit cast 失敗 → query throw → catch NaN → UI 「—」
-    //       改用 r.as_of_date(本來就是 'YYYY-MM-DD' 字串)+ TO_DATE(?, 'YYYY-MM-DD')
-    //   (b) 上界 `<= asOfRaw`(沒減 offset)→ 永遠回最新 row,不是 N 天前
-    //       改 `<= TO_DATE - offset` 才是真的 N 天前
+    // 之前 -7d / -30d ±7 容錯,週末 / 假日多時抓不準。改用 ISO week / month 邊界:
+    //   W% = latest_price vs MAX(as_of_date) WHERE as_of_date < TRUNC(latest, 'IW') (上週日為止)
+    //   M% = latest_price vs MAX(as_of_date) WHERE as_of_date < TRUNC(latest, 'MM') (上月底為止)
+    // 跟 Bloomberg / TradingEconomics 顯示一致。
     const result = [];
     for (const r of latestRows) {
       const code = r.metal_code || r.METAL_CODE;
       const latestPrice = Number(r.price_usd ?? r.PRICE_USD);
       const asOfStr = r.as_of_date || r.AS_OF_DATE;  // 'YYYY-MM-DD' 字串
 
-      const fetchPriceAt = async (offset) => {
+      // 通用 helper:取「<= 邊界日」最近一筆有資料的 price
+      // 2026-05-25:不再用 ±7 容錯,直接往前找(無上限),week/month 跨假期也撈得到
+      const fetchPriceBefore = async (boundarySql, boundaryDescr) => {
         try {
           const row = await db.prepare(`
-            SELECT price_usd FROM (
-              SELECT price_usd FROM pm_price_history
+            SELECT price_usd, TO_CHAR(as_of_date, 'YYYY-MM-DD') AS d FROM (
+              SELECT price_usd, as_of_date FROM pm_price_history
               WHERE UPPER(metal_code) = UPPER(?)
-                AND as_of_date <= TO_DATE(?, 'YYYY-MM-DD') - ?
-                AND as_of_date >= TO_DATE(?, 'YYYY-MM-DD') - ?
+                AND as_of_date <= ${boundarySql}
                 AND price_usd IS NOT NULL
               ORDER BY as_of_date DESC
             ) WHERE ROWNUM = 1
-          `).get(code, asOfStr, offset, asOfStr, offset + 7); // [asOf-offset-7, asOf-offset]
-          return Number(row?.price_usd ?? row?.PRICE_USD);
+          `).get(code, asOfStr);
+          return {
+            price: Number(row?.price_usd ?? row?.PRICE_USD),
+            date: row?.d || row?.D || null,
+          };
         } catch (e) {
-          console.warn(`[Metals] fetchPriceAt ${code} offset=${offset} 失敗:`, e.message);
-          return NaN;
+          console.warn(`[Metals] fetchPriceBefore ${code} (${boundaryDescr}) 失敗:`, e.message);
+          return { price: NaN, date: null };
         }
       };
 
-      // 7 / 30 天前
-      const price7 = await fetchPriceAt(7);
-      const price30 = await fetchPriceAt(30);
-      const weekChg = Number.isFinite(price7) && price7 > 0
-        ? ((latestPrice - price7) / price7) * 100 : null;
-      const monthChg = Number.isFinite(price30) && price30 > 0
-        ? ((latestPrice - price30) / price30) * 100 : null;
+      // D% = 前一個 LME 交易日(latest_date - 1 day 起往前找)
+      // W% = 上週結束日(以 latest 為基準 → 本週週一 = TRUNC IW,上週結束 = 本週週一 - 1)
+      // M% = 上月結束日(以 latest 為基準 → 本月初 = TRUNC MM,上月底 = 本月初 - 1)
+      const prevDay = await fetchPriceBefore(
+        `TO_DATE(?, 'YYYY-MM-DD') - 1`, 'prev_trading_day');
+      const prevWeek = await fetchPriceBefore(
+        `TRUNC(TO_DATE(?, 'YYYY-MM-DD'), 'IW') - 1`, 'last_week_end');
+      const prevMonth = await fetchPriceBefore(
+        `TRUNC(TO_DATE(?, 'YYYY-MM-DD'), 'MM') - 1`, 'last_month_end');
 
-      // D% 處理:優先讀 DB 欄位 day_change_pct;
-      //   - 用 ?? 而非 ||(避免 0 漲跌被當 falsy 誤報「---」)
-      //   - 欄位 null / NaN 時自己用 fetchPriceAt(1) 算前一日漲跌(對齊 W%/M% 邏輯)
-      //     避免某些 source(LBMA 即時抓 / 台銀)沒寫 day_change_pct 害 UI 看不到
+      const weekChg = Number.isFinite(prevWeek.price) && prevWeek.price > 0
+        ? ((latestPrice - prevWeek.price) / prevWeek.price) * 100 : null;
+      const monthChg = Number.isFinite(prevMonth.price) && prevMonth.price > 0
+        ? ((latestPrice - prevMonth.price) / prevMonth.price) * 100 : null;
+
+      // D% 處理:優先讀 DB 欄位 day_change_pct;欄位 null 才用 prev_day 算
       const dayChgFromCol = (() => {
         const v = r.day_change_pct ?? r.DAY_CHANGE_PCT;
         if (v == null) return null;
@@ -185,11 +191,8 @@ router.get('/prices', verifyToken, verifyMetalsAccess, async (req, res) => {
         return Number.isFinite(n) ? n : null;
       })();
       let dayChg = dayChgFromCol;
-      if (dayChg == null) {
-        const price1 = await fetchPriceAt(1);
-        if (Number.isFinite(price1) && price1 > 0) {
-          dayChg = ((latestPrice - price1) / price1) * 100;
-        }
+      if (dayChg == null && Number.isFinite(prevDay.price) && prevDay.price > 0) {
+        dayChg = ((latestPrice - prevDay.price) / prevDay.price) * 100;
       }
 
       result.push({
@@ -202,6 +205,9 @@ router.get('/prices', verifyToken, verifyMetalsAccess, async (req, res) => {
         day_change_pct: dayChg != null && Number.isFinite(dayChg) ? Number(dayChg.toFixed(2)) : null,
         week_change_pct: weekChg != null && Number.isFinite(weekChg) ? Number(weekChg.toFixed(2)) : null,
         month_change_pct: monthChg != null && Number.isFinite(monthChg) ? Number(monthChg.toFixed(2)) : null,
+        // 2026-05-25: 把 W%/M% baseline 日期回傳給前端 tooltip 顯示「vs 5/16」
+        week_baseline_date: prevWeek.date,
+        month_baseline_date: prevMonth.date,
       });
     }
 

@@ -433,12 +433,14 @@ async function substituteVarsAsync(template, taskName, outBag) {
     result = result.replaceAll('{{pm_current_prices}}', priceText);
   }
 
-  // {{pm_weekly_changes}} / {{pm_monthly_changes}} — 11 金屬「最新價 vs N 天前」實際漲跌幅,
-  // 給週/月報 LLM 當 anchor,不要自由發揮推測漲跌幅(原 prompt 只給新聞 KB,LLM 從 narrative
-  // 推估常跟實際差 5-20%)。算法 = (latest - price_n_days_ago) / price_n_days_ago × 100
-  for (const [placeholder, daysBack, label] of [
-    ['{{pm_weekly_changes}}', 7, '近 7 天'],
-    ['{{pm_monthly_changes}}', 30, '近 30 天'],
+  // {{pm_weekly_changes}} / {{pm_monthly_changes}} — 11 金屬「本週/月最新 vs 上週/月結束」實際漲跌幅,
+  // 給週/月報 LLM 當 anchor。2026-05-25 改用 ISO week / month boundary 對齊,跟 Bloomberg / TE 一致:
+  //   W%: latest_price vs MAX(as_of_date) WHERE as_of_date < TRUNC(latest, 'IW') (上週日為止)
+  //   M%: latest_price vs MAX(as_of_date) WHERE as_of_date < TRUNC(latest, 'MM') (上月底為止)
+  // 不再用 ±7d 容錯,直接「<= 邊界、有資料、最近一筆」邏輯,自然 fallback。
+  for (const [placeholder, boundarySql, label, periodLabel] of [
+    ['{{pm_weekly_changes}}',  `TRUNC(TO_DATE(?, 'YYYY-MM-DD'), 'IW') - 1`, '上週',  '週'],
+    ['{{pm_monthly_changes}}', `TRUNC(TO_DATE(?, 'YYYY-MM-DD'), 'MM') - 1`, '上月',  '月'],
   ]) {
     if (!result.includes(placeholder)) continue;
     let txt = '';
@@ -460,41 +462,44 @@ async function substituteVarsAsync(template, taskName, outBag) {
           const code = r.metal_code || r.METAL_CODE;
           const latest = Number(r.price_usd ?? r.PRICE_USD);
           const latestDate = r.as_of_date || r.AS_OF_DATE;
-          // 拿 latestDate 往前 daysBack 天的最近一筆(allow ±7 天 window 容錯週末/假日)
+          // 撈「上週結束日 / 上月結束日」之前最近一筆有資料的 row
+          // 不限上限往前找,跨假期 / 跨年 / 月份首日都撈得到 baseline
           const prev = await db.prepare(`
             SELECT price_usd, TO_CHAR(as_of_date,'YYYY-MM-DD') AS d FROM (
               SELECT price_usd, as_of_date FROM pm_price_history
               WHERE UPPER(metal_code) = UPPER(?)
-                AND as_of_date <= TO_DATE(?, 'YYYY-MM-DD') - ?
-                AND as_of_date >= TO_DATE(?, 'YYYY-MM-DD') - ?
+                AND as_of_date <= ${boundarySql}
                 AND price_usd IS NOT NULL
               ORDER BY as_of_date DESC
             ) WHERE ROWNUM = 1
-          `).get(code, latestDate, daysBack, latestDate, daysBack + 7);
+          `).get(code, latestDate);
           const prevPrice = Number(prev?.price_usd ?? prev?.PRICE_USD);
           const prevDate = prev?.d || prev?.D || '—';
           if (Number.isFinite(latest) && Number.isFinite(prevPrice) && prevPrice > 0) {
             const chg = ((latest - prevPrice) / prevPrice) * 100;
             const chgStr = `${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%`;
-            lines.push(`- ${code}: 前收 **${prevPrice.toLocaleString()}** (${prevDate}) → 現價 ${latest.toLocaleString()} (${latestDate}) = 漲跌 **${chgStr}**`);
+            lines.push(
+              `- ${code}: ${label}收盤 **${prevPrice.toLocaleString()}** (${prevDate}) `
+              + `→ 本${periodLabel}最新 ${latest.toLocaleString()} (${latestDate}) `
+              + `= ${periodLabel}漲跌 **${chgStr}**`
+            );
           } else {
             lines.push(`- ${code}: 資料不足(${prevDate || '?'} → ${latestDate})`);
           }
         }
-        const periodLabel = label === '近 7 天' ? '週' : '月';
-        txt = `\n═══ ${label} 11 金屬實際報價 anchor(MUST be your source for 表格「上${periodLabel}收盤價」與「${periodLabel}漲跌幅」欄)═══\n${lines.join('\n')}\n\n`
-          + `⚠️ **表格欄位對應規則**:\n`
-          + `   - 「上${periodLabel}收盤價」欄 = 上面每行的「前收」數字(粗體那個)\n`
-          + `   - 「${periodLabel}漲跌幅」欄 = 上面每行的「漲跌」數字(最後那個粗體 %)\n`
-          + `   ❌ 禁止用新聞 narrative 推測,❌ 禁止自己 round 改數字,完全照抄上面。\n`
+        txt = `\n═══ 11 金屬 ${periodLabel}漲跌實際報價 anchor(${label}結束 vs 本${periodLabel}最新)═══\n${lines.join('\n')}\n\n`
+          + `⚠️ **表格欄位對應規則(必須照抄,不准 round / 改數字 / 用新聞推測):**\n`
+          + `   - 「本${periodLabel}最新報價」欄 = 上面每行「本${periodLabel}最新」的數字(箭頭右側那個)\n`
+          + `   - 「${periodLabel}漲跌幅」欄 = 上面每行「${periodLabel}漲跌」的 % 數字(最後一個粗體)\n`
+          + `   - 報價後面括號的日期就是「真實資料日期」,如果跟今天 {{date}} 差距 > 3 天,務必標註在欄位旁邊\n`
           + `   你的工作是「解釋為什麼這個漲跌」(主要驅動因素欄),不是「推測漲跌幅」。\n`;
-        console.log(`[Scheduled] ${placeholder} injected ${rows.length} metals (vs ${daysBack}d)`);
+        console.log(`[Scheduled] ${placeholder} injected ${rows.length} metals (${label}結束對齊)`);
       } else {
-        txt = `\n═══ ${label} 漲跌幅 ═══\n(pm_price_history 暫無資料)\n`;
+        txt = `\n═══ ${periodLabel}漲跌幅 ═══\n(pm_price_history 暫無資料)\n`;
       }
     } catch (e) {
       console.warn(`[Scheduled] ${placeholder} lookup failed:`, e.message);
-      txt = `\n═══ ${label} 漲跌幅 ═══\n(查詢失敗:${e.message})\n`;
+      txt = `\n═══ ${periodLabel}漲跌幅 ═══\n(查詢失敗:${e.message})\n`;
     }
     result = result.replaceAll(placeholder, txt);
   }
