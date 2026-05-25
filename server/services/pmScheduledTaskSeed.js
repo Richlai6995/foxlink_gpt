@@ -770,8 +770,8 @@ function buildWeeklyReportTask(kbMap, models = {}) {
      - 燈號 — 🔴(漲)/ 🟢(跌)/ 🟡(持平,|漲跌| < 0.5%)的 emoji
      - 金屬品種 — \`**中文名 (英文代碼)**\` 例:\`**銅 (Cu)**\`
      - **本週最新報價** — 取 \`{{pm_weekly_changes}}\` anchor 區塊「本週最新」那個價(箭頭右側,單位 USD),數字千分位逗號。
-       ⚠️ 若 anchor 的「本週最新」日期跟今天 {{date}} 差 > 3 天(週末跑或假期),**括號加標日期**:`31,250 (5/22)`。
-       ⚠️ 若 anchor 的日期是這週(差 ≤ 3 天),直接寫數字不加日期:`32.45`。
+       ⚠️ 若 anchor 的「本週最新」日期跟今天 {{date}} 差 > 3 天(週末跑或假期),**括號加標日期**:\`31,250 (5/22)\`。
+       ⚠️ 若 anchor 的日期是這週(差 ≤ 3 天),直接寫數字不加日期:\`32.45\`。
      - 週漲跌幅 — \`**+5.2%**\` 或 \`**-2.8%**\`(粗體含正負號),必須用 \`{{pm_weekly_changes}}\` 提供的實際數字(上週結束 vs 本週最新)
      - 主要驅動因素 — 一句話 30-60 字說明該金屬本週主漲/跌動能(地緣 / 政策 / 庫存 / 供需 / 終端需求)
 
@@ -922,7 +922,7 @@ function buildMonthlyReportTask(kbMap, models = {}) {
      - 燈號 — 🔴(漲)/ 🟢(跌)/ 🟡(持平,|漲跌| < 1%)
      - 金屬品種 — \`**中文名 (英文代碼)**\`
      - **本月最新報價** — 取 \`{{pm_monthly_changes}}\` anchor 區塊「本月最新」那個價(箭頭右側,單位 USD),數字千分位逗號。
-       ⚠️ 若 anchor 的日期跟今天 {{date}} 差 > 3 天 → **括號加標日期**:`32,300 (5/22)`。差 ≤ 3 天直接寫數字。
+       ⚠️ 若 anchor 的日期跟今天 {{date}} 差 > 3 天 → **括號加標日期**:\`32,300 (5/22)\`。差 ≤ 3 天直接寫數字。
      - 月漲跌幅 — \`**+18.5%**\` 或 \`**-5.2%**\`(粗體含正負號),必須用 \`{{pm_monthly_changes}}\` 提供的實際數字(上月結束 vs 本月最新)
      - 主要驅動因素 — 30-60 字說明該金屬本月主驅動(著重結構性、整月貫穿的因素,非單日事件)
 
@@ -2144,7 +2144,7 @@ Rhodium 備援: {{scrape:https://www.kitco.com/charts/liverhodium.html}}
 - \`market\`:\`LME\`(基本金屬)/\`BOT\`(台銀金)/\`LBMA\`(Westmetall Silver)/\`JM\`(JM PGM)/\`COMEX\`
 - \`grade\`:抓不到填 null
 - \`source\` + \`source_url\`:**台銀 → "台灣銀行"**;**JM → "JohnsonMatthey"**;Westmetall / Kitco 用單一品牌名
-  ⚠️ **絕對禁止寫混合 source**(如 `"Westmetall / Kitco"`、`"Westmetall/TradingEconomics"`),
+  ⚠️ **絕對禁止寫混合 source**(如 \`"Westmetall / Kitco"\`、\`"Westmetall/TradingEconomics"\`),
   該筆數字實際從哪抓就填哪個,備援只是「主源失敗時的替代」,不是「同時來源」。一筆 row 只有一個 source。
   (**不再有 TradingEconomics**)
 - \`as_of_date\`:
