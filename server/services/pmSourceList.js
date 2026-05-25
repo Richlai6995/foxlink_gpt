@@ -20,15 +20,8 @@ const PM_SOURCES = [
   { url: 'https://www.westmetall.com/en/markdaten.php',                   label: 'Westmetall Market Data' },
   // Westmetall /en/news.php 2026-04-27 起回 404(可能改版),先移除
   // 若之後找到新 news URL 再補進來;現有 markdaten.php 仍能撈報價
-  { url: 'https://tradingeconomics.com/commodity/copper',                 label: 'TE Copper' },
-  { url: 'https://tradingeconomics.com/commodity/aluminum',               label: 'TE Aluminum' },
-  { url: 'https://tradingeconomics.com/commodity/nickel',                 label: 'TE Nickel' },
-  { url: 'https://tradingeconomics.com/commodity/zinc',                   label: 'TE Zinc' },
-  { url: 'https://tradingeconomics.com/commodity/lead',                   label: 'TE Lead' },
-  { url: 'https://tradingeconomics.com/commodity/gold',                   label: 'TE Gold' },
-  { url: 'https://tradingeconomics.com/commodity/silver',                 label: 'TE Silver' },
-  { url: 'https://tradingeconomics.com/commodity/platinum',               label: 'TE Platinum' },
-  { url: 'https://tradingeconomics.com/commodity/palladium',              label: 'TE Palladium' },
+  // 2026-05-25 起 TradingEconomics 全面停用(CFD 報價不準、來源不可靠),
+  // 基本金屬一律走 Westmetall LME Cash Settlement,PGM day_change_pct 改 server 端用前一日 JM 價自動補算
   // Mining.com /feed/ 是 WordPress 標準 RSS,實測通(2026-04-27)
   { url: 'https://www.mining.com/feed/',                                  label: 'Mining.com (RSS)' },
   // OilPrice /rss/main 公開 RSS,實測通(2026-04-27)

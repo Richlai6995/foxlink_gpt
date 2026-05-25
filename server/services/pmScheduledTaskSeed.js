@@ -484,9 +484,11 @@ function buildMacroTask(models = {}) {
 - TWDUSD(美元兌台幣)
 
 ═══ 資料源(可選用)═══
-{{scrape:https://tradingeconomics.com/united-states/currency}}
-{{scrape:https://tradingeconomics.com/united-states/government-bond-yield}}
 {{scrape:https://www.investing.com/economic-calendar/}}
+{{scrape:https://finance.yahoo.com/quote/DX-Y.NYB/}}
+{{scrape:https://finance.yahoo.com/quote/%5ETNX/}}
+// 2026-05-25 起 TradingEconomics 全面停用,改用 Yahoo Finance / investing.com 公開頁面
+// (LLM fetch tool 帶 browser headers,通常能繞 anti-bot)
 
 ═══ 輸出 ═══
 A. 一段繁體中文簡報(列出每個指標的當前值 + 與前日 / 上週的變化)
@@ -500,8 +502,8 @@ B. markdown 末尾另外輸出 \`\`\`json [...] \`\`\` 給 db_write 落地:
     "as_of_date": "{{date}}",
     "value": 104.23,
     "unit": "index",
-    "source": "TradingEconomics",
-    "source_url": "https://tradingeconomics.com/..."
+    "source": "Yahoo Finance",
+    "source_url": "https://finance.yahoo.com/..."
   }
 ]
 \`\`\`
@@ -1053,25 +1055,18 @@ function buildMasterScrapeTask(kbMap, models = {}) {
 {{fetch:https://matthey.com/pgm-prices/rss-feed.xml}}
 ↑ Pt / Pd / Rh / Ir / Ru 五金屬的 USD/oz 基準價,JM 每天 08:30 HK 時間更新。
   正崴採購合約多以 JM Base Price 為準,**PGM 的 price_usd 一律以此為主源**。
-  RSS 不帶日變動 %,所以下面再抓 TradingEconomics 補 day_change_pct。
+  RSS 不帶日變動 %,LLM 一律輸出 day_change_pct=null,server 後算(用前一日 JM 價)。
 
-═══ AG 白銀(LBMA 抓不到,改用 Westmetall + Kitco 雙源)═══
-{{scrape:https://www.kitco.com/charts/livesilver.html}}
+═══ AG 白銀(LBMA 抓不到,Westmetall 主源 + Kitco 備援)═══
 {{scrape:https://www.westmetall.com/en/markdaten.php}}
+{{scrape:https://www.kitco.com/charts/livesilver.html}}
 ↑ Westmetall 含 Silver Fixing(EUR/kg 要換算),Kitco 即時 spot(USD/oz 直接用)
   Westmetall 為主、Kitco 為備援/交叉驗證。
 
-═══ 基本金屬 + 日變動 %(LME 報價 + TradingEconomics)═══
-{{scrape:https://tradingeconomics.com/commodity/copper}}
-{{scrape:https://tradingeconomics.com/commodity/aluminum}}
-{{scrape:https://tradingeconomics.com/commodity/nickel}}
-{{scrape:https://tradingeconomics.com/commodity/zinc}}
-{{scrape:https://tradingeconomics.com/commodity/lead}}
-{{scrape:https://tradingeconomics.com/commodity/tin}}
-{{scrape:https://tradingeconomics.com/commodity/platinum}}
-{{scrape:https://tradingeconomics.com/commodity/palladium}}
-{{scrape:https://tradingeconomics.com/commodity/rhodium}}
-↑ 提供基本金屬 LME 報價 + 日變動 %,作為 11 個金屬 day_change_pct 主源
+═══ 基本金屬 6 種(CU/AL/NI/ZN/PB/SN)主源:Westmetall LME Cash Settlement ═══
+↑ markdaten.php 已在上面 scrape 過,**所有 6 個基本金屬直接從這同一頁解析**。
+  ⚠️ **2026-05-25 起,TradingEconomics 全面停用**(CFD 報價不準、來源不可靠)。
+  基本金屬只認 LME Cash Settlement(Westmetall 二手轉發)。
 
 ═══ 任務 ═══
 1. 從以上 source 抓出當日報價數字
@@ -1121,15 +1116,32 @@ B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;含 _kb_doc
       "price_usd": 2019.0,
       "unit": "USD/oz",
       "fx_rate_to_usd": 1.0,
-      "day_change_pct": -1.87,
+      "day_change_pct": null,
       "price_type": "fixing",
       "market": "JM",
       "source": "JohnsonMatthey",
       "source_url": "https://matthey.com/pgm-prices/rss-feed.xml",
       "raw_snippet": "JM Base Price: US$ 2019 per troy oz (28 Apr 2026 08:30 HK)"
+    },
+    {
+      "as_of_date": "2026-05-22",   // ← 注意:Westmetall 抓到的日期(LME 交易日),不是 {{date}}
+      "metal_code": "CU",
+      "metal_name": "銅",
+      "price_usd": 13545.00,
+      "unit": "USD/ton",
+      "original_price": 13545.00,
+      "original_currency": "USD",
+      "original_unit": "USD/ton",
+      "fx_rate_to_usd": 1.0,
+      "day_change_pct": null,        // ← LLM 永遠輸出 null,server 後算
+      "price_type": "spot",
+      "market": "LME",
+      "source": "Westmetall",
+      "source_url": "https://www.westmetall.com/en/markdaten.php",
+      "raw_snippet": "22. May 2026 | LME Copper Cash-Settlement | 13,545.00"
     }
-    // **必須 11 筆**,順序:AU AG PT PD RH CU AL NI ZN PB SN
-    // 找不到資料的金屬 → 仍輸出該筆但 price_usd / day_change_pct 給 null,source 給 'unknown'
+    // **prices 陣列只放今天真的抓到的金屬**(0-11 筆),沒抓到的不要列(別塞 null row)
+    // AU/PT/PD/RH 用今天 {{date}},Westmetall 基本金屬 + AG 用 Westmetall 表格那行的日期
   ]
 }
 \`\`\`
@@ -1143,24 +1155,42 @@ B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;含 _kb_doc
 - **PT / PD / RH 的 price_usd 一律從 JM RSS 取**
   - source = "JohnsonMatthey", source_url = "https://matthey.com/pgm-prices/rss-feed.xml"
   - price_type = "fixing", market = "JM"
-- day_change_pct 從 TradingEconomics 補
+- **day_change_pct 一律輸出 null**(server 端會用前一日 JM 價格自動補算,LLM 不要猜)
 
 ═══ AG 寫入規則 ═══
 - **Westmetall 為主**(EUR/kg → USD/oz 換算)
 - Kitco 為備援/交叉驗證
 
+═══ 基本金屬寫入規則(CU/AL/NI/ZN/PB/SN)═══
+- **只從 Westmetall markdaten.php 解析**,source = "Westmetall"
+- **day_change_pct 一律輸出 null**(server 端會跟上一筆 LME 收盤價自動補算)
+- ⚠️ **as_of_date 必須用 Westmetall 表格那一行實際的日期**(例如表頭「22. May 2026」→ "2026-05-22"),
+  **不要**用今天 {{date}}。原因:台灣 06:00 抓取時 LME 還沒收盤,Westmetall 最新一筆是
+  「上一個 LME 交易日」(週末 / 假日跨更多天),用今天日期會跟 LME 實際日期錯位。
+- **某金屬今天 Westmetall 沒新報價**(週末 / 該行無數字)→ 該 metal 整筆 **不要輸出**(prices 陣列直接漏掉它,server 端不會塞 null row)。
+  ❌ 禁止用前一日的價當今日報價填進去。
+
 ═══ 寫入規則(務必遵守)═══
-- **prices 必 11 筆**(metal_code 全部到齊),即使部分金屬今天沒資料,給 null 也要列出
+- **prices 陣列長度可變**(0-11 筆),只放今天真的抓到價的金屬
+  - AU 台銀:每天都有 → 一定要寫
+  - PT/PD/RH JM RSS:JM 每天 08:30 HK 更新 → 通常有
+  - AG/基本金屬 Westmetall:LME 週末休市 → 週末可能 0 筆
 - price_usd 一律換算成 **USD 等價**
-- as_of_date 統一用今天 = {{date}}(YYYY-MM-DD)
+- **as_of_date 規則**:
+  - AU 台銀 → 今天 {{date}}
+  - JM RSS PT/PD/RH → 今天 {{date}}(RSS 標記 JM 更新日)
+  - **Westmetall 基本金屬 + AG → 用 Westmetall 表格那一行的日期**(可能是 1-3 天前)
 - **只輸出一個 \`\`\`json\`\`\` 區塊,內含 prices 陣列(沒有 news!)**
 
 ═══ 自我檢查清單 ═══
 - [ ] A 段中文報價綜述 200-400 字?
 - [ ] **JSON 內只有 _kb_doc + prices,沒有 news?**(2026-04-29 起新聞已交給 by-source task)
 - [ ] _kb_doc 是 1 筆陣列,title/summary/content 都填好?
-- [ ] prices 是 11 筆 + metal_code 全部到齊?
+- [ ] **prices 陣列只放今天真的抓到價的金屬**(沒抓到的不要塞 null 進來)
 - [ ] AU 用台銀價、PT/PD/RH 用 JM Base Price?
+- [ ] **基本金屬 + AG 的 as_of_date 用 Westmetall 表格實際日期**(不是 {{date}})?
+- [ ] **所有 day_change_pct 都是 null**(LLM 不算,server 後算)
+- [ ] **完全沒用 TradingEconomics**?(2026-05-25 起停用)
 - [ ] 整份輸出只有一個 \`\`\`json\`\`\` 區塊?`;
 
   const pipeline = [
@@ -1682,13 +1712,15 @@ async function patchExistingMasterScrapeAddPriceWrite(db, kbMap, models) {
   // marker 列表(只要任一缺就 force update + 改 recipients):
   //   JohnsonMatthey + rate.bot.com.tw + news vs prices 規則(2026-04-28)
   //   + 「全網金屬報價收集」+ _kb_doc(2026-04-29 重構,砍新聞段、不發 email、不產 DOCX)
+  //   + TE 停用 marker(2026-05-25:基本金屬只看 Westmetall,day_change_pct 改 server 後算)
   const hasJmMarker         = !!promptStr && /JohnsonMatthey/.test(promptStr);
   const hasBotMarker        = !!promptStr && /rate\.bot\.com\.tw/.test(promptStr);
   const hasNewsRulesMarker  = !!promptStr && /絕對不要放純報價公告/.test(promptStr);
   const hasV2Marker         = !!promptStr && /全網金屬報價收集/.test(promptStr);
   const hasKbDocMarker      = !!promptStr && /_kb_doc/.test(promptStr);
+  const hasNoTeMarker       = !!promptStr && /TradingEconomics 全面停用/.test(promptStr);
 
-  if (hasPriceWrite && hasJmMarker && hasBotMarker && hasNewsRulesMarker && hasV2Marker && hasKbDocMarker) return;
+  if (hasPriceWrite && hasJmMarker && hasBotMarker && hasNewsRulesMarker && hasV2Marker && hasKbDocMarker && hasNoTeMarker) return;
 
   try {
     // 一併 update prompt + pipeline + email_subject/body(2026-04-29 重構不發 email)
@@ -1704,6 +1736,7 @@ async function patchExistingMasterScrapeAddPriceWrite(db, kbMap, models) {
       !hasNewsRulesMarker && 'news vs prices 規則',
       !hasV2Marker && '2026-04-29 純報價重構(砍新聞段)',
       !hasKbDocMarker && '_kb_doc KB 寫入結構',
+      !hasNoTeMarker && '2026-05-25 TE 停用 + Westmetall 對齊',
     ].filter(Boolean).join(' + ');
     console.log(`[PMScheduledTaskSeed] Upgraded "${targetName}" #${id}: ${missing}`);
   } catch (e) {
@@ -2014,7 +2047,8 @@ async function patchUserDailyMetalQuoteTask(db) {
   if (promptStr && typeof promptStr !== 'string' && promptStr.toString) promptStr = promptStr.toString();
   const hasBotMarker = !!promptStr && /rate\.bot\.com\.tw/.test(promptStr);
   const hasJmMarker  = !!promptStr && /JohnsonMatthey/.test(promptStr);
-  if (hasBotMarker && hasJmMarker) return; // 已升級
+  const hasNoTeMarker = !!promptStr && /TradingEconomics 全面停用/.test(promptStr);
+  if (hasBotMarker && hasJmMarker && hasNoTeMarker) return; // 已升級
 
   // 對應 user 既有 array-of-objects 結構 prompt(跟 buildMasterScrapeTask 的物件結構不同)
   // 採用 user 上次貼的版本作 base,加進台銀 / matthey / kitco silver
@@ -2034,16 +2068,13 @@ async function patchUserDailyMetalQuoteTask(db) {
 ↑ Pt / Pd / Rh / Ir / Ru 五金屬 USD/oz 基準價,JM 每天 08:30 HK 更新。
   正崴 PGM 採購多以 JM Base Price 為合約結算基準。
 
-═══ 資料源 4 — Trading Economics(PGM 日變動 % 補充)═══
-Platinum: {{scrape:https://tradingeconomics.com/commodity/platinum}}
-Palladium: {{scrape:https://tradingeconomics.com/commodity/palladium}}
-Rhodium: {{scrape:https://tradingeconomics.com/commodity/rhodium}}
-
-═══ 資料源 5 — Kitco(Silver / PGM 備援,僅在主源失敗時用)═══
+═══ 資料源 4 — Kitco(Silver / PGM 備援,僅在主源失敗時用)═══
 Silver 備援: {{scrape:https://www.kitco.com/charts/livesilver.html}}
 Platinum 備援: {{scrape:https://www.kitco.com/charts/liveplatinum.html}}
 Palladium 備援: {{scrape:https://www.kitco.com/charts/livepalladium.html}}
 Rhodium 備援: {{scrape:https://www.kitco.com/charts/liverhodium.html}}
+↑ ⚠️ 2026-05-25 起 **TradingEconomics 全面停用**(報價來源不可靠),
+  PGM 的 day_change_pct 改為 server 端用前一日 JM 價格自動補算。
 
 ═══ 解析規則(請嚴格遵守)═══
 
@@ -2064,10 +2095,18 @@ Rhodium 備援: {{scrape:https://www.kitco.com/charts/liverhodium.html}}
 
 4. **Platinum / Palladium / Rhodium** 主源:**Johnson Matthey RSS**(資料源 3)
    - **price_usd 一律以 JM RSS 為主**,source="JohnsonMatthey", price_type="fixing", market="JM"
-   - **day_change_pct 從 TradingEconomics 補**(JM RSS 沒帶日變動)
-   - JM RSS 抓不到該金屬才 fallback 用 TE 的價(source="TradingEconomics", price_type="spot")
-   - JM + TE 都失敗才用 Kitco Bid/Ask 平均(source="Kitco")
+   - **day_change_pct 一律輸出 null**(server 後算,LLM 不要猜)
+   - JM RSS 抓不到該金屬才 fallback Kitco Bid/Ask 平均(source="Kitco")
+   - **禁止用 TradingEconomics**(2026-05-25 起停用)
    - **禁止用歷史數據當今日價**
+
+5. **基本金屬(CU/AL/NI/ZN/PB/SN)** 來源:**Westmetall markdaten.php(唯一源)**
+   - source="Westmetall", source_url="https://www.westmetall.com/en/markdaten.php"
+   - **day_change_pct 一律輸出 null**(server 後算)
+   - **as_of_date 用 Westmetall 表格實際那一行的日期**,不是今天 — 例如表頭「22. May 2026」→ "2026-05-22"
+     (台灣 06:00 抓取時 LME 還沒收盤當日,所以 Westmetall 最新一筆通常是 1-3 天前)
+   - **某金屬今天 Westmetall 沒新報價**(週末 / 該行無數字)→ **整筆漏掉不要寫**(別塞 null row)
+   - **禁止用 TradingEconomics**
 
 ═══ 輸出第一部分:繁中 markdown 表格 ═══
 
@@ -2100,8 +2139,10 @@ Rhodium 備援: {{scrape:https://www.kitco.com/charts/liverhodium.html}}
 - \`price_type\`:\`spot\`/\`futures\`/\`fixing\`(JM Base Price / 台銀 / LBMA / LME 定盤)/\`estimate\`
 - \`market\`:\`LME\`(基本金屬)/\`BOT\`(台銀金)/\`LBMA\`(Westmetall Silver)/\`JM\`(JM PGM)/\`COMEX\`
 - \`grade\`:抓不到填 null
-- \`source\` + \`source_url\`:**台銀 → "台灣銀行"**;**JM → "JohnsonMatthey"**;Westmetall / Kitco / TradingEconomics 用品牌名
-- \`as_of_date\`:{{date}}
+- \`source\` + \`source_url\`:**台銀 → "台灣銀行"**;**JM → "JohnsonMatthey"**;Westmetall / Kitco 用品牌名(**不再有 TradingEconomics**)
+- \`as_of_date\`:
+  - AU 台銀、PT/PD/RH JM → 今天 {{date}}
+  - **Westmetall 基本金屬 + AG → Westmetall 表格那一行的日期**(可能 1-3 天前)
 
 \`\`\`json
 [
@@ -2113,8 +2154,9 @@ Rhodium 備援: {{scrape:https://www.kitco.com/charts/liverhodium.html}}
     "price_type":"spot","market":"LME","grade":"Grade A",
     "day_change_pct":null,"lme_stock":396000,"stock_change":425,
     "source":"Westmetall","source_url":"https://www.westmetall.com/en/markdaten.php",
-    "as_of_date":"{{date}}"
+    "as_of_date":"2026-05-22"
   },
+  // ↑ 注意 CU 的 as_of_date 是 Westmetall 表格那一行的日期(2026-05-22),不是今天!
   {
     "metal_code":"AU","metal_name":"金",
     "original_price":4689.20,"original_currency":"USD","original_unit":"USD/oz (1英兩)",
@@ -2141,7 +2183,7 @@ Rhodium 備援: {{scrape:https://www.kitco.com/charts/liverhodium.html}}
     "price_usd":2019.00,"unit":"USD/oz","fx_rate_to_usd":1.0,
     "conversion_note":null,
     "price_type":"fixing","market":"JM","grade":null,
-    "day_change_pct":-1.87,"lme_stock":null,"stock_change":null,
+    "day_change_pct":null,"lme_stock":null,"stock_change":null,
     "source":"JohnsonMatthey","source_url":"https://matthey.com/pgm-prices/rss-feed.xml",
     "as_of_date":"{{date}}"
   },
@@ -2151,7 +2193,7 @@ Rhodium 備援: {{scrape:https://www.kitco.com/charts/liverhodium.html}}
     "price_usd":1500.00,"unit":"USD/oz","fx_rate_to_usd":1.0,
     "conversion_note":null,
     "price_type":"fixing","market":"JM","grade":null,
-    "day_change_pct":-0.57,"lme_stock":null,"stock_change":null,
+    "day_change_pct":null,"lme_stock":null,"stock_change":null,
     "source":"JohnsonMatthey","source_url":"https://matthey.com/pgm-prices/rss-feed.xml",
     "as_of_date":"{{date}}"
   },
@@ -2161,7 +2203,7 @@ Rhodium 備援: {{scrape:https://www.kitco.com/charts/liverhodium.html}}
     "price_usd":10000.00,"unit":"USD/oz","fx_rate_to_usd":1.0,
     "conversion_note":null,
     "price_type":"fixing","market":"JM","grade":null,
-    "day_change_pct":0.00,"lme_stock":null,"stock_change":null,
+    "day_change_pct":null,"lme_stock":null,"stock_change":null,
     "source":"JohnsonMatthey","source_url":"https://matthey.com/pgm-prices/rss-feed.xml",
     "as_of_date":"{{date}}"
   }
@@ -2174,6 +2216,7 @@ Rhodium 備援: {{scrape:https://www.kitco.com/charts/liverhodium.html}}
     const missing = [
       !hasBotMarker && '台銀金 fetch',
       !hasJmMarker && 'JM RSS',
+      !hasNoTeMarker && '2026-05-25 TE 停用',
     ].filter(Boolean).join(' + ');
     console.log(`[PMScheduledTaskSeed] Force-updated user task "[PM] 每日貴金屬行情" #${id}: ${missing}`);
   } catch (e) {

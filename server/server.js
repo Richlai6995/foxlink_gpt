@@ -341,6 +341,12 @@ app.get('/api/version', (req, res) => {
       startSourceHealthCron();
     } catch (e) { console.error('[PmSourceHealth] Failed to start:', e.message); }
 
+    // 2026-05-25: PM day_change_pct 補算(TE 停用後接手 PGM + 基本金屬日變動 %)
+    if (RUN_SCHEDULERS) try {
+      const { startDayChangePctCron } = require('./services/pmDayChangePctService');
+      startDayChangePctCron();
+    } catch (e) { console.error('[PmDayChangePct] Failed to start:', e.message); }
+
     // Phase 5 Track F-2 + F-5: PM Token 預算 + cost aggregator(每 1h)
     if (RUN_SCHEDULERS) try {
       const { startTokenBudgetCron } = require('./services/pmTokenBudgetService');
