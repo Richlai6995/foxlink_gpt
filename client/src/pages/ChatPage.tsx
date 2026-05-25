@@ -723,8 +723,8 @@ function ChatPageDesktop() {
           }
           setSessions((prev) => [newSession, ...prev])
           setCurrentSessionId(sessionId)
-          // Apply pending skills to the new session
-          if (pendingSkillIds.size > 0) {
+          // Apply pending skills to the new session — 純對話模式時跳過,避免把 skill 寫進 session_skills
+          if (!pureMode && pendingSkillIds.size > 0) {
             try {
               await api.put(`/chat/sessions/${sessionId}/skills`, { skill_ids: [...pendingSkillIds] })
               setPendingSkillIds(new Set())
@@ -762,18 +762,25 @@ function ChatPageDesktop() {
         files.forEach((f) => formData.append('files', f))
       }
       // Explicit tool selection — always send even if empty (tells backend to skip auto-discover)
-      formData.append('mcp_server_ids', JSON.stringify([...selectedMcpIds]))
-      formData.append('dify_kb_ids',    JSON.stringify([...selectedDifyIds]))
-      formData.append('self_kb_ids',    JSON.stringify([...selectedKbIds]))
-      formData.append('erp_tool_ids',   JSON.stringify([...selectedErpIds]))
+      // 純對話模式:強制送空陣列,不要把使用者之前選的工具/KB id 傳上去(state 沒清掉只是 UI 灰掉)
+      if (pureMode) {
+        formData.append('mcp_server_ids', '[]')
+        formData.append('dify_kb_ids',    '[]')
+        formData.append('self_kb_ids',    '[]')
+        formData.append('erp_tool_ids',   '[]')
+        formData.append('pure_mode', 'true')
+      } else {
+        formData.append('mcp_server_ids', JSON.stringify([...selectedMcpIds]))
+        formData.append('dify_kb_ids',    JSON.stringify([...selectedDifyIds]))
+        formData.append('self_kb_ids',    JSON.stringify([...selectedKbIds]))
+        formData.append('erp_tool_ids',   JSON.stringify([...selectedErpIds]))
+      }
       // Hidden tools — backend filters these out from auto/explicit mode and from session skills
       formData.append('hidden_mcp_ids',     JSON.stringify([...mcpHidden]))
       formData.append('hidden_dify_ids',    JSON.stringify([...difyHidden]))
       formData.append('hidden_self_kb_ids', JSON.stringify([...kbHidden]))
       formData.append('hidden_skill_ids',   JSON.stringify([...skillHidden]))
       formData.append('hidden_erp_ids',     JSON.stringify([...erpHidden]))
-      // 純對話模式 — server 端會 skip 所有工具/KB/技能註冊
-      if (pureMode) formData.append('pure_mode', 'true')
 
       // SSE via XHR（相較 fetch 多了 upload.onprogress，可顯示檔案上傳進度）
       const token = localStorage.getItem('token')

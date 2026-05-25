@@ -320,8 +320,8 @@ export default function MobileChatLayout() {
         }
         setSessions((p) => [newSession, ...p])
         setCurrentSessionId(sessionId)
-        // 把 pending skills(新對話前已挑的)套用到剛建好的 session
-        if (pendingSkillIds.size > 0) {
+        // 把 pending skills(新對話前已挑的)套用到剛建好的 session — 純對話模式跳過
+        if (!pureMode && pendingSkillIds.size > 0) {
           try {
             const payload: any = { skill_ids: [...pendingSkillIds] }
             const varsToSend: Record<number, Record<string, any>> = {}
@@ -361,16 +361,24 @@ export default function MobileChatLayout() {
     // 多檔附件 — 走桌機相同的 multipart 路徑
     files.forEach((f) => formData.append('files', f))
     // 工具選擇 — 對齊桌機 ChatPage:所有欄位都送(含空 array),server 把 [] 視為 null → auto mode
-    formData.append('mcp_server_ids', JSON.stringify([...selectedMcpIds]))
-    formData.append('dify_kb_ids',    JSON.stringify([...selectedDifyIds]))
-    formData.append('self_kb_ids',    JSON.stringify([...selectedKbIds]))
-    formData.append('erp_tool_ids',   JSON.stringify([]))
+    // 純對話模式:強制空陣列(state 沒清掉只是 UI 灰掉,不能讓使用者預選的工具偷渡上去)
+    if (pureMode) {
+      formData.append('mcp_server_ids', '[]')
+      formData.append('dify_kb_ids',    '[]')
+      formData.append('self_kb_ids',    '[]')
+      formData.append('erp_tool_ids',   '[]')
+      formData.append('pure_mode', 'true')
+    } else {
+      formData.append('mcp_server_ids', JSON.stringify([...selectedMcpIds]))
+      formData.append('dify_kb_ids',    JSON.stringify([...selectedDifyIds]))
+      formData.append('self_kb_ids',    JSON.stringify([...selectedKbIds]))
+      formData.append('erp_tool_ids',   JSON.stringify([]))
+    }
     formData.append('hidden_mcp_ids',     JSON.stringify([]))
     formData.append('hidden_dify_ids',    JSON.stringify([]))
     formData.append('hidden_self_kb_ids', JSON.stringify([]))
     formData.append('hidden_skill_ids',   JSON.stringify([]))
     formData.append('hidden_erp_ids',     JSON.stringify([]))
-    if (pureMode) formData.append('pure_mode', 'true')
 
     const token = localStorage.getItem('token')
     let accText = ''
