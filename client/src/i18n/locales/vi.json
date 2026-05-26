@@ -2970,7 +2970,10 @@
       "notStarted": "Chưa bắt đầu",
       "searchPlaceholder": "Tìm theo tên hoặc mã NV…",
       "pageSize": "Mỗi trang",
-      "paginationInfo": "{{from}}–{{to}} / {{total}}"
+      "paginationInfo": "{{from}}–{{to}} / {{total}}",
+      "mandatoryIncomplete": "Chưa hoàn thành bắt buộc",
+      "browseIncomplete": "Chưa duyệt hết",
+      "examMissing": "Còn {{n}} câu"
     },
     "share": {
       "title": "Cài đặt chia sẻ khóa học",

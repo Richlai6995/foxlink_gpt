@@ -9,6 +9,11 @@ interface CourseDetail {
   best_score: number; attempts: number
   last_score: number; last_attempt_at: string | null
   weighted: number; total_score: number; passed: boolean
+  mandatory_complete?: boolean
+  mandatory_browse_complete?: boolean
+  mandatory_exam_complete?: boolean
+  mandatory_exam_missing?: number
+  mandatory_exam_total?: number
 }
 
 interface UserReport {
@@ -20,6 +25,9 @@ interface UserReport {
   last_attempt_at: string | null
   total_attempts: number
   exam_started: boolean
+  mandatory_complete?: boolean
+  mandatory_exam_total?: number
+  mandatory_exam_missing?: number
 }
 
 interface ReportData {
@@ -117,6 +125,28 @@ export default function ProgramReport({ programId }: { programId: number }) {
     return v
       ? <span className="inline-flex items-center gap-1 text-blue-600"><Clock size={14} />{t('training.report.started')}</span>
       : <span className="inline-flex items-center gap-1 text-slate-400"><MinusCircle size={14} />{t('training.report.notStarted')}</span>
+  }
+
+  // 未及格時告訴 admin 為什麼:必修沒做完?還是分數不夠?
+  const failReason = (u: UserReport): string | null => {
+    if (u.program_passed) return null
+    if (!u.exam_started) return null // 還沒考的人不顯示原因
+    if (u.mandatory_complete === false) {
+      // 從 courses 收集 incomplete 細節
+      const bits: string[] = []
+      for (const c of u.courses || []) {
+        if (c.mandatory_complete === false) {
+          const segs: string[] = []
+          if (c.mandatory_browse_complete === false) segs.push(t('training.report.browseIncomplete') as string)
+          if (c.mandatory_exam_complete === false && (c.mandatory_exam_missing || 0) > 0) {
+            segs.push(t('training.report.examMissing', { n: c.mandatory_exam_missing }) as string)
+          }
+          if (segs.length > 0) bits.push(segs.join(' / '))
+        }
+      }
+      return bits.length > 0 ? bits.join(', ') : (t('training.report.mandatoryIncomplete') as string)
+    }
+    return null
   }
 
   const toggleRow = (uid: number) => {
@@ -244,7 +274,17 @@ export default function ProgramReport({ programId }: { programId: number }) {
                       {u.exam_started ? `${u.last_score}/${u.last_score_max}` : '—'}
                     </td>
                     <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{fmtDate(u.last_attempt_at)}</td>
-                    <td className="px-3 py-2 text-center">{yesNo(u.program_passed, 'pass')}</td>
+                    <td className="px-3 py-2 text-center">
+                      <div className="flex flex-col items-center gap-0.5">
+                        {yesNo(u.program_passed, 'pass')}
+                        {(() => {
+                          const reason = failReason(u)
+                          return reason
+                            ? <span className="text-[10px] text-orange-500 whitespace-nowrap" title={reason}>{reason}</span>
+                            : null
+                        })()}
+                      </div>
+                    </td>
                   </tr>
                   {hasDetail && isOpen && (
                     <tr className="bg-slate-50">

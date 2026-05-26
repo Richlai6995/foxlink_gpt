@@ -91,36 +91,48 @@ async function loadProgramScoringCtx(db, progId) {
     lessonsByCourse.get(l.course_id).push(l);
   }
 
-  // 3) 每個 lesson 的 slide 總數 + 是否有互動 block
+  // 3) 每個 lesson 的 slide 總數 + 互動 slide_id 清單
+  //    為了「必修全部做完才判定及格」,需要知道 mandatory lesson 裡每個互動 slide 的 id,
+  //    才能比對 user 是否每題都答過(不只 count 對得上,要 set ⊇ mandatory set)
   const lessonIds = allLessons.map(l => l.id);
   const totalSlideByLesson = new Map();
-  const hasInteractiveByLesson = new Map();
+  const interactiveSlideIdsByLesson = new Map(); // lesson_id → Set<slide_id>
+  const hasInteractiveByLesson = new Map();      // 保留 boolean 版本給舊呼叫
   for (const ids of chunk(lessonIds, ORACLE_IN_CHUNK)) {
     if (ids.length === 0) continue;
     const ph = ids.map(() => '?').join(',');
+    // 撈所有 slide(含 content_json LIKE 判斷互動 type)
     const rows = await db.prepare(`
-      SELECT lesson_id,
-             COUNT(*) AS total_slides,
-             SUM(CASE WHEN content_json LIKE '%"type":"hotspot"%'
-                       OR content_json LIKE '%"type":"dragdrop"%'
-                       OR content_json LIKE '%"type":"quiz_inline"%'
-                      THEN 1 ELSE 0 END) AS interactive_count
+      SELECT id, lesson_id,
+             CASE WHEN content_json LIKE '%"type":"hotspot"%'
+                   OR content_json LIKE '%"type":"dragdrop"%'
+                   OR content_json LIKE '%"type":"quiz_inline"%'
+                  THEN 1 ELSE 0 END AS is_interactive
       FROM course_slides
       WHERE lesson_id IN (${ph})
-      GROUP BY lesson_id
     `).all(...ids);
     for (const r of rows) {
-      totalSlideByLesson.set(Number(r.lesson_id), Number(r.total_slides) || 0);
-      hasInteractiveByLesson.set(Number(r.lesson_id), Number(r.interactive_count) > 0);
+      const lid = Number(r.lesson_id);
+      const sid = Number(r.id);
+      totalSlideByLesson.set(lid, (totalSlideByLesson.get(lid) || 0) + 1);
+      if (Number(r.is_interactive) === 1) {
+        if (!interactiveSlideIdsByLesson.has(lid)) interactiveSlideIdsByLesson.set(lid, new Set());
+        interactiveSlideIdsByLesson.get(lid).add(sid);
+        hasInteractiveByLesson.set(lid, true);
+      }
     }
   }
   // 沒查到的 lesson 預設 0
   for (const lid of lessonIds) {
     if (!totalSlideByLesson.has(lid)) totalSlideByLesson.set(lid, 0);
     if (!hasInteractiveByLesson.has(lid)) hasInteractiveByLesson.set(lid, false);
+    if (!interactiveSlideIdsByLesson.has(lid)) interactiveSlideIdsByLesson.set(lid, new Set());
   }
 
-  return { program, courses, lessonsByCourse, totalSlideByLesson, hasInteractiveByLesson };
+  return {
+    program, courses, lessonsByCourse,
+    totalSlideByLesson, hasInteractiveByLesson, interactiveSlideIdsByLesson,
+  };
 }
 
 /**
@@ -136,9 +148,16 @@ async function loadUsersInteractionData(db, progId, userIds, courseIds, lessonId
   const lastByUserCourse = new Map();
   // attemptsByUserCourse: Map<`${user_id}|${course_id}`, count>
   const attemptsByUserCourse = new Map();
+  // answeredSlidesByUserCourse: Map<`${user_id}|${course_id}`, Set<slide_id>>
+  // — 用來判定「必修題目是否全部做完」(across ALL test sessions,只要 user 曾經
+  //   答過該題就算)。比 best session 寬鬆,符合「做完後再判及格」的語意
+  const answeredSlidesByUserCourse = new Map();
 
   if (userIds.length === 0 || courseIds.length === 0) {
-    return { browseViewByUserLesson, bestByUserCourse, lastByUserCourse, attemptsByUserCourse };
+    return {
+      browseViewByUserLesson, bestByUserCourse, lastByUserCourse,
+      attemptsByUserCourse, answeredSlidesByUserCourse,
+    };
   }
 
   for (const userChunk of chunk(userIds, ORACLE_IN_CHUNK)) {
@@ -235,10 +254,29 @@ async function loadUsersInteractionData(db, progId, userIds, courseIds, lessonId
       for (const r of attRows) {
         attemptsByUserCourse.set(`${r.user_id}|${r.course_id}`, Number(r.cnt) || 0);
       }
+
+      // (E) 所有曾經答過的 slide_id per (user, course) — 跨所有 test sessions
+      //     拿來判定「必修互動題目是否全部做完」(set ⊇ mandatory interactive slides)
+      const ansRows = await db.prepare(`
+        SELECT user_id, course_id, slide_id
+        FROM interaction_results
+        WHERE session_id IS NOT NULL AND player_mode = 'test'
+          AND user_id IN (${userPh})
+          AND course_id IN (${coursePh})
+        GROUP BY user_id, course_id, slide_id
+      `).all(...userChunk, ...courseChunk);
+      for (const r of ansRows) {
+        const key = `${r.user_id}|${r.course_id}`;
+        if (!answeredSlidesByUserCourse.has(key)) answeredSlidesByUserCourse.set(key, new Set());
+        answeredSlidesByUserCourse.get(key).add(Number(r.slide_id));
+      }
     }
   }
 
-  return { browseViewByUserLesson, bestByUserCourse, lastByUserCourse, attemptsByUserCourse };
+  return {
+    browseViewByUserLesson, bestByUserCourse, lastByUserCourse,
+    attemptsByUserCourse, answeredSlidesByUserCourse,
+  };
 }
 
 /**
@@ -258,14 +296,16 @@ async function loadUsersInteractionData(db, progId, userIds, courseIds, lessonId
  */
 function computeUserCourseScore({
   userId,
-  course,                  // 從 ctx.courses 來的單一 course 結構
-  lessonsByCourse,         // ctx.lessonsByCourse
-  totalSlideByLesson,      // ctx.totalSlideByLesson
-  hasInteractiveByLesson,  // ctx.hasInteractiveByLesson
-  browseViewByUserLesson,  // from loadUsersInteractionData
-  bestByUserCourse,        // from loadUsersInteractionData
-  lastByUserCourse,        // from loadUsersInteractionData
-  attemptsByUserCourse,    // from loadUsersInteractionData
+  course,                       // 從 ctx.courses 來的單一 course 結構
+  lessonsByCourse,              // ctx.lessonsByCourse
+  totalSlideByLesson,           // ctx.totalSlideByLesson
+  hasInteractiveByLesson,       // ctx.hasInteractiveByLesson
+  interactiveSlideIdsByLesson,  // ctx.interactiveSlideIdsByLesson — 必修完成度比對用
+  browseViewByUserLesson,       // from loadUsersInteractionData
+  bestByUserCourse,             // from loadUsersInteractionData
+  lastByUserCourse,             // from loadUsersInteractionData
+  attemptsByUserCourse,         // from loadUsersInteractionData
+  answeredSlidesByUserCourse,   // from loadUsersInteractionData — 必修完成度比對用
 }) {
   const examConfig = course.exam_config || {};
   const courseTotalScore = course.course_total_score;
@@ -286,6 +326,12 @@ function computeUserCourseScore({
   let interactiveLessonsWeight = 0;
   let totalEffectiveWeight = 0;
 
+  // 必修完成度追蹤
+  let mandatoryBrowseTotal = 0;
+  let mandatoryBrowseViewed = 0;
+  const mandatoryInteractiveSlideIds = new Set();
+  let hasAnyMandatoryLesson = false;
+
   for (const l of lessons) {
     const total = totalSlideByLesson.get(Number(l.id)) || 0;
     const viewedRaw = browseViewByUserLesson.get(`${userId}|${l.id}`) || 0;
@@ -298,6 +344,16 @@ function computeUserCourseScore({
     // mandatory:program 層的 lesson_mandatory override 優先,否則用 course_lessons.is_mandatory
     const ov = lessonMandatoryOverride[`lesson_${l.id}`];
     const mandatory = (ov === 0 || ov === 1) ? ov === 1 : ((l.is_mandatory ?? 1) === 1);
+
+    if (mandatory) {
+      hasAnyMandatoryLesson = true;
+      mandatoryBrowseTotal += total;
+      mandatoryBrowseViewed += viewed;
+      if (hasInteractive && interactiveSlideIdsByLesson) {
+        const ids = interactiveSlideIdsByLesson.get(Number(l.id));
+        if (ids) for (const sid of ids) mandatoryInteractiveSlideIds.add(sid);
+      }
+    }
 
     // weight:program 層 lesson_weights override 優先,否則用 course_lessons.score_weight
     const lwKey = `lesson_${l.id}`;
@@ -348,8 +404,29 @@ function computeUserCourseScore({
   }
 
   const courseScorePct = courseTotalScore > 0 ? (weighted / courseTotalScore) * 100 : 0;
-  // 對齊學員端 my-scores 的判定 — 不額外要求 attempts(純 browse-only 課程也可過)
-  const coursePassed = courseScorePct >= coursePassScore;
+
+  // ── 必修完成度判定 ──────────────────────────────────────────────
+  // 規則(2026-05-26):
+  // - 沒任何必修章節 → mandatoryComplete=true(沒東西要完成)
+  // - 有必修章節 →
+  //     1) 必修章節的所有 slide 都瀏覽過(browseViewed >= browseTotal)
+  //     2) 必修章節裡的所有互動 slide 都至少答過一次(across all sessions)
+  //   兩個都要過才算「必修做完」
+  // - coursePassed = mandatoryComplete && score >= passScore
+  //   做完才有資格被判定及格,沒做完不管分數多高都不算過
+  const answeredSlides = answeredSlidesByUserCourse?.get(`${userId}|${course.course_id}`) || new Set();
+  const mandatoryBrowseComplete = !hasAnyMandatoryLesson
+    || mandatoryBrowseTotal === 0
+    || mandatoryBrowseViewed >= mandatoryBrowseTotal;
+
+  let mandatoryExamMissing = 0;
+  for (const sid of mandatoryInteractiveSlideIds) {
+    if (!answeredSlides.has(sid)) mandatoryExamMissing++;
+  }
+  const mandatoryExamComplete = mandatoryExamMissing === 0;
+  const mandatoryComplete = mandatoryBrowseComplete && mandatoryExamComplete;
+
+  const coursePassed = mandatoryComplete && courseScorePct >= coursePassScore;
 
   return {
     weighted,
@@ -366,6 +443,15 @@ function computeUserCourseScore({
     lastScoreRaw,
     lastMaxRaw,
     onlyCountMandatory,
+    // 必修完成度(給前端顯示「缺 N 題」/「未瀏覽完」)
+    has_mandatory: hasAnyMandatoryLesson,
+    mandatory_browse_total: mandatoryBrowseTotal,
+    mandatory_browse_viewed: mandatoryBrowseViewed,
+    mandatory_browse_complete: mandatoryBrowseComplete,
+    mandatory_exam_total: mandatoryInteractiveSlideIds.size,
+    mandatory_exam_missing: mandatoryExamMissing,
+    mandatory_exam_complete: mandatoryExamComplete,
+    mandatory_complete: mandatoryComplete,
   };
 }
 
@@ -380,8 +466,11 @@ function computeUserProgramScore(userId, ctx, interactionData) {
   let programLastAt = null;
   let programAttempts = 0;
   let allRequiredPassed = true;
+  let allRequiredMandatoryComplete = true;
   let anyBrowseViewed = 0;
   let browseTotal = 0;
+  let programMandatoryExamTotal = 0;
+  let programMandatoryExamMissing = 0;
   const courseDetails = [];
 
   for (const course of ctx.courses) {
@@ -391,6 +480,7 @@ function computeUserProgramScore(userId, ctx, interactionData) {
       lessonsByCourse: ctx.lessonsByCourse,
       totalSlideByLesson: ctx.totalSlideByLesson,
       hasInteractiveByLesson: ctx.hasInteractiveByLesson,
+      interactiveSlideIdsByLesson: ctx.interactiveSlideIdsByLesson,
       ...interactionData,
     });
 
@@ -399,7 +489,12 @@ function computeUserProgramScore(userId, ctx, interactionData) {
     anyBrowseViewed += r.browseViewed;
     browseTotal += r.browseTotal;
 
-    if (course.is_required && !r.coursePassed) allRequiredPassed = false;
+    if (course.is_required) {
+      if (!r.coursePassed) allRequiredPassed = false;
+      if (!r.mandatory_complete) allRequiredMandatoryComplete = false;
+      programMandatoryExamTotal += r.mandatory_exam_total;
+      programMandatoryExamMissing += r.mandatory_exam_missing;
+    }
 
     if (r.attempts > 0) {
       programLastTotal += r.lastWeighted;
@@ -423,10 +518,16 @@ function computeUserProgramScore(userId, ctx, interactionData) {
       total_score: r.courseTotalScore,
       pass_score: r.coursePassScore,
       passed: r.coursePassed,
+      mandatory_complete: r.mandatory_complete,
+      mandatory_browse_complete: r.mandatory_browse_complete,
+      mandatory_exam_complete: r.mandatory_exam_complete,
+      mandatory_exam_missing: r.mandatory_exam_missing,
+      mandatory_exam_total: r.mandatory_exam_total,
     });
   }
 
   const programPassScore = ctx.program.program_pass_score || 60;
+  // 程式級及格 = 所有必修課都「做完 + 過分」
   const programPassed = allRequiredPassed
     && (programMax > 0 ? (programTotal / programMax * 100) >= programPassScore : false);
   const examStarted = programAttempts > 0;
@@ -449,6 +550,10 @@ function computeUserProgramScore(userId, ctx, interactionData) {
     browse_pct: browseTotal > 0 ? Math.round(anyBrowseViewed / browseTotal * 100) : 0,
     status,
     courses: courseDetails,
+    // 必修完成度 rollup(前端 row hint 用)
+    mandatory_complete: allRequiredMandatoryComplete,
+    mandatory_exam_total: programMandatoryExamTotal,
+    mandatory_exam_missing: programMandatoryExamMissing,
   };
 }
 

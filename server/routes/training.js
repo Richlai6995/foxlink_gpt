@@ -4178,6 +4178,7 @@ router.get('/classroom/programs/:id/my-scores', async (req, res) => {
         lessonsByCourse: ctx.lessonsByCourse,
         totalSlideByLesson: ctx.totalSlideByLesson,
         hasInteractiveByLesson: ctx.hasInteractiveByLesson,
+        interactiveSlideIdsByLesson: ctx.interactiveSlideIdsByLesson,
         ...interactionData,
       });
       const lessonProgress = breakdown.lessonProgress;
@@ -4234,6 +4235,14 @@ router.get('/classroom/programs/:id/my-scores', async (req, res) => {
         only_count_mandatory: onlyCountMandatory,
         browse_progress: { total: totalSlides, viewed: viewedSlides, pct: totalSlides > 0 ? Math.round(viewedSlides / totalSlides * 100) : 0, lessons: lessonProgress },
         browse_only_score: browseOnlyScore,
+        // 必修完成度(2026-05-26 起,coursePassed 必須先 mandatory_complete)
+        mandatory_complete: scoreResult.mandatory_complete,
+        mandatory_browse_complete: scoreResult.mandatory_browse_complete,
+        mandatory_browse_total: scoreResult.mandatory_browse_total,
+        mandatory_browse_viewed: scoreResult.mandatory_browse_viewed,
+        mandatory_exam_complete: scoreResult.mandatory_exam_complete,
+        mandatory_exam_total: scoreResult.mandatory_exam_total,
+        mandatory_exam_missing: scoreResult.mandatory_exam_missing,
         exam: {
           best_score: bestScore, best_max: bestMax,
           attempts: attemptCount?.cnt || 0, max_attempts: maxAttempts,
@@ -4409,12 +4418,12 @@ router.get('/programs/:id/report/export', async (req, res) => {
     const XLSX = require('xlsx');
     const lang = req.query.lang || req.headers['accept-language']?.split(',')[0]?.split('-')[0] || 'zh';
     const labels = lang === 'en'
-      ? { name: 'Name', eid: 'Employee ID', dept: 'Department', started: 'Exam Started', browse: 'Browse Progress', attempts: 'Attempts', lastScore: 'Last Score', lastAt: 'Last Attempt', pass: 'Passed', yes: 'Yes', no: 'No', dash: '—' }
+      ? { name: 'Name', eid: 'Employee ID', dept: 'Department', started: 'Exam Started', browse: 'Browse Progress', attempts: 'Attempts', lastScore: 'Last Score', lastAt: 'Last Attempt', pass: 'Passed', complete: 'Mandatory Completed', missing: 'Missing', yes: 'Yes', no: 'No', dash: '—' }
       : lang === 'vi'
-      ? { name: 'Tên', eid: 'Mã NV', dept: 'Phòng ban', started: 'Đã bắt đầu thi', browse: 'Tiến độ duyệt', attempts: 'Số lần thi', lastScore: 'Điểm gần nhất', lastAt: 'Lần thi gần nhất', pass: 'Đạt', yes: 'Có', no: 'Không', dash: '—' }
-      : { name: '姓名', eid: '工號', dept: '部門', started: '是否開始測驗', browse: '導覽進度', attempts: '考過幾次', lastScore: '最後成績', lastAt: '最後測驗日期', pass: '是否及格', yes: '是', no: '否', dash: '—' };
+      ? { name: 'Tên', eid: 'Mã NV', dept: 'Phòng ban', started: 'Đã bắt đầu thi', browse: 'Tiến độ duyệt', attempts: 'Số lần thi', lastScore: 'Điểm gần nhất', lastAt: 'Lần thi gần nhất', pass: 'Đạt', complete: 'Hoàn thành bắt buộc', missing: 'Thiếu', yes: 'Có', no: 'Không', dash: '—' }
+      : { name: '姓名', eid: '工號', dept: '部門', started: '是否開始測驗', browse: '導覽進度', attempts: '考過幾次', lastScore: '最後成績', lastAt: '最後測驗日期', pass: '是否及格', complete: '必修完成', missing: '未完成', yes: '是', no: '否', dash: '—' };
 
-    const headers = [labels.name, labels.eid, labels.dept, labels.started, labels.browse, labels.attempts, labels.lastScore, labels.lastAt, labels.pass];
+    const headers = [labels.name, labels.eid, labels.dept, labels.started, labels.browse, labels.attempts, labels.lastScore, labels.lastAt, labels.complete, labels.pass];
 
     const fmtAt = (d) => {
       if (!d) return labels.dash;
@@ -4422,6 +4431,22 @@ router.get('/programs/:id/report/export', async (req, res) => {
       if (Number.isNaN(t.getTime())) return labels.dash;
       const pad = (n) => String(n).padStart(2, '0');
       return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}`;
+    };
+
+    const completeText = (u) => {
+      if (u.mandatory_complete) return labels.yes;
+      // 列出缺什麼:缺 N 題 / 未瀏覽完(看哪個沒過)
+      const parts = [];
+      for (const c of (u.courses || [])) {
+        if (c.mandatory_complete) continue;
+        const bits = [];
+        if (!c.mandatory_browse_complete) bits.push(lang === 'en' ? 'browse' : lang === 'vi' ? 'duyệt' : '瀏覽');
+        if (!c.mandatory_exam_complete && c.mandatory_exam_missing > 0) {
+          bits.push(`${labels.missing} ${c.mandatory_exam_missing}`);
+        }
+        if (bits.length > 0) parts.push(`${c.title}: ${bits.join(', ')}`);
+      }
+      return parts.length > 0 ? parts.join(' / ') : labels.no;
     };
 
     const rows = filtered.map(u => {
@@ -4440,6 +4465,7 @@ router.get('/programs/:id/report/export', async (req, res) => {
         u.exam_started ? u.total_attempts : labels.dash,
         lastScoreStr,
         fmtAt(u.last_attempt_at),
+        completeText(u),
         u.program_passed ? labels.yes : labels.no,
       ];
     });

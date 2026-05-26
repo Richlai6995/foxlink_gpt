@@ -2970,7 +2970,10 @@
       "notStarted": "未開始",
       "searchPlaceholder": "搜尋姓名或工號…",
       "pageSize": "每頁",
-      "paginationInfo": "第 {{from}}–{{to}} 筆，共 {{total}} 筆"
+      "paginationInfo": "第 {{from}}–{{to}} 筆，共 {{total}} 筆",
+      "mandatoryIncomplete": "未完成必修",
+      "browseIncomplete": "未瀏覽完",
+      "examMissing": "缺 {{n}} 題"
     },
     "share": {
       "title": "課程分享設定",
