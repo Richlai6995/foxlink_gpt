@@ -2967,7 +2967,10 @@
       "lastAttemptAt": "最後測驗日期",
       "passResult": "是否及格",
       "started": "已開始",
-      "notStarted": "未開始"
+      "notStarted": "未開始",
+      "searchPlaceholder": "搜尋姓名或工號…",
+      "pageSize": "每頁",
+      "paginationInfo": "第 {{from}}–{{to}} 筆，共 {{total}} 筆"
     },
     "share": {
       "title": "課程分享設定",

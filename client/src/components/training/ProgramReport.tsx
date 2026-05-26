@@ -1,7 +1,7 @@
-import { useState, useEffect, Fragment } from 'react'
+import { useState, useEffect, Fragment, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
-import { Download, ChevronDown, ChevronRight, Users, CheckCircle2, XCircle, Clock, MinusCircle } from 'lucide-react'
+import { Download, ChevronDown, ChevronRight, Users, CheckCircle2, XCircle, Clock, MinusCircle, Search, ChevronsLeft, ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon, ChevronsRight } from 'lucide-react'
 
 interface CourseDetail {
   course_id: number; title: string
@@ -25,11 +25,13 @@ interface UserReport {
 interface ReportData {
   program_title: string; program_pass_score: number
   summary: { total: number; completed_browse: number; passed: number; not_started: number }
+  pagination: { page: number; page_size: number; total: number; total_pages: number }
   users: UserReport[]
 }
 
 type SortKey = 'name' | 'employee_id' | 'browse_pct' | 'attempts' | 'last_score' | 'last_at' | 'passed' | 'started'
 type SortDir = 'asc' | 'desc'
+type FilterStatus = 'all' | 'passed' | 'in_progress' | 'not_started'
 
 const fmtDate = (s: string | null) => {
   if (!s) return '—'
@@ -47,20 +49,48 @@ export default function ProgramReport({ programId }: { programId: number }) {
   const [exporting, setExporting] = useState(false)
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
-  const [filter, setFilter] = useState<'all' | 'passed' | 'in_progress' | 'not_started'>('all')
+  const [filter, setFilter] = useState<FilterStatus>('all')
+  const [searchInput, setSearchInput] = useState('')
+  const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
+  const debounceRef = useRef<number | null>(null)
+
+  // search debounce (400ms)— 邊打邊送會把 server 打爆
+  useEffect(() => {
+    if (debounceRef.current) window.clearTimeout(debounceRef.current)
+    debounceRef.current = window.setTimeout(() => {
+      setSearch(searchInput)
+      setPage(1) // 換搜尋字 → 回第一頁
+    }, 400)
+    return () => { if (debounceRef.current) window.clearTimeout(debounceRef.current) }
+  }, [searchInput])
+
+  // 換 filter / sort → 回第一頁
+  useEffect(() => { setPage(1) }, [filter, sortKey, sortDir, pageSize])
 
   useEffect(() => {
     setLoading(true)
-    api.get(`/training/programs/${programId}/report`)
+    const params = new URLSearchParams({
+      page: String(page),
+      page_size: String(pageSize),
+      status: filter,
+      sort: sortKey,
+      sort_dir: sortDir,
+    })
+    if (search.trim()) params.set('search', search.trim())
+    api.get(`/training/programs/${programId}/report?${params.toString()}`)
       .then(r => setData(r.data))
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [programId])
+  }, [programId, page, pageSize, filter, sortKey, sortDir, search])
 
   const handleExport = async () => {
     setExporting(true)
     try {
-      const res = await api.get(`/training/programs/${programId}/report/export`, { responseType: 'blob' })
+      const params = new URLSearchParams({ status: filter })
+      if (search.trim()) params.set('search', search.trim())
+      const res = await api.get(`/training/programs/${programId}/report/export?${params.toString()}`, { responseType: 'blob' })
       const url = window.URL.createObjectURL(new Blob([res.data]))
       const a = document.createElement('a')
       a.href = url
@@ -71,36 +101,12 @@ export default function ProgramReport({ programId }: { programId: number }) {
     finally { setExporting(false) }
   }
 
-  if (loading) return <div className="text-center py-12 text-sm text-slate-400">{t('training.loading')}</div>
-  if (!data) return null
-
   const toggleSort = (k: SortKey) => {
     if (sortKey === k) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortKey(k); setSortDir('asc') }
   }
 
   const sortIcon = (k: SortKey) => sortKey === k ? (sortDir === 'asc' ? '↑' : '↓') : ''
-
-  const filtered = data.users.filter(u => filter === 'all' || u.status === filter)
-  const sorted = [...filtered].sort((a, b) => {
-    const dir = sortDir === 'asc' ? 1 : -1
-    const cmp = (x: number | string, y: number | string) =>
-      x < y ? -dir : x > y ? dir : 0
-    switch (sortKey) {
-      case 'name': return cmp(a.name || '', b.name || '')
-      case 'employee_id': return cmp(a.employee_id || '', b.employee_id || '')
-      case 'browse_pct': return cmp(a.browse_pct, b.browse_pct)
-      case 'attempts': return cmp(a.total_attempts, b.total_attempts)
-      case 'last_score': {
-        const ax = a.last_score_max > 0 ? a.last_score / a.last_score_max : -1
-        const bx = b.last_score_max > 0 ? b.last_score / b.last_score_max : -1
-        return cmp(ax, bx)
-      }
-      case 'last_at': return cmp(a.last_attempt_at || '', b.last_attempt_at || '')
-      case 'passed': return cmp(a.program_passed ? 1 : 0, b.program_passed ? 1 : 0)
-      case 'started': return cmp(a.exam_started ? 1 : 0, b.exam_started ? 1 : 0)
-    }
-  })
 
   const yesNo = (v: boolean, kind: 'pass' | 'start') => {
     if (kind === 'pass') {
@@ -121,7 +127,7 @@ export default function ProgramReport({ programId }: { programId: number }) {
     })
   }
 
-  const filterBtn = (v: typeof filter, label: string, cls: string) => (
+  const filterBtn = (v: FilterStatus, label: string, cls: string) => (
     <button
       onClick={() => setFilter(v)}
       className={`px-2.5 py-1 rounded-full text-xs font-medium transition ${
@@ -132,21 +138,39 @@ export default function ProgramReport({ programId }: { programId: number }) {
     </button>
   )
 
+  if (loading && !data) return <div className="text-center py-12 text-sm text-slate-400">{t('training.loading')}</div>
+  if (!data) return null
+
+  const rows = data.users
+  const summary = data.summary
+  const pg = data.pagination
+  const inProgressCount = summary.total - summary.passed - summary.not_started
+
   return (
     <div className="space-y-4">
-      {/* Summary bar */}
+      {/* Summary + search bar */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-2">
           <Users size={16} className="text-blue-600" />
           <span className="text-sm font-semibold text-slate-700">{t('training.report.title')}</span>
         </div>
         <div className="flex items-center gap-1.5">
-          {filterBtn('all', `${t('training.report.assigned')} ${data.summary.total}`, 'bg-blue-100 text-blue-700')}
-          {filterBtn('passed', `${t('training.scoring.passed')} ${data.summary.passed}`, 'bg-green-100 text-green-700')}
-          {filterBtn('in_progress', `${t('training.scoring.inProgress')} ${data.summary.total - data.summary.passed - data.summary.not_started}`, 'bg-amber-100 text-amber-700')}
-          {filterBtn('not_started', `${t('training.scoring.notStarted')} ${data.summary.not_started}`, 'bg-slate-200 text-slate-600')}
+          {filterBtn('all', `${t('training.report.assigned')} ${summary.total}`, 'bg-blue-100 text-blue-700')}
+          {filterBtn('passed', `${t('training.scoring.passed')} ${summary.passed}`, 'bg-green-100 text-green-700')}
+          {filterBtn('in_progress', `${t('training.scoring.inProgress')} ${inProgressCount}`, 'bg-amber-100 text-amber-700')}
+          {filterBtn('not_started', `${t('training.scoring.notStarted')} ${summary.not_started}`, 'bg-slate-200 text-slate-600')}
         </div>
         <div className="flex-1" />
+        <div className="relative">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          <input
+            type="text"
+            value={searchInput}
+            onChange={e => setSearchInput(e.target.value)}
+            placeholder={t('training.report.searchPlaceholder') as string}
+            className="pl-8 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg w-52 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </div>
         <button onClick={handleExport} disabled={exporting}
           className="flex items-center gap-1.5 bg-green-600 hover:bg-green-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition disabled:opacity-50">
           <Download size={13} /> {exporting ? '...' : t('training.report.exportExcel')}
@@ -154,7 +178,12 @@ export default function ProgramReport({ programId }: { programId: number }) {
       </div>
 
       {/* User table */}
-      <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
+      <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto relative">
+        {loading && (
+          <div className="absolute inset-0 bg-white/60 flex items-center justify-center z-10 text-xs text-slate-500">
+            {t('training.loading')}
+          </div>
+        )}
         <table className="w-full text-xs">
           <thead className="bg-slate-50 text-[11px] uppercase text-slate-500">
             <tr>
@@ -186,7 +215,7 @@ export default function ProgramReport({ programId }: { programId: number }) {
             </tr>
           </thead>
           <tbody>
-            {sorted.map(u => {
+            {rows.map(u => {
               const isOpen = expanded.has(u.user_id)
               const hasDetail = u.courses.length > 1
               const lastPct = u.last_score_max > 0 ? Math.round(u.last_score / u.last_score_max * 100) : 0
@@ -246,7 +275,7 @@ export default function ProgramReport({ programId }: { programId: number }) {
                 </Fragment>
               )
             })}
-            {sorted.length === 0 && (
+            {rows.length === 0 && !loading && (
               <tr>
                 <td colSpan={9} className="text-center py-8 text-sm text-slate-400">{t('training.report.noData')}</td>
               </tr>
@@ -254,6 +283,54 @@ export default function ProgramReport({ programId }: { programId: number }) {
           </tbody>
         </table>
       </div>
+
+      {/* Pagination */}
+      {pg.total > 0 && (
+        <div className="flex items-center justify-between text-xs text-slate-600">
+          <div>
+            {t('training.report.paginationInfo', {
+              from: (pg.page - 1) * pg.page_size + 1,
+              to: Math.min(pg.page * pg.page_size, pg.total),
+              total: pg.total,
+            })}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-slate-500">{t('training.report.pageSize')}</span>
+            <select
+              value={pageSize}
+              onChange={e => setPageSize(Number(e.target.value))}
+              className="border border-slate-300 rounded px-2 py-1 text-xs"
+            >
+              {[20, 50, 100, 200, 500].map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <div className="flex items-center gap-0.5 ml-2">
+              <button
+                onClick={() => setPage(1)}
+                disabled={pg.page <= 1}
+                className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+              ><ChevronsLeft size={14} /></button>
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={pg.page <= 1}
+                className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+              ><ChevronLeftIcon size={14} /></button>
+              <span className="px-2 tabular-nums">
+                {pg.page} / {pg.total_pages}
+              </span>
+              <button
+                onClick={() => setPage(p => Math.min(pg.total_pages, p + 1))}
+                disabled={pg.page >= pg.total_pages}
+                className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+              ><ChevronRightIcon size={14} /></button>
+              <button
+                onClick={() => setPage(pg.total_pages)}
+                disabled={pg.page >= pg.total_pages}
+                className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+              ><ChevronsRight size={14} /></button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

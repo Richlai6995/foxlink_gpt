@@ -2967,7 +2967,10 @@
       "lastAttemptAt": "Last Attempt",
       "passResult": "Passed",
       "started": "Started",
-      "notStarted": "Not Started"
+      "notStarted": "Not Started",
+      "searchPlaceholder": "Search by name or employee ID…",
+      "pageSize": "Per page",
+      "paginationInfo": "{{from}}–{{to}} of {{total}}"
     },
     "share": {
       "title": "Course Sharing Settings",

@@ -2967,7 +2967,10 @@
       "lastAttemptAt": "Lần thi gần nhất",
       "passResult": "Đạt",
       "started": "Đã bắt đầu",
-      "notStarted": "Chưa bắt đầu"
+      "notStarted": "Chưa bắt đầu",
+      "searchPlaceholder": "Tìm theo tên hoặc mã NV…",
+      "pageSize": "Mỗi trang",
+      "paginationInfo": "{{from}}–{{to}} / {{total}}"
     },
     "share": {
       "title": "Cài đặt chia sẻ khóa học",

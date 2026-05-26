@@ -3077,6 +3077,24 @@ async function runMigrations(db) {
     created_at         TIMESTAMP DEFAULT SYSTIMESTAMP
   )`);
 
+  // ── Training 報表效能 index(2026-05-26)──────────────────────────────────
+  // 主要 use case:admin 成績報表 bulk query(GROUP BY user_id, course_id, session_id
+  // + WHERE player_mode='test' AND user_id IN(...) AND course_id IN(...))。
+  // 沒這個 index 時 1378 人會掃全表 N 次,加了之後 set-based query 走 index range scan。
+  for (const [name, ddl] of [
+    ['ix_ir_user_course_test',
+      `CREATE INDEX ix_ir_user_course_test ON interaction_results(user_id, course_id, player_mode, session_id)`],
+    ['ix_ir_course_user',
+      `CREATE INDEX ix_ir_course_user ON interaction_results(course_id, user_id)`],
+    ['ix_usv_prog_user_lesson',
+      `CREATE INDEX ix_usv_prog_user_lesson ON user_slide_views(program_id, user_id, lesson_id)`],
+    ['ix_usv_prog_user_course',
+      `CREATE INDEX ix_usv_prog_user_course ON user_slide_views(program_id, user_id, course_id)`],
+  ]) {
+    try { await db.prepare(ddl).run(); console.log(`[Migration] ${name} created ✓`); }
+    catch (e) { if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn(`[Migration] ${name}:`, e.message); }
+  }
+
   await createTable('COURSE_NOTIFICATION_SETTINGS', `CREATE TABLE course_notification_settings (
     id                  NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     course_id           NUMBER NOT NULL,

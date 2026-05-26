@@ -9,6 +9,13 @@ const POD = process.env.HOSTNAME || os.hostname();
 const { verifyToken } = require('./auth');
 const { db } = require('../database-oracle');
 const { resolveGranteeNamesInRows, getLangFromReq } = require('../services/granteeNameResolver');
+const {
+  loadProgramScoringCtx,
+  loadUsersInteractionData,
+  computeUserCourseScore,
+  computeUserProgramScore,
+  buildLessonBreakdown,
+} = require('../services/programScoreCalculator');
 
 // ─── File upload config ──────────────────────────────────────────────────────
 const localUploads = path.join(__dirname, '..', 'uploads');
@@ -4132,123 +4139,60 @@ router.get('/classroom/programs/:id/my-scores', async (req, res) => {
     const progId = Number(req.params.id);
     const userId = req.user.id;
 
-    // Get program info
-    const program = await db.prepare('SELECT program_pass_score FROM training_programs WHERE id=?').get(progId);
-    if (!program) return res.status(404).json({ error: '專案不存在' });
+    // 用 shared util 載 program scoring context — 跟 admin 報表共用一份算法
+    const ctx = await loadProgramScoringCtx(db, progId);
+    if (!ctx) return res.status(404).json({ error: '專案不存在' });
 
-    // Get program courses with exam_config (+ course settings_json for fallback defaults)
-    const coursesRaw = await db.prepare(`
-      SELECT pc.id AS pc_id, pc.course_id, pc.lesson_ids, pc.exam_config, pc.is_required,
-             c.title AS course_title, c.pass_score AS course_pass_score,
-             c.settings_json AS course_settings_json
-      FROM program_courses pc
-      JOIN courses c ON c.id = pc.course_id
-      WHERE pc.program_id = ? ORDER BY pc.sort_order
-    `).all(progId);
+    // 單一使用者:撈這個 user 在所有 course / lesson 的 interaction 資料
+    const allLessonIds = [];
+    for (const arr of ctx.lessonsByCourse.values()) for (const l of arr) allLessonIds.push(l.id);
+    const interactionData = await loadUsersInteractionData(
+      db, progId,
+      [userId],
+      ctx.courses.map(c => c.course_id),
+      allLessonIds
+    );
 
     const result = [];
     let programTotal = 0, programMax = 0;
     let allCoursePassed = true;
 
-    for (const pc of coursesRaw) {
-      const lessonIds = pc.lesson_ids ? JSON.parse(pc.lesson_ids) : null;
-      const examConfig = pc.exam_config ? JSON.parse(pc.exam_config) : {};
-      // Fallback: if program's exam_config.only_count_mandatory is unset, inherit from course
-      if (examConfig.only_count_mandatory === undefined && pc.course_settings_json) {
-        try {
-          const cs = typeof pc.course_settings_json === 'string' ? JSON.parse(pc.course_settings_json) : pc.course_settings_json;
-          if (cs?.exam?.only_count_mandatory !== undefined) {
-            examConfig.only_count_mandatory = !!cs.exam.only_count_mandatory;
-          }
-        } catch {}
-      }
-      const courseTotalScore = examConfig.total_score || 100;
-      const coursePassScore = examConfig.pass_score || pc.course_pass_score || 60;
-      const maxAttempts = examConfig.max_attempts || 0;
+    for (const course of ctx.courses) {
+      const pc = { course_id: course.course_id, course_pass_score: course.course_pass_score, course_title: course.course_title };
+      const lessonIds = course.lesson_ids;
+      const examConfig = course.exam_config;
+      const courseTotalScore = course.course_total_score;
+      const coursePassScore = course.course_pass_score_effective;
+      const maxAttempts = course.max_attempts;
 
-      // Get lessons for this course (filtered by lesson_ids), include mandatory + default weight
-      let lessons = await db.prepare('SELECT id, title, is_mandatory, score_weight FROM course_lessons WHERE course_id=? ORDER BY sort_order, id').all(pc.course_id);
-      if (lessonIds && lessonIds.length > 0) {
-        lessons = lessons.filter(l => lessonIds.includes(l.id));
-      }
+      // 用 shared util 算分數 + lesson 細節(學員端 UI 需要 lessonProgress 顯示每章)
+      const breakdown = buildLessonBreakdown({
+        userId, course,
+        lessonsByCourse: ctx.lessonsByCourse,
+        totalSlideByLesson: ctx.totalSlideByLesson,
+        hasInteractiveByLesson: ctx.hasInteractiveByLesson,
+        browseViewByUserLesson: interactionData.browseViewByUserLesson,
+      });
+      const scoreResult = computeUserCourseScore({
+        userId, course,
+        lessonsByCourse: ctx.lessonsByCourse,
+        totalSlideByLesson: ctx.totalSlideByLesson,
+        hasInteractiveByLesson: ctx.hasInteractiveByLesson,
+        ...interactionData,
+      });
+      const lessonProgress = breakdown.lessonProgress;
+      const totalSlides = breakdown.totalSlides;
+      const viewedSlides = breakdown.viewedSlides;
+      const browseOnlyScore = breakdown.browseOnlyScore;
+      const onlyCountMandatory = breakdown.onlyCountMandatory;
+      const bestScore = scoreResult.bestScore;
+      const bestMax = scoreResult.bestMax || 100;
+      const weightedScore = scoreResult.weighted;
+      const coursePassed = scoreResult.coursePassed;
+      const attemptCount = { cnt: scoreResult.attempts };
+      if (pc.course_id != null && course.is_required && !coursePassed) allCoursePassed = false;
 
-      // Get total slides per lesson + check if lesson has interactive blocks
-      const lessonProgress = [];
-      let totalSlides = 0, viewedSlides = 0;
-      let browseOnlyScore = 0; // score from non-interactive lessons (browse completion), using effective weights
-      const lessonWeights = examConfig.lesson_weights || {};
-      const lessonMandatoryOverride = examConfig.lesson_mandatory || {};
-      const onlyCountMandatory = !!examConfig.only_count_mandatory;
-
-      for (const lesson of lessons) {
-        const slideCount = await db.prepare('SELECT COUNT(*) AS cnt FROM course_slides WHERE lesson_id=?').get(lesson.id);
-        const viewed = await db.prepare(`
-          SELECT COUNT(*) AS cnt FROM user_slide_views
-          WHERE user_id=? AND lesson_id=? AND ${progId ? 'program_id=?' : 'program_id IS NULL'}
-        `).get(userId, lesson.id, ...(progId ? [progId] : []));
-
-        const total = slideCount?.cnt || 0;
-        const done = Math.min(viewed?.cnt || 0, total);
-        totalSlides += total;
-        viewedSlides += done;
-
-        // Check if this lesson has any interactive slides (hotspot/dragdrop/quiz_inline)
-        const interactiveCount = await db.prepare(`
-          SELECT COUNT(*) AS cnt FROM course_slides cs
-          WHERE cs.lesson_id = ? AND (
-            cs.content_json LIKE '%"type":"hotspot"%'
-            OR cs.content_json LIKE '%"type":"dragdrop"%'
-            OR cs.content_json LIKE '%"type":"quiz_inline"%'
-          )
-        `).get(lesson.id);
-        const hasInteractive = (interactiveCount?.cnt || 0) > 0;
-
-        // Effective mandatory: program override → course default (1=mandatory)
-        const ovMand = lessonMandatoryOverride[`lesson_${lesson.id}`];
-        const mandatory = (ovMand === 0 || ovMand === 1) ? ovMand === 1 : (lesson.is_mandatory ?? 1) === 1;
-
-        // Effective weight: program override → course default (SCORE_WEIGHT)
-        const baseWeight = lessonWeights[`lesson_${lesson.id}`] != null
-          ? Number(lessonWeights[`lesson_${lesson.id}`])
-          : (lesson.score_weight ?? 0);
-        const effectiveWeight = (onlyCountMandatory && !mandatory) ? 0 : baseWeight;
-
-        // For non-interactive lessons: score = browse completion × effective weight
-        let lessonBrowseScore = 0;
-        if (!hasInteractive && effectiveWeight > 0 && total > 0) {
-          lessonBrowseScore = Math.round((done / total) * effectiveWeight);
-          browseOnlyScore += lessonBrowseScore;
-        }
-
-        lessonProgress.push({
-          lesson_id: lesson.id, title: lesson.title, total, viewed: done,
-          has_interactive: hasInteractive, browse_score: lessonBrowseScore,
-          lesson_weight: effectiveWeight, base_weight: baseWeight,
-          is_mandatory: mandatory ? 1 : 0,
-          not_counted: onlyCountMandatory && !mandatory
-        });
-      }
-
-      // Get best exam score (from interaction_results grouped by session_id)
-      // This covers ONLY interactive lessons
-      const bestSession = await db.prepare(`
-        SELECT SUM(COALESCE(weighted_score, score)) AS session_score,
-               SUM(COALESCE(weighted_max, max_score)) AS session_max,
-               MAX(created_at) AS session_at
-        FROM interaction_results
-        WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test'
-        GROUP BY session_id
-        ORDER BY SUM(COALESCE(weighted_score, score)) DESC
-        FETCH FIRST 1 ROW ONLY
-      `).get(userId, pc.course_id);
-
-      // Get exam attempt count
-      const attemptCount = await db.prepare(`
-        SELECT COUNT(DISTINCT session_id) AS cnt FROM interaction_results
-        WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test'
-      `).get(userId, pc.course_id);
-
-      // Get exam history (all sessions) with per-slide details
+      // 額外撈 exam history(per-attempt 含 slide 細節)— 給學員 UI 看每次答題紀錄
       const examHistoryRaw = await db.prepare(`
         SELECT session_id, SUM(COALESCE(weighted_score, score)) AS score,
                SUM(COALESCE(weighted_max, max_score)) AS max_score,
@@ -4256,9 +4200,8 @@ router.get('/classroom/programs/:id/my-scores', async (req, res) => {
         FROM interaction_results
         WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test'
         GROUP BY session_id ORDER BY MAX(created_at) DESC
-      `).all(userId, pc.course_id);
+      `).all(userId, course.course_id);
 
-      // Load slide details for each session
       const examHistory = [];
       for (const sess of examHistoryRaw) {
         const slides = await db.prepare(`
@@ -4271,7 +4214,6 @@ router.get('/classroom/programs/:id/my-scores', async (req, res) => {
           WHERE ir.session_id = ? AND ir.user_id = ?
           ORDER BY ir.id
         `).all(sess.session_id, userId);
-        // Parse CLOB fields
         const parsedSlides = slides.map(s => ({
           ...s,
           score_breakdown: s.score_breakdown ? (typeof s.score_breakdown === 'string' ? JSON.parse(s.score_breakdown) : s.score_breakdown) : null,
@@ -4280,36 +4222,8 @@ router.get('/classroom/programs/:id/my-scores', async (req, res) => {
         examHistory.push({ ...sess, slides: parsedSlides });
       }
 
-      const bestScore = bestSession?.session_score || 0;
-      const bestMax = bestSession?.session_max || 100;
-      const examRatio = bestMax > 0 ? bestScore / bestMax : 0;
-
-      // Calculate interactive lessons' weighted score (using effective weights)
-      const interactiveLessonsWeight = lessonProgress
-        .filter(l => l.has_interactive)
-        .reduce((s, l) => s + l.lesson_weight, 0);
-
-      // Sum of all included effective weights (used to normalize)
-      const totalEffectiveWeight = lessonProgress.reduce((s, l) => s + l.lesson_weight, 0);
-
-      let weightedScore;
-      if (totalEffectiveWeight > 0) {
-        // Normalize: earned / weightSum × courseTotalScore
-        // (rescales proportions to the configured total score, handles only_count_mandatory)
-        const interactiveEarned = examRatio * interactiveLessonsWeight;
-        const earnedTotal = browseOnlyScore + interactiveEarned;
-        weightedScore = Math.round((earnedTotal / totalEffectiveWeight) * courseTotalScore);
-      } else {
-        // Fallback: no configured weights → use exam ratio directly
-        weightedScore = Math.round(examRatio * courseTotalScore);
-      }
-
-      const courseScorePct = courseTotalScore > 0 ? (weightedScore / courseTotalScore) * 100 : 0;
-      const coursePassed = courseScorePct >= coursePassScore;
-      if (pc.is_required && !coursePassed) allCoursePassed = false;
-
       programTotal += weightedScore;
-      programMax += courseTotalScore;
+      programMax += scoreResult.courseTotalScore;
 
       result.push({
         course_id: pc.course_id,
@@ -4330,7 +4244,7 @@ router.get('/classroom/programs/:id/my-scores', async (req, res) => {
       });
     }
 
-    const programPassScore = program.program_pass_score || 60;
+    const programPassScore = ctx.program.program_pass_score || 60;
     const programPassed = allCoursePassed && (programMax > 0 ? programTotal / programMax * 100 >= programPassScore : false);
 
     res.json({
@@ -4346,176 +4260,109 @@ router.get('/classroom/programs/:id/my-scores', async (req, res) => {
   }
 });
 
-// GET /api/training/programs/:id/report — admin report
+// Shared helper:把整批 users 算成 usersReport,共用 admin 報表 + Excel export
+async function buildProgramReportRows(progId, { searchRaw } = {}) {
+  const ctx = await loadProgramScoringCtx(db, progId);
+  if (!ctx) return null;
+
+  // 撈所有指派的使用者(可選 search 過濾 — name / employee_id)
+  const search = (searchRaw || '').trim();
+  const params = [progId];
+  let whereSearch = '';
+  if (search) {
+    whereSearch = ` AND (LOWER(u.name) LIKE LOWER(?) OR LOWER(u.employee_id) LIKE LOWER(?))`;
+    const like = `%${search}%`;
+    params.push(like, like);
+  }
+  const users = await db.prepare(`
+    SELECT DISTINCT pa.user_id, u.name, u.employee_id, u.dept_code
+    FROM program_assignments pa
+    JOIN users u ON u.id = pa.user_id
+    WHERE pa.program_id = ? AND pa.status != 'exempted'${whereSearch}
+    ORDER BY u.name
+  `).all(...params);
+
+  // 批次撈所有 user 的 browse / best / last / attempts(set-based queries)
+  const allLessonIds = [];
+  for (const arr of ctx.lessonsByCourse.values()) for (const l of arr) allLessonIds.push(l.id);
+  const interactionData = await loadUsersInteractionData(
+    db, progId,
+    users.map(u => u.user_id),
+    ctx.courses.map(c => c.course_id),
+    allLessonIds
+  );
+
+  // 用 shared util 算每個 user 的成績
+  const usersReport = users.map(u => {
+    const scores = computeUserProgramScore(u.user_id, ctx, interactionData);
+    return {
+      user_id: u.user_id, name: u.name, employee_id: u.employee_id, dept_code: u.dept_code,
+      ...scores,
+    };
+  });
+
+  return { ctx, usersReport };
+}
+
+// GET /api/training/programs/:id/report — admin report (paginated)
 router.get('/programs/:id/report', async (req, res) => {
   if (!canPublish(req)) return res.status(403).json({ error: '需要上架權限' });
   try {
     const progId = Number(req.params.id);
-    const program = await db.prepare('SELECT title, program_pass_score FROM training_programs WHERE id=?').get(progId);
-    if (!program) return res.status(404).json({ error: '專案不存在' });
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const pageSize = Math.min(500, Math.max(10, Number(req.query.page_size) || 50));
+    const statusFilter = ['all', 'passed', 'in_progress', 'not_started'].includes(req.query.status)
+      ? req.query.status : 'all';
+    const sortKey = req.query.sort || 'name';
+    const sortDir = req.query.sort_dir === 'desc' ? 'desc' : 'asc';
 
-    // All assigned users
-    const users = await db.prepare(`
-      SELECT DISTINCT pa.user_id, u.name, u.employee_id, u.dept_code
-      FROM program_assignments pa
-      JOIN users u ON u.id = pa.user_id
-      WHERE pa.program_id = ? AND pa.status != 'exempted'
-      ORDER BY u.name
-    `).all(progId);
+    const built = await buildProgramReportRows(progId, { searchRaw: req.query.search });
+    if (!built) return res.status(404).json({ error: '專案不存在' });
+    const { ctx, usersReport } = built;
 
-    // Program courses
-    const courses = await db.prepare(`
-      SELECT pc.course_id, pc.exam_config, pc.lesson_ids, pc.is_required,
-             c.title AS course_title, c.pass_score AS course_pass_score
-      FROM program_courses pc JOIN courses c ON c.id = pc.course_id
-      WHERE pc.program_id = ? ORDER BY pc.sort_order
-    `).all(progId);
+    // Summary 用 search 後但 status 過濾前的數字
+    const summary = {
+      total: usersReport.length,
+      completed_browse: usersReport.filter(u => u.browse_pct === 100).length,
+      passed: usersReport.filter(u => u.status === 'passed').length,
+      not_started: usersReport.filter(u => u.status === 'not_started').length,
+    };
 
-    // For each user, get progress + scores
-    const usersReport = [];
-    let totalCompleted = 0, totalPassed = 0, totalNotStarted = 0;
+    // Status filter
+    const filtered = statusFilter === 'all'
+      ? usersReport
+      : usersReport.filter(u => u.status === statusFilter);
 
-    for (const u of users) {
-      let browseTotal = 0, browseViewed = 0;
-      let programTotal = 0, programMax = 0;
-      let allPassed = true;
-      let programLastTotal = 0, programLastMax = 0, programLastAt = null, programAttempts = 0;
-      const courseDetails = [];
-
-      for (const pc of courses) {
-        const examConfig = pc.exam_config ? JSON.parse(pc.exam_config) : {};
-        const courseTotalScore = examConfig.total_score || 100;
-        const coursePassScore = examConfig.pass_score || pc.course_pass_score || 60;
-        const lessonIds = pc.lesson_ids ? JSON.parse(pc.lesson_ids) : null;
-
-        // Slide count
-        let slideCountSql = 'SELECT COUNT(*) AS cnt FROM course_slides cs JOIN course_lessons cl ON cl.id = cs.lesson_id WHERE cl.course_id=?';
-        const scParams = [pc.course_id];
-        if (lessonIds && lessonIds.length) {
-          const ph = lessonIds.map(() => '?').join(',');
-          slideCountSql += ` AND cs.lesson_id IN (${ph})`;
-          scParams.push(...lessonIds.map(Number));
-        }
-        const slideCount = await db.prepare(slideCountSql).get(...scParams);
-
-        const viewedCount = await db.prepare(`
-          SELECT COUNT(*) AS cnt FROM user_slide_views WHERE user_id=? AND course_id=? AND program_id=?
-        `).get(u.user_id, pc.course_id, progId);
-
-        const total = slideCount?.cnt || 0;
-        const viewed = Math.min(viewedCount?.cnt || 0, total);
-        browseTotal += total;
-        browseViewed += viewed;
-
-        // Best exam score
-        const best = await db.prepare(`
-          SELECT SUM(COALESCE(weighted_score, score)) AS session_score,
-                 SUM(COALESCE(weighted_max, max_score)) AS session_max
-          FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test'
-          GROUP BY session_id ORDER BY SUM(COALESCE(weighted_score, score)) DESC
-          FETCH FIRST 1 ROW ONLY
-        `).get(u.user_id, pc.course_id);
-
-        // Last attempt (most recent session)
-        const last = await db.prepare(`
-          SELECT SUM(COALESCE(weighted_score, score)) AS session_score,
-                 SUM(COALESCE(weighted_max, max_score)) AS session_max,
-                 MAX(created_at) AS last_at
-          FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test'
-          GROUP BY session_id ORDER BY MAX(created_at) DESC
-          FETCH FIRST 1 ROW ONLY
-        `).get(u.user_id, pc.course_id);
-
-        const attempts = await db.prepare(
-          "SELECT COUNT(DISTINCT session_id) AS cnt FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test'"
-        ).get(u.user_id, pc.course_id);
-
-        // Browse-only score for non-interactive lessons
-        const lessonWeights = examConfig.lesson_weights || {};
-        const hasLessonWeights = Object.keys(lessonWeights).length > 0;
-        let browseOnlyScore = 0;
-        if (hasLessonWeights) {
-          let lessonsForCourse = await db.prepare('SELECT id FROM course_lessons WHERE course_id=? ORDER BY sort_order, id').all(pc.course_id);
-          if (lessonIds?.length) lessonsForCourse = lessonsForCourse.filter(l => lessonIds.includes(l.id));
-          for (const les of lessonsForCourse) {
-            const iCnt = await db.prepare(`SELECT COUNT(*) AS cnt FROM course_slides WHERE lesson_id=? AND (content_json LIKE '%"type":"hotspot"%' OR content_json LIKE '%"type":"dragdrop"%' OR content_json LIKE '%"type":"quiz_inline"%')`).get(les.id);
-            if ((iCnt?.cnt || 0) === 0) {
-              const lw = lessonWeights[`lesson_${les.id}`] || 0;
-              if (lw > 0) {
-                const lTotal = await db.prepare('SELECT COUNT(*) AS cnt FROM course_slides WHERE lesson_id=?').get(les.id);
-                const lViewed = await db.prepare('SELECT COUNT(*) AS cnt FROM user_slide_views WHERE user_id=? AND lesson_id=? AND program_id=?').get(u.user_id, les.id, progId);
-                const lt = lTotal?.cnt || 0; const lv = Math.min(lViewed?.cnt || 0, lt);
-                browseOnlyScore += lt > 0 ? Math.round((lv / lt) * lw) : 0;
-              }
-            }
-          }
-        }
-
-        const bestScore = best?.session_score || 0;
-        const bestMax = best?.session_max || 100;
-        const ratio = bestMax > 0 ? bestScore / bestMax : 0;
-        const interactiveWeight = hasLessonWeights
-          ? Object.entries(lessonWeights).reduce((s, [k, v]) => s + (typeof v === 'number' ? v : 0), 0) - browseOnlyScore
-          : courseTotalScore;
-        const weighted = hasLessonWeights
-          ? browseOnlyScore + Math.round(ratio * (interactiveWeight > 0 ? interactiveWeight : courseTotalScore))
-          : Math.round(ratio * courseTotalScore);
-        const passed = ratio * 100 >= coursePassScore;
-        if (pc.is_required && !passed) allPassed = false;
-        programTotal += weighted;
-        programMax += courseTotalScore;
-
-        // Last-attempt weighted score (course-level)
-        const lastScoreRaw = last?.session_score || 0;
-        const lastMaxRaw = last?.session_max || 0;
-        const lastRatio = lastMaxRaw > 0 ? lastScoreRaw / lastMaxRaw : 0;
-        const lastWeighted = lastMaxRaw > 0
-          ? (hasLessonWeights
-              ? browseOnlyScore + Math.round(lastRatio * (interactiveWeight > 0 ? interactiveWeight : courseTotalScore))
-              : Math.round(lastRatio * courseTotalScore))
-          : 0;
-        const lastAt = last?.last_at || null;
-        const cAttempts = attempts?.cnt || 0;
-        if (cAttempts > 0) {
-          programLastTotal += lastWeighted;
-          programLastMax += courseTotalScore;
-          programAttempts += cAttempts;
-          if (lastAt && (!programLastAt || new Date(lastAt) > new Date(programLastAt))) programLastAt = lastAt;
-        }
-
-        courseDetails.push({
-          course_id: pc.course_id, title: pc.course_title,
-          browse_total: total, browse_viewed: viewed,
-          best_score: bestScore, attempts: cAttempts,
-          last_score: lastWeighted, last_attempt_at: lastAt,
-          weighted, total_score: courseTotalScore, passed
-        });
+    // Sort
+    const dir = sortDir === 'asc' ? 1 : -1;
+    const cmp = (x, y) => (x < y ? -dir : x > y ? dir : 0);
+    const getSortVal = (u) => {
+      switch (sortKey) {
+        case 'employee_id': return u.employee_id || '';
+        case 'browse_pct': return u.browse_pct;
+        case 'attempts': return u.total_attempts;
+        case 'last_score': return u.last_score_max > 0 ? u.last_score / u.last_score_max : -1;
+        case 'last_at': return u.last_attempt_at || '';
+        case 'passed': return u.program_passed ? 1 : 0;
+        case 'started': return u.exam_started ? 1 : 0;
+        case 'name': default: return u.name || '';
       }
+    };
+    const sorted = [...filtered].sort((a, b) => cmp(getSortVal(a), getSortVal(b)));
 
-      const pPassScore = program.program_pass_score || 60;
-      const pPassed = allPassed && (programMax > 0 ? programTotal / programMax * 100 >= pPassScore : false);
-      const examStarted = programAttempts > 0;
-      const status = browseViewed === 0 && !examStarted ? 'not_started' : pPassed ? 'passed' : 'in_progress';
-      if (status === 'not_started') totalNotStarted++;
-      else if (status === 'passed') totalPassed++;
-
-      usersReport.push({
-        user_id: u.user_id, name: u.name, employee_id: u.employee_id, dept_code: u.dept_code,
-        browse_total: browseTotal, browse_viewed: browseViewed, browse_pct: browseTotal > 0 ? Math.round(browseViewed / browseTotal * 100) : 0,
-        courses: courseDetails,
-        program_total: programTotal, program_max: programMax, program_passed: pPassed, status,
-        last_score: programLastTotal, last_score_max: programLastMax,
-        last_attempt_at: programLastAt, total_attempts: programAttempts, exam_started: examStarted
-      });
-    }
-
-    totalCompleted = usersReport.filter(u => u.browse_pct === 100).length;
+    const totalFiltered = sorted.length;
+    const startIdx = (page - 1) * pageSize;
+    const pageRows = sorted.slice(startIdx, startIdx + pageSize);
 
     res.json({
-      program_title: program.title,
-      program_pass_score: program.program_pass_score || 60,
-      summary: { total: users.length, completed_browse: totalCompleted, passed: totalPassed, not_started: totalNotStarted },
-      users: usersReport
+      program_title: ctx.program.title,
+      program_pass_score: ctx.program.program_pass_score || 60,
+      summary,
+      pagination: {
+        page, page_size: pageSize, total: totalFiltered,
+        total_pages: Math.max(1, Math.ceil(totalFiltered / pageSize)),
+      },
+      users: pageRows,
     });
   } catch (e) {
     console.error('[Report] error:', e.message);
@@ -4529,26 +4376,34 @@ router.get('/programs/:id/report/export', async (req, res) => {
   try {
     // Reuse report logic
     const progId = Number(req.params.id);
-    const reportRes = { json: null };
-    // Inline the report generation (call the same logic)
-    const program = await db.prepare('SELECT title, program_pass_score FROM training_programs WHERE id=?').get(progId);
-    if (!program) return res.status(404).json({ error: '專案不存在' });
+    const statusFilter = ['all', 'passed', 'in_progress', 'not_started'].includes(req.query.status)
+      ? req.query.status : 'all';
 
-    const courses = await db.prepare(`
-      SELECT pc.course_id, pc.exam_config, pc.lesson_ids, pc.is_required,
-             c.title AS course_title, c.pass_score AS course_pass_score
-      FROM program_courses pc JOIN courses c ON c.id = pc.course_id
-      WHERE pc.program_id = ? ORDER BY pc.sort_order
-    `).all(progId);
+    const built = await buildProgramReportRows(progId, { searchRaw: req.query.search });
+    if (!built) return res.status(404).json({ error: '專案不存在' });
+    const { ctx, usersReport } = built;
+    const program = ctx.program;
 
-    const users = await db.prepare(`
-      SELECT DISTINCT pa.user_id, u.name, u.employee_id, u.dept_code,
-             (SELECT name FROM (SELECT DISTINCT dept_code, dept_name AS name FROM users WHERE dept_code IS NOT NULL) WHERE dept_code = u.dept_code AND ROWNUM=1) AS dept_name
-      FROM program_assignments pa
-      JOIN users u ON u.id = pa.user_id
-      WHERE pa.program_id = ? AND pa.status != 'exempted'
-      ORDER BY u.name
-    `).all(progId);
+    // 補 dept_name(export 才需要,API 不需要)
+    const deptCodes = [...new Set(usersReport.map(u => u.dept_code).filter(Boolean))];
+    const deptNameMap = new Map();
+    if (deptCodes.length > 0) {
+      const CHUNK = 800;
+      for (let i = 0; i < deptCodes.length; i += CHUNK) {
+        const slice = deptCodes.slice(i, i + CHUNK);
+        const ph = slice.map(() => '?').join(',');
+        const rows = await db.prepare(
+          `SELECT dept_code, MAX(dept_name) AS dept_name
+           FROM users WHERE dept_code IN (${ph}) AND dept_name IS NOT NULL
+           GROUP BY dept_code`
+        ).all(...slice);
+        for (const r of rows) deptNameMap.set(r.dept_code, r.dept_name);
+      }
+    }
+
+    const filtered = statusFilter === 'all'
+      ? usersReport
+      : usersReport.filter(u => u.status === statusFilter);
 
     // Build Excel — i18n headers based on request language
     const XLSX = require('xlsx');
@@ -4569,93 +4424,25 @@ router.get('/programs/:id/report/export', async (req, res) => {
       return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}`;
     };
 
-    const rows = [];
-    for (const u of users) {
-      let browseTotal = 0, browseViewed = 0, programMax = 0, programTotal = 0;
-      let programLastTotal = 0, programLastMax = 0, programLastAt = null, programAttempts = 0;
-      let allPassed = true;
-
-      for (const pc of courses) {
-        const examConfig = pc.exam_config ? JSON.parse(pc.exam_config) : {};
-        const courseTotalScore = examConfig.total_score || 100;
-        const coursePassScore = examConfig.pass_score || pc.course_pass_score || 60;
-        const lessonIds = pc.lesson_ids ? JSON.parse(pc.lesson_ids) : null;
-
-        let scSql = 'SELECT COUNT(*) AS cnt FROM course_slides cs JOIN course_lessons cl ON cl.id=cs.lesson_id WHERE cl.course_id=?';
-        const scParams2 = [pc.course_id];
-        if (lessonIds?.length) {
-          const ph = lessonIds.map(() => '?').join(',');
-          scSql += ` AND cs.lesson_id IN (${ph})`;
-          scParams2.push(...lessonIds.map(Number));
-        }
-        const sc = await db.prepare(scSql).get(...scParams2);
-        const vc = await db.prepare('SELECT COUNT(*) AS cnt FROM user_slide_views WHERE user_id=? AND course_id=? AND program_id=?').get(u.user_id, pc.course_id, progId);
-        const total = sc?.cnt || 0; const viewed = Math.min(vc?.cnt || 0, total);
-        browseTotal += total; browseViewed += viewed;
-
-        const eLessonWeights = examConfig.lesson_weights || {};
-        const eHasLW = Object.keys(eLessonWeights).length > 0;
-        let eBrowseScore = 0;
-        if (eHasLW) {
-          let eLessons = await db.prepare('SELECT id FROM course_lessons WHERE course_id=?').all(pc.course_id);
-          if (lessonIds?.length) eLessons = eLessons.filter(l => lessonIds.includes(l.id));
-          for (const el of eLessons) {
-            const ic = await db.prepare(`SELECT COUNT(*) AS cnt FROM course_slides WHERE lesson_id=? AND (content_json LIKE '%"type":"hotspot"%' OR content_json LIKE '%"type":"dragdrop"%' OR content_json LIKE '%"type":"quiz_inline"%')`).get(el.id);
-            if ((ic?.cnt || 0) === 0) {
-              const lw = eLessonWeights[`lesson_${el.id}`] || 0;
-              if (lw > 0) {
-                const lt = await db.prepare('SELECT COUNT(*) AS cnt FROM course_slides WHERE lesson_id=?').get(el.id);
-                const lv = await db.prepare('SELECT COUNT(*) AS cnt FROM user_slide_views WHERE user_id=? AND lesson_id=? AND program_id=?').get(u.user_id, el.id, progId);
-                eBrowseScore += (lt?.cnt || 0) > 0 ? Math.round((Math.min(lv?.cnt || 0, lt.cnt) / lt.cnt) * lw) : 0;
-              }
-            }
-          }
-        }
-
-        const best = await db.prepare(`SELECT SUM(COALESCE(weighted_score,score)) AS session_score, SUM(COALESCE(weighted_max,max_score)) AS session_max FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test' GROUP BY session_id ORDER BY SUM(COALESCE(weighted_score,score)) DESC FETCH FIRST 1 ROW ONLY`).get(u.user_id, pc.course_id);
-        const bs = best?.session_score || 0;
-        const bm = best?.session_max || 100;
-        const bestRatio = bm > 0 ? bs / bm : 0;
-        const bestWeighted = eHasLW ? eBrowseScore + Math.round(bestRatio * (courseTotalScore - eBrowseScore)) : Math.round(bestRatio * courseTotalScore);
-        const bestPct = courseTotalScore > 0 ? (bestWeighted / courseTotalScore) * 100 : 0;
-        if (pc.is_required && bestPct < coursePassScore) allPassed = false;
-        programTotal += bestWeighted;
-        programMax += courseTotalScore;
-
-        const last = await db.prepare(`SELECT SUM(COALESCE(weighted_score,score)) AS session_score, SUM(COALESCE(weighted_max,max_score)) AS session_max, MAX(created_at) AS last_at FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test' GROUP BY session_id ORDER BY MAX(created_at) DESC FETCH FIRST 1 ROW ONLY`).get(u.user_id, pc.course_id);
-        const lsRaw = last?.session_score || 0;
-        const lmRaw = last?.session_max || 0;
-        const lastRatio = lmRaw > 0 ? lsRaw / lmRaw : 0;
-        const lastWeighted = lmRaw > 0
-          ? (eHasLW ? eBrowseScore + Math.round(lastRatio * (courseTotalScore - eBrowseScore)) : Math.round(lastRatio * courseTotalScore))
-          : 0;
-        const at = await db.prepare("SELECT COUNT(DISTINCT session_id) AS cnt FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test'").get(u.user_id, pc.course_id);
-        const cAttempts = at?.cnt || 0;
-        if (cAttempts > 0) {
-          programLastTotal += lastWeighted;
-          programLastMax += courseTotalScore;
-          programAttempts += cAttempts;
-          if (last?.last_at && (!programLastAt || new Date(last.last_at) > new Date(programLastAt))) programLastAt = last.last_at;
-        }
-      }
-
-      const pPass = allPassed && (programMax > 0 ? programTotal / programMax * 100 >= (program.program_pass_score || 60) : false);
-      const browsePct = browseTotal > 0 ? `${Math.round(browseViewed / browseTotal * 100)}% (${browseViewed}/${browseTotal})` : labels.dash;
-      const examStarted = programAttempts > 0;
-      const lastScoreStr = examStarted ? `${programLastTotal}/${programLastMax}` : labels.dash;
-
-      rows.push([
+    const rows = filtered.map(u => {
+      const browsePct = u.browse_total > 0
+        ? `${u.browse_pct}% (${u.browse_viewed}/${u.browse_total})`
+        : labels.dash;
+      const lastScoreStr = u.exam_started
+        ? `${u.last_score}/${u.last_score_max}`
+        : labels.dash;
+      return [
         u.name,
         u.employee_id || '',
-        u.dept_name || u.dept_code || '',
-        examStarted ? labels.yes : labels.no,
+        deptNameMap.get(u.dept_code) || u.dept_code || '',
+        u.exam_started ? labels.yes : labels.no,
         browsePct,
-        examStarted ? programAttempts : labels.dash,
+        u.exam_started ? u.total_attempts : labels.dash,
         lastScoreStr,
-        fmtAt(programLastAt),
-        pPass ? labels.yes : labels.no
-      ]);
-    }
+        fmtAt(u.last_attempt_at),
+        u.program_passed ? labels.yes : labels.no,
+      ];
+    });
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
