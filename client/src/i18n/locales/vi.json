@@ -2946,7 +2946,12 @@
       "stepsIncomplete": "Bước chưa hoàn thành",
       "wrongClicks": "Nhấp sai",
       "clickAt": "Nhấp tại",
-      "shouldBe": "Nên nhấp"
+      "shouldBe": "Nên nhấp",
+      "mandatoryIncomplete": "Chưa hoàn thành bắt buộc",
+      "browseIncomplete": "Chưa duyệt hết",
+      "examMissing": "Còn {{n}} câu chưa làm",
+      "whyNotPassed": "Lý do chưa đạt:",
+      "scoreUnderPass": "Hiện {{score}} điểm, chưa đạt mức {{pass}}"
     },
     "report": {
       "title": "Báo cáo điểm",

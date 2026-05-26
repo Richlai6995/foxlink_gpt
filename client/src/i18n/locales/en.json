@@ -2946,7 +2946,12 @@
       "stepsIncomplete": "Steps incomplete",
       "wrongClicks": "Wrong clicks",
       "clickAt": "Click at",
-      "shouldBe": "Should be"
+      "shouldBe": "Should be",
+      "mandatoryIncomplete": "Mandatory incomplete",
+      "browseIncomplete": "Browse incomplete",
+      "examMissing": "{{n}} unanswered",
+      "whyNotPassed": "Why not passed:",
+      "scoreUnderPass": "Current {{score}} pts, below pass line {{pass}}"
     },
     "report": {
       "title": "Score Report",

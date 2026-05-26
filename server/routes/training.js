@@ -4557,49 +4557,39 @@ router.get('/classroom/my-programs', async (req, res) => {
       ORDER BY CASE tp.status WHEN 'active' THEN 0 ELSE 1 END, tp.end_date
     `).all(req.user.id);
 
-    // For each program, compute real progress (browse + exam per course)
+    // For each program, compute progress via shared util (對齊 admin 報表 + my-scores)
     for (const prog of programs) {
-      const courseRows = await db.prepare(`
-        SELECT pc.course_id, pc.lesson_ids, pc.exam_config, c.pass_score AS course_pass_score
-        FROM program_courses pc JOIN courses c ON c.id = pc.course_id
-        WHERE pc.program_id = ?
-      `).all(prog.id);
-      let total = courseRows.length, completed = 0, in_progress = 0;
-      for (const cr of courseRows) {
-        let examConfig = {};
-        try { if (cr.exam_config) examConfig = typeof cr.exam_config === 'string' ? JSON.parse(cr.exam_config) : cr.exam_config; } catch {}
-        const passScore = examConfig.pass_score || cr.course_pass_score || 60;
-        let lessonIds = null;
-        try { if (cr.lesson_ids) lessonIds = typeof cr.lesson_ids === 'string' ? JSON.parse(cr.lesson_ids) : cr.lesson_ids; } catch {}
-
-        // Browse: count total slides vs viewed
-        let slideSql = 'SELECT COUNT(*) AS cnt FROM course_slides cs JOIN course_lessons cl ON cl.id=cs.lesson_id WHERE cl.course_id=?';
-        const slideParams = [cr.course_id];
-        if (lessonIds?.length) { slideSql += ` AND cs.lesson_id IN (${lessonIds.map(() => '?').join(',')})`; slideParams.push(...lessonIds); }
-        const slideCount = await db.prepare(slideSql).get(...slideParams);
-        let viewedCount = { cnt: 0 };
-        try { viewedCount = await db.prepare('SELECT COUNT(*) AS cnt FROM user_slide_views WHERE user_id=? AND course_id=? AND program_id=?').get(req.user.id, cr.course_id, prog.id) || { cnt: 0 }; } catch {}
-        const browseOk = (slideCount?.cnt || 0) > 0 && (viewedCount?.cnt || 0) >= (slideCount?.cnt || 0);
-
-        // Check if course has ANY interactive slides
-        let iSql = `SELECT COUNT(*) AS cnt FROM course_slides cs JOIN course_lessons cl ON cl.id=cs.lesson_id WHERE cl.course_id=? AND (cs.content_json LIKE '%"type":"hotspot"%' OR cs.content_json LIKE '%"type":"dragdrop"%' OR cs.content_json LIKE '%"type":"quiz_inline"%')`;
-        const iParams = [cr.course_id];
-        if (lessonIds?.length) { iSql += ` AND cs.lesson_id IN (${lessonIds.map(() => '?').join(',')})`; iParams.push(...lessonIds); }
-        const interactiveSlides = await db.prepare(iSql).get(...iParams);
-        const hasInteractive = (interactiveSlides?.cnt || 0) > 0;
-
-        // Exam: best score (only matters if course has interactive content)
-        let examOk = !hasInteractive; // no interactive = auto pass
-        let best = null;
-        if (hasInteractive) {
-          best = await db.prepare(`SELECT SUM(COALESCE(weighted_score,score)) AS s, SUM(COALESCE(weighted_max,max_score)) AS m FROM interaction_results WHERE user_id=? AND course_id=? AND session_id IS NOT NULL AND player_mode='test' GROUP BY session_id ORDER BY SUM(COALESCE(weighted_score,score)) DESC FETCH FIRST 1 ROW ONLY`).get(req.user.id, cr.course_id);
-          examOk = best && best.m > 0 && (best.s / best.m * 100) >= passScore;
+      try {
+        const ctx = await loadProgramScoringCtx(db, prog.id);
+        if (!ctx) {
+          prog.stats = { total: 0, completed: 0, in_progress: 0, pending: 0 };
+          continue;
         }
-
-        if (browseOk && examOk) completed++;
-        else if ((viewedCount?.cnt || 0) > 0 || best) in_progress++;
+        const allLessonIds = [];
+        for (const arr of ctx.lessonsByCourse.values()) for (const l of arr) allLessonIds.push(l.id);
+        const interactionData = await loadUsersInteractionData(
+          db, prog.id,
+          [req.user.id],
+          ctx.courses.map(c => c.course_id),
+          allLessonIds,
+        );
+        const scores = computeUserProgramScore(req.user.id, ctx, interactionData);
+        // 「門完成」= course-level passed(mandatory_complete + score >= passScore)
+        let completed = 0, in_progress = 0;
+        for (const c of scores.courses) {
+          if (c.passed) completed++;
+          else if (c.browse_viewed > 0 || c.attempts > 0) in_progress++;
+        }
+        prog.stats = {
+          total: scores.courses.length,
+          completed,
+          in_progress,
+          pending: scores.courses.length - completed - in_progress,
+        };
+      } catch (e) {
+        console.warn(`[Classroom] program ${prog.id} stats failed:`, e.message);
+        prog.stats = { total: 0, completed: 0, in_progress: 0, pending: 0 };
       }
-      prog.stats = { total, completed, in_progress, pending: total - completed - in_progress };
     }
     res.json(programs);
   } catch (e) {

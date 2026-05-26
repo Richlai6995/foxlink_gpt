@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
-import { BookOpen, CheckCircle2, Clock, ChevronDown, ChevronUp, FileText, Award } from 'lucide-react'
+import { BookOpen, CheckCircle2, Clock, ChevronDown, ChevronUp, FileText, Award, AlertCircle } from 'lucide-react'
 
 interface LessonProgress {
   lesson_id: number
@@ -35,6 +35,14 @@ interface CourseScore {
   max_attempts: number
   only_count_mandatory?: boolean
   browse_progress: { total: number; viewed: number; pct: number; lessons: LessonProgress[] }
+  // 必修完成度(2026-05-26 起與 admin 報表一致)
+  mandatory_complete?: boolean
+  mandatory_browse_complete?: boolean
+  mandatory_browse_total?: number
+  mandatory_browse_viewed?: number
+  mandatory_exam_complete?: boolean
+  mandatory_exam_total?: number
+  mandatory_exam_missing?: number
   exam: {
     best_score: number; best_max: number
     attempts: number; max_attempts: number
@@ -78,6 +86,13 @@ export default function ProgramScorePanel({ programId }: { programId: number }) 
         const browseComplete = browsePct === 100
         const hasExam = c.exam.attempts > 0
         const expanded = expandedCourse === c.course_id
+        // 必修未完成 hint(對齊 admin 報表)
+        const mandatoryBits: string[] = []
+        if (c.mandatory_browse_complete === false) mandatoryBits.push(t('training.scoring.browseIncomplete') as string)
+        if (c.mandatory_exam_complete === false && (c.mandatory_exam_missing || 0) > 0) {
+          mandatoryBits.push(t('training.scoring.examMissing', { n: c.mandatory_exam_missing }) as string)
+        }
+        const showIncompleteHint = mandatoryBits.length > 0
 
         return (
           <div key={c.course_id} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
@@ -104,6 +119,12 @@ export default function ProgramScorePanel({ programId }: { programId: number }) 
                     <span>{t('training.scoring.attempts')}: {c.exam.attempts}/{c.exam.max_attempts}</span>
                   )}
                 </div>
+                {showIncompleteHint && (
+                  <div className="mt-1.5 flex items-center gap-1 text-[11px] text-orange-600 bg-orange-50 border border-orange-200 rounded px-2 py-1 w-fit">
+                    <AlertCircle size={11} className="shrink-0" />
+                    <span>{t('training.scoring.mandatoryIncomplete')}: {mandatoryBits.join(' / ')}</span>
+                  </div>
+                )}
               </div>
               {expanded ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
             </div>
@@ -211,20 +232,54 @@ export default function ProgramScorePanel({ programId }: { programId: number }) 
       })}
 
       {/* Program total */}
-      <div className={`rounded-xl p-4 flex items-center gap-4 border-2 ${data.program_passed ? 'bg-green-50 border-green-300' : 'bg-slate-50 border-slate-200'}`}>
-        <Award size={24} className={data.program_passed ? 'text-green-600' : 'text-slate-400'} />
-        <div className="flex-1">
-          <div className="text-sm font-bold text-slate-800">
-            {t('training.scoring.programTotal')}: {data.program_total}/{data.program_max}
+      {(() => {
+        // 找未完成必修的課程,列出來給學員看為什麼沒及格
+        const incompleteCourses = data.courses.filter(c => c.mandatory_complete === false)
+        const scorePct = data.program_max > 0 ? (data.program_total / data.program_max) * 100 : 0
+        const scoreUnder = !data.program_passed && incompleteCourses.length === 0 && scorePct < data.program_pass_score
+        return (
+          <div className={`rounded-xl p-4 border-2 ${data.program_passed ? 'bg-green-50 border-green-300' : 'bg-slate-50 border-slate-200'}`}>
+            <div className="flex items-center gap-4">
+              <Award size={24} className={data.program_passed ? 'text-green-600' : 'text-slate-400'} />
+              <div className="flex-1">
+                <div className="text-sm font-bold text-slate-800">
+                  {t('training.scoring.programTotal')}: {data.program_total}/{data.program_max}
+                </div>
+                <div className="text-xs text-slate-500">
+                  {t('training.scoring.passLine')}: {data.program_pass_score}
+                </div>
+              </div>
+              <span className={`text-sm font-bold px-3 py-1 rounded-full ${data.program_passed ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                {data.program_passed ? t('training.scoring.passed') : t('training.scoring.notPassed')}
+              </span>
+            </div>
+            {!data.program_passed && incompleteCourses.length > 0 && (
+              <div className="mt-3 flex items-start gap-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
+                <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <div className="font-medium mb-0.5">{t('training.scoring.whyNotPassed')}</div>
+                  <ul className="space-y-0.5">
+                    {incompleteCourses.map(c => {
+                      const bits: string[] = []
+                      if (c.mandatory_browse_complete === false) bits.push(t('training.scoring.browseIncomplete') as string)
+                      if (c.mandatory_exam_complete === false && (c.mandatory_exam_missing || 0) > 0) {
+                        bits.push(t('training.scoring.examMissing', { n: c.mandatory_exam_missing }) as string)
+                      }
+                      return <li key={c.course_id}>• {c.course_title}: {bits.join(' / ') || t('training.scoring.mandatoryIncomplete')}</li>
+                    })}
+                  </ul>
+                </div>
+              </div>
+            )}
+            {scoreUnder && (
+              <div className="mt-3 flex items-center gap-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
+                <AlertCircle size={14} className="shrink-0" />
+                <span>{t('training.scoring.scoreUnderPass', { score: Math.round(scorePct), pass: data.program_pass_score })}</span>
+              </div>
+            )}
           </div>
-          <div className="text-xs text-slate-500">
-            {t('training.scoring.passLine')}: {data.program_pass_score}
-          </div>
-        </div>
-        <span className={`text-sm font-bold px-3 py-1 rounded-full ${data.program_passed ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
-          {data.program_passed ? t('training.scoring.passed') : t('training.scoring.notPassed')}
-        </span>
-      </div>
+        )
+      })()}
     </div>
   )
 }

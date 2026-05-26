@@ -2946,7 +2946,12 @@
       "stepsIncomplete": "步驟未完成",
       "wrongClicks": "錯誤點擊",
       "clickAt": "點擊位置",
-      "shouldBe": "應點擊"
+      "shouldBe": "應點擊",
+      "mandatoryIncomplete": "必修未完成",
+      "browseIncomplete": "未瀏覽完",
+      "examMissing": "缺 {{n}} 題未答",
+      "whyNotPassed": "未及格原因:",
+      "scoreUnderPass": "目前 {{score}} 分，未達及格線 {{pass}} 分"
     },
     "report": {
       "title": "成績報表",
