@@ -18,8 +18,13 @@ interface Assignment {
   completed_at: string | null
   score: number | null
   passed: number | null
+  passed_new?: boolean         // 新邏輯下的及格(對齊 admin 報表)
+  mandatory_complete?: boolean // 必修是否全做完
   lesson_ids: number[] | null
-  lesson_status?: { lesson_id: number; title: string; total: number; viewed: number; done: boolean; locked: boolean }[]
+  lesson_status?: {
+    lesson_id: number; title: string; total: number; viewed: number; done: boolean; locked: boolean
+    exam_total?: number; exam_missing?: number; exam_complete?: boolean
+  }[]
   exam_topics?: { id: number; title: string; total_score: number; time_limit_minutes: number }[]
 }
 
@@ -32,6 +37,7 @@ interface ProgramDetail {
   end_date: string
   sequential_lessons?: number
   assignments: Assignment[]
+  passed_courses_count?: number
 }
 
 export default function ProgramView() {
@@ -68,7 +74,9 @@ export default function ProgramView() {
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-400">{t('training.loading')}</div>
   if (!program) return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-400">{t('training.courseNotFound')}</div>
 
-  const completed = program.assignments.filter(a => a.status === 'completed').length
+  // 用後端用新邏輯算的 passed_courses_count(對齊 admin 報表 + 成績頁)
+  // fallback 到 status==='completed' 是為了相容性(萬一 API 還沒回新欄位)
+  const completed = program.passed_courses_count ?? program.assignments.filter(a => a.status === 'completed').length
   const total = program.assignments.length
 
   return (
@@ -160,16 +168,30 @@ export default function ProgramView() {
                 <div className="border-t border-slate-100 px-5 py-3">
                   <div className="text-[10px] font-semibold text-slate-500 uppercase mb-2">{t('training.scoring.browseDetail')}</div>
                   <div className="space-y-1">
-                    {a.lesson_status.map(ls => (
-                      <div key={ls.lesson_id} className={`flex items-center gap-2 text-xs py-1 ${ls.locked ? 'opacity-40' : ''}`}>
-                        {ls.locked ? <Lock size={12} className="text-slate-400" />
-                          : ls.done ? <CheckCircle2 size={12} className="text-green-500" />
-                          : <Clock size={12} className="text-blue-400" />}
-                        <span className="flex-1 text-slate-700">{ls.title}</span>
-                        <span className="text-slate-400 text-[11px]">{ls.viewed}/{ls.total}</span>
-                        {ls.locked && <span className="text-[9px] text-orange-400">{t('training.scoring.locked')}</span>}
-                      </div>
-                    ))}
+                    {a.lesson_status.map(ls => {
+                      // icon 決策:
+                      // 鎖住 → Lock
+                      // 沒瀏覽完 → 藍色 Clock
+                      // 瀏覽完 + 有互動題沒答 → 橘色 Clock + 「缺 N 題」
+                      // 瀏覽完 + 互動題都答完(或沒互動題) → 綠色 CheckCircle
+                      const hasMissingExam = ls.done && (ls.exam_missing ?? 0) > 0
+                      return (
+                        <div key={ls.lesson_id} className={`flex items-center gap-2 text-xs py-1 ${ls.locked ? 'opacity-40' : ''}`}>
+                          {ls.locked ? <Lock size={12} className="text-slate-400" />
+                            : hasMissingExam ? <Clock size={12} className="text-orange-500" />
+                            : ls.done ? <CheckCircle2 size={12} className="text-green-500" />
+                            : <Clock size={12} className="text-blue-400" />}
+                          <span className="flex-1 text-slate-700">{ls.title}</span>
+                          {hasMissingExam && (
+                            <span className="text-[10px] text-orange-600 bg-orange-50 border border-orange-200 rounded px-1.5 py-0.5">
+                              {t('training.scoring.examMissing', { n: ls.exam_missing })}
+                            </span>
+                          )}
+                          <span className="text-slate-400 text-[11px]">{ls.viewed}/{ls.total}</span>
+                          {ls.locked && <span className="text-[9px] text-orange-400">{t('training.scoring.locked')}</span>}
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               )}

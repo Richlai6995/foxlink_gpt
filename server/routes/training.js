@@ -4604,6 +4604,7 @@ router.get('/classroom/programs/:id', async (req, res) => {
     const program = await db.prepare('SELECT * FROM training_programs WHERE id=?').get(req.params.id);
     if (!program) return res.status(404).json({ error: '專案不存在' });
 
+    const progId = Number(req.params.id);
     const assignmentsRaw = await db.prepare(`
       SELECT pa.*, c.title AS course_title, c.cover_image, c.description AS course_description,
              pc.lesson_ids
@@ -4612,7 +4613,29 @@ router.get('/classroom/programs/:id', async (req, res) => {
       LEFT JOIN program_courses pc ON pc.program_id = pa.program_id AND pc.course_id = pa.course_id
       WHERE pa.program_id = ? AND pa.user_id = ? AND pa.status != 'exempted'
       ORDER BY COALESCE(pc.sort_order, pa.id)
-    `).all(req.params.id, req.user.id);
+    `).all(progId, req.user.id);
+
+    // 載 scoring context — 用來標 lesson 「缺 X 題未答」+ course passed(對齊新邏輯)
+    let ctx = null;
+    let interactionData = null;
+    let courseScoreByCourseId = new Map();
+    try {
+      ctx = await loadProgramScoringCtx(db, progId);
+      if (ctx) {
+        const allLessonIds = [];
+        for (const arr of ctx.lessonsByCourse.values()) for (const l of arr) allLessonIds.push(l.id);
+        interactionData = await loadUsersInteractionData(
+          db, progId, [req.user.id],
+          ctx.courses.map(c => c.course_id), allLessonIds,
+        );
+        // pre-compute per-course score 給 assignment.passed_new 用
+        const progScore = computeUserProgramScore(req.user.id, ctx, interactionData);
+        for (const c of progScore.courses) courseScoreByCourseId.set(c.course_id, c);
+      }
+    } catch (e) {
+      console.warn(`[Classroom] program ${progId} ctx load failed:`, e.message);
+    }
+
     // Parse lesson_ids + compute lesson progress + exam topics
     const isSequential = program.sequential_lessons === 1;
     const assignments = [];
@@ -4629,18 +4652,39 @@ router.get('/classroom/programs/:id', async (req, res) => {
       }
       const lessonStatus = [];
       let allPrevDone = true;
+      // 拿這個 user 在這 course 答過的 slide_id set,用來算 lesson 級「缺 N 題未答」
+      const answered = interactionData?.answeredSlidesByUserCourse?.get(`${req.user.id}|${a.course_id}`) || new Set();
       for (const lesson of lessons) {
         const slideCount = await db.prepare('SELECT COUNT(*) AS cnt FROM course_slides WHERE lesson_id=?').get(lesson.id);
         const viewedCount = await db.prepare(
           'SELECT COUNT(*) AS cnt FROM user_slide_views WHERE user_id=? AND lesson_id=? AND program_id=?'
-        ).get(req.user.id, lesson.id, Number(req.params.id));
+        ).get(req.user.id, lesson.id, progId);
         const total = slideCount?.cnt || 0;
         const viewed = Math.min(viewedCount?.cnt || 0, total);
         const done = total > 0 && viewed >= total;
-        lessonStatus.push({ lesson_id: lesson.id, title: lesson.title, total, viewed, done, locked: isSequential && !allPrevDone });
+
+        // 計算 lesson 級「互動題缺幾題」
+        const interactiveIds = ctx?.interactiveSlideIdsByLesson?.get(Number(lesson.id)) || new Set();
+        let examMissing = 0;
+        for (const sid of interactiveIds) if (!answered.has(sid)) examMissing++;
+
+        lessonStatus.push({
+          lesson_id: lesson.id, title: lesson.title, total, viewed, done,
+          locked: isSequential && !allPrevDone,
+          // 新欄位:幫前端決定章節是「✓ 完全完成」還是「✓ 瀏覽完但有題目缺」
+          exam_total: interactiveIds.size,
+          exam_missing: examMissing,
+          exam_complete: examMissing === 0,
+        });
+        // 順序學習解鎖只看「瀏覽完」(維持原行為,避免必修還沒考的人被卡住無法瀏覽下一章)
         if (!done) allPrevDone = false;
       }
       parsed.lesson_status = lessonStatus;
+
+      // 新邏輯下這個 assignment 是否「課程通過」(對齊 ProgramScorePanel + admin 報表)
+      const courseScore = courseScoreByCourseId.get(a.course_id);
+      parsed.passed_new = !!courseScore?.passed;
+      parsed.mandatory_complete = !!courseScore?.mandatory_complete;
 
       // Get exam topics for this course
       try {
@@ -4651,7 +4695,15 @@ router.get('/classroom/programs/:id', async (req, res) => {
       assignments.push(parsed);
     }
 
-    res.json({ ...program, sequential_lessons: program.sequential_lessons, assignments });
+    // 頂部「N/M 門完成」用新邏輯算
+    const passedCoursesCount = assignments.filter(a => a.passed_new).length;
+
+    res.json({
+      ...program,
+      sequential_lessons: program.sequential_lessons,
+      assignments,
+      passed_courses_count: passedCoursesCount,
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
