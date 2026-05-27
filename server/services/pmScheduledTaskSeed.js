@@ -1060,11 +1060,11 @@ function buildMasterScrapeTask(kbMap, models = {}) {
   正崴採購合約多以 JM Base Price 為準,**PGM 的 price_usd 一律以此為主源**。
   RSS 不帶日變動 %,LLM 一律輸出 day_change_pct=null,server 後算(用前一日 JM 價)。
 
-═══ AG 白銀(LBMA 抓不到,Westmetall 主源 + Kitco 備援)═══
-{{scrape:https://www.westmetall.com/en/markdaten.php}}
-{{scrape:https://www.kitco.com/charts/livesilver.html}}
-↑ Westmetall 含 Silver Fixing(EUR/kg 要換算),Kitco 即時 spot(USD/oz 直接用)
-  Westmetall 為主、Kitco 為備援/交叉驗證。
+═══ AG 白銀主源:LBMA Silver Fix(USD/oz JSON,直接抓)═══
+{{fetch:https://prices.lbma.org.uk/json/silver.json}}
+↑ LBMA Silver Fix 公開 JSON endpoint,每日 USD/oz 已固定,直接用 v[0] 當 price_usd。
+  source = "LBMA", source_url = "https://prices.lbma.org.uk/json/silver.json"
+  (2026-05-25 起 AG 改用 LBMA 為唯一主源,不再用 Westmetall / Kitco)
 
 ═══ 基本金屬 6 種(CU/AL/NI/ZN/PB/SN)主源:Westmetall LME Cash Settlement ═══
 ↑ markdaten.php 已在上面 scrape 過,**所有 6 個基本金屬直接從這同一頁解析**。
@@ -1144,7 +1144,7 @@ B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;含 _kb_doc
       "raw_snippet": "22. May 2026 | LME Copper Cash-Settlement | 13,545.00"
     }
     // **prices 陣列只放今天真的抓到的金屬**(0-11 筆),沒抓到的不要列(別塞 null row)
-    // AU/PT/PD/RH 用今天 {{date}},Westmetall 基本金屬 + AG 用 Westmetall 表格那行的日期
+    // AU/PT/PD/RH 用今天 {{date}};基本金屬 Westmetall 用表格那行的日期;AG LBMA 用 JSON 的 d 欄位
   ]
 }
 \`\`\`
@@ -1161,9 +1161,12 @@ B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;含 _kb_doc
 - **day_change_pct 一律輸出 null**(server 端會用前一日 JM 價格自動補算,LLM 不要猜)
 
 ═══ AG 寫入規則 ═══
-- **Westmetall 為主**(EUR/kg → USD/oz 換算),source = "Westmetall"
-- Kitco 為備援:**只在 Westmetall 完全抓不到時用**,source = "Kitco"
-- ⚠️ **絕對禁止 source = "Westmetall / Kitco"** 這種混合,實際數字從哪抓就填哪個
+- **LBMA Silver Fix 為唯一主源**(USD/oz 直接用,不換算)
+  - source = "LBMA", source_url = "https://prices.lbma.org.uk/json/silver.json"
+  - price_type = "fix", market = "LBMA"
+  - 從 JSON 取最新一筆 \`{ d: 'YYYY-MM-DD', v: [USD, GBP, EUR] }\`,用 v[0]
+  - as_of_date 用 LBMA JSON 的 d 欄位(可能比今天早 1-3 天)
+- LBMA 抓不到該日 → 該筆漏掉不要輸出(不再 fallback Westmetall / Kitco)
 
 ═══ 基本金屬寫入規則(CU/AL/NI/ZN/PB/SN)═══
 - **只從 Westmetall markdaten.php 解析**,source = "Westmetall"
@@ -1178,12 +1181,14 @@ B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;含 _kb_doc
 - **prices 陣列長度可變**(0-11 筆),只放今天真的抓到價的金屬
   - AU 台銀:每天都有 → 一定要寫
   - PT/PD/RH JM RSS:JM 每天 08:30 HK 更新 → 通常有
-  - AG/基本金屬 Westmetall:LME 週末休市 → 週末可能 0 筆
+  - 基本金屬 Westmetall:LME 週末休市 → 週末可能 0 筆
+  - AG LBMA:LBMA Fix 週末休市 → 週末可能 0 筆
 - price_usd 一律換算成 **USD 等價**
 - **as_of_date 規則**:
   - AU 台銀 → 今天 {{date}}
   - JM RSS PT/PD/RH → 今天 {{date}}(RSS 標記 JM 更新日)
-  - **Westmetall 基本金屬 + AG → 用 Westmetall 表格那一行的日期**(可能是 1-3 天前)
+  - **Westmetall 基本金屬 → 用 Westmetall 表格那一行的日期**(可能是 1-3 天前)
+  - **AG LBMA → 用 JSON 最新一筆的 d 欄位**(可能是 1-3 天前)
 - **只輸出一個 \`\`\`json\`\`\` 區塊,內含 prices 陣列(沒有 news!)**
 
 ═══ 自我檢查清單 ═══
@@ -1192,7 +1197,7 @@ B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;含 _kb_doc
 - [ ] _kb_doc 是 1 筆陣列,title/summary/content 都填好?
 - [ ] **prices 陣列只放今天真的抓到價的金屬**(沒抓到的不要塞 null 進來)
 - [ ] AU 用台銀價、PT/PD/RH 用 JM Base Price?
-- [ ] **基本金屬 + AG 的 as_of_date 用 Westmetall 表格實際日期**(不是 {{date}})?
+- [ ] **基本金屬 as_of_date 用 Westmetall 表格實際日期** + **AG as_of_date 用 LBMA JSON d 欄位**(都不是 {{date}})?
 - [ ] **所有 day_change_pct 都是 null**(LLM 不算,server 後算)
 - [ ] **完全沒用 TradingEconomics**?(2026-05-25 起停用)
 - [ ] 整份輸出只有一個 \`\`\`json\`\`\` 區塊?`;
@@ -1723,8 +1728,10 @@ async function patchExistingMasterScrapeAddPriceWrite(db, kbMap, models) {
   const hasV2Marker         = !!promptStr && /全網金屬報價收集/.test(promptStr);
   const hasKbDocMarker      = !!promptStr && /_kb_doc/.test(promptStr);
   const hasNoTeMarker       = !!promptStr && /TradingEconomics 全面停用/.test(promptStr);
+  // 2026-05-25:AG 改用 LBMA 為唯一主源(原本是 Westmetall 主 + Kitco 備)
+  const hasLbmaAgMarker     = !!promptStr && /LBMA 為唯一主源/.test(promptStr);
 
-  if (hasPriceWrite && hasJmMarker && hasBotMarker && hasNewsRulesMarker && hasV2Marker && hasKbDocMarker && hasNoTeMarker) return;
+  if (hasPriceWrite && hasJmMarker && hasBotMarker && hasNewsRulesMarker && hasV2Marker && hasKbDocMarker && hasNoTeMarker && hasLbmaAgMarker) return;
 
   try {
     // 一併 update prompt + pipeline + email_subject/body(2026-04-29 重構不發 email)
@@ -1741,6 +1748,7 @@ async function patchExistingMasterScrapeAddPriceWrite(db, kbMap, models) {
       !hasV2Marker && '2026-04-29 純報價重構(砍新聞段)',
       !hasKbDocMarker && '_kb_doc KB 寫入結構',
       !hasNoTeMarker && '2026-05-25 TE 停用 + Westmetall 對齊',
+      !hasLbmaAgMarker && '2026-05-25 AG 改 LBMA 主源',
     ].filter(Boolean).join(' + ');
     console.log(`[PMScheduledTaskSeed] Upgraded "${targetName}" #${id}: ${missing}`);
   } catch (e) {
@@ -2090,12 +2098,13 @@ Rhodium 備援: {{scrape:https://www.kitco.com/charts/liverhodium.html}}
    - source="台灣銀行", price_type="fixing", market="BOT"
    - 台銀失敗才 fallback 用 Westmetall 的 LBMA Gold Fixing 二手轉發
 
-3. **Silver(AG)** 主源:Westmetall(EUR/kg → USD/oz 換算)+ Kitco 備援
-   - Westmetall 給 EUR/kg → 保留 original_price 是 EUR/kg + 換算 USD/oz
-     (1 kg = 32.1507 oz,EUR/USD 匯率取 Westmetall 當日值,is_estimated=1)
-     必須附換算公式
-   - Westmetall 失敗才 fallback Kitco(USD/oz 直接用,is_estimated=0)
-   - **不可用 LBMA**:資料權已獨家授權 ICE/IBA 付費,公開網頁沒數字
+3. **Silver(AG)** 主源:**LBMA Silver Fix(USD/oz 直接抓)**
+   - 2026-05-25 起改 LBMA 為唯一主源,JSON endpoint:https://prices.lbma.org.uk/json/silver.json
+   - JSON shape:\`[{ d: 'YYYY-MM-DD', v: [USD, GBP, EUR] }, ...]\`,取最新一筆 v[0]
+   - source="LBMA", source_url="https://prices.lbma.org.uk/json/silver.json"
+   - price_type="fix", market="LBMA", is_estimated=0
+   - as_of_date 用 JSON 那筆的 d 欄位(不是今天 {{date}})
+   - LBMA 沒新一筆 → 該日 AG 整筆漏掉,**禁止 fallback Westmetall / Kitco**
 
 4. **Platinum / Palladium / Rhodium** 主源:**Johnson Matthey RSS**(資料源 3)
    - **price_usd 一律以 JM RSS 為主**,source="JohnsonMatthey", price_type="fixing", market="JM"
@@ -2176,13 +2185,13 @@ Rhodium 備援: {{scrape:https://www.kitco.com/charts/liverhodium.html}}
   },
   {
     "metal_code":"AG","metal_name":"銀",
-    "original_price":2119.35,"original_currency":"EUR","original_unit":"EUR/kg",
-    "price_usd":77.07,"unit":"USD/oz","fx_rate_to_usd":1.1691,
-    "conversion_note":"2,119.35 EUR/kg × 1.1691 ÷ 32.1507 oz/kg = 77.07 USD/oz",
-    "price_type":"estimate","market":"LBMA","grade":null,
+    "original_price":77.49,"original_currency":"USD","original_unit":"USD/troy oz",
+    "price_usd":77.49,"unit":"USD/oz","fx_rate_to_usd":1.0,
+    "conversion_note":null,
+    "price_type":"fix","market":"LBMA","grade":null,
     "day_change_pct":null,"lme_stock":null,"stock_change":null,
-    "source":"Westmetall","source_url":"https://www.westmetall.com/en/markdaten.php",
-    "as_of_date":"{{date}}"
+    "source":"LBMA","source_url":"https://prices.lbma.org.uk/json/silver.json",
+    "as_of_date":"2026-05-07"
   },
   {
     "metal_code":"PT","metal_name":"鉑",
