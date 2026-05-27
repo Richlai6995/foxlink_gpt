@@ -25,6 +25,7 @@
     "docx": "^9.6.0",
     "docxtemplater": "^3.68.3",
     "dotenv": "^16.4.5",
+    "duckdb": "^1.4.4",
     "exceljs": "^4.4.0",
     "express": "^4.19.2",
     "form-data": "^4.0.5",
