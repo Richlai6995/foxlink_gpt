@@ -92,6 +92,7 @@ npm run dev
 | Q-2026-DEMO-006 | BYD | **JDM** | 3 | ACTIVE | ✗ | 雙方共同開發 · IP 共享 |
 | IT-2026-DEMO-007 | 內部 IT | IT 維護 | 1 | ACTIVE | ✗ | GENERAL plugin · 非 QUOTE |
 | Q-2026-DEMO-008 | Xiaomi | OEM | 1 | **DRAFT** | ✗ | 草稿 · 還沒啟動 |
+| **Q-2026-DEMO-009-SS** | **SteelSeries ApS** | **ODM** | 1 | ACTIVE | ✓ | **⭐ v0.5 旗艦 · 真實案 RFQ_Rival_3 校驗 · 變體 + 三廠 + 11 NRE + 16 PKG · 15 成員 · Stage 5** |
 
 ---
 
@@ -319,6 +320,95 @@ npm run dev
 3. 勾「只看本案 BU」filter
 4. 點任一 design → 右欄 iframe 開 `/dashboard?design=N&project_id=41&embed=1`
 5. embed=1 自動隱藏 Cortex 內建 sidebar(避免雙重導覽)
+
+---
+
+### 劇本 10 · ⭐ v0.5 SteelSeries Rival 3+ 旗艦案(真實 RFQ 校驗)
+
+**對應**:`docs/projects-platform-spec_v0.5.md` §11.3.5-8(Variant / NRE / Packaging / Multi-Factory Matrix)
+**HTML demo**:`docs/Cortex_互動Demo_v0.5.html`
+
+**帳號**:`ss_mike` / `123456`(Mike Chen, DPM)— 也可用 `ss_amy`(業務 HOST)/ `ss_tony`(MPM)/ `ss_lisa`(BPM)
+
+**Pre-condition**:seed 已建 Q-2026-DEMO-009-SS · 15 個 ss_* 成員 · 8 channels · Stage 5 PARALLEL_COLLECT 進行中
+
+**步驟:**
+
+#### A · 聊天 + 多 PM 協作
+
+1. 進 WarRoom · 切「聊天」tab
+2. **預期**:8 個 channel(announcement / general / qa-customer / engineering / sourcing / factory / cost-review / certification)
+3. 看右欄「頻道成員」:Mike Chen (DPM) / Alvin (ME) / Troy (EE) / Keny (RD) 等 15 人
+4. 切到 #general → 看到 4-5 條真實對話(Amy 開案、Mike 收 DPM、Tony 收 MPM、3 廠 EPM 各自 Cleansheet 完成)
+5. BLOCKER 訊息「T-107 EMC Debugging 預算客戶未回」標紅 + 自動同步 announcement
+6. DECISION 訊息「採 CN-OptA」AI #23 自動 Pin(琥珀光環)
+7. AI_INSIGHT 訊息「SG&A+Profit $0.75 毛利 6.7% 偏低」紫色語言
+
+#### B · ⭐ Form Section 切換看 v0.5 4 個新 section
+
+1. 切「報價 Form」tab
+2. **預期**:左欄 6 個 section 入口(客戶資料 / **CMF 變體** v0.5 / **Packaging** v0.5 / **NRE 成本** v0.5 / 成本核算(含 3 廠) / AI 工具)
+3. 點「**🎨 CMF 變體**」(§11.3.5):
+   - axis_key = `cmf_color`,2 variant(Black 80% / White 20%)
+   - 配置表:Black 334,400 yr · $8.52/件 / White 83,600 yr · $8.73/件
+   - **Roll-up**:加權平均 material cost **$8.562 / unit** · 總年材料成本 **$3,579,000 / yr**
+4. 點「**📦 Packaging**」(§11.3.7):
+   - 16 項 child-table(Gift Box / Inner Pad / Seal Sticker / PIG / SN Label / Master Carton / UN3481 …)
+   - **PKG Total / unit = $1.275** · Vendor 數 = 4 · Pallet = EU EPAL
+5. 點「**🔧 NRE 成本**」(§11.3.6):
+   - 4 widget:Original $218,911 / Negotiated $37,876 / 節省 $181,035(↓ 82.7%)/ 攤提 $0.0906/unit
+   - 11 項表格:`nre_dev_npi` $93K→$10K(↓89% 長期 partnership)/ `nre_mte` $80K→$5K(↓94%)/ `nre_emc_debug` 30hrs×$125 客戶**待回**琥珀標
+   - 機密 mask 試:切視角到非 PM/sales/admin → 看到 ▒▒▒
+6. 點「**📊 成本核算**」(§11.3.8):
+   - **3×3 matrix**(3 廠 × 3 PKG option):
+     ```
+              Opt A    Opt B    Opt C
+     CN     $11.12   $11.11   $12.59
+     VN     $11.12   $11.02 ✓ $12.59     ← MIN
+     TW     $11.12   $11.02   $12.60
+     ```
+   - 推薦 CN-OptA · 客戶未指定廠 mandatory_factory=null
+   - 切 Black ⇄ White variant tab
+   - MVA:CN $1.86 / VN $1.43 / TW $3.00 · SG&A+Profit $0.75 · suggested_quote $11.87 · 年總營收 $4.96M
+7. 點「**✨ AI 工具**」:
+   - 4 個工具卡片(AI 建議定價 / Cleansheet / What-if / 贏單機率)
+   - 點任一個 → 開 modal · 走 stub mode 或 LLM(看 env)
+
+#### C · 任務看板(12 task)
+
+1. 切「任務看板」tab
+2. **預期**:
+   - DONE 6(EE BOM / ME BOM 黑/白 / CN/VN/TW Cleansheet)
+   - IN_PROGRESS 3(NRE EMI/Cert / 30 國認證 / Packaging 詢價)
+   - BLOCKED 2(**T-024 結構應力分析 R0.8** / **T-107 EMC Debug 客戶待回**)
+   - PENDING 1(BOM Cost Review 草稿)
+3. Kanban ⇄ Gantt 切換 · 看 BLOCKED task 紅邊
+
+#### D · 機密 mask 測試(切 demo role)
+
+1. topbar 視角 dropdown 切「PARTICIPANT」(非 PM/sales 視角)
+2. 進 Form > NRE 成本:看到 ▒▒▒▒(11 個 NRE item 數字 mask)
+3. 進 Form > 成本核算(3 廠 matrix):各 cell 顯示 ▒▒▒
+4. 切回「HOST」→ 全部恢復明文
+
+#### E · ⭐ 對齊 v0.5 spec 範例值對照表
+
+| 項目 | spec / HTML demo 期望值 | UI 顯示 |
+|---|---|---|
+| Variant Black qty | 334,400 (80%) | ✓ |
+| Variant White qty | 83,600 (20%) | ✓ |
+| 加權平均 material cost | $8.562 / unit | ✓ |
+| Packaging 16 項合計 | $1.275 / unit | ✓ |
+| NRE Original | $218,911 | ✓ |
+| NRE Negotiated | $37,876 | ✓ |
+| NRE Delta | ↓ 82.7% | ✓ |
+| 3 廠 spread (Black) | $1.58 ($12.60 max − $11.02 min) | ✓ |
+| MVA CN / VN / TW | $1.86 / $1.43 / $3.00 | ✓ |
+| 推薦 quote | $11.87 / unit | ✓ |
+| 年總營收 | $4.96M | ✓ |
+| 推薦組合 | CN-OptA | ✓ |
+| 最便宜組合 | VN-OptB ($11.02) | ✓(✓ MIN 標亮) |
+| 毛利率 | 6.7% (gaming 偏低) | ✓ |
 
 ---
 

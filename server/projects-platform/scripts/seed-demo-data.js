@@ -66,6 +66,22 @@ const DEMO_USERS = [
 
   // Chat guest
   { username: 'guest_helen',  name: 'Helen (跨組訪客)',     email: 'helen@foxlink.com',  grants: [] },
+
+  // ── SteelSeries Rival 3+ Wired Mouse 案專屬團隊(15 人 · v0.5 demo)──
+  { username: 'ss_amy',       name: 'Amy 王曉明 (業務主)',    email: 'amy.ss@foxlink.com',     grants: [{ role: 'project.sales' }] },
+  { username: 'ss_joy',       name: 'Joy 業務助理',          email: 'joy.ss@foxlink.com',     grants: [] },
+  { username: 'ss_mike',      name: 'Mike Chen (DPM)',     email: 'mike.ss@foxlink.com',    grants: [{ role: 'project.pm' }] },
+  { username: 'ss_alvin',     name: 'Alvin (ME · 黑/白 BOM)', email: 'alvin.ss@foxlink.com', grants: [] },
+  { username: 'ss_troy',      name: 'Troy (EE)',           email: 'troy.ss@foxlink.com',    grants: [] },
+  { username: 'ss_keny',      name: 'Keny Chen (RD HW Mgr)', email: 'keny.ss@foxlink.com',  grants: [] },
+  { username: 'ss_tony',      name: 'Tony 何宗翰 (MPM)',     email: 'tony.ss@foxlink.com',   grants: [{ role: 'project.pm' }] },
+  { username: 'ss_andy',      name: 'Andy (CN 廠 EPM)',     email: 'andy.ss@foxlink.com',    grants: [] },
+  { username: 'ss_long',      name: 'Long (VN 廠 EPM)',     email: 'long.ss@foxlink.com',    grants: [] },
+  { username: 'ss_ken_tw',    name: 'Ken (TW 廠 EPM)',      email: 'ken.tw.ss@foxlink.com',  grants: [] },
+  { username: 'ss_lisa',      name: 'Lisa (BPM)',          email: 'lisa.ss@foxlink.com',    grants: [{ role: 'project.pm' }] },
+  { username: 'ss_iris',      name: 'Iris (台北採購)',       email: 'iris.ss@foxlink.com',   grants: [] },
+  { username: 'ss_ken_fac',   name: 'Ken (工廠採購)',        email: 'ken.fac.ss@foxlink.com', grants: [] },
+  { username: 'ss_john',      name: 'John (QA · 認證)',     email: 'john.ss@foxlink.com',    grants: [] },
 ];
 
 // ─────────────────────────────────────────────────────────────────────
@@ -344,6 +360,159 @@ const DEMO_PROJECTS = [
     tasks: [
       { title: 'PoC 測試',           status: 'DONE',        accountable_role: 'engineering', assignee: 'workflow_jay' },
       { title: '正式環境部署計畫',    status: 'IN_PROGRESS', accountable_role: 'PM',          assignee: 'workflow_jay' },
+    ],
+  },
+
+  // ⭐ v0.5 旗艦案:SteelSeries Rival 3+ Wired Mouse(ODM · 多 SKU + 三廠 + 11 NRE + 16 PKG)
+  {
+    project_code: 'Q-2026-DEMO-009-SS',
+    type_code: 'QUOTE',
+    title: 'SteelSeries Rival 3+ Wired Mouse (ELM5 Gen2 · ODM)',
+    bu_id: 1,
+    lifecycle_status: 'ACTIVE',
+    is_confidential: 1,
+    importance: 'HIGH',
+    urgency: 'HIGH',
+    priority_score: 5,
+    pm_username: 'ss_mike',
+    sales_username: 'ss_amy',
+    members: [
+      'ss_joy', 'ss_alvin', 'ss_troy', 'ss_keny', 'ss_tony',
+      'ss_andy', 'ss_long', 'ss_ken_tw', 'ss_lisa', 'ss_iris', 'ss_ken_fac', 'ss_john',
+    ],
+    data_payload: {
+      title: 'SteelSeries Rival 3+ Wired Mouse (ELM5 Gen2 · ODM)',
+      customer: 'SteelSeries ApS',
+      customer_alias: 'S001',
+      partNo: '5881-1047-0HA0',
+      quantity: 418000,
+      dueDate: '2026-08-30',
+      mode: 'ODM',
+      specs: 'Gaming wired mouse · USB-A · TrueMove Core sensor · PTFE feet · paracord cable · 黑/白雙色',
+      notes: '對齊真實案校驗(2024 SteelSeries Rival 3 報價)· 共用 EE BOM、ME BOM 分黑/白、PKG 16 項共用、3 廠對比(CN/VN/TW)',
+      estimatedCycleDays: 130,
+
+      // 機密欄位
+      amount: 'Tier-S',     // 4,956,000 USD/yr
+      margin: 'Tier-L',     // 6.7%(gaming 周邊偏低)
+      cost_breakdown: 'MASKED',
+
+      // ─── v0.5 §11.3.5 Variant Dimension ─────────────────────────
+      variants: {
+        axis_key: 'cmf_color',
+        axis_label: 'CMF 顏色',
+        cardinality: 2,
+        items: [
+          { key: 'black', label: 'Black', share: 0.80, qty: 334400, material_cost: 8.52, me_bom: '5881-1047-0HA0(B)', note: 'PTFE Feet 雙色款 / Wheel Grip B1-3' },
+          { key: 'white', label: 'White', share: 0.20, qty: 83600,  material_cost: 8.73, me_bom: '5881-1047-0CA0(W)', note: 'PTFE Feet White / Bottom Cover translucent' },
+        ],
+      },
+
+      // ─── v0.5 §11.3.6 NRE Costs(11 項標準)──────────────────────
+      nre: {
+        total_original:   218911,
+        total_negotiated: 37876,
+        delta_pct:        82.7,
+        amortize_per_unit: 0.0906,  // 37876 / 418000
+        items_count: 11,
+        items_done: 7,
+        items: [
+          { key: 'nre_build_cost',  label: 'Build Cost (試產費)',                 qty: 1,  original: 13600, updated: 13600, remark: '3/13 build qty 300→200 each color', responsible: 'SMT/NPI team', accountable: 'EPM',  status: 'done' },
+          { key: 'nre_emc_test',    label: 'EMC Test + Cert',                    qty: 0,  original: 0,     updated: 0,     remark: 'SS 自付',                   responsible: 'QA team',      accountable: 'DPM',  status: 'done' },
+          { key: 'nre_emc_debug',   label: 'EMC Debugging 預算 (30hrs×$125)',     qty: 30, original: 3750,  updated: 3750,  remark: '新認證 due · 客戶待回',   responsible: 'RD QA',        accountable: 'DPM',  status: 'pending', sla_color: 'amber' },
+          { key: 'nre_compat',      label: 'Compatibility Test',                 qty: 0,  original: 0,     updated: 0,     remark: 'Foxlink internal',          responsible: 'QA team',      accountable: 'DPM',  status: 'done' },
+          { key: 'nre_dve',         label: 'DVE NRE (Chromebook)',               qty: 1,  original: 165,   updated: 165,   remark: '認證 fee',                  responsible: 'RD',           accountable: 'DPM',  status: 'done' },
+          { key: 'nre_travel',      label: 'Travel Expense',                     qty: 2,  original: 6000,  updated: 0,     remark: '3/13 議價削除',             responsible: 'DPM',          accountable: 'DPM',  status: 'done' },
+          { key: 'nre_dev_npi',     label: 'Dev + NPI Labor Cost',               qty: 1,  original: 93299, updated: 10000, remark: '3/13 ↓$83K 長期 partnership', responsible: 'DPM team', accountable: 'DPM', status: 'done' },
+          { key: 'nre_reliability', label: 'Reliability Test (EV+DV)',           qty: 1,  original: 9159,  updated: 1500,  remark: '3/13 ↓ if Opt2',            responsible: 'QA team',      accountable: 'DPM',  status: 'pending' },
+          { key: 'nre_pkg_ret',     label: 'Package RET (Reliability)',          qty: 1,  original: 2223,  updated: 500,   remark: 'EV+DV 樣本',                 responsible: 'PKG team',     accountable: 'MPM',  status: 'pending' },
+          { key: 'nre_ort',         label: 'ORT (Ongoing Reliability)',          qty: 1,  original: 7530,  updated: 361,   remark: '3/10 僅樣本費',              responsible: 'QA team',      accountable: 'DPM',  status: 'pending' },
+          { key: 'nre_mte',         label: 'Unique Fixtures (MTE NPI)',          qty: 1,  original: 80185, updated: 5000,  remark: '3/10 僅 NPI · MP 廠自付',    responsible: 'NPI EPM',      accountable: 'DPM',  status: 'done' },
+          { key: 'nre_tooling',     label: 'Tooling (模具改費)',                  qty: 1,  original: 3000,  updated: 3000,  remark: 'Middle housing + Trigger', responsible: '塑件 PM',      accountable: 'DPM',  status: 'done' },
+        ],
+      },
+
+      // ─── v0.5 §11.3.7 Packaging Sub-form(16 項 Mouse 標準範本)─
+      packaging: {
+        template: 'Mouse / Keyboard standard',
+        items_count: 16,
+        pallet_compliance: 'EU EPAL',
+        total_per_unit: 1.275,  // SUM(qty × unit_price)
+        vendor_count: 4,
+        items: [
+          { no: 1,  part_name: 'Gift Box',                  spec: '278×250mm · 350g art paper coated',         qty: 1, unit_price: 0.32,  vendor: '富立印刷', lead_time_wk: 5,  note: 'Dieline 2024-02' },
+          { no: 2,  part_name: 'Inner Pad',                 spec: '296×152mm · E-flute corrugated',           qty: 1, unit_price: 0.12,  vendor: '富立印刷', lead_time_wk: 5,  note: 'FSC certified' },
+          { no: 3,  part_name: 'Inner Pad Partition',       spec: '171×84mm · E-flute corrugated',            qty: 1, unit_price: 0.05,  vendor: '富立印刷', lead_time_wk: 5,  note: 'FSC certified' },
+          { no: 4,  part_name: 'Seal Sticker',              spec: 'Φ25mm · 透明植物纖維',                       qty: 2, unit_price: 0.02,  vendor: '冠美包裝', lead_time_wk: 3,  note: '2 pcs per box' },
+          { no: 5,  part_name: 'Bag for Product',           spec: '套產品 · sustainable material',              qty: 1, unit_price: 0.04,  vendor: '冠美包裝', lead_time_wk: 4,  note: '2025 零塑' },
+          { no: 6,  part_name: 'Bag for Box',               spec: '套盒 · sustainable material',                qty: 1, unit_price: 0.03,  vendor: '冠美包裝', lead_time_wk: 4,  note: '2025 零塑' },
+          { no: 7,  part_name: 'PIG',                       spec: '320×200.8mm · 80gsm',                       qty: 1, unit_price: 0.08,  vendor: '富立印刷', lead_time_wk: 7,  note: '多語言印刷' },
+          { no: 8,  part_name: 'PID Label for Product',     spec: '40×60mm · 80gsm art paper',                 qty: 1, unit_price: 0.015, vendor: '三泰標籤', lead_time_wk: 3,  note: 'with QR' },
+          { no: 9,  part_name: 'Box Label',                 spec: '100×13mm · 80gsm art paper',                qty: 1, unit_price: 0.01,  vendor: '三泰標籤', lead_time_wk: 3,  note: 'SN + MFD date' },
+          { no: 10, part_name: 'Language Label',            spec: '116×12mm · 80gsm art paper',                qty: 1, unit_price: 0.01,  vendor: '三泰標籤', lead_time_wk: 3,  note: 'keyboard layout 文字' },
+          { no: 11, part_name: 'Master Carton',             spec: '5~6 retail box / carton',                   qty: 1, unit_price: 0.45,  vendor: '富立印刷', lead_time_wk: 7,  note: 'Double-wall BC flute' },
+          { no: 12, part_name: 'Master Carton Label',       spec: '89×140mm · 80gsm art paper',                qty: 1, unit_price: 0.02,  vendor: '三泰標籤', lead_time_wk: 3,  note: '2 sides duplicated' },
+          { no: 13, part_name: 'SN Label for Carton',       spec: '50×50mm · art paper',                       qty: 1, unit_price: 0.01,  vendor: '三泰標籤', lead_time_wk: 3,  note: '2D barcode' },
+          { no: 14, part_name: 'SteelSeries Logo Tape',     spec: '封口 OPP tape · 客供印刷模板',                 qty: 1, unit_price: 0.03,  vendor: '冠美包裝', lead_time_wk: 7,  note: '客供 logo file' },
+          { no: 15, part_name: 'Pallet Material',           spec: 'EU/US GMA/APAC 三規 · V20',                  qty: 1, unit_price: 0.08,  vendor: '環球棧板', lead_time_wk: 10, note: 'ISPM15 fumigation' },
+          { no: 16, part_name: 'UN3481 Label',              spec: 'IATA · lithium battery shipping',           qty: 1, unit_price: 0.01,  vendor: '三泰標籤', lead_time_wk: 3,  note: '本案無電池保留欄' },
+        ],
+      },
+
+      // ─── v0.5 §11.3.8 Multi-Factory Cost Matrix(3 廠 × 3 PKG)──
+      factory_matrix: {
+        axes: { factory: ['CN','VN','TW'], pkg_option: ['A','B','C'] },
+        mandatory_factory: null,  // 客戶未指定
+        recommended: { factory: 'CN', pkg_option: 'A' },  // Tony 4/15 默認
+        cheapest: { factory: 'VN', pkg_option: 'B', value: 11.02 },
+        spread: 1.58,             // max - min over 3×3 black
+        cells: {
+          // black variant · total_cost_exfactory ($/unit)
+          black: {
+            'CN-A': 11.12, 'CN-B': 11.11, 'CN-C': 12.59,
+            'VN-A': 11.12, 'VN-B': 11.02, 'VN-C': 12.59,
+            'TW-A': 11.12, 'TW-B': 11.02, 'TW-C': 12.60,
+          },
+          white: {
+            'CN-A': 11.34, 'CN-B': 11.33, 'CN-C': 12.75,
+            'VN-A': 11.34, 'VN-B': 11.24, 'VN-C': 12.82,
+            'TW-A': 11.34, 'TW-B': 11.25, 'TW-C': 12.82,
+          },
+        },
+        mva: { CN: 1.86, VN: 1.43, TW: 3.00 },   // transformation cost
+        sga_profit: 0.75,
+        suggested_quote: 11.87,                   // / unit
+        annual_revenue: 4956000,                  // 418K × $11.87
+      },
+
+      // 報價結果(供 BI / dashboard 用)
+      win_status: 'IN_NEGOTIATION',
+    },
+    confidential_fields: ['amount', 'margin', 'cost_breakdown', 'nre.items', 'factory_matrix.cells'],
+    chat_messages: [
+      { user: 'ss_amy',  type: 'NORMAL',     content: '各位,SteelSeries Rival 3 系列上一代有跑過,這次 Gen2 主要差異是 CMF 改新材質、PTFE 腳貼、paracord cable。客戶要求 CN/VN/TW 三廠對比,黑/白雙色 9 種組合。請各 PM 分頭起跑。' },
+      { user: 'ss_mike', type: 'NORMAL',     content: 'DPM 收到。EE BOM 黑白共用 Troy 跑、ME BOM 黑/白分版 Alvin 跑。NRE 11 項分工已在 #engineering 開單。' },
+      { user: 'ss_tony', type: 'NORMAL',     content: 'MPM 收到。三廠 Cleansheet 各廠 EPM 收 (Andy/Long/Ken),Packaging 16 項詢價已 sync Ken (工廠採購)。' },
+      { user: 'ss_andy', type: 'PROGRESS',   content: 'CN Cleansheet 完成。MVA = $1.86 / unit。BB Assy 22 DL + SMT 38 DL,共 101 DL/day。' },
+      { user: 'ss_long', type: 'PROGRESS',   content: 'VN Cleansheet 完成。MVA = $1.43 / unit (Labor 便宜但 indirect material 較貴)。' },
+      { user: 'ss_ken_tw', type: 'PROGRESS', content: 'TW Cleansheet 完成。MVA = $3.00 / unit (Labor 高但自動化高,Yield 較好)。' },
+      { user: 'ss_lisa', type: 'AI_INSIGHT', content: '🤖 SG&A+Profit 維持 $0.75 / unit,毛利率 ~6.7%,對 gaming 周邊算偏低。建議 NRE 已壓得很低 ($218.9K → $37.9K · ↓ 83%),最終單價想保 7% margin 可能要 push NRE 客戶分擔。' },
+      { user: 'ss_mike', type: 'BLOCKER',    content: '🚨 T-107 EMC Debugging 預算 (30hrs×$125 = $3,750) 客戶 Ben 4/22 留言「待 Sustainability 條款確認」目前已 11 天未回應,擋住 Stage 6 進入。Lisa 麻煩 push 一下。' },
+      { user: 'ss_amy',  type: 'DECISION',   content: '決定:依 Tony 默認方向採 CN-OptA(總成本 $11.12)。VN-OptB 雖然便宜 $0.10,但客戶未提區域要求,CN 廠對 SS supply 鏈最熟。最終單價建議 $11.87。' },
+    ],
+    tasks: [
+      { title: 'T-018 EE BOM (黑/白共用版)',           status: 'DONE',        accountable_role: 'EE',         assignee: 'ss_troy' },
+      { title: 'T-019 ME BOM Black (18 項)',          status: 'DONE',        accountable_role: 'ME',         assignee: 'ss_alvin' },
+      { title: 'T-020 ME BOM White (18 項)',          status: 'DONE',        accountable_role: 'ME',         assignee: 'ss_alvin' },
+      { title: 'T-024 結構應力分析 R0.8',              status: 'BLOCKED',     accountable_role: 'engineering', assignee: 'ss_keny' },
+      { title: 'T-025 NRE EMI/Cert/WHQL',             status: 'IN_PROGRESS', accountable_role: 'QA',         assignee: 'ss_john' },
+      { title: 'CN Cleansheet (Andy)',                status: 'DONE',        accountable_role: 'EPM',        assignee: 'ss_andy' },
+      { title: 'VN Cleansheet (Long)',                status: 'DONE',        accountable_role: 'EPM',        assignee: 'ss_long' },
+      { title: 'TW Cleansheet (Ken)',                 status: 'DONE',        accountable_role: 'EPM',        assignee: 'ss_ken_tw' },
+      { title: 'T-107 EMC Debugging 預算客戶確認',     status: 'BLOCKED',     accountable_role: 'BPM',        assignee: 'ss_lisa' },
+      { title: 'T-112 30 國認證矩陣',                  status: 'IN_PROGRESS', accountable_role: 'QA',         assignee: 'ss_john' },
+      { title: 'Packaging 16 項詢價彙總',              status: 'IN_PROGRESS', accountable_role: 'sourcing',   assignee: 'ss_ken_fac' },
+      { title: 'BOM Cost Review 草稿',                status: 'PENDING',     accountable_role: 'PM',         assignee: 'ss_mike' },
     ],
   },
 
