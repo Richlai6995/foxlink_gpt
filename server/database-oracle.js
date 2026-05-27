@@ -1478,6 +1478,16 @@ async function runMigrations(db) {
   await safeCreateExcelJobIdx('IDX_XLSXJOBS_RECOVERY',    'CREATE INDEX idx_xlsxjobs_recovery ON excel_query_jobs(status, heartbeat_at)');
   await safeCreateExcelJobIdx('IDX_XLSXJOBS_SESSION',     'CREATE INDEX idx_xlsxjobs_session ON excel_query_jobs(session_id)');
 
+  // ── Multi-file 支援:多檔同時 load 進同個 DuckDB instance,讓 LLM 可寫 cross-file JOIN ──
+  // 沒這欄前,LLM 一次只能查一檔,「比較兩個 BOM 差異」這類任務會陷入 20+ query 循環不收斂。
+  try {
+    await db.prepare(`ALTER TABLE excel_query_jobs ADD extra_files_json CLOB`).run();
+    console.log('[Migration] Added extra_files_json to excel_query_jobs');
+  } catch (e) {
+    // ORA-01430:column being added already exists
+    if (!e.message?.includes('ORA-01430')) console.warn('[Migration] extra_files_json add:', e.message);
+  }
+
   // ── Phase 1 一次性 migration:Excel skill 改走 jobService 後,自動把 skill_runner
   //    上的 child process 停掉(不再需要)。autoRestoreRunners 看到 code_status='stopped'
   //    就不會再 spawn,4 個 pod 共省 4 個無用 child process + 40100-40999 port。

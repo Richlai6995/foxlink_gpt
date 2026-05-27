@@ -200,18 +200,23 @@ function rowsToMarkdown(rows) {
  *   @param {number}  opts.userId
  *   @param {string}  opts.sessionId
  *   @param {number}  [opts.messageId]   chat_messages id(LLM 提早結束時用來 append 完成訊息)
- *   @param {string}  opts.fileName      LLM 給的 file_name
+ *   @param {string}  opts.fileName      LLM 給的 file_name(對應主表 t)
  *   @param {string}  opts.filePath      解析後實際 NFS path(已經過 attached_files 比對 + UPLOAD_ROOT 安全檢查)
  *   @param {string}  [opts.sheetName]
  *   @param {string}  opts.sql
+ *   @param {Array}   [opts.extraFiles]  其他 session 內的附檔 [{name, path}, ...],會被 load 成 f1/f2/f3
+ *                                       讓 LLM 在同個 DuckDB instance 內 cross-file JOIN
  * @returns {Promise<string>} jobId
  */
 async function createJob(db, opts) {
   const jobId = crypto.randomUUID();
+  const extraFilesJson = opts.extraFiles && opts.extraFiles.length > 0
+    ? JSON.stringify(opts.extraFiles.map(f => ({ name: f.name, path: f.path })))
+    : null;
   await db.prepare(`
     INSERT INTO excel_query_jobs (
-      id, user_id, session_id, message_id, file_name, file_path, sheet_name, sql_text, status
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+      id, user_id, session_id, message_id, file_name, file_path, sheet_name, sql_text, status, extra_files_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
   `).run(
     jobId,
     opts.userId,
@@ -221,8 +226,9 @@ async function createJob(db, opts) {
     opts.filePath,
     opts.sheetName || null,
     opts.sql,
+    extraFilesJson,
   );
-  console.log(`[ExcelJob] created ${jobId} user=${opts.userId} file=${opts.fileName} sheet=${opts.sheetName || '(auto)'} sql.len=${opts.sql.length}`);
+  console.log(`[ExcelJob] created ${jobId} user=${opts.userId} file=${opts.fileName} sheet=${opts.sheetName || '(auto)'} sql.len=${opts.sql.length} extras=${opts.extraFiles?.length || 0}`);
 
   // 同 process setImmediate worker(跟 transcribeJobService 一致)
   setImmediate(() => runJob(db, jobId).catch(e =>
@@ -400,66 +406,85 @@ async function runJob(db, jobId) {
     const tagId = `${jobId.slice(0,8)}|${path.basename(job.file_path)}`;
     console.log(`[ExcelJob] start ${tagId} sheet=${job.sheet_name || '(auto)'} recovery_count=${job.recovery_count || 0}`);
 
-    // 3. 路徑安全檢查
-    let realPath;
+    // 3. 解析 extra_files_json,組「要 load 的所有檔案」清單
+    //    主檔 → 主 sheet 為 t,其他 sheet 為 sanitize(sheet name)
+    //    extras → 每檔第一個有資料的 sheet 為 f1, f2, ...,其他 sheet 為 alias_sheet 命名
+    let extraFiles = [];
     try {
-      realPath = fs.realpathSync(job.file_path);
-    } catch (e) {
-      throw new Error(`檔案已被清除或不存在: ${job.file_name} (${job.file_path})`);
+      extraFiles = job.extra_files_json ? JSON.parse(job.extra_files_json) : [];
+      if (!Array.isArray(extraFiles)) extraFiles = [];
+    } catch (_) { extraFiles = []; }
+
+    const allFiles = [
+      { name: job.file_name, path: job.file_path, alias: 't', isMain: true },
+      ...extraFiles.map((f, i) => ({ name: f.name, path: f.path, alias: `f${i + 1}`, isMain: false })),
+    ];
+
+    // 4. 對所有檔案做安全 + 存在性檢查
+    for (const f of allFiles) {
+      let rp;
+      try { rp = fs.realpathSync(f.path); }
+      catch (e) { throw new Error(`檔案已被清除或不存在: ${f.name} (${f.path})`); }
+      if (!rp.startsWith(UPLOAD_ROOT)) {
+        throw new Error(`拒絕讀取此路徑(超出 ${UPLOAD_ROOT}): ${f.name}`);
+      }
+      f.realPath = rp;
     }
-    if (!realPath.startsWith(UPLOAD_ROOT)) {
-      throw new Error(`拒絕讀取此路徑(超出 ${UPLOAD_ROOT}): ${job.file_name}`);
-    }
 
-    // 4. 讀 xlsx
-    await _updateProgress(db, jobId, 5, 'reading_xlsx');
-    const fileSize = fs.statSync(realPath).size;
-    const tRead = Date.now();
-    const wb = XLSX.readFile(realPath, { cellDates: true });
-    console.log(`[ExcelJob] ${tagId} readFile ${(fileSize/1024/1024).toFixed(2)}MB in ${Date.now()-tRead}ms, sheets=${wb.SheetNames.length}`);
-    await _updateProgress(db, jobId, 20, 'reading_xlsx');
-
-    let pickedSheet;
-    try { pickedSheet = pickSheet(wb, job.sheet_name); }
-    catch (e) { throw new Error(e.message); }
-
-    // 5. DuckDB instance + 建表
+    // 5. DuckDB instance + 對每檔讀 xlsx + 建表
     duckdbInstance = new duckdb.Database(':memory:');
     duckdbConn = duckdbInstance.connect();
     await dbRun(duckdbConn, `SET memory_limit='256MB'`);
     await dbRun(duckdbConn, `SET threads=2`);
 
-    await _updateProgress(db, jobId, 25, 'loading_duckdb');
-    const loadedSheets = [];
-    const sheetsTotal = wb.SheetNames.filter(n => {
-      const ws = wb.Sheets[n];
-      return ws && ws['!ref'] && ws['!ref'] !== 'A1';
-    }).length;
-    let sheetsDone = 0;
+    await _updateProgress(db, jobId, 5, 'reading_xlsx');
+    const tRead = Date.now();
+    const loadedSheets = [];  // { original, table, rows, columns, fileName, alias }
 
-    for (const name of wb.SheetNames) {
-      const ws = wb.Sheets[name];
-      if (!ws || !ws['!ref'] || ws['!ref'] === 'A1') continue;
-      const tSheet = Date.now();
-      const { headers, data } = readSheet(ws);
-      if (headers.length === 0) continue;
+    for (let fi = 0; fi < allFiles.length; fi++) {
+      const f = allFiles[fi];
+      const fileSize = fs.statSync(f.realPath).size;
+      const tFile = Date.now();
+      const wb = XLSX.readFile(f.realPath, { cellDates: true });
+      console.log(`[ExcelJob] ${tagId} read "${f.name}" (alias=${f.alias}) ${(fileSize/1024/1024).toFixed(2)}MB in ${Date.now()-tFile}ms, sheets=${wb.SheetNames.length}`);
 
-      const tblName = name === pickedSheet ? 't' : sanitizeIdent(name);
-      try {
-        await loadTable(duckdbConn, tblName, headers, data);
-        console.log(`[ExcelJob] ${tagId} sheet "${name}" → table "${tblName}": ${data.length} rows, ${headers.length} cols, ${Date.now()-tSheet}ms`);
-        loadedSheets.push({ original: name, table: tblName, rows: data.length, columns: headers });
-      } catch (e) {
-        console.warn(`[ExcelJob] ${tagId} Failed to load sheet "${name}": ${e.message}`);
+      // 主檔的 pickedSheet 用 LLM 指定的 sheet_name;extras 自動選第一個有資料的
+      let pickedSheet;
+      try { pickedSheet = pickSheet(wb, f.isMain ? job.sheet_name : null); }
+      catch (e) { throw new Error(`${f.name}: ${e.message}`); }
+
+      // loading 階段 5→60,按檔案數 + sheet 數平均分配進度
+      const baseProg = 5 + Math.round(55 * fi / allFiles.length);
+      await _updateProgress(db, jobId, baseProg, 'loading_duckdb');
+
+      for (const name of wb.SheetNames) {
+        const ws = wb.Sheets[name];
+        if (!ws || !ws['!ref'] || ws['!ref'] === 'A1') continue;
+        const tSheet = Date.now();
+        const { headers, data } = readSheet(ws);
+        if (headers.length === 0) continue;
+
+        // 主 sheet:用 alias 本身(t / f1 / f2);其他 sheet:alias_<sanitize_name>
+        const tblName = name === pickedSheet
+          ? f.alias
+          : `${f.alias}_${sanitizeIdent(name)}`;
+        try {
+          await loadTable(duckdbConn, tblName, headers, data);
+          console.log(`[ExcelJob] ${tagId} "${f.name}" sheet "${name}" → table "${tblName}": ${data.length} rows, ${headers.length} cols, ${Date.now()-tSheet}ms`);
+          loadedSheets.push({
+            original: name, table: tblName, rows: data.length, columns: headers,
+            fileName: f.name, alias: f.alias, isMain: f.isMain && name === pickedSheet,
+          });
+        } catch (e) {
+          console.warn(`[ExcelJob] ${tagId} Failed to load "${f.name}" sheet "${name}": ${e.message}`);
+        }
       }
-      sheetsDone++;
-      // loading 階段 25→60
-      const loadingProg = 25 + Math.round(35 * sheetsDone / Math.max(sheetsTotal, 1));
-      await _updateProgress(db, jobId, loadingProg, 'loading_duckdb');
     }
 
+    await _updateProgress(db, jobId, 60, 'loading_duckdb');
+
     if (loadedSheets.length === 0) {
-      throw new Error('此 Excel 沒有可讀取的工作表(全部空白)');
+      throw new Error('所有 Excel 都沒有可讀取的工作表(全部空白)');
     }
 
     // 6. 跑 SQL
@@ -469,13 +494,14 @@ async function runJob(db, jobId) {
     try {
       result = await dbAll(duckdbConn, job.sql_text);
     } catch (e) {
-      const tableInfo = loadedSheets.map(s =>
-        `  - ${s.table}${s.original !== s.table ? ` (原名:${s.original})` : ''} — ${s.rows} 列, 欄位:${s.columns.join(', ')}`
-      ).join('\n');
+      const tableInfo = loadedSheets.map(s => {
+        const fileTag = s.fileName ? ` [檔:${s.fileName}]` : '';
+        return `  - ${s.table}${s.original !== s.table.replace(/^[tf]\d*_?/, '') ? ` (原名:${s.original})` : ''}${fileTag} — ${s.rows} 列, 欄位:${s.columns.join(', ')}`;
+      }).join('\n');
       throw new Error(
         `SQL 執行失敗: ${e.message}\n` +
         `\n你下的 SQL:\n\`\`\`sql\n${job.sql_text}\n\`\`\`\n` +
-        `\n可用的表(主工作表別名為 t):\n${tableInfo}\n` +
+        `\n可用的表(主檔=t,其他檔=f1/f2/...):\n${tableInfo}\n` +
         `\n常見原因:欄位名拼錯、引號用錯(欄位名含中文/空格用 "雙引號")、聚合沒 GROUP BY。`
       );
     }
@@ -485,13 +511,19 @@ async function runJob(db, jobId) {
 
     // 7. 組 markdown 結果
     const md = rowsToMarkdown(result);
-    const sheetNote = loadedSheets.length > 1
-      ? ` (本檔共 ${loadedSheets.length} 工作表:${loadedSheets.map(s => s.original).join(', ')})`
+    const multiFileNote = extraFiles.length > 0
+      ? ` + ${extraFiles.length} 個附檔(f1..f${extraFiles.length})`
       : '';
     const elapsed = Date.now() - (job.started_at ? new Date(job.started_at).getTime() : tRead);
+    const mainSheet = loadedSheets.find(s => s.isMain);
+    const allTablesNote = loadedSheets.length > 1
+      ? `\n**所有 table**(主檔=t):\n` + loadedSheets.map(s =>
+          `  - ${s.table} (${s.fileName} / sheet="${s.original}", ${s.rows} 列)`
+        ).join('\n') + '\n'
+      : '';
     const resultMd =
-      `**檔案**:${job.file_name}\n` +
-      `**主工作表**:${pickedSheet}${sheetNote}\n` +
+      `**主檔**:${job.file_name}${multiFileNote}\n` +
+      `**主工作表**:${mainSheet?.original || '(unknown)'}${allTablesNote}\n` +
       `**SQL**:\n\`\`\`sql\n${job.sql_text}\n\`\`\`\n\n` +
       `**結果**(${result.length} 列, ${elapsed}ms):\n\n${md}`;
 
