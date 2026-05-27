@@ -34,7 +34,13 @@ const crypto = require('crypto');
 const duckdb = require('duckdb');
 const XLSX = require('xlsx');
 
-const UPLOAD_ROOT = path.resolve(process.env.UPLOAD_DIR || '/app/uploads');
+// 重要:預設值必須對齊 chat.js / transcribeJobService 用的 `path.join(__dirname, '../uploads')`,
+// 不可寫死 '/app/uploads'。Windows 開發機 env 沒設時,/app/uploads 會 resolve 成 D:\app\uploads,
+// 跟 chat.js 算出來的 D:\vibe_coding\foxlink_gpt\server\uploads 不一致 → startsWith 失敗 →
+// 拋「拒絕讀取此路徑」→ LLM 看到 error 會合理化成「檔名特殊字元問題」誤導 user。
+const UPLOAD_ROOT = process.env.UPLOAD_DIR
+  ? path.resolve(process.env.UPLOAD_DIR)
+  : path.join(__dirname, '../uploads');
 
 // ─── 配置 ────────────────────────────────────────────────────────────────────
 const MAX_ROWS_PER_SHEET    = 100000;
