@@ -1669,10 +1669,13 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           console.warn(`[Chat] xlsx preview failed for "${originalName}": ${e.message}`);
         }
 
+        // ⚠️ 此段文字會被 TAG router 掃過(它對 message 做 substring match),
+        // 不可用「分析」「深度」「比較」「金屬」等常見動詞/名詞 — 會誤觸發 pm_deep_analysis_workflow、
+        // pm_what_if_cost_impact 等 PM workflow 的 TAG match。用「處理」「回答」這類中性詞。
         combinedUserText += `\n\n[Excel: ${originalName}]\n` +
           `(此檔案已完整保存。以下僅為前 30 列預覽。\n` +
           ` 若 excel_query 工具可用,精確的彙總/排序/Top N/篩選請透過該工具查詢;\n` +
-          ` 若工具未提供,以預覽資料盡力分析並向使用者說明限制。)\n` +
+          ` 若工具未提供,以預覽資料盡力回答並向使用者說明限制。)\n` +
           preview;
 
         fileMetas.push({
@@ -2127,12 +2130,16 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
         })();
         console.log(`[Skill] Checking skill "${sk.name}" id=${sk.id} public=${sk.is_public} mode=${sk.endpoint_mode} tags=${JSON.stringify(tags)}`);
         if (tags.length === 0) continue;
-        // Bidirectional match: message contains tag, OR any 2+ char segment of tag is in message
+        // Bidirectional match: message contains tag, OR any 3-4 char segment of tag is in message
+        // ⚠️ 之前用 2-char substring,CJK 撞嚴重(tag '深度分析' 切 '分析'(2 char)會 match
+        //    含「分析」字眼的訊息,連帶觸發整個 PM workflow 群)。改 3-char 起跳:
+        //    - tag '深度分析' 切片 '深度分'/'度分析' — 不會 match 含「分析」的訊息
+        //    - tag '聲音' (2 char) 仍會被完整 includes 邏輯接住(msgLower.includes('聲音'))
+        //    - 4-char 上限保留(避免長 tag 切過細)
         const tagMatch = tags.some(tag => {
           const t = String(tag).toLowerCase();
           if (msgLower.includes(t)) return true;
-          // Check 2-4 char substrings of tag against message (e.g. "聲音" in "文字轉聲音" matches "轉成聲音檔")
-          for (let len = 2; len <= Math.min(t.length, 4); len++) {
+          for (let len = 3; len <= Math.min(t.length, 4); len++) {
             for (let i = 0; i <= t.length - len; i++) {
               if (msgLower.includes(t.slice(i, i + len))) return true;
             }
