@@ -10,6 +10,7 @@ const { streamChatAoai, streamChatAoaiWithTools } = require('../services/llmServ
 const { processGenerateBlocks } = require('../services/fileGenerator');
 const { parseChartBlocks } = require('../services/chartSpecParser');
 const skillRunner = require('../services/skillRunner');
+const excelQueryJobService = require('../services/excelQueryJobService');
 const { notifyAdminSensitiveKeyword } = require('../services/mailService');
 const { budgetGuard } = require('../middleware/budgetGuard');
 const mcpClient = require('../services/mcpClient');
@@ -2187,8 +2188,10 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
     let allSkillsToProcess = [...sessionSkills, ...tagRoutedSkills, ...topbarErpSkills];
 
     // ── Force-inject excel_query skill when session has xlsx attached ─────────
-    // 不靠 TAG 路由(命中率 0),只要 session 有 xlsx 附檔就強制掛上,
-    // 確保 LLM 能呼叫 excel_query 跑精確 SQL 而非自行估算數字。
+    // Phase 1 起,Excel 查詢走 excelQueryJobService(背景 job + DB lock),不再依賴
+    // skill_runner 子程序也不打 HTTP。所以只要 skill record 有 tool_schema 就視為可用,
+    // 不檢查 code_status / endpoint_url / code_snippet。「無法連線」這條降級路徑事實上
+    // 不會再被觸發(jobService 在本 pod 跑,不會跨 pod ECONNREFUSED)。
     let excelSkillInjected = false;
     if (sessionAttachedFiles.length > 0) {
       try {
@@ -2196,8 +2199,7 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
         const xlsxSkill = await db.prepare(
           `SELECT * FROM skills
            WHERE LOWER(name) IN ('excel 精確查詢', 'excel_query')
-             AND type = 'code' AND code_status = 'running'
-             AND endpoint_url IS NOT NULL`
+             AND tool_schema IS NOT NULL`
         ).get();
         if (xlsxSkill) {
           const skId = String(xlsxSkill.id || xlsxSkill.ID);
@@ -2207,12 +2209,18 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           }
           excelSkillInjected = true;
         } else {
-          console.warn('[Skill] sessionAttachedFiles has xlsx but excel_query skill not running — install/start it via Code Runners admin UI');
+          console.warn('[Skill] sessionAttachedFiles has xlsx but excel_query skill record missing/has no tool_schema');
         }
       } catch (e) {
         console.warn('[Skill] Failed to force-inject excel_query:', e.message);
       }
     }
+
+    // 用於後續多處特判:這個 skill 走 jobService,不需要 spawn child process
+    const isExcelQuerySkill = (sk) => {
+      const n = String(sk?.name || sk?.NAME || '').toLowerCase();
+      return n === 'excel 精確查詢' || n === 'excel_query';
+    };
 
     // Skip hidden skills + skills whose underlying ERP tool is hidden(ERP 是包成 erp_proc skill 進來的)
     if (hiddenSkillIds.size > 0 || hiddenErpIds.size > 0) {
@@ -2270,14 +2278,14 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           `5. 若使用者問題模糊(例如「分析這個檔」),先呼叫 excel_query 跑 \`SELECT * FROM t LIMIT 5\` 看資料樣貌,再決定後續查詢。\n`
         );
       } else {
-        // Skill runner 死了 — 不能叫 LLM 呼叫不存在的工具。誠實告知限制。
+        // Excel 查詢 skill 完全沒在 DB(admin 還沒安裝)— 才會走這段降級
         skillSystemPrompts.push(
-          `# Excel 附件處理(降級模式 — excel_query 工具暫時無法使用)\n\n` +
+          `# Excel 附件處理(降級模式 — excel_query 工具未安裝)\n\n` +
           `## 可用檔案\n${fileList}\n\n` +
           `## 規則\n` +
-          `1. **excel_query 工具目前未啟動**,你只能看到每個 sheet 的前 30 列預覽,無法執行精確 SQL。\n` +
+          `1. **excel_query 工具尚未在此系統安裝**,你只能看到每個 sheet 的前 30 列預覽,無法執行精確 SQL。\n` +
           `2. 若使用者問題只需從預覽就能回答(看欄位、看前幾筆樣本),正常回。\n` +
-          `3. 若使用者問題涉及 Top N、彙總、排序、整檔加總/計數等,**必須在回覆開頭明確告知**:「Excel 查詢工具暫時無法使用,以下答案僅基於前 30 列預覽,可能不完整,請聯絡管理員啟動 excel_query 後再試。」然後才以預覽資料盡力回答。\n` +
+          `3. 若使用者問題涉及 Top N、彙總、排序、整檔加總/計數等,**必須在回覆開頭明確告知**:「Excel 精確查詢工具尚未安裝,以下答案僅基於前 30 列預覽,可能不完整,請聯絡系統管理員安裝 excel_query 技能後再試。」然後才以預覽資料盡力回答。\n` +
           `4. 絕對不要假裝呼叫 excel_query,也不要捏造看似精確的數字。\n`
         );
       }
@@ -2300,6 +2308,35 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
         ]);
         return r.ok;
       } catch (_) { return false; }
+    }
+
+    // ── 統一取本 pod skill endpoint 的 helper ────────────────────────────
+    // K8s 多 pod 下 DB.endpoint_url 是「最後一個 spawn 的 pod」覆寫的,讀它必撞
+    // ECONNREFUSED。永遠先看本 pod in-memory runningProcesses → 沒有就當場 spawn。
+    // 這個 helper 取代之前散落各處的 resolveLocalEndpoint 呼叫,語意一致:
+    //   回傳 healthy localUrl → 可直接 fetch
+    //   回傳 null → 本 pod 沒辦法執行此 skill(spawn 失敗 / 健檢失敗)
+    async function ensureLocalSkillEndpoint(sk) {
+      if (sk.type !== 'code') return sk.endpoint_url; // non-code: external URL, 直接用
+      const skId = sk.id || sk.ID;
+      let localUrl = skillRunner.resolveLocalEndpoint(skId, null); // 不 fallback DB
+      if (localUrl && await checkCodeSkillHealth(localUrl)) return localUrl;
+
+      // 本 pod 沒有可用 entry → 試著當場 spawn(僅當 user intended running + 有 code)
+      const codeStatus = sk.code_status || sk.CODE_STATUS;
+      const codeSnippet = sk.code_snippet || sk.CODE_SNIPPET;
+      if (codeStatus === 'running' && codeSnippet) {
+        try {
+          console.log(`[Skill] "${sk.name}" not running on this pod, on-demand spawning...`);
+          skillRunner.saveCode(skId, codeSnippet);
+          await skillRunner.spawnRunner({ ...sk, id: skId, code_snippet: codeSnippet }, db);
+          localUrl = skillRunner.resolveLocalEndpoint(skId, null);
+          if (localUrl && await checkCodeSkillHealth(localUrl)) return localUrl;
+        } catch (e) {
+          console.warn(`[Skill] "${sk.name}" on-demand spawn failed: ${e.message}`);
+        }
+      }
+      return null;
     }
 
     // ── Rate limiting for skills ─────────────────────────────────────────
@@ -2368,22 +2405,24 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           }
         }
       } else if (sk.type === 'external' || sk.type === 'code') {
-        // For code runners, resolve endpoint URL from code_port if not set
-        if (sk.type === 'code' && !sk.endpoint_url && sk.code_port) {
-          sk = { ...sk, endpoint_url: `http://localhost:${sk.code_port}` };
-        }
-        if (!sk.endpoint_url) {
-          console.warn(`[Skill] "${sk.name}" skipped: no endpoint_url (code_status=${sk.code_status}, code_port=${sk.code_port})`);
-          continue;
-        }
-        // For code runners, do a quick health check first(用 pod-local port,
-        // 避免拿到別 pod 的 DB.endpoint_url 永遠 health fail)
-        if (sk.type === 'code') {
-          const _localUrl = skillRunner.resolveLocalEndpoint(sk.id || sk.ID, sk.endpoint_url);
-          const healthy = await checkCodeSkillHealth(_localUrl);
-          if (!healthy) {
-            console.warn(`[Skill] "${sk.name}" health check failed (localUrl=${_localUrl} db=${sk.endpoint_url}), skipping`);
-            sendEvent({ type: 'status', message: `⚠️ Skill "${sk.name}" 離線，請先在技能設定中啟動 Code Runner` });
+        // Phase 1:excel_query 走 jobService,不需要 child process / endpoint;直接 mark 一個
+        // 假 url,讓 register loop 條件通過(它檢查 sk.endpoint_url 存在),tool handler 會特判。
+        if (sk.type === 'code' && isExcelQuerySkill(sk)) {
+          sk.endpoint_url = 'job://excel_query';   // sentinel,實際不會被 fetch
+        } else if (sk.type === 'code') {
+          const _localUrl = await ensureLocalSkillEndpoint(sk);
+          if (!_localUrl) {
+            console.warn(`[Skill] "${sk.name}" unavailable on this pod (status=${sk.code_status}), skipping`);
+            sendEvent({ type: 'status', message: `⚠️ Skill "${sk.name}" 暫時無法在本節點執行,本次跳過` });
+            continue;
+          }
+          // 直接 mutate sk(也就是 allSkillsToProcess[i])的 endpoint_url 為本 pod 的 URL。
+          // 後面第二輪 register loop 讀 sk.endpoint_url 才會拿到對的值。
+          sk.endpoint_url = _localUrl;
+        } else {
+          // external skill:直接用 DB endpoint_url(外部服務,跟 pod 無關)
+          if (!sk.endpoint_url) {
+            console.warn(`[Skill] external "${sk.name}" skipped: no endpoint_url`);
             continue;
           }
         }
@@ -2660,7 +2699,11 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
     // post_answer / answer skills run AFTER Gemini — do NOT register them as Gemini tools
     // (codeSkillToolMap 已在 allSkillsToProcess 後宣告,供 answer fallback 共用)
     for (const sk of allSkillsToProcess) {
-      if ((sk.type === 'code' || sk.type === 'external') && sk.tool_schema && sk.code_status === 'running' && sk.endpoint_url
+      // excel_query 走 jobService,放寬 code_status 限制(admin 把它停了也讓 LLM 能 call,
+      // 因為實際執行不靠 skill_runner 子程序)
+      const isExcelQ = isExcelQuerySkill(sk);
+      const codeStatusOk = isExcelQ || sk.code_status === 'running';
+      if ((sk.type === 'code' || sk.type === 'external') && sk.tool_schema && codeStatusOk && sk.endpoint_url
           && sk.endpoint_mode !== 'post_answer' && sk.endpoint_mode !== 'answer') {
         try {
           const schema = JSON.parse(sk.tool_schema);
@@ -2704,12 +2747,10 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
         const _t0 = Date.now();
         let _status = 'ok', _errMsg = null, _respPreview = null, added = '';
         try {
-          // Pod-local endpoint(K8s 多 pod 必須,DB.endpoint_url 會被互相覆寫)
-          const _localUrl = sk.type === 'code'
-            ? skillRunner.resolveLocalEndpoint(sk.id || sk.ID, sk.endpoint_url)
-            : sk.endpoint_url;
+          // sk.endpoint_url 已在 ensureLocalSkillEndpoint loop 內 mutate 成本 pod URL(code skill)
+          // 或 DB 值(external skill);直接用即可。
           const resp = await Promise.race([
-            fetch(_localUrl, {
+            fetch(sk.endpoint_url, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -2750,11 +2791,9 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
       const _ansT0 = Date.now();
       sendEvent({ type: 'status', message: `Skill: ${sk.name} 處理中...` });
       try {
-        const _localUrl = sk.type === 'code'
-          ? skillRunner.resolveLocalEndpoint(sk.id || sk.ID, sk.endpoint_url)
-          : sk.endpoint_url;
+        // sk.endpoint_url 已是本 pod URL(ensureLocalSkillEndpoint mutate);直接用
         const resp = await Promise.race([
-          fetch(_localUrl, {
+          fetch(sk.endpoint_url, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -3667,15 +3706,99 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
                 }
               }
 
+              // ── excel_query 特判:走 excelQueryJobService(背景 job + DB lock + recovery)──
+              // 不打 skill_runner HTTP,因此跨 pod / deploy 中斷都能撐過。最多同步等 90s 拿
+              // 結果回 LLM;超時 LLM 拿到「背景中」訊息,job 完成時靠 chat_message + user_notification
+              // 兜底通知 user。
+              if (isExcelQuerySkill(sk)) {
+                const _t0 = Date.now();
+                const fileName = args?.file_name || args?.fileName;
+                const sheetName = args?.sheet_name || args?.sheetName;
+                const sqlText = args?.sql;
+                if (!sqlText || typeof sqlText !== 'string') {
+                  return '[Excel 查詢失敗] 缺少必要參數 sql(必須是 DuckDB SQL 字串)。請重新呼叫工具並提供 sql 參數。';
+                }
+                if (!fileName) {
+                  return `[Excel 查詢失敗] 缺少必要參數 file_name。可用檔案:\n${(sessionAttachedFiles || []).map((f, i) => `${i+1}. ${f.name}`).join('\n')}`;
+                }
+                if (!Array.isArray(sessionAttachedFiles) || sessionAttachedFiles.length === 0) {
+                  return '[Excel 查詢失敗] 此對話沒有偵測到 Excel 檔案附件。請使用者先上傳 .xlsx/.xls 檔案,再呼叫此工具。';
+                }
+                // fuzzy match 找出實際路徑
+                const target = sessionAttachedFiles.find(f => f.name === fileName)
+                  || sessionAttachedFiles.find(f => f.name && f.name.toLowerCase() === fileName.toLowerCase())
+                  || sessionAttachedFiles.find(f => f.name && f.name.includes(fileName))
+                  || sessionAttachedFiles.find(f => f.name && fileName.includes(f.name));
+                if (!target || !target.path) {
+                  return `[Excel 查詢失敗] 找不到檔案 "${fileName}"。可用:\n${sessionAttachedFiles.map((f, i) => `${i+1}. ${f.name}`).join('\n')}`;
+                }
+
+                try {
+                  const jobId = await excelQueryJobService.createJob(db, {
+                    userId: req.user.id,
+                    sessionId,
+                    fileName: target.name,
+                    filePath: target.path,
+                    sheetName: sheetName || null,
+                    sql: sqlText,
+                  });
+                  sendEvent({ type: 'status', message: `Excel 查詢已排程 (${jobId.slice(0,8)}),處理中...` });
+
+                  const r = await excelQueryJobService.waitForResult(db, jobId, {
+                    maxWaitMs: 90_000,
+                    onProgress: ({ progress, stage }) => {
+                      const stageLabel = stage === 'reading_xlsx' ? '讀取 xlsx'
+                        : stage === 'loading_duckdb' ? '建立 DuckDB 索引'
+                        : stage === 'executing_sql' ? '執行 SQL'
+                        : stage;
+                      sendEvent({ type: 'status', message: `Excel 查詢中:${stageLabel} (${progress}%)` });
+                    },
+                  });
+
+                  // log
+                  try {
+                    await db.prepare(
+                      `INSERT INTO skill_call_logs (skill_id, user_id, session_id, query_preview, response_preview, status, error_msg, duration_ms)
+                       VALUES (?,?,?,?,?,?,?,?)`
+                    ).run(
+                      sk.id, req.user.id, sessionId,
+                      JSON.stringify({ file_name: target.name, sql: sqlText.slice(0, 120) }).slice(0, 200),
+                      (r.resultMd || r.error || '').slice(0, 200),
+                      r.failed ? 'error' : (r.done ? 'ok' : 'async'),
+                      r.failed ? (r.error || '').slice(0, 500) : null,
+                      Date.now() - _t0,
+                    );
+                  } catch (_) {}
+
+                  if (r.done && !r.failed) {
+                    return r.resultMd; // 同步拿到結果,LLM 正常用
+                  }
+                  if (r.done && r.failed) {
+                    return `[Excel 查詢失敗] ${r.error}`;
+                  }
+                  // 超時:job 還在跑,告訴 LLM 不要等,user 會在通知收到結果
+                  return `[Excel 查詢仍在背景執行(已 ${Math.floor((Date.now()-_t0)/1000)}s,job=${jobId.slice(0,8)})。系統會在完成後以鈴鐺通知使用者並在對話中補上結果訊息。請對使用者說明這個情況(查詢仍在進行中,請稍候、可同時做其他事),你的工作完成,不要再呼叫 excel_query 工具。]`;
+                } catch (e) {
+                  console.error(`[Excel] jobService failed: ${e.message}`);
+                  try {
+                    await db.prepare(
+                      `INSERT INTO skill_call_logs (skill_id, user_id, session_id, query_preview, status, error_msg, duration_ms) VALUES (?,?,?,?,?,?,?)`
+                    ).run(sk.id, req.user.id, sessionId, JSON.stringify(args).slice(0, 200), 'error', e.message, Date.now() - _t0);
+                  } catch (_) {}
+                  return `[Excel 查詢失敗] ${e.message}`;
+                }
+              }
+
               sendEvent({ type: 'status', message: `執行技能程式：${sk.name}` });
               const _t0 = Date.now();
               try {
-                // Pod-local endpoint:DB.endpoint_url 在多 pod 下會被互相覆寫,
-                // 必須優先用本 pod 自己 spawn 的 process port,否則 ECONNREFUSED
-                const _localUrl = sk.type === 'code'
-                  ? skillRunner.resolveLocalEndpoint(sk.id || sk.ID, sk.endpoint_url)
+                // sk.endpoint_url 已在前面 ensureLocalSkillEndpoint mutate 為本 pod URL。
+                // 若 LLM 在很長對話中 call,本 pod 的 spawned process 可能在這時間內被
+                // healthMonitor 清掉了,所以這裡再 re-resolve 一次保險。
+                let _localUrl = sk.type === 'code'
+                  ? (skillRunner.resolveLocalEndpoint(sk.id || sk.ID, null) || await ensureLocalSkillEndpoint(sk))
                   : sk.endpoint_url;
-                if (!_localUrl) throw new Error('skill endpoint not available on this pod');
+                if (!_localUrl) throw new Error(`skill "${sk.name}" endpoint not available on this pod`);
                 const resp = await fetch(_localUrl, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', ...(sk.endpoint_secret ? { Authorization: `Bearer ${sk.endpoint_secret}` } : {}) },

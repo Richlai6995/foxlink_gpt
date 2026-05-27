@@ -88,12 +88,27 @@ function appendLog(skillId, line) {
 }
 
 // ── Directory setup ───────────────────────────────────────────────────────────
+// runner.js 總是同步最新 template(改用 hash 比對)。之前是 if-not-exists,
+// deploy 升級 template(例:SIGTERM grace 從 500ms 拉到 30s)的 fix 對既有 skill
+// 完全沒生效 — 它們還在跑舊 runner.js,直到有人手動清掉 NFS 上的 runner_<id>/runner.js。
 function ensureRunnerDir(skillId) {
   const dir = path.join(RUNNERS_DIR, String(skillId));
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const runnerSrc = path.join(TEMPLATE_DIR, 'runner.js');
   const runnerDst = path.join(dir, 'runner.js');
-  if (!fs.existsSync(runnerDst)) {
-    fs.copyFileSync(path.join(TEMPLATE_DIR, 'runner.js'), runnerDst);
+  try {
+    const srcHash = crypto.createHash('md5').update(fs.readFileSync(runnerSrc)).digest('hex');
+    const dstHash = fs.existsSync(runnerDst)
+      ? crypto.createHash('md5').update(fs.readFileSync(runnerDst)).digest('hex')
+      : null;
+    if (srcHash !== dstHash) {
+      fs.copyFileSync(runnerSrc, runnerDst);
+      console.log(`[skillRunner] runner.js synced for skill #${skillId} (${dstHash ? 'updated' : 'first-copy'})`);
+    }
+  } catch (e) {
+    console.warn(`[skillRunner] ensureRunnerDir sync runner.js #${skillId} failed: ${e.message}`);
+    // fallback: 至少確保有 runner.js
+    if (!fs.existsSync(runnerDst)) fs.copyFileSync(runnerSrc, runnerDst);
   }
   return dir;
 }
@@ -140,48 +155,52 @@ function forceKillProcess(proc, pid) {
   if (pid) { try { process.kill(pid, 'SIGKILL'); } catch (_) {} }
 }
 
-// ── Kill runner (async, with stopping state) ──────────────────────────────────
+// ── Kill helpers ──────────────────────────────────────────────────────────────
+// 重點:DB 寫不寫分兩個版本。
+//   _killLocal:只清本 pod in-memory entry + SIGKILL 子程序。**不寫 DB**。
+//     給 healthMonitor / hot-reload / 同 pod 互相清理用。多 pod 環境下絕對
+//     不能由其中一個 pod 替別人改 DB 的 code_status/endpoint_url。
+//   killRunner:user 明確點停。**會寫 DB code_status='stopped'**。
+//     等於宣告「這個 skill 全 pod 都該停」。
+async function _killLocal(skillId) {
+  const entry = runningProcesses.get(skillId);
+  if (!entry) return false;
+  const { port } = entry;
+  try {
+    forceKillProcess(entry.process, entry.process.pid);
+    await Promise.race([
+      new Promise(r => entry.process.once('exit', r)),
+      new Promise(r => setTimeout(r, 1000)),
+    ]);
+  } catch (e) {
+    console.warn(`[skillRunner] _killLocal #${skillId} kill error: ${e.message}`);
+  }
+  releasePort(port);
+  runningProcesses.delete(skillId);
+  await waitForPortFree(port, 1000);
+  return true;
+}
+
 async function killRunner(skillId, db) {
+  // user-initiated stop: 寫 DB,所有 pod 下次 healthMonitor 看到都會停
   pushStatusUpdate(skillId, 'stopping');
   try { db.prepare(`UPDATE skills SET code_status='stopping' WHERE id=?`).run(skillId); } catch (_) {}
 
-  const entry = runningProcesses.get(skillId);
+  const hadLocal = await _killLocal(skillId);
 
-  if (!entry) {
-    // No in-memory entry — try kill by PID from DB
+  // 沒 in-memory entry(可能是別 pod spawn 的) — 試著用 DB 留下的 PID 殺(best-effort,只對同 pod 有效)
+  if (!hadLocal) {
     try {
       const row = db.prepare(`SELECT code_pid, code_port FROM skills WHERE id=?`).get(skillId);
       if (row?.code_pid) { try { process.kill(row.code_pid, 'SIGKILL'); } catch (_) {} }
       if (row?.code_port) await waitForPortFree(row.code_port, 3000);
     } catch (_) {}
-    try { db.prepare(`UPDATE skills SET code_status='stopped', code_port=NULL, code_pid=NULL, endpoint_url=NULL WHERE id=?`).run(skillId); } catch (_) {}
-    pushStatusUpdate(skillId, 'stopped');
-    return false;
   }
-
-  const { port } = entry;
 
   try {
-    // Skip SIGTERM — go straight to SIGKILL to avoid server.close() keep-alive delay
-    forceKillProcess(entry.process, entry.process.pid);
-    // Wait for exit confirmation (max 1s)
-    await Promise.race([
-      new Promise(r => entry.process.once('exit', r)),
-      new Promise(r => setTimeout(r, 1000)),
-    ]);
-    releasePort(port);
-    runningProcesses.delete(skillId);
-    // Brief wait for OS to release port (max 1s)
-    await waitForPortFree(port, 1000);
-  } catch (e) {
-    console.error(`[skillRunner] killRunner error for #${skillId}:`, e.message);
-    releasePort(port);
-    runningProcesses.delete(skillId);
-  } finally {
-    // Always update DB and push stopped — even if something threw above
-    try { db.prepare(`UPDATE skills SET code_status='stopped', code_port=NULL, code_pid=NULL, endpoint_url=NULL WHERE id=?`).run(skillId); } catch (_) {}
-    pushStatusUpdate(skillId, 'stopped');
-  }
+    db.prepare(`UPDATE skills SET code_status='stopped', code_port=NULL, code_pid=NULL, endpoint_url=NULL WHERE id=?`).run(skillId);
+  } catch (_) {}
+  pushStatusUpdate(skillId, 'stopped');
   return true;
 }
 
@@ -256,7 +275,10 @@ async function spawnRunner(skill, db) {
       const e = runningProcesses.get(skillId);
       if (e) { releasePort(e.port); runningProcesses.delete(skillId); }
       appendLog(skillId, `[exit] process exited code=${code} signal=${signal}`);
-      try { db.prepare(`UPDATE skills SET code_status='stopped', code_port=NULL, code_pid=NULL WHERE id=?`).run(skillId); } catch (_) {}
+      // 重要:**不寫 DB**。child 死可能只是本 pod 的事(OOM / native crash / 本 pod 在
+      // rolling restart)。寫 code_status='stopped' 會誤導別 pod 的 missing-spawn 邏輯
+      // 跳過補救。DB 的 code_status 維持 user intended state(running),由 healthMonitor
+      // 的 missing-spawn 補 spawn 即可。
       pushStatusUpdate(skillId, 'stopped');
     });
 
@@ -409,53 +431,41 @@ function startHealthMonitor(db) {
         }
 
         console.warn(`[skillRunner] Health check FAILED for skill #${skillId} (${fails} fails, childAlive=${childAlive}): ${e.message}`);
-        appendLog(skillId, `[health] hard-fail after ${fails} attempts (childAlive=${childAlive}): ${e.message} — marking as error`);
-        try { entry.process.kill('SIGKILL'); } catch (_) {}
-        releasePort(entry.port);
-        runningProcesses.delete(skillId);
+        appendLog(skillId, `[health] hard-fail after ${fails} attempts (childAlive=${childAlive}): ${e.message} — local cleanup only, DB untouched`);
+        // **不寫 DB**。本 pod 健檢失敗 = 本 pod 的 entry 壞了,不代表 user 不要這個 skill。
+        // 之前 UPDATE code_status='error' 會引發 K8s 多 pod 互相覆寫災難:pod B 的
+        // 過時 in-memory entry → 失敗 3 次 → 把 DB endpoint_url 清掉 → chat.js 拿
+        // 不到任何 endpoint → LLM 走「無法連線」降級路徑。
+        // 現在:只清本 pod state,DB 的 code_status='running'(user 想要它跑)維持,
+        // 下個 30s 週期的 missing-spawn 邏輯會在本 pod 補 spawn 一個新的。
+        await _killLocal(skillId).catch(() => {});
         healthFailures.delete(skillId);
-        pushStatusUpdate(skillId, 'error', { error: 'Process unresponsive' });
-        try {
-          db.prepare(`UPDATE skills SET code_status='error', code_port=NULL, code_pid=NULL, code_error='Process unresponsive' WHERE id=?`).run(skillId);
-        } catch (_) {}
+        pushStatusUpdate(skillId, 'unhealthy', { error: 'Process unresponsive (local cleanup)' });
       }
     }
 
-    // 2. Hot-reload + missing-spawn + auto-recover from transient unresponsive
+    // 2. Hot-reload + missing-spawn
     //    (a) admin UI 在 pod A 改 code → pod B/C/D 30s 內 hot-reload
-    //    (b) admin UI 在 pod A 第一次啟動新 skill → pod B/C/D 沒這個 process,
-    //        autoRestoreRunners 又只在啟動時跑一次,所以這裡偵測缺漏並補 spawn
-    //    (c) 'error' 狀態 + error_msg='Process unresponsive' → 是被 health
-    //        誤殺(不是真壞),自動回血再 spawn(避免使用者要手動點啟動)
+    //    (b) 本 pod 沒這個 skill 的 process(autoRestoreRunners 啟動時只跑一次,
+    //        新建的 skill 或本 pod 剛被健檢清掉的 → 30s 內補 spawn)
+    //    舊有的 'error' 狀態 auto-recovery 已不需要 — 因為健檢不再寫 'error'。
     try {
       const skills = await db.prepare(
-        `SELECT * FROM skills WHERE type='code' AND (
-           code_status='running'
-           OR (code_status='error' AND code_error='Process unresponsive')
-         )`
+        `SELECT * FROM skills WHERE type='code' AND code_status='running'`
       ).all();
       for (const skill of skills) {
         if (!skill.code_snippet) continue;
 
-        // (b)/(c) 本 pod 沒這個 skill 的 process → 補 spawn
+        // (b) 本 pod 沒這個 skill 的 process → 補 spawn(帶 cooldown 防止真壞無限重啟)
         if (!runningProcesses.has(skill.id)) {
-          // (c) auto-recovery 前先檢查 cooldown(防止 skill 真壞無限重啟)
-          const isErrorRecovery = (skill.code_status === 'error' || skill.CODE_STATUS === 'error');
-          if (isErrorRecovery) {
-            const last = lastAutoRespawn.get(skill.id) || 0;
-            const since = Date.now() - last;
-            if (since < AUTO_RESPAWN_COOLDOWN_MS) {
-              // 還在冷卻,跳過(下個 cycle 再看)
-              continue;
-            }
-            console.log(`[skillRunner] Auto-recovery: skill #${skill.id} (${skill.name}) was 'unresponsive', respawning...`);
-          } else {
-            console.log(`[skillRunner] Missing process for skill #${skill.id} (${skill.name}) on this pod, spawning locally...`);
-          }
+          const last = lastAutoRespawn.get(skill.id) || 0;
+          const since = Date.now() - last;
+          if (since < AUTO_RESPAWN_COOLDOWN_MS) continue; // 還在冷卻
+          console.log(`[skillRunner] Missing process for skill #${skill.id} (${skill.name}) on this pod, spawning locally...`);
           try {
             saveCode(skill.id, skill.code_snippet);
             await spawnRunner(skill, db);
-            if (isErrorRecovery) lastAutoRespawn.set(skill.id, Date.now());
+            lastAutoRespawn.set(skill.id, Date.now());
           } catch (e) {
             console.error(`[skillRunner] Auto-spawn failed for #${skill.id}: ${e.message}`);
           }

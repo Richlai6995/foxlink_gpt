@@ -423,6 +423,14 @@ app.get('/api/version', (req, res) => {
       } catch (e) {
         console.warn('[Shutdown] transcribeJobService.gracefullyPauseActiveJobs error:', e.message);
       }
+      // 同上,Excel 精確查詢 background jobs
+      try {
+        const excelQueryJobService = require('./services/excelQueryJobService');
+        const { db } = require('./database-oracle');
+        await excelQueryJobService.gracefullyPauseActiveJobs(db);
+      } catch (e) {
+        console.warn('[Shutdown] excelQueryJobService.gracefullyPauseActiveJobs error:', e.message);
+      }
       server.close(async () => {
         try {
           const { getPool } = require('./database-oracle');
@@ -487,6 +495,23 @@ app.get('/api/version', (req, res) => {
       }, 24 * 60 * 60 * 1000);
     } catch (e) {
       console.error('[TranscribeJob] Failed to start recovery scheduler:', e.message);
+    }
+
+    // Excel 精確查詢 background job recovery + cleanup scheduler(對齊 transcribeJobService pattern)
+    if (RUN_SCHEDULERS) try {
+      const excelQueryJobService = require('./services/excelQueryJobService');
+      excelQueryJobService.recoverStaleJobs(db).catch((e) => console.warn('[ExcelJob] startup recovery:', e.message));
+      setInterval(() => {
+        excelQueryJobService.recoverStaleJobs(db).catch((e) => console.warn('[ExcelJob] recovery tick:', e.message));
+      }, 5 * 60 * 1000);
+
+      // 每天跑一次 cleanup(> 7 天 done/failed 的 job 清 result_md / data_json,節省 DB CLOB 空間)
+      excelQueryJobService.cleanupOldJobs(db).catch((e) => console.warn('[ExcelJob] startup cleanup:', e.message));
+      setInterval(() => {
+        excelQueryJobService.cleanupOldJobs(db).catch((e) => console.warn('[ExcelJob] cleanup tick:', e.message));
+      }, 24 * 60 * 60 * 1000);
+    } catch (e) {
+      console.error('[ExcelJob] Failed to start recovery scheduler:', e.message);
     }
 
     // KB maintenance scheduler（orphan chunks cleanup, Phase 1 of kb-retrieval v2）

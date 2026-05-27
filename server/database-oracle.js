@@ -1437,6 +1437,78 @@ async function runMigrations(db) {
   await safeCreateTranscribeIdx('IDX_TRANSJOBS_RECOVERY',    'CREATE INDEX idx_transjobs_recovery ON transcribe_jobs(status, heartbeat_at)');
   await safeCreateTranscribeIdx('IDX_TRANSJOBS_SESSION',     'CREATE INDEX idx_transjobs_session ON transcribe_jobs(session_id)');
 
+  // ── Excel 精確查詢背景 Job(對齊 transcribe_jobs / research_jobs pattern)─────
+  // 設計動機:Excel skill 之前是 chat.js 直接打 child-process skill runner 的 HTTP,
+  //   多 pod 下 DB.endpoint_url race + deploy 中斷 in-flight query 都會掉線。
+  //   改成跑 background job:任何 web pod 都能執行,DB lock 防搶,heartbeat + recovery
+  //   保證 deploy 重啟可從 stale jobs 接手。
+  // 處理邏輯內嵌在 excelQueryJobService.js,不再依賴 skill_runner 子程序。
+  await createTable('EXCEL_QUERY_JOBS', `CREATE TABLE excel_query_jobs (
+    id                VARCHAR2(36)   PRIMARY KEY,
+    user_id           NUMBER         NOT NULL,
+    session_id        VARCHAR2(36),
+    message_id        NUMBER,                                 -- chat_messages id(LLM 提早 return 時用來 append 完成訊息)
+    file_name         VARCHAR2(500)  NOT NULL,                -- 顯示名(LLM 給的 file_name)
+    file_path         VARCHAR2(1000) NOT NULL,                -- 解析後 NFS path(經 UPLOAD_ROOT 安全檢查)
+    sheet_name        VARCHAR2(255),                          -- LLM 指定 sheet,NULL = 自動選第一個有資料的
+    sql_text          CLOB           NOT NULL,                -- LLM 給的 DuckDB SQL
+    status            VARCHAR2(20)   DEFAULT 'pending',       -- pending/running/done/failed
+    progress          NUMBER         DEFAULT 0,               -- 0-100,讀檔+建表+查詢分段更新
+    progress_stage    VARCHAR2(50),                           -- 'reading_xlsx' / 'loading_duckdb' / 'executing_sql'
+    rows_returned     NUMBER,
+    result_md         CLOB,                                   -- 最終 markdown 結果(LLM 拿這個當 tool response)
+    result_data_json  CLOB,                                   -- 結構化 data(可選,給將來 chart/dashboard 用)
+    error_msg         VARCHAR2(2000),
+    is_notified       NUMBER(1)      DEFAULT 0,               -- user_notification 是否已推
+    recovery_count    NUMBER         DEFAULT 0,               -- 中斷後 resume 次數,>=3 標 failed
+    lock_token        VARCHAR2(64),                           -- pod 識別,防多 pod 搶
+    heartbeat_at      TIMESTAMP,                              -- worker 60s 更新一次
+    created_at        TIMESTAMP      DEFAULT SYSTIMESTAMP,
+    updated_at        TIMESTAMP      DEFAULT SYSTIMESTAMP,
+    started_at        TIMESTAMP,
+    completed_at      TIMESTAMP
+  )`);
+
+  const safeCreateExcelJobIdx = async (name, ddl) => {
+    try { await db.prepare(ddl).run(); } catch (e) {
+      if (!e.message?.includes('ORA-00955')) console.warn(`[Migration] index ${name}: ${e.message}`);
+    }
+  };
+  await safeCreateExcelJobIdx('IDX_XLSXJOBS_USER_STATUS', 'CREATE INDEX idx_xlsxjobs_user_status ON excel_query_jobs(user_id, status)');
+  await safeCreateExcelJobIdx('IDX_XLSXJOBS_RECOVERY',    'CREATE INDEX idx_xlsxjobs_recovery ON excel_query_jobs(status, heartbeat_at)');
+  await safeCreateExcelJobIdx('IDX_XLSXJOBS_SESSION',     'CREATE INDEX idx_xlsxjobs_session ON excel_query_jobs(session_id)');
+
+  // ── Phase 1 一次性 migration:Excel skill 改走 jobService 後,自動把 skill_runner
+  //    上的 child process 停掉(不再需要)。autoRestoreRunners 看到 code_status='stopped'
+  //    就不會再 spawn,4 個 pod 共省 4 個無用 child process + 40100-40999 port。
+  //    重要:只動一次。用 'excel_query_migrated_to_job' system_settings flag 控,跑過就跳過。
+  try {
+    const flag = await db.prepare(`SELECT value FROM system_settings WHERE key='excel_query_migrated_to_job'`).get();
+    if (!flag || flag.value !== '1') {
+      const r = await db.prepare(`
+        UPDATE skills SET code_status='stopped', code_port=NULL, code_pid=NULL, endpoint_url=NULL
+        WHERE type='code' AND LOWER(name) IN ('excel 精確查詢', 'excel_query')
+      `).run();
+      const affected = r?.rowsAffected || r?.changes || 0;
+      if (affected > 0) {
+        console.log(`[Migration] Excel skill marked stopped (now runs via excelQueryJobService) — affected=${affected}`);
+      }
+      // 寫 flag(用 upsert)
+      try {
+        const exists = await db.prepare(`SELECT 1 AS x FROM system_settings WHERE key='excel_query_migrated_to_job'`).get();
+        if (exists) {
+          await db.prepare(`UPDATE system_settings SET value='1' WHERE key='excel_query_migrated_to_job'`).run();
+        } else {
+          await db.prepare(`INSERT INTO system_settings (key, value) VALUES ('excel_query_migrated_to_job', '1')`).run();
+        }
+      } catch (e) {
+        console.warn('[Migration] excel_query_migrated_to_job flag write failed:', e.message);
+      }
+    }
+  } catch (e) {
+    console.warn('[Migration] excel_query stop migration failed (non-fatal):', e.message);
+  }
+
   // ── 通用個人通知 user_notifications(per-user toast/鈴鐺通知)──────────────
   // 跟 announcements(廣播公告)正交,跟 feedback_notifications(綁 ticket)解耦。
   // 設計給「個人 background job 完成」「系統訊息」「未來各 service 推送」共用。
