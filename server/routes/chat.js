@@ -1652,20 +1652,41 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
         const persistPath = path.join(sessionFilesDir, safeFname);
         fs.copyFileSync(filePath, persistPath);
 
+        // 自動偵測真 header 列 — BOM / 報表類 xls 第 1 列常是 metadata(Creator: xxx),
+        // 真 header 在第 3-5 列。死板抓 rows[0] 會讓 LLM 看到 "Creator,,,,,,..." 不知所云。
+        // 同邏輯也在 excelQueryJobService.js 內(必須兩邊一致,否則 LLM preview 看到 X 但
+        // SQL 拿到 Y 會狂寫 wrong SQL)。
+        const _detectHdr = (rows) => {
+          const sampleLen = Math.min(rows.length, 10);
+          let bestIdx = 0, bestScore = -1;
+          for (let i = 0; i < sampleLen; i++) {
+            const row = rows[i];
+            if (!Array.isArray(row)) continue;
+            const nonNull = row.filter(v => v !== null && v !== undefined && v !== '').length;
+            if (nonNull < 4) continue;
+            const stringCount = row.filter(v => typeof v === 'string' && v.trim() && !/^-?\d+(\.\d+)?$/.test(v.trim())).length;
+            const score = 50 + (nonNull / row.length) * 30 + (stringCount / Math.max(nonNull, 1)) * 20 + (sampleLen - i) * 0.5;
+            if (score > bestScore) { bestScore = score; bestIdx = i; }
+          }
+          return bestIdx;
+        };
         let preview = '';
         const sheets = [];
         try {
           const XLSX = require('xlsx');
-          const wb = XLSX.readFile(persistPath, { sheetRows: 31, cellDates: true });
+          // sheetRows=31 之前太緊;若 header 在第 5 列,只剩 26 列資料預覽。改 50,
+          // 讓 detectHeaderRow 有空間找,並仍保留 30 列實際資料給 LLM 看。
+          const wb = XLSX.readFile(persistPath, { sheetRows: 50, cellDates: true });
           for (const sname of wb.SheetNames) {
             const ws = wb.Sheets[sname];
             if (!ws || !ws['!ref'] || ws['!ref'] === 'A1') continue;
             const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: false });
             if (!rows.length) continue;
-            const headers = (rows[0] || []).map(h => String(h ?? ''));
-            const sampleRows = rows.slice(1, 31);
+            const hdrIdx = _detectHdr(rows);
+            const headers = (rows[hdrIdx] || []).map(h => String(h ?? ''));
+            const sampleRows = rows.slice(hdrIdx + 1, hdrIdx + 1 + 30);
             sheets.push({ name: sname, columns: headers });
-            preview += `\nSheet "${sname}" — 欄位:${headers.map(h => `"${h}"`).join(', ')}\n`;
+            preview += `\nSheet "${sname}"${hdrIdx > 0 ? ` (header 在第 ${hdrIdx + 1} 列,前 ${hdrIdx} 列為 metadata)` : ''} — 欄位:${headers.map(h => `"${h}"`).join(', ')}\n`;
             preview += `前 ${sampleRows.length} 列預覽:\n`;
             const csvRows = [headers, ...sampleRows];
             preview += csvRows.map(r => r.map(v => v === null || v === undefined ? '' : String(v)).join(',')).join('\n') + '\n';

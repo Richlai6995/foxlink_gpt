@@ -86,13 +86,45 @@ function dedupNames(names) {
   });
 }
 
+// BOM / 報表類 xls 第 1 列常常是 metadata(Creator: 某人 / Title: BOM / 空白裝飾列),
+// 真正的 header(Item Number / Qty / Ref Des 等)在第 N 列。死板抓 rows[0] 當 header
+// 會讓 LLM 看到 col_2, col_3 不知所云,寫 SQL 必錯。
+// 算法:找前 10 列中,「非空 cell ≥ max(4, width*0.5) 且 全部 cells 看起來像 header
+//      (字串、無空值連續、不是純數字)」的第一列當 header。
+function detectHeaderRow(rows) {
+  const sampleLen = Math.min(rows.length, 10);
+  let bestIdx = 0;
+  let bestScore = -1;
+  for (let i = 0; i < sampleLen; i++) {
+    const row = rows[i];
+    if (!Array.isArray(row)) continue;
+    const nonNull = row.filter(v => v !== null && v !== undefined && v !== '').length;
+    const totalCells = row.length;
+    if (totalCells === 0) continue;
+    // 80% 以上非空 + 至少 4 cells + 大多是非數字 string → 強候選
+    const stringCount = row.filter(v => typeof v === 'string' && v.trim() && !/^-?\d+(\.\d+)?$/.test(v.trim())).length;
+    const score =
+      (nonNull >= 4 ? 50 : 0) +
+      (nonNull / totalCells) * 30 +
+      (stringCount / Math.max(nonNull, 1)) * 20 +
+      // 早出現的列加分(同樣強度優先取上面)
+      (sampleLen - i) * 0.5;
+    if (score > bestScore && nonNull >= 4) {
+      bestScore = score;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
+}
+
 function readSheet(ws) {
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: false });
-  if (rows.length === 0) return { headers: [], data: [] };
-  const headers = (rows[0] || []).map((h, i) => sanitizeIdent(h || `col_${i + 1}`));
+  if (rows.length === 0) return { headers: [], data: [], headerRowIdx: 0 };
+  const headerRowIdx = detectHeaderRow(rows);
+  const headers = (rows[headerRowIdx] || []).map((h, i) => sanitizeIdent(h || `col_${i + 1}`));
   const finalHeaders = dedupNames(headers);
-  const data = rows.slice(1, MAX_ROWS_PER_SHEET + 1);
-  return { headers: finalHeaders, data };
+  const data = rows.slice(headerRowIdx + 1, MAX_ROWS_PER_SHEET + 1 + headerRowIdx);
+  return { headers: finalHeaders, data, headerRowIdx };
 }
 
 function pickSheet(wb, requested) {
