@@ -1394,6 +1394,10 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
     const fileMetas = [];
     const userParts = [];
     let combinedUserText = message;
+    // ⚠️ 保留 user 原始輸入(剝掉 doc template tag,但不含後續 append 進來的 Excel preview /
+    // 音訊轉錄 / BOM 預覽資料等內容)。專門給 TAG router 用,避免附件內容裡的字
+    // (例如 BOM 廠商欄含「金屬」「分析」)誤觸發 PM workflow 等 skill。
+    let originalUserMessage = message || '';
 
     // ── Doc Template Tag Detection ──────────────────────────────────────────
     // Message prefix: [使用範本:UUID:name:outputFormat] or [使用範本:UUID:name:pptx:rich:dark]
@@ -1415,6 +1419,7 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           pptxRichTheme  = tplMatch[5] || 'dark';
         }
         combinedUserText = combinedUserText.slice(tplMatch[0].length).trim();
+        originalUserMessage = originalUserMessage.slice(tplMatch[0].length).trim();
         try {
           const tplRow = await db.prepare('SELECT schema_json, name FROM doc_templates WHERE id=?').get(docTemplateId);
           if (tplRow?.schema_json) {
@@ -2100,9 +2105,14 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
     // ── TAG-based skill auto-routing (skills not manually attached but tags match) ──
     const sessionSkillIds = new Set(sessionSkills.map(s => String(s.id)));
     let tagRoutedSkills = [];
-    // Explicit mode 下使用者已明確選工具,不要再讓 TAG router 自動加塞 skill 的 code tool
-    if (explicitMode) {
-      console.log(`[Skill] TAG routing skipped (explicit tool selection mode)`);
+    // 完全跳過 TAG auto-routing 的條件:
+    //   1. explicitMode — user 在 top bar 明確選了 MCP/Dify/KB/ERP
+    //   2. sessionSkills.length > 0 — user 在 sidebar 「技能」面板勾了至少 1 個 skill
+    //      (user 明確選擇就該尊重,別再亂塞;之前漏這條,只勾 Excel 精確查詢仍會
+    //       被 PM workflow 等 TAG 誤撈)
+    const userManuallyChoseSkill = sessionSkills.length > 0;
+    if (explicitMode || userManuallyChoseSkill) {
+      console.log(`[Skill] TAG routing skipped (explicit=${explicitMode}, userPickedSkills=${sessionSkills.length})`);
     } else {
     try {
       // Apply per-user hidden filter at TAG-routing entry — skips Checking-skill logs and tag matching for hidden ones
@@ -2116,7 +2126,10 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           });
       const _skillsHiddenCount = _allAccessibleSkills.length - allAccessibleSkills.length;
       console.log(`[Skill] TAG routing: found ${allAccessibleSkills.length} accessible skills for user ${req.user.id}${_skillsHiddenCount > 0 ? ` (hidden=${_skillsHiddenCount})` : ''}`);
-      const msgLower = combinedUserText.toLowerCase();
+      // ⚠️ 只 scan user 原始輸入,不 scan combinedUserText(已 append Excel preview / 音訊轉錄 /
+      // BOM 廠商欄等附件內容)。BOM 預覽常含「金屬」「分析」「比較」等通用詞,會誤觸發
+      // PM workflow / forecast 等 skill 的 TAG。user 原始輸入才是「真意圖」。
+      const msgLower = (originalUserMessage || '').toLowerCase();
       for (const sk of allAccessibleSkills) {
         if (sessionSkillIds.has(String(sk.id))) continue;
         const rawTags = sk.tags;
