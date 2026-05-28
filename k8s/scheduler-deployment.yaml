@@ -73,8 +73,13 @@ spec:
               value: "/app/uploads"
             - name: REDIS_URL
               value: "redis://redis:6379"
+            # 2026-05-28:從 1024 拉到 2560
+            # 配合 limits.memory=3Gi。原本 1024 + 1536Mi 在 startup 11+ 個 setImmediate seed
+            # 同時並發(helpKbSync/pmDashboardSeed/...)瞬間 RSS 破 1.5G → OOMKilled(137)。
+            # server.js 已改 queueStartupSeed 序列化,但 native buffer(duckdb/xlsx/oracledb)
+            # 仍可能 spike,留足夠空間更安全。
             - name: NODE_OPTIONS
-              value: "--max-old-space-size=1024"
+              value: "--max-old-space-size=2560"
             # Oracle Instant Client
             - name: ORACLE_HOME
               value: "/opt/oracle/instantclient"
@@ -118,12 +123,16 @@ spec:
               readOnly: true
 
           # ── Resources(比 web pod 低一階 — 沒外部流量、純背景跑)──────────────
+          # 2026-05-28:memory limit 從 1536Mi 拉到 3Gi。
+          # OOMKilled (137) 事故:startup 39s 內並發 11+ 個 autoSeed setImmediate,
+          # 雖然 idle baseline 只有 230Mi,但 native buffer(oracledb/xlsx/JSZip/@google/genai)
+          # 同時膨脹瞬間爆。配合 server.js 序列化 startup seed + NODE_OPTIONS=2560 雙保險。
           resources:
             requests:
-              memory: "512Mi"
+              memory: "768Mi"
               cpu: "200m"
             limits:
-              memory: "1536Mi"
+              memory: "3Gi"
               cpu: "1500m"     # 高峰時排程任務含 LLM call + 檔案生成,留足夠 burst
 
           # ── Health Checks(scheduler pod 也跑 Express,/api/health 仍可用)──

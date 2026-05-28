@@ -282,8 +282,10 @@ router.get('/accessible-resources', async (req, res) => {
         `SELECT id, name, name_zh, name_en, name_vi FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order, name`
       ).all();
     } else {
+      // Oracle: SELECT DISTINCT + ORDER BY 的欄位必須出現在 SELECT 列(否則 ORA-01791)。
+      // sort_order 沒 select 出來 → ORDER BY 不到 → 改把它一起 select(下游 map 不用)。
       difyKbs = await db.prepare(`
-        SELECT DISTINCT d.id, d.name, d.name_zh, d.name_en, d.name_vi
+        SELECT DISTINCT d.id, d.name, d.name_zh, d.name_en, d.name_vi, d.sort_order
         FROM dify_knowledge_bases d
         JOIN dify_access a ON a.dify_kb_id=d.id
         WHERE d.is_active=1 AND (

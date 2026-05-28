@@ -1683,7 +1683,14 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
             const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: false });
             if (!rows.length) continue;
             const hdrIdx = _detectHdr(rows);
-            const headers = (rows[hdrIdx] || []).map(h => String(h ?? ''));
+            const rawHeaders = (rows[hdrIdx] || []).map((h, i) => String(h ?? '') || `col_${i + 1}`);
+            // ⚠️ 必須跟 excelQueryJobService.js 的建表邏輯一致 — 它對 header 做了
+            //   sanitizeIdent([^\w一-鿿] → _) + dedupNames 處理。preview 餵 LLM 的欄位名
+            //   若用 raw header,LLM 寫 SELECT "Material Var" 永遠 Binder Error
+            //   (DuckDB 內實際是 Material_Var)。共用同個 helper 才能對齊。
+            const headers = excelQueryJobService.dedupNames(
+              rawHeaders.map(excelQueryJobService.sanitizeIdent)
+            );
             const sampleRows = rows.slice(hdrIdx + 1, hdrIdx + 1 + 30);
             sheets.push({ name: sname, columns: headers });
             preview += `\nSheet "${sname}"${hdrIdx > 0 ? ` (header 在第 ${hdrIdx + 1} 列,前 ${hdrIdx} 列為 metadata)` : ''} — 欄位:${headers.map(h => `"${h}"`).join(', ')}\n`;
@@ -2322,7 +2329,7 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           `3. 呼叫 excel_query 時:\n` +
           `   - file_name 從上方檔案清單中選一個(完全比對檔名最佳)當主檔\n` +
           `   - 主工作表別名永遠是 t,可直接 \`FROM t\`\n` +
-          `   - 欄位名含中文/空格/特殊字元時用雙引號,例如 \`"客戶專案代碼"\`\n` +
+          `   - **欄位名一律用雙引號**(中文、底線、reserved word 如 desc/order/group 都會炸),欄位名直接用上方清單中 "" 內的字串(已 sanitize 為 \`[\\w一-鿿]+\` 形式,空格/. /() 都已轉底線)\n` +
           `   - SQL 是 DuckDB 方言,支援 GROUP BY、ORDER BY、LIMIT、CASE WHEN、聚合函數、視窗函數、FULL OUTER JOIN\n` +
           `4. 拿到 SQL 結果後,用結果數字寫敘述,不要再修改數字。\n` +
           `5. **每次 query 後盡量直接寫答案**;若需多查也不要超過 3 round,3 round 還沒答案 → 用已有資料盡力總結。\n` +

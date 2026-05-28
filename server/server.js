@@ -305,6 +305,32 @@ app.get('/api/version', (req, res) => {
       console.log('[Schedulers] RUN_SCHEDULERS=false → this pod skips all cron / seed / recovery / sync init');
     }
 
+    // ─── Startup seed serializer ──────────────────────────────────────────────
+    // Why: 原本 11+ 個 setImmediate(autoSeed*) 在 scheduler pod 啟動瞬間並發,
+    //      native buffer(oracledb / xlsx / @google/genai / JSZip)同時膨脹
+    //      → RSS 破 1.5GB → OOMKilled(2026-05-28 事故,startup 39 秒就被砍)。
+    // 改用單一 worker 序列跑,啟動後 delay 10s 再 drain,中間 2s gap 給 GC 喘息。
+    const _seedQueue = [];
+    let _seedWorkerStarted = false;
+    function queueStartupSeed(name, fn) {
+      _seedQueue.push({ name, fn });
+      if (_seedWorkerStarted) return;
+      _seedWorkerStarted = true;
+      setTimeout(async () => {
+        while (_seedQueue.length > 0) {
+          const job = _seedQueue.shift();
+          const t0 = Date.now();
+          try {
+            await job.fn();
+            console.log(`[StartupSeed] ${job.name} done in ${Date.now() - t0}ms`);
+          } catch (e) {
+            console.error(`[StartupSeed] ${job.name} failed:`, e.message);
+          }
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+      }, 10_000);
+    }
+
     // Feedback SLA cron job
     if (RUN_SCHEDULERS) try {
       const { startSLACron } = require('./services/feedbackSLAService');
@@ -650,23 +676,15 @@ app.get('/api/version', (req, res) => {
     }
 
     // Auto-sync Help KB (non-blocking, runs in background)
-    if (RUN_SCHEDULERS) setImmediate(async () => {
-      try {
-        const { syncHelpKb } = require('./services/helpKbSync');
-        await syncHelpKb(db);
-      } catch (e) {
-        console.error('[HelpKB] Failed to sync:', e.message);
-      }
+    if (RUN_SCHEDULERS) queueStartupSeed('HelpKbSync', async () => {
+      const { syncHelpKb } = require('./services/helpKbSync');
+      await syncHelpKb(db);
     });
 
     // Auto-seed Help Sections (compare last_modified, upsert changed sections)
-    if (RUN_SCHEDULERS) setImmediate(async () => {
-      try {
-        const { autoSeedHelp } = require('./services/helpAutoSeed');
-        await autoSeedHelp(db);
-      } catch (e) {
-        console.error('[HelpAutoSeed] Failed:', e.message);
-      }
+    if (RUN_SCHEDULERS) queueStartupSeed('HelpAutoSeed', async () => {
+      const { autoSeedHelp } = require('./services/helpAutoSeed');
+      await autoSeedHelp(db);
     });
 
     // 2026-05-11 user 決定停用預測功能 — auto-seed 不再跑(避免每次重啟把 is_active=0 改回 1)
@@ -680,58 +698,38 @@ app.get('/api/version', (req, res) => {
     // });
 
     // Auto-seed Excel 精確查詢 code skill (DuckDB SQL on uploaded xlsx)
-    if (RUN_SCHEDULERS) setImmediate(async () => {
-      try {
-        const { autoSeedExcelQuerySkill } = require('./services/excelQuerySkillSeed');
-        await autoSeedExcelQuerySkill(db);
-      } catch (e) {
-        console.error('[ExcelQuerySkillSeed] Failed:', e.message);
-      }
+    if (RUN_SCHEDULERS) queueStartupSeed('ExcelQuerySkillSeed', async () => {
+      const { autoSeedExcelQuerySkill } = require('./services/excelQuerySkillSeed');
+      await autoSeedExcelQuerySkill(db);
     });
 
     // Auto-seed PM Multi-Agent Workflow skill (pm_deep_analysis_workflow)
-    if (RUN_SCHEDULERS) setImmediate(async () => {
-      try {
-        const { autoSeedPmWorkflowSkill } = require('./services/pmWorkflowSeed');
-        await autoSeedPmWorkflowSkill(db);
-      } catch (e) {
-        console.error('[PMWorkflowSeed] Failed:', e.message);
-      }
+    if (RUN_SCHEDULERS) queueStartupSeed('PMWorkflowSeed', async () => {
+      const { autoSeedPmWorkflowSkill } = require('./services/pmWorkflowSeed');
+      await autoSeedPmWorkflowSkill(db);
     });
 
     // Auto-seed PM BOM What-if skill (pm_what_if_cost_impact) — Phase 4 14.1
-    if (RUN_SCHEDULERS) setImmediate(async () => {
-      try {
-        const { autoSeedPmBomSkill } = require('./services/pmBomSkillSeed');
-        await autoSeedPmBomSkill(db);
-      } catch (e) {
-        console.error('[PMBomSkillSeed] Failed:', e.message);
-      }
+    if (RUN_SCHEDULERS) queueStartupSeed('PMBomSkillSeed', async () => {
+      const { autoSeedPmBomSkill } = require('./services/pmBomSkillSeed');
+      await autoSeedPmBomSkill(db);
     });
 
     // Auto-seed PM (precious metals platform) KBs + scheduled tasks
     // 順序:KBs 先建 → 拿 ID Map → 餵給 task seed,task 的 kb_write 節點直接綁好 kb_id。
     // 兩者都 idempotent;task 預設 status='paused',admin 改 prompt / 加收件人後再 enable。
-    if (RUN_SCHEDULERS) setImmediate(async () => {
-      try {
-        const { autoSeedPmKnowledgeBases } = require('./services/pmKnowledgeBaseSeed');
-        const { autoSeedPmScheduledTasks } = require('./services/pmScheduledTaskSeed');
-        const kbMap = await autoSeedPmKnowledgeBases(db);
-        await autoSeedPmScheduledTasks(db, kbMap);
-      } catch (e) {
-        console.error('[PMSeed] Failed:', e.message);
-      }
+    if (RUN_SCHEDULERS) queueStartupSeed('PMSeed', async () => {
+      const { autoSeedPmKnowledgeBases } = require('./services/pmKnowledgeBaseSeed');
+      const { autoSeedPmScheduledTasks } = require('./services/pmScheduledTaskSeed');
+      const kbMap = await autoSeedPmKnowledgeBases(db);
+      await autoSeedPmScheduledTasks(db, kbMap);
     });
 
     // Auto-seed PM AI 戰情 Dashboard(project + topics + designs)
     // 依賴:LOCAL ai_db_sources + 5 張 PM 表的 ai_schema_definitions(由 D5 + aiSchemaAutoRegister 建)
-    if (RUN_SCHEDULERS) setImmediate(async () => {
-      try {
-        const { autoSeedPmDashboard } = require('./services/pmDashboardSeed');
-        await autoSeedPmDashboard(db);
-      } catch (e) {
-        console.error('[PMDashboardSeed] Failed:', e.message);
-      }
+    if (RUN_SCHEDULERS) queueStartupSeed('PMDashboardSeed', async () => {
+      const { autoSeedPmDashboard } = require('./services/pmDashboardSeed');
+      await autoSeedPmDashboard(db);
     });
 
     // Warm-up factory code cache from ERP (FND_FLEX_VALUES_VL)

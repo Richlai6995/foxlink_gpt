@@ -216,6 +216,10 @@ async function runTrainingJobs() {
       ).all(prog.id);
       const existingPair = new Set(existing.map(e => `${e.user_id}|${e.course_id}`));
 
+      // database-oracle.js lowercaseKeys 把 Oracle DATE → ISO 字串(line 46),
+      // 直接 bind 回 DATE 欄位會被 NLS_DATE_FORMAT 當 literal 解 → ORA-01861。
+      // 統一轉回 Date 物件,讓 oracledb 走 DATE typing path。
+      const dueDate = prog.end_date ? new Date(prog.end_date) : null;
       let added = 0;
       for (const uid of userIdSet) {
         for (const cid of courseIds) {
@@ -224,7 +228,7 @@ async function runTrainingJobs() {
             await db.prepare(`
               INSERT INTO program_assignments (program_id, course_id, user_id, due_date, status)
               VALUES (?, ?, ?, ?, 'pending')
-            `).run(prog.id, cid, uid, prog.end_date);
+            `).run(prog.id, cid, uid, dueDate);
             added++;
           } catch (e) {
             if (!e.message?.includes('UQ_PROG_ASSIGN')) throw e;
@@ -293,13 +297,15 @@ async function assignNewUserToActivePrograms(db, userId) {
       }
       if (courseIds.length === 0) continue;
 
+      // 同 cron 段:lowercaseKeys 已把 end_date 轉成 ISO 字串,bind 回 DATE 會 ORA-01861。
+      const dueDate = prog.end_date ? new Date(prog.end_date) : null;
       let added = 0;
       for (const cid of courseIds) {
         try {
           await db.prepare(`
             INSERT INTO program_assignments (program_id, course_id, user_id, due_date, status)
             VALUES (?, ?, ?, ?, 'pending')
-          `).run(prog.id, cid, u.id, prog.end_date);
+          `).run(prog.id, cid, u.id, dueDate);
           added++;
         } catch (e) {
           if (!e.message?.includes('UQ_PROG_ASSIGN')) throw e;

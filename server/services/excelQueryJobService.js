@@ -690,4 +690,8 @@ module.exports = {
   recoverStaleJobs,
   gracefullyPauseActiveJobs,
   cleanupOldJobs,
+  // 給 chat.js xlsx preview 用 — preview 餵 LLM 的欄位名必須跟這裡建表後一致,
+  // 否則 LLM 看到 "Material Var" 但 DuckDB 實際是 Material_Var → Binder Error。
+  sanitizeIdent,
+  dedupNames,
 };
