@@ -16,7 +16,15 @@
  *   auth:forgot:user:{u}     TTL 3600  — forgot-password per username 計數
  */
 
+const crypto = require('crypto');
 const redisClient = require('./redisClient');
+
+// UA hash 用來區分「同 IP 不同 user」— Akamai/CDN 後面 N 個 user 共用 edge IP,
+// 各自 UA 不同 → 不會因為其中一個失敗就把整條 edge 拖下水。
+// 8 byte hex 已足夠 collision-safe(攻擊者偽造 UA 也只是換一個 hash bucket)。
+function uaHash(ua) {
+  return crypto.createHash('sha256').update(String(ua || '')).digest('hex').slice(0, 16);
+}
 
 const cfg = () => ({
   failAlertPerUser:    parseInt(process.env.AUTH_FAIL_ALERT_PER_USER || '5', 10),
@@ -65,8 +73,13 @@ async function countAuthFailure({ userId, username, ip, ua, eventType }) {
 
   let userCount = 0;
   let ipCount = 0;
-  if (userId) userCount = await bumpCounter(`auth:fail:user:${userId}`, w);
-  if (ip)     ipCount   = await bumpCounter(`auth:fail:ip:${ip}`, w);
+  // 2026-05-28:Akamai edge IP 連坐事故 — 同 IP 後面 10 個不同 user 各失敗 1 次,
+  // 觸發 ipCount=10 自動黑名單 → 整 edge 被擋 → 全公司外網中槍。
+  // 把 IP key 改成 (ip + ua-hash),不同 user 各自 UA 不同就各自計數;
+  // 真攻擊者通常用固定 UA 大量重打,計數仍準確。
+  const ipKeyExt = ip ? `${ip}:${uaHash(ua)}` : null;
+  if (userId)   userCount = await bumpCounter(`auth:fail:user:${userId}`, w);
+  if (ipKeyExt) ipCount   = await bumpCounter(`auth:fail:ip:${ipKeyExt}`, w);
 
   // 達閾值 → 寄信(寄完設旗標,1 小時內不重寄)
   if (userId && userCount >= c.failAlertPerUser) {

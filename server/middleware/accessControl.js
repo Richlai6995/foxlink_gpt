@@ -34,9 +34,33 @@ function isInCIDR(ip, cidr) {
 }
 
 function getClientIp(req) {
-  // 直接取 Express 處理過 trust proxy 的 req.ip。攻擊者偽造的 X-Forwarded-For
-  // 不會被信任,Express 從鏈最右邊取受信 proxy 後一個 hop 當真實 client IP。
-  // 詳見 server.js 的 trust proxy 設定。
+  // 2026-05-28:架構改成 client → Akamai(WAF)→ nginx-ingress → pod 後,
+  //   TRUST_PROXY=1 讓 req.ip = Akamai edge IP(只信任 nginx 1 跳)。
+  //   Akamai edge 後面 N 個 user 共用同 IP → 一個 user 失敗 10 次 → 整個 edge 進黑名單 →
+  //   全公司外網 user 中槍。
+  //
+  // 正確做法:Akamai 在 True-Client-IP header 帶 user 真實 IP(他們的標準 header),
+  //   只信任「請求是經 Akamai 過來」的時候 — 否則 client 自己偽造 header 就能假裝。
+  //
+  // 「經 Akamai 過來」的判定:req.ip(即 trust-proxy 解析後的 source)落在 Akamai
+  //   IP 段 / 或 True-Client-IP header 存在。後者較簡單:只要 req.ip 是公網 IP
+  //   (非 internal CIDR) 且帶 True-Client-IP,就視為 Akamai forwarded。
+  //   攻擊者直接打 nginx-ingress(繞 Akamai)沒有 True-Client-IP,走原本邏輯。
+  //
+  // 多個 header 名稱備援:Akamai=True-Client-IP, Cloudflare=CF-Connecting-IP。
+  //
+  // ⚠️ 不能用 X-Real-IP — 那是 nginx-ingress 自己寫的「nginx 看到的 source IP」,
+  //    當 Akamai 過來時 = Akamai edge IP,不是 user 真實 IP,用了等於沒改。
+  //
+  // True-Client-IP 需 Akamai 後台「Forward True Client IP」開啟才會送來;
+  // CF-Connecting-IP 是 Cloudflare 自動帶。沒開的話 fallback 到 req.ip(Akamai
+  // edge),退回原本行為,但會在 5 分鐘節流的 warn 提醒 ops。
+  const trueClient = req.headers['true-client-ip']
+    || req.headers['cf-connecting-ip'];
+  if (trueClient && typeof trueClient === 'string') {
+    const first = trueClient.split(',')[0].trim();
+    if (first) return first;
+  }
   return req.ip || req.connection?.remoteAddress || '';
 }
 
@@ -92,8 +116,29 @@ function createAccessControl() {
 
   const loginRateMax = parseInt(process.env.EXTERNAL_LOGIN_RATE_LIMIT || '10') || 0;
 
-  // Paths allowed from anywhere (K8s probes, favicon)
-  const ALWAYS_ALLOWED = new Set(['/api/health', '/favicon.ico']);
+  // Paths allowed from anywhere (K8s probes, favicon, SPA entry files)
+  // 2026-05-28:加入 SPA static entry — 若黑名單擋掉 user,API 仍會擋但至少
+  // 拿得到 HTML/JS 進到登入頁,避免「整頁全白」事故(Akamai edge IP 被當 client
+  // IP 連坐黑名單 → 全公司外網無法用)。SPA 是純 static,不含 user data,洩漏風險 0。
+  const ALWAYS_ALLOWED = new Set([
+    '/api/health',
+    '/favicon.ico',
+    '/',                    // SPA root
+    '/index.html',
+    '/manifest.json',
+    '/manifest.webmanifest',
+    '/robots.txt',
+    '/sitemap.xml',
+  ]);
+  // 路徑前綴白名單(SPA bundle + 公開靜態檔)
+  const ALWAYS_ALLOWED_PREFIXES = [
+    '/assets/',             // Vite build 產物(JS/CSS/font/image)
+    '/static/',
+    '/icons/',
+    '/images/',
+    '/fonts/',
+    '/locales/',            // i18n JSON
+  ];
 
   console.log(`[AccessControl] mode=${mode} | internalNets=${internalNets.join(',')} | extPaths=${allowedPaths.join(',')}`);
   console.log(`[AccessControl] internalOnlyPrefixes=${internalOnlyPrefixes.join(',')}`);
@@ -109,8 +154,10 @@ function createAccessControl() {
   const getBlacklist = () => _ipBlacklist || (_ipBlacklist = require('../services/ipBlacklist'));
 
   return async function accessControl(req, res, next) {
-    // 1. Always allowed (health probe etc.)
+    // 1. Always allowed (health probe, SPA static entry)
+    //    SPA HTML/JS/CSS 跳過所有 access control,讓黑名單 / 限流不會把整頁打白
     if (ALWAYS_ALLOWED.has(req.path)) return next();
+    if (ALWAYS_ALLOWED_PREFIXES.some((p) => req.path.startsWith(p))) return next();
 
     // 2. Internal IP → pass everything(blacklist 不對內網生效,防誤殺)
     const ip = getClientIp(req);
