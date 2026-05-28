@@ -99,7 +99,17 @@ export default function MyDevicesModal({ open, onClose }: { open: boolean; onClo
       await deleteMyCredential(id)
       await loadPasskeys()
     } catch (e: any) {
-      setPasskeyErr(e?.response?.data?.error || '移除失敗')
+      // 拆開三種狀態給 user 看 — 拿不到 response = 網路/防火牆/黑名單擋下;
+      // 拿到 response 但無 error 欄位 = 後端非預期錯誤
+      const status = e?.response?.status
+      const body = e?.response?.data?.error
+      if (body) {
+        setPasskeyErr(`移除失敗 (${status}): ${body}`)
+      } else if (status) {
+        setPasskeyErr(`移除失敗 (HTTP ${status}) — 請重試或聯絡 IT`)
+      } else {
+        setPasskeyErr(`移除失敗 — 網路或連線被中介擋下 (${e?.message || 'no response'})`)
+      }
     }
   }
 
@@ -115,7 +125,11 @@ export default function MyDevicesModal({ open, onClose }: { open: boolean; onClo
       await api.delete(`/auth/me/devices/${deviceId}`)
       await load()
     } catch (e: any) {
-      setErr(e?.response?.data?.error || '移除失敗')
+      const status = e?.response?.status
+      const body = e?.response?.data?.error
+      if (body) setErr(`移除失敗 (${status}): ${body}`)
+      else if (status) setErr(`移除失敗 (HTTP ${status}) — 請重試`)
+      else setErr(`移除失敗 — 網路或連線被中介擋下 (${e?.message || 'no response'})`)
     } finally {
       setBusy(null)
     }
@@ -230,8 +244,10 @@ export default function MyDevicesModal({ open, onClose }: { open: boolean; onClo
           )}
 
           {!loading && devices.length === 0 && (
-            <div className="text-center py-8 text-slate-500 text-sm">
-              {t('myDevices.empty', '目前沒有信任裝置 — 從外網登入後會自動加入')}
+            <div className="text-center py-6 text-slate-500 text-xs leading-6">
+              {t('myDevices.empty',
+                '目前沒有 MFA 信任裝置 — 此區塊只記錄外網登入完成 Webex MFA 驗證後的裝置,\n跟上方「快速登入」綁定的指紋/Face ID 是兩個獨立系統。\n若從未走過外網 Webex MFA 流程,顯示空白是正常的。'
+              )}
             </div>
           )}
 
