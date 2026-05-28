@@ -271,9 +271,25 @@ app.get('/api/version', (req, res) => {
     // Serve frontend in production
     const staticPath = path.join(__dirname, 'public');
     if (fs.existsSync(staticPath)) {
-      app.use(express.static(staticPath));
+      // 2026-05-28:index.html / SW / manifest 強制 no-store,/assets/* 因為帶
+      // content hash 可長 cache。否則 deploy 後 user 瀏覽器仍用舊 index.html
+      // → 指向已不存在的舊 bundle hash → 整頁壞掉,得手動清快取。
+      // (本次 Akamai DELETE 修法上線就踩到 — user 一直拿到舊 bundle 發 DELETE)
+      app.use(express.static(staticPath, {
+        setHeaders: (res, filePath) => {
+          const base = path.basename(filePath);
+          if (base === 'index.html' || base === 'sw.js' || base.startsWith('manifest')) {
+            res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+          } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+            // Vite assets 都帶 content hash,可永久 cache
+            res.set('Cache-Control', 'public, max-age=31536000, immutable');
+          }
+        },
+      }));
       app.get('*', (req, res, next) => {
         if (req.path.startsWith('/api')) return next();
+        // SPA fallback 也是 index.html → 同樣 no-store
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
         res.sendFile(path.join(staticPath, 'index.html'));
       });
     }

@@ -19,6 +19,13 @@ const redisClient = require('./redisClient');
 
 const KEY_BL = (ip) => `bl:ip:${ip}`;
 const NEGATIVE_CACHE_TTL = 60;  // 不在黑名單的 IP cache 60 秒,降低 DB 查詢頻率
+// 2026-05-28:BLOCKED cache TTL 從 24h 砍到 5 分鐘。
+// 原本 24h 害 ops 從 SQL 直接 DELETE ip_blacklist 後,Redis cache 還困住 IP 整整 24h
+// → user 仍被 403,得手動 `redis-cli DEL bl:ip:xxx` 同步,容易漏。
+// 5 分鐘是「ops 改 DB 後最壞等多久生效」的容忍上限,代價只是每個外網 IP 5min 多 1 次 DB query
+// (indexed lookup,< 1ms,可忽略)。
+// admin UI 走 ipBlacklist.remove() / add() 仍會即時刷 cache,所以這只是兜底。
+const BLOCKED_CACHE_TTL = 300;
 const VAL_BLOCKED = '1';
 const VAL_NOT_BLOCKED = '0';
 
@@ -118,10 +125,12 @@ async function isBlacklisted(ip) {
   const db = require('../database-oracle').db;
   const row = await dbCheck(db, ip);
   if (row) {
-    // 算 TTL:有 expires_at 則用差值,否則 1 hr 重查
-    const ttl = row.expires_at
-      ? Math.max(60, Math.floor((new Date(row.expires_at).getTime() - Date.now()) / 1000))
-      : 3600;
+    // 取「expires_at 剩餘秒數」跟 BLOCKED_CACHE_TTL 取小值 — 永不超過 5 分鐘
+    // 保證 DB 過期 / 手動刪後最多 5 分鐘生效,即使 expires_at 還很遠也不會死黏
+    const remainSec = row.expires_at
+      ? Math.max(0, Math.floor((new Date(row.expires_at).getTime() - Date.now()) / 1000))
+      : BLOCKED_CACHE_TTL;
+    const ttl = Math.max(60, Math.min(remainSec || BLOCKED_CACHE_TTL, BLOCKED_CACHE_TTL));
     await redisClient.setSharedValue(KEY_BL(ip), VAL_BLOCKED, ttl);
     return true;
   }
@@ -133,8 +142,10 @@ async function add({ ip, reason, source = 'manual', createdBy = null, ttlHours =
   if (!ip) throw new Error('ip required');
   const db = require('../database-oracle').db;
   const id = await dbAdd(db, { ip, reason, source, createdBy, ttlHours });
-  // 刷 cache:寫入 ttlHours 對應秒數,沒設(永久)用 24 hr 重查間隔
-  const ttl = ttlHours ? Math.floor(Number(ttlHours) * 3600) : 24 * 3600;
+  // 寫 cache 跟 isBlacklisted 同策略:永不超過 BLOCKED_CACHE_TTL(5 分鐘)
+  // 讓「DB 後續被改 / 刪」最多 5 分鐘自動生效,不用手動 DEL redis key
+  const dbTtlSec = ttlHours ? Math.floor(Number(ttlHours) * 3600) : BLOCKED_CACHE_TTL;
+  const ttl = Math.min(dbTtlSec, BLOCKED_CACHE_TTL);
   await redisClient.setSharedValue(KEY_BL(ip), VAL_BLOCKED, ttl);
   console.warn(`[IpBlacklist] ADD ip=${ip} source=${source} reason="${reason || ''}" ttl=${ttlHours || 'permanent'}h`);
   return id;

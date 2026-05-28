@@ -1,15 +1,19 @@
 #!/bin/bash
 # FOXLINK GPT — K8s 部署腳本
-# 使用方式: ./deploy.sh [tag]
-# 範例:     ./deploy.sh          → push latest
-#           ./deploy.sh v1.2.3   → push 指定 tag
+# 使用方式: ./deploy.sh [tag] [--no-pull]
+# 範例:     ./deploy.sh          → 用 git short hash 當 tag(預設、推薦)
+#           ./deploy.sh v1.2.3   → 用指定 tag
+#           ./deploy.sh latest   → 強制走 latest(legacy,不推薦)
+#
+# 2026-05-28 改動:預設 tag 從 `latest` 改成 git short hash。
+# 原因:用 `latest` + `kubectl rollout restart` 走滾動更新時,即使 imagePullPolicy=Always,
+#   有過機率拉到舊 cache(本次踩到 — pod 跑舊 image digest=890284 但 registry 上是新的)。
+# 改用 immutable tag + `kubectl set image` 強制每次 deploy 都換 image reference,k8s 一定重拉。
 
 set -e
 
 REGISTRY="10.8.93.11:5000"
 IMAGE="foxlink-gpt"
-TAG="${1:-latest}"
-FULL_IMAGE="${REGISTRY}/${IMAGE}:${TAG}"
 NAMESPACE="foxlink"
 DEPLOY="foxlink-gpt"
 
@@ -40,13 +44,24 @@ fi
 # Build-time version — 同 image 全 pod 共用,client 端 /api/version polling 才會穩定
 APP_VERSION="$(git rev-parse --short HEAD 2>/dev/null || date -u +%Y%m%d%H%M%S)"
 
+# Tag 解析:第 1 個非 --no-pull 旗標的參數當 tag;沒給就用 APP_VERSION(git hash)
+# 之前預設 `latest` 害我們踩到 k8s rolling update 拉不到新 digest 的雷
+TAG=""
+for arg in "$@"; do
+  if [ "$arg" != "--no-pull" ] && [ -z "$TAG" ]; then
+    TAG="$arg"
+  fi
+done
+TAG="${TAG:-${APP_VERSION}}"
+FULL_IMAGE="${REGISTRY}/${IMAGE}:${TAG}"
+
 echo "▶ Building: ${FULL_IMAGE}  (APP_VERSION=${APP_VERSION})"
 docker build --build-arg APP_VERSION="${APP_VERSION}" -t "${FULL_IMAGE}" .
 
 echo "▶ Pushing to registry: ${FULL_IMAGE}"
 docker push "${FULL_IMAGE}"
 
-# 同時 tag 為 latest（如果指定了特定 tag）
+# 同時 tag 為 latest 維持外部兼容(其他工具還在用 :latest 引用)
 if [ "${TAG}" != "latest" ]; then
   docker tag "${FULL_IMAGE}" "${REGISTRY}/${IMAGE}:latest"
   docker push "${REGISTRY}/${IMAGE}:latest"
@@ -102,14 +117,32 @@ echo "▶ Applying K8s manifests (RBAC, Deployment, Service...)"
 kubectl apply -f "$(dirname "$0")/k8s/deployment.yaml"
 kubectl apply -f "$(dirname "$0")/k8s/scheduler-deployment.yaml"
 
-echo "▶ Rolling update web (maxUnavailable=0 → 零停機)"
-kubectl rollout restart deployment/${DEPLOY} -n ${NAMESPACE}
-kubectl rollout status deployment/${DEPLOY} -n ${NAMESPACE}
+# 用 set image 強制換 image reference — 保證 k8s 拉新 image 不會用 cache
+# (跟 rollout restart 的差別:後者只重啟 pod 用同 image,Always policy 有時也會用 layer cache)
+echo "▶ Rolling update web (set image ${FULL_IMAGE}, maxUnavailable=0 → 零停機)"
+kubectl -n ${NAMESPACE} set image deployment/${DEPLOY} ${DEPLOY}=${FULL_IMAGE}
+kubectl -n ${NAMESPACE} rollout status deployment/${DEPLOY} --timeout=300s
 
-echo "▶ Restart scheduler (Recreate strategy → 30-60s 空窗)"
-kubectl rollout restart deployment/${DEPLOY}-scheduler -n ${NAMESPACE}
-kubectl rollout status deployment/${DEPLOY}-scheduler -n ${NAMESPACE}
+echo "▶ Restart scheduler (set image ${FULL_IMAGE}, Recreate → 30-60s 空窗)"
+kubectl -n ${NAMESPACE} set image deployment/${DEPLOY}-scheduler ${DEPLOY}-scheduler=${FULL_IMAGE}
+kubectl -n ${NAMESPACE} rollout status deployment/${DEPLOY}-scheduler --timeout=300s
+
+# 收尾:把舊 ReplicaSet 殘留的 pod 清乾淨(deployment history 留太多會撐住舊 pod)
+echo "▶ Cleaning up orphan ReplicaSets(desired=0 但仍有 pod 殘留)"
+for rs in $(kubectl -n ${NAMESPACE} get rs -l app=${DEPLOY} \
+              -o jsonpath='{range .items[?(@.spec.replicas==0)]}{.metadata.name}{"\n"}{end}'); do
+  pods=$(kubectl -n ${NAMESPACE} get pods --field-selector=status.phase=Running \
+           -l app=${DEPLOY} -o name 2>/dev/null | xargs -I{} kubectl -n ${NAMESPACE} get {} \
+           -o jsonpath='{.metadata.ownerReferences[0].name}{"\n"}' 2>/dev/null | grep -c "^${rs}$" || true)
+  if [ "$pods" -gt 0 ]; then
+    echo "  ⚠️  RS ${rs} desired=0 卻仍有 ${pods} 個 pod,刪除"
+    kubectl -n ${NAMESPACE} delete rs ${rs} --wait=false 2>/dev/null || true
+  fi
+done
 
 echo ""
 echo "✓ 部署完成！Image: ${FULL_IMAGE}"
 echo "  kubectl get pods -n ${NAMESPACE} -o wide"
+echo "  kubectl -n ${NAMESPACE} get pods -l app=${DEPLOY} -o jsonpath='{range .items[*]}{.metadata.name}{\"\\t\"}{.spec.containers[0].image}{\"\\n\"}{end}'"
+echo ""
+echo "  ⓘ 確認所有 pod image tag 都是 ${TAG}(不是 :latest 或舊 hash)"
