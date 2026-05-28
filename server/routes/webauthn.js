@@ -358,7 +358,11 @@ router.get('/credentials', verifyToken, async (req, res) => {
   }
 });
 
-router.delete('/credentials/:id', verifyToken, async (req, res) => {
+// 共用 handler — DELETE 跟 POST alias 兩條 route 都掛在這支
+// 2026-05-28:Akamai Bot Manager 預設擋 DELETE method(回 501),user 從外網
+// 點刪除一律失敗。提供 POST alias 繞過 method 限制,等 WAF 那邊放行 DELETE 後
+// 仍可移除 alias(兩條都保留 idempotent,沒副作用)。
+async function deleteCredentialHandler(req, res) {
   try {
     const { db } = require('../database-oracle');
     const id = Number(req.params.id);
@@ -374,7 +378,10 @@ router.delete('/credentials/:id', verifyToken, async (req, res) => {
     console.error('[webauthn] delete credential error:', e);
     res.status(500).json({ error: e.message });
   }
-});
+}
+
+router.delete('/credentials/:id', verifyToken, deleteCredentialHandler);
+router.post('/credentials/:id/delete', verifyToken, deleteCredentialHandler);
 
 // Admin:看某 user 的所有 credentials(用於協助處理裝置遺失)
 router.get('/admin/credentials/:userId', verifyToken, verifyAdmin, async (req, res) => {

@@ -122,7 +122,8 @@ export default function MyDevicesModal({ open, onClose }: { open: boolean; onClo
     )) return
     setBusy(deviceId)
     try {
-      await api.delete(`/auth/me/devices/${deviceId}`)
+      // 2026-05-28:Akamai 擋 DELETE method,改打 POST alias(後端兩條 route 同個 handler)
+      await api.post(`/auth/me/devices/${deviceId}/delete`)
       await load()
     } catch (e: any) {
       const status = e?.response?.status

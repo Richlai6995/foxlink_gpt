@@ -95,5 +95,7 @@ export async function listMyCredentials(): Promise<BoundCredential[]> {
 }
 
 export async function deleteMyCredential(id: number): Promise<void> {
-  await api.delete(`/auth/webauthn/credentials/${id}`)
+  // 2026-05-28:Akamai Bot Manager 擋外網 DELETE method(回 501 不到 backend),
+  // 改打 POST alias。後端兩條 route 同個 handler,內外網都通。
+  await api.post(`/auth/webauthn/credentials/${id}/delete`)
 }

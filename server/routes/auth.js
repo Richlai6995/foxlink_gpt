@@ -1363,8 +1363,9 @@ router.get('/me/devices', async (req, res) => {
   }
 });
 
-// DELETE /api/auth/me/devices/:device_id — 移除指定信任裝置
-router.delete('/me/devices/:deviceId', async (req, res) => {
+// DELETE / POST alias — Akamai 擋 DELETE method,提供 POST 兜底
+// 2026-05-28:同 webauthn delete credential 一樣的 workaround
+async function revokeDeviceHandler(req, res) {
   const ctx = await requireSession(req, res);
   if (!ctx) return;
   const { deviceId } = req.params;
@@ -1384,7 +1385,10 @@ router.delete('/me/devices/:deviceId', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-});
+}
+
+router.delete('/me/devices/:deviceId', revokeDeviceHandler);
+router.post('/me/devices/:deviceId/delete', revokeDeviceHandler);
 
 // POST /api/auth/me/devices/revoke-all — 全清(常見情境:device 遺失)
 router.post('/me/devices/revoke-all', async (req, res) => {
