@@ -1056,9 +1056,22 @@ function buildMasterScrapeTask(kbMap, models = {}) {
 
 ═══ PGM 業界基準價:Johnson Matthey Base Price(RSS)═══
 {{fetch:https://matthey.com/pgm-prices/rss-feed.xml}}
-↑ Pt / Pd / Rh / Ir / Ru 五金屬的 USD/oz 基準價,JM 每天 08:30 HK 時間更新。
+↑ Pt / Pd / Rh / Ir / Ru 五金屬的 USD/oz 基準價。
   正崴採購合約多以 JM Base Price 為準,**PGM 的 price_usd 一律以此為主源**。
-  RSS 不帶日變動 %,LLM 一律輸出 day_change_pct=null,server 後算(用前一日 JM 價)。
+
+  **⚠️ JM RSS 每天有 4 個盤(HK 08:30 / HK 14:00 / London 09:00 / NY 09:30),
+     使用者只認 London 09:00 的價作 PT/PD/RH/IR/RU 結算基準。**
+
+  ✅ **正確做法**:從 RSS 解析「最近一個 London 09:00 fix」(title / description 含
+     "London" 或 "09:00 London" 標記的那筆)。**忽略 HK / NY 其他盤**。
+  - 例:5/28 (週四) London 09:00 → PT=1,920, PD=1,920(從畫面對應)
+  - 例:5/29 (週五) London 09:00 尚未發布(早上 HK 06:00 抓時 London 還沒到 9 點)
+    → 取 5/28 London 09:00,as_of_date 標 "2026-05-28"
+
+  ❌ 錯誤:抓 RSS 最頂端那筆(常是 NY 09:30,跟 London 差 1-2%)
+  ❌ 錯誤:抓 HK 08:30(用採購端時區但歐美結算不用)
+
+  RSS 不帶日變動 %,LLM 一律輸出 day_change_pct=null,server 後算(用前一日 London 9am 價)。
 
 ═══ AG 白銀主源:LBMA Silver Fix(USD/oz JSON,直接抓)═══
 {{fetch:https://prices.lbma.org.uk/json/silver.json}}
@@ -1115,18 +1128,19 @@ B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;含 _kb_doc
       "raw_snippet": "台銀黃金存摺 11:10 美金 / 1英兩 / 本行賣出 4689.20"
     },
     {
-      "as_of_date": "{{date}}",
+      "as_of_date": "2026-05-28",
       "metal_code": "PT",
       "metal_name": "鉑",
-      "price_usd": 2019.0,
+      "price_usd": 1920.0,
       "unit": "USD/oz",
       "fx_rate_to_usd": 1.0,
       "day_change_pct": null,
       "price_type": "fixing",
       "market": "JM",
+      "grade": "London 09:00",
       "source": "JohnsonMatthey",
       "source_url": "https://matthey.com/pgm-prices/rss-feed.xml",
-      "raw_snippet": "JM Base Price: US$ 2019 per troy oz (28 Apr 2026 08:30 HK)"
+      "raw_snippet": "JM Base Price: PT US$ 1,920/oz (28 May 2026 London 09:00 fix)"
     },
     {
       "as_of_date": "2026-05-22",   // ← 注意:Westmetall 抓到的日期(LME 交易日),不是 {{date}}
@@ -1157,10 +1171,12 @@ B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;含 _kb_doc
 - price_type = "fixing" / market = "BOT"
 
 ═══ PGM 寫入規則 ═══
-- **PT / PD / RH 的 price_usd 一律從 JM RSS 取**
+- **PT / PD / RH 的 price_usd 一律取 JM RSS 的 「London 09:00 fix」**(不是 HK / NY)
   - source = "JohnsonMatthey", source_url = "https://matthey.com/pgm-prices/rss-feed.xml"
   - price_type = "fixing", market = "JM"
-- **day_change_pct 一律輸出 null**(server 端會用前一日 JM 價格自動補算,LLM 不要猜)
+  - **grade 欄填 "London 09:00"** 標明是哪個盤(避免之後又被誤抓 NY 價)
+  - as_of_date 用「該 London 9am fix 的實際日期」(可能是昨天或更早)
+- **day_change_pct 一律輸出 null**(server 端會用前一日 London 9am JM 價自動補算)
 
 ═══ AG 寫入規則 ═══
 - **LBMA Silver Fix 為唯一主源**(USD/oz 直接用,不換算)
@@ -1761,8 +1777,10 @@ async function patchExistingMasterScrapeAddPriceWrite(db, kbMap, models) {
   const hasLbmaAgMarker     = !!promptStr && /LBMA 為唯一主源/.test(promptStr);
   // 2026-05-29:修「LME 來源端尚未發布最新資料就整個漏」邏輯衝突,改成「抓最頂端那一行」
   const hasLatestRowMarker  = !!promptStr && /抓表格\*\*最頂端那一行/.test(promptStr);
+  // 2026-05-29:PGM 改 London 9am fix(原本 LLM 預設抓 NY 09:30)
+  const hasLondon9amMarker  = !!promptStr && /London 09:00 fix/.test(promptStr);
 
-  if (hasPriceWrite && hasJmMarker && hasBotMarker && hasNewsRulesMarker && hasV2Marker && hasKbDocMarker && hasNoTeMarker && hasLbmaAgMarker && hasLatestRowMarker) return;
+  if (hasPriceWrite && hasJmMarker && hasBotMarker && hasNewsRulesMarker && hasV2Marker && hasKbDocMarker && hasNoTeMarker && hasLbmaAgMarker && hasLatestRowMarker && hasLondon9amMarker) return;
 
   try {
     // 一併 update prompt + pipeline + email_subject/body(2026-04-29 重構不發 email)
@@ -1781,6 +1799,7 @@ async function patchExistingMasterScrapeAddPriceWrite(db, kbMap, models) {
       !hasNoTeMarker && '2026-05-25 TE 停用 + Westmetall 對齊',
       !hasLbmaAgMarker && '2026-05-25 AG 改 LBMA 主源',
       !hasLatestRowMarker && '2026-05-29 抓最頂端 row 邏輯',
+      !hasLondon9amMarker && '2026-05-29 PGM 改 London 9am fix',
     ].filter(Boolean).join(' + ');
     console.log(`[PMScheduledTaskSeed] Upgraded "${targetName}" #${id}: ${missing}`);
   } catch (e) {
@@ -2138,10 +2157,13 @@ Rhodium 備援: {{scrape:https://www.kitco.com/charts/liverhodium.html}}
    - as_of_date 用 JSON 那筆的 d 欄位(不是今天 {{date}})
    - LBMA 沒新一筆 → 該日 AG 整筆漏掉,**禁止 fallback Westmetall / Kitco**
 
-4. **Platinum / Palladium / Rhodium** 主源:**Johnson Matthey RSS**(資料源 3)
-   - **price_usd 一律以 JM RSS 為主**,source="JohnsonMatthey", price_type="fixing", market="JM"
+4. **Platinum / Palladium / Rhodium** 主源:**Johnson Matthey RSS — London 09:00 fix**(資料源 3)
+   - **price_usd 一律取 JM RSS 的 "London 09:00" 那一盤**,source="JohnsonMatthey", price_type="fixing", market="JM"
    - **day_change_pct 一律輸出 null**(server 後算,LLM 不要猜)
+   - grade 欄填 "London 09:00" 標明是哪個盤
    - JM RSS 抓不到該金屬才 fallback Kitco Bid/Ask 平均(source="Kitco")
+   - ⚠️ JM 每天有 4 個盤(HK 08:30 / HK 14:00 / London 09:00 / NY 09:30),**只認 London 09:00**
+   - **禁止抓 HK / NY 盤的價**(差距常 1-2%)
    - **禁止用 TradingEconomics**(2026-05-25 起停用)
    - **禁止用歷史數據當今日價**
 
