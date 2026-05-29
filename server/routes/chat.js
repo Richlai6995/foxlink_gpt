@@ -1630,12 +1630,20 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
       // PDF → send as inline data to Gemini (handles images + text natively, better than pdf-parse)
       // Gemini supports inline PDF up to ~20MB; larger files fall back to text extraction
       // Azure OpenAI cannot handle inlineData, so always use text extraction for AOAI
+      // ⚠️ PDF 也要 persist 到 session_files/ — pdf_to_docx skill 透過 attached_files 拿 path 才能轉檔
       const MAX_PDF_INLINE_MB = 15;
       if (mimeType === 'application/pdf' && file.size <= MAX_PDF_INLINE_MB * 1024 * 1024 && !isAoaiProvider) {
         sendEvent({ type: 'status', message: `正在解析: ${originalName}...` });
         userParts.push(await fileToGeminiPart(filePath, mimeType));
-        fileMetas.push({ name: originalName, type: 'document' });
-        console.log(`[Chat] PDF sent as inline data to Gemini: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
+
+        const sessionFilesDir = path.join(UPLOAD_DIR, 'session_files', sessionId);
+        if (!fs.existsSync(sessionFilesDir)) fs.mkdirSync(sessionFilesDir, { recursive: true });
+        const safeFname = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${path.basename(originalName).replace(/[\\/]/g, '_')}`;
+        const persistPath = path.join(sessionFilesDir, safeFname);
+        fs.copyFileSync(filePath, persistPath);
+
+        fileMetas.push({ name: originalName, type: 'pdf', localPath: persistPath, mimeType });
+        console.log(`[Chat] PDF inline + persisted: "${originalName}" ${(file.size / 1024 / 1024).toFixed(2)}MB → ${persistPath}`);
         fs.unlinkSync(filePath);
         continue;
       }
@@ -1727,13 +1735,41 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
       console.log(`[Chat] Extracting text from "${originalName}"...`);
       sendEvent({ type: 'status', message: `正在解析: ${originalName}...` });
       const extractedText = await extractTextFromFile(filePath, mimeType, originalName);
+
+      // ⚠️ 走 extract text 路線的 PDF(大檔 / AOAI)也要 persist,
+      // 否則 pdf_to_docx skill 拿不到 source PDF 路徑。
+      const isPdf = mimeType === 'application/pdf' || ext === '.pdf';
+      let pdfPersistPath = null;
+      if (isPdf) {
+        try {
+          const sessionFilesDir = path.join(UPLOAD_DIR, 'session_files', sessionId);
+          if (!fs.existsSync(sessionFilesDir)) fs.mkdirSync(sessionFilesDir, { recursive: true });
+          const safeFname = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${path.basename(originalName).replace(/[\\/]/g, '_')}`;
+          pdfPersistPath = path.join(sessionFilesDir, safeFname);
+          fs.copyFileSync(filePath, pdfPersistPath);
+        } catch (e) {
+          console.warn(`[Chat] PDF persist failed for "${originalName}": ${e.message}`);
+          pdfPersistPath = null;
+        }
+      }
+
       if (extractedText) {
         console.log(`[Chat] Extracted ${extractedText.length} chars from "${originalName}"`);
         combinedUserText += `\n\n${extractedText}`;
-        fileMetas.push({ name: originalName, type: 'document' });
+        if (isPdf) {
+          fileMetas.push({ name: originalName, type: 'pdf', localPath: pdfPersistPath, mimeType });
+        } else {
+          fileMetas.push({ name: originalName, type: 'document' });
+        }
       } else {
         console.warn(`[Chat] Extraction returned null for "${originalName}" (mime=${mimeType})`);
-        fileMetas.push({ name: originalName, type: 'unknown' });
+        if (isPdf && pdfPersistPath) {
+          // 純圖片 PDF / 加密 PDF → extract 沒文字但檔還在,讓 LLM 知道並可呼叫 pdf_to_docx
+          combinedUserText += `\n\n[PDF: ${originalName}] (此 PDF 無法直接抽取文字,可能為掃描型或加密。可使用 pdf_to_docx 工具處理。)`;
+          fileMetas.push({ name: originalName, type: 'pdf', localPath: pdfPersistPath, mimeType });
+        } else {
+          fileMetas.push({ name: originalName, type: 'unknown' });
+        }
       }
       fs.unlinkSync(filePath);
     }
@@ -1962,23 +1998,35 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
         if (!f || !f.localPath || seen.has(f.localPath)) return;
         try { if (!fs.existsSync(f.localPath)) return; } catch (_) { return; }
         seen.add(f.localPath);
-        out.push({ name: f.name, path: f.localPath, sheets: f.sheets || [] });
+        out.push({
+          name: f.name,
+          path: f.localPath,
+          type: f.type,                   // 'xlsx' | 'pdf' — skill 可依此挑檔
+          sheets: f.sheets || [],
+          mimeType: f.mimeType,
+        });
       };
-      // 當前 message 的 xlsx
-      for (const fm of fileMetas) if (fm.type === 'xlsx') push(fm);
-      // 歷史 message 的 xlsx (從 files_json 還原)
+      // 當前 message 的 xlsx / pdf
+      for (const fm of fileMetas) {
+        if (fm.type === 'xlsx' || fm.type === 'pdf') push(fm);
+      }
+      // 歷史 message 的 xlsx / pdf (從 files_json 還原)
       for (const m of historyMessages) {
         if (!m.files_json) continue;
         try {
           const parsed = JSON.parse(m.files_json);
           const arr = Array.isArray(parsed) ? parsed : (parsed?.generated || []);
-          for (const f of arr) if (f.type === 'xlsx') push(f);
+          for (const f of arr) if (f.type === 'xlsx' || f.type === 'pdf') push(f);
         } catch (_) {}
       }
       return out;
     })();
     if (sessionAttachedFiles.length > 0) {
-      console.log(`[Chat] Session has ${sessionAttachedFiles.length} xlsx file(s) → excel_query skill will be force-injected`);
+      const byType = sessionAttachedFiles.reduce((acc, f) => {
+        acc[f.type || 'unknown'] = (acc[f.type || 'unknown'] || 0) + 1;
+        return acc;
+      }, {});
+      console.log(`[Chat] Session has ${sessionAttachedFiles.length} attached file(s) → ${JSON.stringify(byType)}`);
     }
 
     // Determine if we need image-aware history (resolved after resolveApiModel below)
@@ -3873,6 +3921,11 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
                 });
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 const data = await resp.json();
+                // Skill 產生檔案 → 推 generated_files 給前端(對齊 post_answer 路徑 line 4398)。
+                // 讓 pdf_to_docx 之類產生 binary 檔的 skill 能在 tool-call 期間就把下載 link 推給 UI。
+                if (data.files && Array.isArray(data.files) && data.files.length > 0) {
+                  sendEvent({ type: 'generated_files', files: data.files });
+                }
                 // ── Passthrough:skill 顯式回 { artifact } 且 admin 開總開關 ──
                 const ptResult = tryPassthrough({
                   result: data,

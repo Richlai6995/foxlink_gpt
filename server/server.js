@@ -719,6 +719,12 @@ app.get('/api/version', (req, res) => {
       await autoSeedExcelQuerySkill(db);
     });
 
+    // Auto-seed PDF 轉 Word code skill (pdf2docx via Python venv)
+    if (RUN_SCHEDULERS) queueStartupSeed('PdfToDocxSkillSeed', async () => {
+      const { autoSeedPdfToDocxSkill } = require('./services/pdfToDocxSkillSeed');
+      await autoSeedPdfToDocxSkill(db);
+    });
+
     // Auto-seed PM Multi-Agent Workflow skill (pm_deep_analysis_workflow)
     if (RUN_SCHEDULERS) queueStartupSeed('PMWorkflowSeed', async () => {
       const { autoSeedPmWorkflowSkill } = require('./services/pmWorkflowSeed');

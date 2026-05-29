@@ -22,13 +22,23 @@ FROM node:20-slim AS runner
 # LibreOffice impress = .ppt → .pptx conversion (for legacy Office support)
 #   headless-only 子集：core + impress；不裝 writer/calc（.doc 走 word-extractor pure JS、
 #   .xls 靠 xlsx lib 已能讀）。整體增加約 ~250MB。
+# python3 + pip:給 PDF → DOCX skill 用(pdf2docx + PyMuPDF)。約 +400MB。
 RUN apt-get update \
     && apt-get install -y --no-install-recommends tzdata fontconfig \
     && (apt-get install -y --no-install-recommends libaio1t64 2>/dev/null \
         || apt-get install -y --no-install-recommends libaio1) \
     && apt-get install -y --no-install-recommends libreoffice-impress libreoffice-core \
     && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get install -y --no-install-recommends python3 python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/*
+
+# Python venv for PDF workers
+# 用 venv 不踩 Debian Bookworm 的 PEP 668(EXTERNALLY-MANAGED)限制,
+# 且把 pip 套件鎖在 /opt/pdf-venv 不污染 system python。
+ENV PDF_VENV=/opt/pdf-venv
+ENV PDF_PYTHON=${PDF_VENV}/bin/python3
+RUN python3 -m venv ${PDF_VENV} \
+    && ${PDF_PYTHON} -m pip install --no-cache-dir --upgrade pip
 
 # Timezone
 ENV TZ=Asia/Taipei
@@ -47,6 +57,12 @@ WORKDIR /app
 # Install server deps (production only)
 COPY server/package*.json ./
 RUN npm install --only=production
+
+# Install Python deps for pdf workers
+# 先單獨 COPY requirements.txt 拿 layer cache;requirements 不變就不會重跑 pip install。
+COPY server/python_workers/requirements.txt /tmp/pdf_workers_requirements.txt
+RUN ${PDF_PYTHON} -m pip install --no-cache-dir -r /tmp/pdf_workers_requirements.txt \
+    && rm /tmp/pdf_workers_requirements.txt
 
 # Copy server source
 COPY server ./

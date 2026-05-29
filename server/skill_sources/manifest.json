@@ -18,5 +18,10 @@
     "file": "excel_query.js",
     "match_name": "Excel ?精確查詢|excel_query",
     "description": "Excel 精確查詢 — DuckDB SQL 跑使用者上傳的 xlsx,確保彙總/排序/Top N 數字 100% 正確"
+  },
+  {
+    "file": "pdf_to_docx.js",
+    "match_name": "PDF ?轉 ?Word|pdf_to_docx|PDF→Word",
+    "description": "PDF 轉 Word — pdf2docx (Python venv) 保留版面、表格、圖片;支援加密 PDF;掃描型走 Phase 3 OCR"
   }
 ]

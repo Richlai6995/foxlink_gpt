@@ -1,0 +1,4 @@
+# PDF → DOCX worker dependencies
+# Pin minor versions:pdf2docx 對 PyMuPDF 升級敏感(1.25+ 改 import path 會炸)
+PyMuPDF>=1.23.0,<1.25.0
+pdf2docx==0.5.8
