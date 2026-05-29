@@ -66,6 +66,17 @@ function ChatPageDesktop() {
   const [erpPickerOpen, setErpPickerOpen] = useState(false)
   const [erpInvoking, setErpInvoking] = useState<ErpTool | null>(null)
   const [erpPendingContext, setErpPendingContext] = useState<string | null>(null)
+  // Phase 1c:加密 PDF 密碼旁路 modal — token 從 SSE event 'pdf_password_prompt' 收到
+  const [pdfPasswordPrompt, setPdfPasswordPrompt] = useState<null | {
+    token: string;
+    file_name: string;
+    expires_in: number;
+    session_id: string;
+  }>(null)
+  const [pdfPasswordInput, setPdfPasswordInput] = useState('')
+  const [pdfPasswordBusy, setPdfPasswordBusy] = useState(false)
+  const [pdfPasswordError, setPdfPasswordError] = useState<string | null>(null)
+  const [pdfPasswordMode, setPdfPasswordMode] = useState<'auto' | 'editable' | 'vision'>('auto')
   const [reasoningEffort, setReasoningEffort] = useState<string>(
     () => localStorage.getItem('reasoningEffort') || ''
   )
@@ -859,6 +870,18 @@ function ChatPageDesktop() {
                     urlPreview: f.publicUrl?.slice(0, 60),
                   })))
                   generatedFiles.push(...event.files)
+                } else if (event.type === 'pdf_password_prompt') {
+                  // Phase 1c:加密 PDF → 跳 modal 收密碼(密碼不進 chat content)
+                  console.log('[SSE] pdf_password_prompt token=', event.token?.slice(0, 8))
+                  setPdfPasswordInput('')
+                  setPdfPasswordError(null)
+                  setPdfPasswordMode('auto')
+                  setPdfPasswordPrompt({
+                    token: event.token,
+                    file_name: event.file_name || '(unknown)',
+                    expires_in: event.expires_in || 900,
+                    session_id: event.session_id,
+                  })
                 } else if (event.type === 'charts') {
                   // Chat Inline Chart:LLM 吐的 chart spec 解析結果
                   if (Array.isArray(event.charts)) {
@@ -2223,6 +2246,134 @@ function ChatPageDesktop() {
           onPick={(t) => { setErpPickerOpen(false); setErpInvoking(t) }}
           onClose={() => setErpPickerOpen(false)}
         />
+      )}
+
+      {/* Phase 1c:加密 PDF 密碼輸入 modal(密碼從未進 chat content) */}
+      {pdfPasswordPrompt && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50"
+          onClick={() => !pdfPasswordBusy && setPdfPasswordPrompt(null)}
+        >
+          <div
+            className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md p-6 mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-2xl">🔒</span>
+              <h3 className="text-lg font-semibold">PDF 需要密碼</h3>
+            </div>
+            <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+              檔案:<span className="font-mono text-xs break-all">{pdfPasswordPrompt.file_name}</span>
+              <br />
+              <span className="text-xs text-gray-500">密碼不會留存於對話內容</span>
+            </p>
+
+            <input
+              type="password"
+              autoFocus
+              value={pdfPasswordInput}
+              onChange={(e) => { setPdfPasswordInput(e.target.value); setPdfPasswordError(null); }}
+              placeholder="輸入 PDF 密碼"
+              className="w-full px-3 py-2 border rounded mb-3 dark:bg-gray-900 dark:border-gray-700"
+              disabled={pdfPasswordBusy}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && pdfPasswordInput && !pdfPasswordBusy) {
+                  document.getElementById('pdf-pwd-submit')?.click()
+                }
+              }}
+            />
+
+            <div className="flex items-center gap-2 mb-3 text-sm">
+              <label className="text-gray-700 dark:text-gray-300">轉換模式:</label>
+              <select
+                value={pdfPasswordMode}
+                onChange={(e) => setPdfPasswordMode(e.target.value as any)}
+                className="px-2 py-1 border rounded text-xs dark:bg-gray-900 dark:border-gray-700"
+                disabled={pdfPasswordBusy}
+              >
+                <option value="auto">auto(系統依複雜度選)</option>
+                <option value="editable">editable(快,可能跑版)</option>
+                <option value="vision">vision(慢,保留 layout)</option>
+              </select>
+            </div>
+
+            {pdfPasswordError && (
+              <div className="text-sm text-red-600 dark:text-red-400 mb-3 bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded">
+                {pdfPasswordError}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setPdfPasswordPrompt(null)}
+                disabled={pdfPasswordBusy}
+                className="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded disabled:opacity-50"
+              >
+                取消
+              </button>
+              <button
+                id="pdf-pwd-submit"
+                onClick={async () => {
+                  if (!pdfPasswordInput || pdfPasswordBusy) return
+                  setPdfPasswordBusy(true)
+                  setPdfPasswordError(null)
+                  try {
+                    const token = localStorage.getItem('token')
+                    const resp = await fetch('/api/pdf-docx-jobs/decrypt-submit', {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}`,
+                      },
+                      body: JSON.stringify({
+                        token: pdfPasswordPrompt.token,
+                        password: pdfPasswordInput,
+                        format: pdfPasswordMode,
+                      }),
+                    })
+                    const data = await resp.json()
+                    if (resp.ok && data.ok) {
+                      // 成功 → 顯示「已排背景處理」訊息到 chat
+                      if (currentSessionId) {
+                        setMessages((prev) => [...prev, {
+                          id: Date.now(),
+                          session_id: currentSessionId,
+                          role: 'assistant',
+                          content:
+                            `✅ 已解密 PDF「${pdfPasswordPrompt.file_name}」並排入背景處理(job #${String(data.jobId).slice(0, 8)})。\n` +
+                            `共 ${data.pages || '?'} 頁,complexity ${data.complexity_score || '?'}/100,模式:${pdfPasswordMode === 'auto' ? data.recommended_mode || 'auto' : pdfPasswordMode}。\n` +
+                            `完成後右上鈴鐺會通知您。`,
+                          created_at: new Date().toISOString(),
+                        } as any])
+                      }
+                      setPdfPasswordPrompt(null)
+                      setPdfPasswordInput('')
+                    } else {
+                      // 密碼錯 / 其他錯
+                      if (data.error_code === 'PASSWORD_WRONG') {
+                        setPdfPasswordError(data.message || '密碼錯誤,請再試一次')
+                        if (!data.stillTriable) {
+                          // token 已被丟掉,關 modal
+                          setTimeout(() => setPdfPasswordPrompt(null), 2000)
+                        }
+                      } else {
+                        setPdfPasswordError(data.error || `提交失敗(HTTP ${resp.status})`)
+                      }
+                    }
+                  } catch (e: any) {
+                    setPdfPasswordError(`提交失敗:${e.message}`)
+                  } finally {
+                    setPdfPasswordBusy(false)
+                  }
+                }}
+                disabled={!pdfPasswordInput || pdfPasswordBusy}
+                className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {pdfPasswordBusy ? '處理中...' : '解密並轉換'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ERP 參數填寫 + 執行 */}

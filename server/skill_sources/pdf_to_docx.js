@@ -34,16 +34,21 @@ const { spawn } = require('child_process');
 const UPLOAD_ROOT = path.resolve(process.env.UPLOAD_DIR || '/app/uploads');
 const GENERATED_DIR = path.join(UPLOAD_ROOT, 'generated');
 
-const EDITABLE_PAGE_LIMIT = 50;        // editable mode 同步上限(Phase 1d 上線前)
-const VISION_PAGE_LIMIT_FLASH = 20;    // vision flash:每頁 ~3-5s,20 頁 < 110s
-const VISION_PAGE_LIMIT_PRO = 10;      // vision pro:每頁 ~6-8s,10 頁 < 110s
-const CONVERT_TIMEOUT_MS = 110_000;    // chat.js tool dispatch 是 120s,留 10s buffer
+// 同步上限 — 超過就走背景 job(Phase 1d)
+// 實測複雜中文表格 vision Flash 每頁 8-12s,Pro 12-18s。chat.js 120s tool dispatch 硬限
+// 扣 buffer 設這些值。超過就 submitJob 走背景跑、推鈴鐺通知。
+const EDITABLE_SYNC_LIMIT = 50;
+const VISION_SYNC_LIMIT_FLASH = 12;
+const VISION_SYNC_LIMIT_PRO = 6;
+const CONVERT_TIMEOUT_MS = 110_000;
 const INSPECT_TIMEOUT_MS = 30_000;
 const VISION_REBUILD_TIMEOUT_MS = 110_000;
 
-// Internal endpoint(主程序 expose 給 skill child 用),走 127.0.0.1
+// Internal endpoints(主程序 expose 給 skill child 用),走 127.0.0.1
 const INTERNAL_PORT = process.env.PORT || '3007';
 const INTERNAL_VISION_URL = `http://127.0.0.1:${INTERNAL_PORT}/api/_internal/pdf-vision-rebuild`;
+const INTERNAL_PENDING_PASSWORD_URL = `http://127.0.0.1:${INTERNAL_PORT}/api/_internal/pdf-pending-password`;
+const INTERNAL_SUBMIT_JOB_URL = `http://127.0.0.1:${INTERNAL_PORT}/api/_internal/pdf-docx-jobs/submit`;
 
 // Python venv 路徑:Dockerfile 設 /opt/pdf-venv/bin/python3;dev 機 fallback
 function resolvePython() {
@@ -131,31 +136,47 @@ function safeOutputPath(originalName) {
   return path.join(GENERATED_DIR, `${Date.now()}_${base || 'output'}.docx`);
 }
 
-// ── Vision rebuild 走主程序 internal endpoint(skill child 不能 require server services) ──
-async function callVisionRebuild({ pdfPath, outDocxPath, password, model }) {
-  const secret = process.env.INTERNAL_API_SECRET;
-  if (!secret) {
-    throw new Error('INTERNAL_API_SECRET 未設定 — server 主程序啟動時應自動生成,請確認 skill child env 有繼承到');
-  }
-  const resp = await fetch(INTERNAL_VISION_URL, {
+// ── 共用 internal endpoint helper ─────────────────────────────────────────
+function _internalSecret() {
+  const s = process.env.INTERNAL_API_SECRET;
+  if (!s) throw new Error('INTERNAL_API_SECRET 未設定 — server 主程序啟動時應自動生成,skill child env 應繼承');
+  return s;
+}
+
+async function _internalFetch(url, body, { timeoutMs = 30_000 } = {}) {
+  const resp = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Internal-Secret': secret,
-    },
-    body: JSON.stringify({
-      pdfPath, outDocxPath, password, model,
-      concurrency: 3,
-      dpi: 300, // vision 判 cell 底色 / 邊框,200 失真,300 才夠
-    }),
-    signal: AbortSignal.timeout(VISION_REBUILD_TIMEOUT_MS),
+    headers: { 'Content-Type': 'application/json', 'X-Internal-Secret': _internalSecret() },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!resp.ok) {
     let detail = '';
     try { detail = (await resp.json()).error || ''; } catch (_) {}
-    throw new Error(`vision-rebuild HTTP ${resp.status}: ${detail}`);
+    throw new Error(`${url} HTTP ${resp.status}: ${detail}`);
   }
   return await resp.json();
+}
+
+async function callVisionRebuild({ pdfPath, outDocxPath, password, model }) {
+  return _internalFetch(INTERNAL_VISION_URL, {
+    pdfPath, outDocxPath, password, model,
+    concurrency: 3,
+    dpi: 300,
+  }, { timeoutMs: VISION_REBUILD_TIMEOUT_MS });
+}
+
+async function registerPendingPassword({ pdfPath, pdfName, userId, sessionId }) {
+  return _internalFetch(INTERNAL_PENDING_PASSWORD_URL, {
+    pdfPath, pdfName, userId, sessionId,
+  });
+}
+
+async function submitBackgroundJob({ userId, sessionId, pdfPath, pdfName, format, vision_model, pages }) {
+  return _internalFetch(INTERNAL_SUBMIT_JOB_URL, {
+    userId, sessionId, pdfPath, pdfName,
+    format, vision_model, pages,
+  });
 }
 
 // Mode 決定:format=auto 看 recommended_mode;explicit format 強制
@@ -168,7 +189,7 @@ function resolveMode(format, recommendedMode) {
 
 module.exports = async function handler(body) {
   const t0 = Date.now();
-  const { file_name, password, attached_files, format, vision_model } = body || {};
+  const { file_name, password, attached_files, format, vision_model, user_id, session_id } = body || {};
 
   // ── 找檔 ───────────────────────────────────────────────────────────────────
   if (!Array.isArray(attached_files) || attached_files.length === 0) {
@@ -217,13 +238,32 @@ module.exports = async function handler(body) {
 
   if (!inspectResult.ok) {
     if (inspectResult.error_code === 'PASSWORD_REQUIRED') {
-      return {
-        content:
-          `🔒 此 PDF「${target.name}」已加密,需要密碼。\n` +
-          `請使用者直接告知密碼,我會帶入再試一次。\n\n` +
-          `(若擔心密碼留存在對話紀錄,Phase 1c 上線後將提供獨立輸入框,密碼不會進入對話內容。)`,
-        data: { error_code: 'PASSWORD_REQUIRED', file_name: target.name },
-      };
+      // Phase 1c:不要 LLM 問密碼(會進 chat history)。
+      // 改回特殊 prompt 物件,chat.js 偵測 pdf_password_prompt 後 sendEvent 給前端跳 modal。
+      // 使用者在 modal 輸密碼 → POST /api/pdf-docx-jobs/decrypt-submit → 排背景 job → 完成推鈴鐺。
+      try {
+        const reg = await registerPendingPassword({
+          pdfPath: realPath, pdfName: target.name, userId: user_id, sessionId: session_id,
+        });
+        return {
+          content:
+            `🔒 此 PDF「${target.name}」已加密。\n` +
+            `已彈出密碼輸入框,請使用者在獨立輸入框中輸入密碼(密碼**不會**留存於對話內容),系統會自動排背景處理並於完成後通知。`,
+          // chat.js 會偵測這個欄位 → SSE event 'pdf_password_prompt' → 前端跳 modal
+          pdf_password_prompt: {
+            token: reg.token,
+            file_name: target.name,
+            expires_in: reg.expiresIn,
+            session_id,
+          },
+          data: { error_code: 'PASSWORD_REQUIRED', file_name: target.name, token_registered: true },
+        };
+      } catch (e) {
+        return {
+          content: `🔒 此 PDF「${target.name}」已加密,但密碼旁路註冊失敗(${e.message})。請使用者重試,或直接在對話中告知密碼(會留存於對話)。`,
+          data: { error_code: 'PASSWORD_REQUIRED', file_name: target.name, fallback: true },
+        };
+      }
     }
     if (inspectResult.error_code === 'PASSWORD_WRONG') {
       return {
@@ -257,17 +297,32 @@ module.exports = async function handler(body) {
 
   // ── Vision rebuild 路線 ────────────────────────────────────────────────────
   if (mode === 'vision') {
-    const visionLimit = visionModelChoice === 'pro' ? VISION_PAGE_LIMIT_PRO : VISION_PAGE_LIMIT_FLASH;
+    const visionLimit = visionModelChoice === 'pro' ? VISION_SYNC_LIMIT_PRO : VISION_SYNC_LIMIT_FLASH;
     if (pages > visionLimit) {
-      return {
-        content:
-          `📄 此 PDF「${target.name}」共 ${pages} 頁,超過 vision mode 同步上限(${visionModelChoice}=${visionLimit} 頁,每頁需 AI 分析 3-5 秒)。\n\n` +
-          `**選項**:\n` +
-          `1. 改 format='editable' 走 pdf2docx(快但複雜表格 layout 可能跑掉,${EDITABLE_PAGE_LIMIT} 頁內可即時)\n` +
-          `2. 等 Phase 1d 背景 job 上線後 vision mode 可處理大檔(完成會通知)\n` +
-          `3. 請使用者分割成 ≤ ${visionLimit} 頁的小檔分次上傳`,
-        data: { pages, vision_limit: visionLimit, vision_model: visionModelChoice, file_name: target.name },
-      };
+      // Phase 1d:超過同步上限改走背景 job(complete 推鈴鐺通知)
+      try {
+        const submit = await submitBackgroundJob({
+          userId: user_id,
+          sessionId: session_id,
+          pdfPath: realPath,
+          pdfName: target.name,
+          format: 'vision',
+          vision_model: visionModelChoice,
+          pages,
+        });
+        return {
+          content:
+            `📄 此 PDF「${target.name}」共 ${pages} 頁(complexity ${complexity_score}/100),超過 vision ${visionModelChoice} 同步上限(${visionLimit} 頁)。\n\n` +
+            `✅ 已排入**背景處理**(job #${String(submit.jobId).slice(0, 8)}),預估 ${Math.ceil(pages * (visionModelChoice === 'pro' ? 12 : 8) / 3 + 15)} 秒。\n` +
+            `完成後右上鈴鐺會通知您,可在對話末再追問或繼續工作,不必等待。`,
+          data: { mode: 'vision_background', jobId: submit.jobId, pages, vision_model: visionModelChoice, file_name: target.name },
+        };
+      } catch (e) {
+        return {
+          content: `❌ 排入背景 job 失敗:${e.message}\n\n可改 format='editable' 走同步路線(快但可能跑版)。`,
+          data: { error: e.message, file_name: target.name },
+        };
+      }
     }
 
     let rebuildResult;
@@ -325,14 +380,29 @@ module.exports = async function handler(body) {
   }
 
   // ── Editable 路線(pdf2docx)─────────────────────────────────────────────
-  if (pages > EDITABLE_PAGE_LIMIT) {
-    return {
-      content:
-        `📄 此 PDF「${target.name}」共 ${pages} 頁,超過 editable 模式同步上限(${EDITABLE_PAGE_LIMIT} 頁)。\n` +
-        `Phase 1d 背景 job 上線後將支援大檔。\n\n` +
-        `如需立即取得結果,可請使用者分割成較小的 PDF 後分次上傳。`,
-      data: { pages, limit: EDITABLE_PAGE_LIMIT, file_name: target.name },
-    };
+  if (pages > EDITABLE_SYNC_LIMIT) {
+    // Phase 1d:editable 大檔也走背景
+    try {
+      const submit = await submitBackgroundJob({
+        userId: user_id,
+        sessionId: session_id,
+        pdfPath: realPath,
+        pdfName: target.name,
+        format: 'editable',
+        pages,
+      });
+      return {
+        content:
+          `📄 此 PDF「${target.name}」共 ${pages} 頁,超過 editable 同步上限(${EDITABLE_SYNC_LIMIT} 頁)。\n\n` +
+          `✅ 已排入**背景處理**(job #${String(submit.jobId).slice(0, 8)}),完成後右上鈴鐺會通知您。`,
+        data: { mode: 'editable_background', jobId: submit.jobId, pages, file_name: target.name },
+      };
+    } catch (e) {
+      return {
+        content: `❌ 排入背景 job 失敗:${e.message}`,
+        data: { error: e.message, file_name: target.name },
+      };
+    }
   }
 
   let convertResult;

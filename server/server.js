@@ -179,6 +179,13 @@ app.get('/api/version', (req, res) => {
     }
     app.use('/api/_internal', require('./routes/internalPdf'));
     console.log('[Route] /api/_internal/pdf-vision-rebuild OK');
+
+    // PDF → DOCX 背景 job user-facing endpoints + 加密 PDF modal decrypt-submit
+    app.use('/api/pdf-docx-jobs', require('./routes/pdfDocxJobs'));
+    console.log('[Route] /api/pdf-docx-jobs OK');
+
+    // Start pendingPasswordStore sweeper(15min TTL,1min sweep)
+    try { require('./services/pendingPasswordStore').startSweeper(); } catch (_) {}
     app.use('/api/kb', require('./routes/knowledgeBase'));
     console.log('[Route] /api/kb OK');
     app.use('/api/research', require('./routes/research'));
@@ -276,6 +283,16 @@ app.get('/api/version', (req, res) => {
       startHealthMonitor(db);
     } catch (e) {
       console.error('[SkillRunner] autoRestoreRunners failed:', e.message);
+    }
+
+    // PDF → DOCX 背景 job worker(複雜 vision 同步會超 chat.js 120s tool dispatch)
+    // 每個 web pod 都會啟一個 worker;DB atomic UPDATE 防多 pod 搶同 job
+    try {
+      const { db } = require('./database-oracle');
+      const pdfDocxJobService = require('./services/pdfDocxJobService');
+      pdfDocxJobService.startWorker(db);
+    } catch (e) {
+      console.error('[pdfDocxJob] startWorker failed:', e.message);
     }
 
     // Serve frontend in production

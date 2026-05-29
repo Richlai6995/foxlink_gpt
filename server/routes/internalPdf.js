@@ -37,6 +37,44 @@ function requireInternalAuth(req, res, next) {
   next();
 }
 
+// 給 skill child 註冊「待輸入密碼」token,密碼從未進 chat history(走前端 modal + REST)
+router.post('/pdf-pending-password', requireInternalAuth, async (req, res) => {
+  const pendingStore = require('../services/pendingPasswordStore');
+  const { pdfPath, pdfName, userId, sessionId } = req.body || {};
+  if (!pdfPath || !userId) {
+    return res.status(400).json({ error: 'pdfPath and userId required' });
+  }
+  try {
+    const { token, expiresIn } = pendingStore.register({ pdfPath, pdfName, userId, sessionId });
+    res.json({ ok: true, token, expiresIn });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// 給 skill child 直接 submit background job(skill 不能 require service / 沒 user token)
+router.post('/pdf-docx-jobs/submit', requireInternalAuth, async (req, res) => {
+  const { db } = require('../database-oracle');
+  const pdfDocxJobService = require('../services/pdfDocxJobService');
+  const { userId, sessionId, pdfPath, pdfName, format, vision_model, pages, password } = req.body || {};
+  if (!userId || !pdfPath) {
+    return res.status(400).json({ error: 'userId and pdfPath required' });
+  }
+  try {
+    const jobId = await pdfDocxJobService.submitJob(db, {
+      userId, sessionId, pdfPath, pdfName,
+      password,  // 加密 PDF 走旁路時 password 從 modal 來,不會到這個 internal endpoint;
+                 // 此處 password 預期 null。若 caller 真帶,jobService 內 AES 加密入庫。
+      format: format || 'auto',
+      vision_model: vision_model || 'flash',
+      pages: pages || null,
+    });
+    res.json({ ok: true, jobId });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 router.post('/pdf-vision-rebuild', requireInternalAuth, async (req, res) => {
   const { rebuildPdfWithVision } = require('../services/pdfVisionRebuild');
   const { pdfPath, outDocxPath, password, model, dpi, concurrency } = req.body || {};

@@ -1437,6 +1437,51 @@ async function runMigrations(db) {
   await safeCreateTranscribeIdx('IDX_TRANSJOBS_RECOVERY',    'CREATE INDEX idx_transjobs_recovery ON transcribe_jobs(status, heartbeat_at)');
   await safeCreateTranscribeIdx('IDX_TRANSJOBS_SESSION',     'CREATE INDEX idx_transjobs_session ON transcribe_jobs(session_id)');
 
+  // ── PDF → DOCX 背景轉檔 Job(Phase 1d:複雜 vision 同步會超 chat.js 120s) ──
+  // 解決問題:
+  //   - vision mode 對複雜表格 + 多頁同步跑會超 120s tool dispatch timeout
+  //   - editable mode 50+ 頁也超
+  //   - 加密 PDF 走 modal 旁路後也用 job 跑(避免密碼進 chat history)
+  // 設計:
+  //   - 任何 web pod 都能執行;DB UPDATE WHERE status='queued' atomic 防搶
+  //   - password_encrypted:AES-256-CBC(key 從 INTERNAL_API_SECRET 衍生),
+  //     job 完成立即 UPDATE password_encrypted=NULL 清掉
+  //   - 不做 heartbeat / recovery(PDF 重跑成本可接受,deploy 中斷標 failed 即可)
+  await createTable('PDF_DOCX_JOBS', `CREATE TABLE pdf_docx_jobs (
+    id                  VARCHAR2(36)   PRIMARY KEY,
+    user_id             NUMBER         NOT NULL,
+    session_id          VARCHAR2(36),
+    source_pdf_path     VARCHAR2(1000) NOT NULL,
+    source_pdf_name     VARCHAR2(500),
+    password_encrypted  VARCHAR2(500),               -- AES-encrypted; job done 後 NULL
+    format              VARCHAR2(20)   DEFAULT 'auto', -- editable / vision / auto
+    vision_model        VARCHAR2(20)   DEFAULT 'flash', -- flash / pro
+    pages               NUMBER,
+    status              VARCHAR2(20)   DEFAULT 'queued', -- queued / running / done / failed / cancelled
+    progress_pct        NUMBER         DEFAULT 0,
+    progress_msg        VARCHAR2(500),
+    out_docx_path       VARCHAR2(1000),
+    out_public_url      VARCHAR2(500),
+    out_filename        VARCHAR2(500),
+    in_tokens           NUMBER         DEFAULT 0,
+    out_tokens          NUMBER         DEFAULT 0,
+    error_msg           VARCHAR2(1000),
+    is_notified         NUMBER(1)      DEFAULT 0,
+    lock_token          VARCHAR2(64),
+    created_at          TIMESTAMP      DEFAULT SYSTIMESTAMP,
+    started_at          TIMESTAMP,
+    completed_at        TIMESTAMP
+  )`);
+
+  const safeCreatePdfDocxIdx = async (name, ddl) => {
+    try { await db.prepare(ddl).run(); } catch (e) {
+      if (!e.message?.includes('ORA-00955')) console.warn(`[Migration] index ${name}: ${e.message}`);
+    }
+  };
+  await safeCreatePdfDocxIdx('IDX_PDF_DOCX_QUEUE', 'CREATE INDEX idx_pdf_docx_queue ON pdf_docx_jobs(status, created_at)');
+  await safeCreatePdfDocxIdx('IDX_PDF_DOCX_USER',  'CREATE INDEX idx_pdf_docx_user ON pdf_docx_jobs(user_id, created_at DESC)');
+  await safeCreatePdfDocxIdx('IDX_PDF_DOCX_NOTIFY','CREATE INDEX idx_pdf_docx_notify ON pdf_docx_jobs(is_notified, status)');
+
   // ── Excel 精確查詢背景 Job(對齊 transcribe_jobs / research_jobs pattern)─────
   // 設計動機:Excel skill 之前是 chat.js 直接打 child-process skill runner 的 HTTP,
   //   多 pod 下 DB.endpoint_url race + deploy 中斷 in-flight query 都會掉線。
