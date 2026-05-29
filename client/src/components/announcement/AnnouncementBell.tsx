@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Bell, X, Info, CheckCircle, XCircle, Mic, AlertTriangle, Briefcase, Pause } from 'lucide-react'
+import { Bell, X, Info, CheckCircle, XCircle, Mic, AlertTriangle, Briefcase, Pause, Download, FileText } from 'lucide-react'
 import api from '../../lib/api'
 import { useAuth } from '../../context/AuthContext'
 import { useAnnouncementSocket } from '../../hooks/useAnnouncementSocket'
@@ -147,6 +147,12 @@ export default function AnnouncementBell() {
 
   const handleNotificationClick = (notif: UserNotification) => {
     setOpen(false)
+    // PDF docx 完成 → 直接觸發下載(link_url 是 /uploads/generated/*.docx 靜態檔)
+    // 用 window.open 避免 React Router 把 /uploads/... 當前端路由失敗
+    if (notif.type === 'pdf_docx_job_done' && notif.link_url) {
+      window.open(notif.link_url, '_blank')
+      return
+    }
     // 優先 payload.sessionId(transcribe job 場景),其次 link_url
     const sessionId = notif.payload?.sessionId
     if (sessionId) {
@@ -175,6 +181,8 @@ export default function AnnouncementBell() {
   const notifIcon = (type: string) => {
     if (type === 'transcribe_job_done') return <CheckCircle size={14} className="text-green-500" />
     if (type === 'transcribe_job_failed') return <XCircle size={14} className="text-red-500" />
+    if (type === 'pdf_docx_job_done') return <FileText size={14} className="text-green-500" />
+    if (type === 'pdf_docx_job_failed') return <XCircle size={14} className="text-red-500" />
     // projects-platform 通知(notificationEngine)
     if (type?.startsWith('proj_')) {
       if (type.includes('BLOCKER'))      return <AlertTriangle size={14} className="text-red-500" />
@@ -208,6 +216,12 @@ export default function AnnouncementBell() {
         <div
           className="absolute right-0 top-9 w-80 bg-white rounded-xl border border-blue-300 shadow-2xl z-50 p-3 cursor-pointer hover:bg-blue-50 transition animate-[fadeIn_0.2s_ease-out]"
           onClick={() => {
+            // PDF docx 完成 → 直接觸發下載,不走 SPA navigate
+            if (showToast.type === 'pdf_docx_job_done' && showToast.link_url) {
+              window.open(showToast.link_url, '_blank')
+              setShowToast(null)
+              return
+            }
             const sessionId = showToast.payload?.sessionId
             if (sessionId) navigate(`/chat?session=${sessionId}`)
             else if (showToast.link_url) navigate(showToast.link_url)
@@ -218,6 +232,8 @@ export default function AnnouncementBell() {
             <span className="mt-0.5 flex-shrink-0">
               {showToast.type === 'transcribe_job_done' ? <CheckCircle size={16} className="text-green-500" /> :
                showToast.type === 'transcribe_job_failed' ? <XCircle size={16} className="text-red-500" /> :
+               showToast.type === 'pdf_docx_job_done' ? <FileText size={16} className="text-green-500" /> :
+               showToast.type === 'pdf_docx_job_failed' ? <XCircle size={16} className="text-red-500" /> :
                <Mic size={16} className="text-blue-500" />}
             </span>
             <div className="flex-1 min-w-0">
@@ -269,7 +285,22 @@ export default function AnnouncementBell() {
                           {n.title}
                         </div>
                         {n.message && (
-                          <div className="text-xs text-slate-500 break-words">{n.message}</div>
+                          <div className="text-xs text-slate-500 break-words prose prose-xs max-w-none [&_a]:text-blue-600 [&_a]:underline">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{n.message}</ReactMarkdown>
+                          </div>
+                        )}
+                        {/* PDF 轉檔完成 → 明顯下載按鈕(對齊 transcribe job 的點卡片下載 UX,但更明顯) */}
+                        {n.type === 'pdf_docx_job_done' && n.link_url && (
+                          <a
+                            href={n.link_url}
+                            download
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1 mt-1.5 px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100 font-medium"
+                          >
+                            <Download size={11} /> 下載 docx
+                          </a>
                         )}
                         {n.created_at && (
                           <div className="text-[10px] text-slate-400 mt-1">
