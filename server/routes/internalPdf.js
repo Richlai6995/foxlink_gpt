@@ -45,7 +45,7 @@ router.post('/pdf-pending-password', requireInternalAuth, async (req, res) => {
     return res.status(400).json({ error: 'pdfPath and userId required' });
   }
   try {
-    const { token, expiresIn } = pendingStore.register({ pdfPath, pdfName, userId, sessionId });
+    const { token, expiresIn } = await pendingStore.register({ pdfPath, pdfName, userId, sessionId });
     res.json({ ok: true, token, expiresIn });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });

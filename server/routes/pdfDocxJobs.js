@@ -99,7 +99,7 @@ router.post('/decrypt-submit', async (req, res) => {
   }
 
   // 1) peek + ownership check(密碼可能錯,還不要 consume)
-  const pending = pendingStore.peek(token, { verifyUserId: req.user.id });
+  const pending = await pendingStore.peek(token, { verifyUserId: req.user.id });
   if (!pending) {
     return res.status(404).json({ ok: false, error: 'token expired or invalid (or not your token)' });
   }
@@ -112,7 +112,7 @@ router.post('/decrypt-submit', async (req, res) => {
     );
     if (!ins.ok) {
       if (ins.error_code === 'PASSWORD_WRONG') {
-        const stillTriable = pendingStore.recordWrongPassword(token);
+        const stillTriable = await pendingStore.recordWrongPassword(token);
         return res.status(401).json({
           ok: false,
           error_code: 'PASSWORD_WRONG',
@@ -123,7 +123,7 @@ router.post('/decrypt-submit', async (req, res) => {
       return res.status(500).json({ ok: false, error_code: ins.error_code, error: ins.error });
     }
     // 3) 密碼對 → consume token,submit job
-    pendingStore.consume(token, { verifyUserId: req.user.id });
+    await pendingStore.consume(token, { verifyUserId: req.user.id });
     const jobId = await pdfDocxJobService.submitJob(db, {
       userId: req.user.id,
       sessionId: pending.sessionId,
