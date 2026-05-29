@@ -1164,18 +1164,45 @@ B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;含 _kb_doc
 - **LBMA Silver Fix 為唯一主源**(USD/oz 直接用,不換算)
   - source = "LBMA", source_url = "https://prices.lbma.org.uk/json/silver.json"
   - price_type = "fix", market = "LBMA"
-  - 從 JSON 取最新一筆 \`{ d: 'YYYY-MM-DD', v: [USD, GBP, EUR] }\`,用 v[0]
-  - as_of_date 用 LBMA JSON 的 d 欄位(可能比今天早 1-3 天)
-- LBMA 抓不到該日 → 該筆漏掉不要輸出(不再 fallback Westmetall / Kitco)
+
+**⚠️ 抓取邏輯**(跟基本金屬同樣原則):
+
+JSON shape:\`[{ d: 'YYYY-MM-DD', v: [USD, GBP, EUR] }, ...]\`,陣列從舊到新。
+
+✅ **正確做法**:取**陣列最後一筆**(最新),用 v[0] 當 price_usd,
+   d 欄位當 as_of_date。**無論 d 是不是今天 {{date}}**。
+   - 例:今天 2026-05-29,JSON 最後一筆 d="2026-05-28" → 寫 as_of_date="2026-05-28"
+   - 例:今天 2026-05-29(英國假期延遲),最後一筆 d="2026-05-22" → 寫 as_of_date="2026-05-22"
+   - server upsert 看 (AG, 5/22) 已存在就 skip,沒新資料就沒新 row,不會壞事
+
+❌ **不要看「今天沒對應 d」就整個漏掉**。LBMA 已經是「最新可得」就抓進去。
+
+**唯一漏掉情境**:LBMA JSON endpoint 整個 fetch 失敗。
 
 ═══ 基本金屬寫入規則(CU/AL/NI/ZN/PB/SN)═══
 - **只從 Westmetall markdaten.php 解析**,source = "Westmetall"
 - **day_change_pct 一律輸出 null**(server 端會跟上一筆 LME 收盤價自動補算)
-- ⚠️ **as_of_date 必須用 Westmetall 表格那一行實際的日期**(例如表頭「22. May 2026」→ "2026-05-22"),
-  **不要**用今天 {{date}}。原因:台灣 06:00 抓取時 LME 還沒收盤,Westmetall 最新一筆是
-  「上一個 LME 交易日」(週末 / 假日跨更多天),用今天日期會跟 LME 實際日期錯位。
-- **某金屬今天 Westmetall 沒新報價**(週末 / 該行無數字)→ 該 metal 整筆 **不要輸出**(prices 陣列直接漏掉它,server 端不會塞 null row)。
-  ❌ 禁止用前一日的價當今日報價填進去。
+
+**⚠️ 抓取邏輯(這段最常被誤解,務必看完):**
+
+Westmetall markdaten.php 表格從上到下是「日期由新到舊」。Westmetall 是 LME 收盤後翻拍,
+公布到網頁通常**比真實 LME 交易日晚 0-3 天**(尤其週末 / 英國銀行假日後)。
+
+✅ **正確做法**:抓表格**最頂端那一行**(就是「目前可得的最新 LME 收盤」),
+   無論該日期是不是今天 {{date}}。
+   - 例:今天 2026-05-29(週五),Westmetall 表頂顯示「28. May 2026」→ 寫 as_of_date="2026-05-28"
+   - 例:今天 2026-05-29(週五),Westmetall 表頂顯示「22. May 2026」(英國假日延遲)→ 寫 as_of_date="2026-05-22"
+   - 上面這個情境就是抓進去 5/22 的價格,server 端 upsert 看 (metal, 5/22) 已存在就 skip,不會重複
+
+❌ **錯誤做法 1**:看「今天 5/29 沒有對應 row」就整筆漏掉 — **不對**!Westmetall 不會即時公告當日 LME 收盤,
+   你看到的最新一行(就算是 1 週前)就是要寫的 row。
+❌ **錯誤做法 2**:as_of_date 寫今天 {{date}} 但價格用最新那一行 — **不對**!日期會跟 LME 實際交易日錯位。
+
+**唯一可以漏掉的情境**(極少發生):
+- Westmetall markdaten.php **整個頁面解析失敗 / 頁面打不開**
+- 該金屬欄位(CU Cash-Settlement / AL Cash-Settlement / ...)**整欄都是空白**
+
+只要表格還有任何一行有該金屬的數字,就要寫進去。
 
 ═══ 寫入規則(務必遵守)═══
 - **prices 陣列長度可變**(0-11 筆),只放今天真的抓到價的金屬
@@ -1195,7 +1222,7 @@ B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;含 _kb_doc
 - [ ] A 段中文報價綜述 200-400 字?
 - [ ] **JSON 內只有 _kb_doc + prices,沒有 news?**(2026-04-29 起新聞已交給 by-source task)
 - [ ] _kb_doc 是 1 筆陣列,title/summary/content 都填好?
-- [ ] **prices 陣列只放今天真的抓到價的金屬**(沒抓到的不要塞 null 進來)
+- [ ] **prices 陣列放「來源頁面上能看到的最新報價」**(無論日期是不是今天),只有來源整個失敗才漏
 - [ ] AU 用台銀價、PT/PD/RH 用 JM Base Price?
 - [ ] **基本金屬 as_of_date 用 Westmetall 表格實際日期** + **AG as_of_date 用 LBMA JSON d 欄位**(都不是 {{date}})?
 - [ ] **所有 day_change_pct 都是 null**(LLM 不算,server 後算)
@@ -1730,8 +1757,10 @@ async function patchExistingMasterScrapeAddPriceWrite(db, kbMap, models) {
   const hasNoTeMarker       = !!promptStr && /TradingEconomics 全面停用/.test(promptStr);
   // 2026-05-25:AG 改用 LBMA 為唯一主源(原本是 Westmetall 主 + Kitco 備)
   const hasLbmaAgMarker     = !!promptStr && /LBMA 為唯一主源/.test(promptStr);
+  // 2026-05-29:修「LME 來源端尚未發布最新資料就整個漏」邏輯衝突,改成「抓最頂端那一行」
+  const hasLatestRowMarker  = !!promptStr && /抓表格\*\*最頂端那一行/.test(promptStr);
 
-  if (hasPriceWrite && hasJmMarker && hasBotMarker && hasNewsRulesMarker && hasV2Marker && hasKbDocMarker && hasNoTeMarker && hasLbmaAgMarker) return;
+  if (hasPriceWrite && hasJmMarker && hasBotMarker && hasNewsRulesMarker && hasV2Marker && hasKbDocMarker && hasNoTeMarker && hasLbmaAgMarker && hasLatestRowMarker) return;
 
   try {
     // 一併 update prompt + pipeline + email_subject/body(2026-04-29 重構不發 email)
@@ -1749,6 +1778,7 @@ async function patchExistingMasterScrapeAddPriceWrite(db, kbMap, models) {
       !hasKbDocMarker && '_kb_doc KB 寫入結構',
       !hasNoTeMarker && '2026-05-25 TE 停用 + Westmetall 對齊',
       !hasLbmaAgMarker && '2026-05-25 AG 改 LBMA 主源',
+      !hasLatestRowMarker && '2026-05-29 抓最頂端 row 邏輯',
     ].filter(Boolean).join(' + ');
     console.log(`[PMScheduledTaskSeed] Upgraded "${targetName}" #${id}: ${missing}`);
   } catch (e) {
