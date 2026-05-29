@@ -1631,19 +1631,46 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
       // Gemini supports inline PDF up to ~20MB; larger files fall back to text extraction
       // Azure OpenAI cannot handle inlineData, so always use text extraction for AOAI
       // ⚠️ PDF 也要 persist 到 session_files/ — pdf_to_docx skill 透過 attached_files 拿 path 才能轉檔
+      // ⚠️ 加密 PDF 不能 inline 給 Gemini(會炸 "document has no pages" 400),
+      //    必須只走 persist + attached_files,讓 LLM 透過 pdf_to_docx skill 處理
       const MAX_PDF_INLINE_MB = 15;
       if (mimeType === 'application/pdf' && file.size <= MAX_PDF_INLINE_MB * 1024 * 1024 && !isAoaiProvider) {
         sendEvent({ type: 'status', message: `正在解析: ${originalName}...` });
-        userParts.push(await fileToGeminiPart(filePath, mimeType));
 
+        // 先 persist(無論加密與否都需要,skill 要拿這個 path)
         const sessionFilesDir = path.join(UPLOAD_DIR, 'session_files', sessionId);
         if (!fs.existsSync(sessionFilesDir)) fs.mkdirSync(sessionFilesDir, { recursive: true });
         const safeFname = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${path.basename(originalName).replace(/[\\/]/g, '_')}`;
         const persistPath = path.join(sessionFilesDir, safeFname);
         fs.copyFileSync(filePath, persistPath);
 
-        fileMetas.push({ name: originalName, type: 'pdf', localPath: persistPath, mimeType });
-        console.log(`[Chat] PDF inline + persisted: "${originalName}" ${(file.size / 1024 / 1024).toFixed(2)}MB → ${persistPath}`);
+        // Inspect 偵測加密(若 venv / worker 不可用就 fallback assume not-encrypted)
+        let isEncrypted = false;
+        try {
+          const { inspect } = require('../python_workers/pdfWorker');
+          const ins = await inspect(persistPath);
+          if (ins?.ok === false && ins?.error_code === 'PASSWORD_REQUIRED') {
+            isEncrypted = true;
+          } else if (ins?.ok && ins?.encrypted) {
+            // worker open_pdf 不帶密碼但 PDF 加密 → 應該回 PASSWORD_REQUIRED,
+            // 但保險也檢查 encrypted flag
+            isEncrypted = true;
+          }
+        } catch (e) {
+          console.warn(`[Chat] PDF inspect failed (assume not encrypted): ${e.message}`);
+        }
+
+        if (isEncrypted) {
+          // 加密 PDF:不要 inline(Gemini 會炸),只給 LLM 一個提示
+          combinedUserText += `\n\n[PDF: ${originalName}] ⚠️ 此 PDF 已加密,Gemini 無法直接讀內容。請呼叫 pdf_to_docx 工具,工具會自動觸發密碼輸入視窗;轉檔完成後可再上傳解密後的 docx 繼續問內容。`;
+          fileMetas.push({ name: originalName, type: 'pdf', localPath: persistPath, mimeType, encrypted: true });
+          console.log(`[Chat] PDF encrypted, skipped inline (will route through pdf_to_docx skill): "${originalName}" → ${persistPath}`);
+        } else {
+          // 非加密 PDF:照舊 inline 給 Gemini
+          userParts.push(await fileToGeminiPart(filePath, mimeType));
+          fileMetas.push({ name: originalName, type: 'pdf', localPath: persistPath, mimeType });
+          console.log(`[Chat] PDF inline + persisted: "${originalName}" ${(file.size / 1024 / 1024).toFixed(2)}MB → ${persistPath}`);
+        }
         fs.unlinkSync(filePath);
         continue;
       }
