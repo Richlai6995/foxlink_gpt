@@ -31,10 +31,17 @@ const UPLOAD_ROOT = path.resolve(process.env.UPLOAD_DIR || '/app/uploads');
 const GENERATED_DIR = path.join(UPLOAD_ROOT, 'generated');
 
 // ── Password AES helpers ─────────────────────────────────────────────────────
-// key 從 INTERNAL_API_SECRET PBKDF2 衍生;若 secret 變(server 重啟未 persist)
-// 則舊 job 的 encrypted password 無法解 → markFailed 'PASSWORD_DECRYPT_FAILED'
+// key 從 JWT_SECRET PBKDF2 衍生(K8s 多 pod 必一致,從 secret 注入 env)。
+//
+// ⚠️ 不能用 INTERNAL_API_SECRET — 那是 server.js 啟動時各 pod 各自 randomUUID() 產的,
+// K8s 多 pod 之間不一致 → submit job(pod A 加密)跟 runJob(pod B 解密)一定 bad decrypt。
+// JWT_SECRET 在 .env / K8s secret 注入,跨 pod 一致。
+//
+// fallback 順序:JWT_SECRET → INTERNAL_API_SECRET(僅單 pod 場景 OK)→ 寫死(僅 dev)
 function _deriveKey() {
-  const secret = process.env.INTERNAL_API_SECRET || 'fallback-key-NOT-secure-for-prod';
+  const secret = process.env.JWT_SECRET
+              || process.env.INTERNAL_API_SECRET
+              || 'fallback-key-NOT-secure-for-prod';
   return crypto.pbkdf2Sync(secret, 'pdf-docx-jobs-v1', 100_000, 32, 'sha256');
 }
 

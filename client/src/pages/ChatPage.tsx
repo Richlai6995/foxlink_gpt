@@ -77,6 +77,7 @@ function ChatPageDesktop() {
   const [pdfPasswordBusy, setPdfPasswordBusy] = useState(false)
   const [pdfPasswordError, setPdfPasswordError] = useState<string | null>(null)
   const [pdfPasswordMode, setPdfPasswordMode] = useState<'auto' | 'editable' | 'vision'>('auto')
+  const [pdfPasswordShow, setPdfPasswordShow] = useState(false) // 「顯示密碼」toggle
   const [reasoningEffort, setReasoningEffort] = useState<string>(
     () => localStorage.getItem('reasoningEffort') || ''
   )
@@ -876,6 +877,7 @@ function ChatPageDesktop() {
                   setPdfPasswordInput('')
                   setPdfPasswordError(null)
                   setPdfPasswordMode('auto')
+                  setPdfPasswordShow(false)
                   setPdfPasswordPrompt({
                     token: event.token,
                     file_name: event.file_name || '(unknown)',
@@ -2268,20 +2270,32 @@ function ChatPageDesktop() {
               <span className="text-xs text-gray-500">密碼不會留存於對話內容</span>
             </p>
 
-            <input
-              type="password"
-              autoFocus
-              value={pdfPasswordInput}
-              onChange={(e) => { setPdfPasswordInput(e.target.value); setPdfPasswordError(null); }}
-              placeholder="輸入 PDF 密碼"
-              className="w-full px-3 py-2 border rounded mb-3 dark:bg-gray-900 dark:border-gray-700"
-              disabled={pdfPasswordBusy}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && pdfPasswordInput && !pdfPasswordBusy) {
-                  document.getElementById('pdf-pwd-submit')?.click()
-                }
-              }}
-            />
+            <div className="relative mb-3">
+              <input
+                type={pdfPasswordShow ? 'text' : 'password'}
+                autoFocus
+                value={pdfPasswordInput}
+                onChange={(e) => { setPdfPasswordInput(e.target.value); setPdfPasswordError(null); }}
+                placeholder="輸入 PDF 密碼"
+                className="w-full px-3 py-2 pr-20 border rounded dark:bg-gray-900 dark:border-gray-700 font-mono"
+                disabled={pdfPasswordBusy}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && pdfPasswordInput && !pdfPasswordBusy) {
+                    document.getElementById('pdf-pwd-submit')?.click()
+                  }
+                }}
+              />
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={() => setPdfPasswordShow(s => !s)}
+                disabled={pdfPasswordBusy}
+                className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-1 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded disabled:opacity-50"
+                title={pdfPasswordShow ? '隱藏密碼' : '顯示密碼'}
+              >
+                {pdfPasswordShow ? '🙈 隱藏' : '👁 顯示'}
+              </button>
+            </div>
 
             <div className="flex items-center gap-2 mb-3 text-sm">
               <label className="text-gray-700 dark:text-gray-300">轉換模式:</label>
