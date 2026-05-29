@@ -57,11 +57,14 @@ JSON schema:
 
 **絕對規則**:
 1. 文字內容**100% 一字不漏**保留原文(中文標點、數字、空白原樣),不改寫不翻譯不總結
-2. table 的 rows 必須是「方陣」— 每 row 的 cell 數一致;被 colspan/rowspan 吃掉的位置用 null 佔位
-3. 顏色用 #RRGGBB 六位 hex,不確定就省略該欄位
-4. 標題列(header row)的底色、粗體、置中,務必標出
-5. 沒看到的格式欄位省略,別亂猜;但 text 欄位永遠要
-6. **直接輸出 JSON 物件**({ "blocks": [...] }),不要 \`\`\`json 圍欄,不要前導 / 後綴文字`;
+2. **完整列出整頁從上到下「所有」blocks** — 同一頁若有 2、3、4 張表格,**全部**都要寫出來。
+   若 output token 將近上限,寧可砍掉 paragraph 的詳細描述、簡化 cell 文字長度,**也絕對不能省略後續的 table 或讓 JSON 不完整**。
+3. table 的 rows 必須是「方陣」— 每 row 的 cell 數一致;被 colspan/rowspan 吃掉的位置用 null 佔位
+4. 顏色用 #RRGGBB 六位 hex 精確標出(看不清楚的範圍取色,不要省略 header row 的底色)
+5. 標題列(header row)的底色、粗體、置中,務必標出
+6. 沒看到的格式欄位省略;但 text 欄位永遠要
+7. **直接輸出單一 JSON 物件**({ "blocks": [...] }),不要 \`\`\`json 圍欄,不要前導 / 後綴文字
+8. JSON 結束前**自我檢查**:整頁從上到下肉眼可見的內容、所有 table、所有 paragraph 都列了嗎?沒列就補上`;
 
 function _shortHash(s) { return crypto.createHash('md5').update(String(s)).digest('hex').slice(0, 10); }
 
@@ -87,14 +90,28 @@ async function _runWithLimit(tasks, limit) {
   return results;
 }
 
+// maxOutputTokens 上限:Gemini 3 系列實測 Flash / Pro 都接受 ≥ 64K。
+// 一張中文 table JSON 約 2K-4K token,4 張表 + paragraphs 約 15-25K。給 32K 給 Flash、
+// 64K 給 Pro;若還是 MAX_TOKENS 截斷代表 PDF 一頁內容過於密集,要走「頁切片」策略(未來 phase)。
+const MAX_OUTPUT_TOKENS_BY_MODEL = (modelName) => {
+  if (/pro/i.test(modelName)) return 65536;
+  return 32768;
+};
+
 /**
  * 對單張頁面 PNG 跑 Gemini Vision → 拿 blocks JSON。
  */
 async function _visionOnePage({ pngPath, modelName, pageNo, totalPages }) {
   const imgBuf = await fsp.readFile(pngPath);
+  const maxOut = MAX_OUTPUT_TOKENS_BY_MODEL(modelName);
   const model = getGenerativeModel({
     model: modelName,
-    generationConfig: { responseMimeType: 'application/json' },
+    generationConfig: {
+      responseMimeType: 'application/json',
+      maxOutputTokens: maxOut,
+      // 結構化抽取要穩定,別讓 Gemini 隨機性把 hex / JSON 寫壞
+      temperature: 0.1,
+    },
   });
 
   const t0 = Date.now();
@@ -111,6 +128,12 @@ async function _visionOnePage({ pngPath, modelName, pageNo, totalPages }) {
   const usage = extractUsage(result);
   const elapsed = Date.now() - t0;
 
+  // 檢查 finishReason — MAX_TOKENS / SAFETY / RECITATION 都會讓 JSON 不完整或被截
+  const target = result.response || result;
+  const cand = target.candidates?.[0];
+  const finishReason = cand?.finishReason;
+  const truncated = finishReason === 'MAX_TOKENS';
+
   let parsed;
   try {
     parsed = JSON.parse(text);
@@ -122,11 +145,21 @@ async function _visionOnePage({ pngPath, modelName, pageNo, totalPages }) {
       .trim();
     try { parsed = JSON.parse(cleaned); }
     catch (e2) {
-      throw new Error(`vision JSON parse failed (page ${pageNo}): ${e.message}; text preview: ${String(text).slice(0, 200)}`);
+      // 若是 MAX_TOKENS 截斷導致 JSON 殘缺,明確 throw 而不是回部分結果騙人
+      if (truncated) {
+        throw new Error(`vision JSON 被 MAX_TOKENS 截斷(page ${pageNo},out=${usage.outputTokens}/${maxOut}),JSON 殘缺無法 parse。建議:(1) 改用 vision_model='pro' 拉高 maxOutputTokens (2) 將密集 PDF 切成多頁`);
+      }
+      throw new Error(`vision JSON parse failed (page ${pageNo}, finishReason=${finishReason}): ${e.message}; text preview: ${String(text).slice(0, 200)}`);
     }
   }
 
-  console.log(`[pdfVision] page ${pageNo}/${totalPages} done in ${elapsed}ms (in=${usage.inputTokens}, out=${usage.outputTokens}, blocks=${(parsed.blocks || []).length})`);
+  if (truncated) {
+    // JSON 能 parse 但 finishReason=MAX_TOKENS — 罕見但會發生(JSON 剛好 close 在 token 上限),
+    // 仍可能漏後面的 table。明確 throw 讓 caller 標 page failed 而不是吞掉。
+    throw new Error(`vision finishReason=MAX_TOKENS (page ${pageNo}, out=${usage.outputTokens}/${maxOut}),JSON 可能不完整(已 parse 出 ${(parsed.blocks || []).length} blocks)。建議改 vision_model='pro' 或切頁`);
+  }
+
+  console.log(`[pdfVision] page ${pageNo}/${totalPages} done in ${elapsed}ms (in=${usage.inputTokens}, out=${usage.outputTokens}/${maxOut}, finishReason=${finishReason}, blocks=${(parsed.blocks || []).length})`);
   return {
     page_no: pageNo,
     blocks: parsed.blocks || [],
@@ -152,7 +185,8 @@ async function rebuildPdfWithVision(opts) {
   const {
     pdfPath, outDocxPath, password,
     model: modelChoice = 'flash',
-    dpi = 200,
+    // dpi 200 vision 判 cell 底色 / 細邊框會失真,300 才夠;代價是 PNG 約 2x 大、render 慢 ~2x
+    dpi = 300,
     concurrency = 3,
     onProgress,
   } = opts || {};

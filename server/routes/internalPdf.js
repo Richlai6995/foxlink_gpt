@@ -50,7 +50,7 @@ router.post('/pdf-vision-rebuild', requireInternalAuth, async (req, res) => {
       outDocxPath,
       password,
       model: model === 'pro' ? 'pro' : 'flash',
-      dpi: Number(dpi) || 200,
+      dpi: Number(dpi) || 300,
       concurrency: Math.max(1, Math.min(6, Number(concurrency) || 3)),
       onProgress: (p) => {
         // 進度只 log,不 stream(skill 同步等)

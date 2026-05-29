@@ -146,7 +146,7 @@ async function callVisionRebuild({ pdfPath, outDocxPath, password, model }) {
     body: JSON.stringify({
       pdfPath, outDocxPath, password, model,
       concurrency: 3,
-      dpi: 200,
+      dpi: 300, // vision 判 cell 底色 / 邊框,200 失真,300 才夠
     }),
     signal: AbortSignal.timeout(VISION_REBUILD_TIMEOUT_MS),
   });
