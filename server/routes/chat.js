@@ -2289,7 +2289,8 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
     // 不檢查 code_status / endpoint_url / code_snippet。「無法連線」這條降級路徑事實上
     // 不會再被觸發(jobService 在本 pod 跑,不會跨 pod ECONNREFUSED)。
     let excelSkillInjected = false;
-    if (sessionAttachedFiles.length > 0) {
+    const hasXlsxAttached = sessionAttachedFiles.some(f => f.type === 'xlsx');
+    if (hasXlsxAttached) {
       try {
         const existingIds = new Set(allSkillsToProcess.map(s => String(s.id || s.ID)));
         const xlsxSkill = await db.prepare(
@@ -2301,7 +2302,7 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           const skId = String(xlsxSkill.id || xlsxSkill.ID);
           if (!existingIds.has(skId)) {
             allSkillsToProcess.push(xlsxSkill);
-            console.log(`[Skill] Force-injected excel_query skill #${skId} (session has ${sessionAttachedFiles.length} xlsx)`);
+            console.log(`[Skill] Force-injected excel_query skill #${skId} (session has ${sessionAttachedFiles.filter(f => f.type === 'xlsx').length} xlsx)`);
           }
           excelSkillInjected = true;
         } else {
@@ -2309,6 +2310,42 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
         }
       } catch (e) {
         console.warn('[Skill] Failed to force-inject excel_query:', e.message);
+      }
+    }
+
+    // ── Force-inject pdf_to_docx skill when session has PDF attached ──────────
+    // 原本設計「不 force-inject 讓 LLM 自然 tool-call」,實測 LLM 看不到工具就用既有
+    // 「看 PDF 寫 markdown + generate_docx 代碼塊」能力 fake 轉檔,使用者以為走 vision 卻
+    // 完全沒進 skill。對齊 xlsx 改 force-inject:有 PDF 就把工具放進 LLM tools 清單。
+    let pdfToDocxSkillInjected = false;
+    const hasPdfAttached = sessionAttachedFiles.some(f => f.type === 'pdf');
+    if (hasPdfAttached) {
+      try {
+        const existingIds = new Set(allSkillsToProcess.map(s => String(s.id || s.ID)));
+        const pdfSkill = await db.prepare(
+          `SELECT * FROM skills
+           WHERE LOWER(name) IN ('pdf 轉 word', 'pdf_to_docx')
+             AND tool_schema IS NOT NULL`
+        ).get();
+        if (pdfSkill) {
+          const skId = String(pdfSkill.id || pdfSkill.ID);
+          // gate on code_status='running' — 真有跑的 skill 才注入,否則 LLM 會試 call
+          // 一個沒在跑的工具導致 MALFORMED_FUNCTION_CALL
+          const codeStatus = pdfSkill.code_status || pdfSkill.CODE_STATUS;
+          if (codeStatus === 'running') {
+            if (!existingIds.has(skId)) {
+              allSkillsToProcess.push(pdfSkill);
+              console.log(`[Skill] Force-injected pdf_to_docx skill #${skId} (session has ${sessionAttachedFiles.filter(f => f.type === 'pdf').length} pdf)`);
+            }
+            pdfToDocxSkillInjected = true;
+          } else {
+            console.warn(`[Skill] pdf_to_docx skill exists but code_status=${codeStatus} (admin 須在 Code Runners UI 點啟動)`);
+          }
+        } else {
+          console.warn('[Skill] sessionAttachedFiles has pdf but pdf_to_docx skill record missing/has no tool_schema');
+        }
+      } catch (e) {
+        console.warn('[Skill] Failed to force-inject pdf_to_docx:', e.message);
       }
     }
 
@@ -2350,8 +2387,9 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
     // ⚠️ 必須 gate 在 excelSkillInjected 上 — 若 skill runner 死掉但 prompt 還叫 LLM
     // 「必須呼叫 excel_query」,Gemini 3 會試圖呼叫未 declared 的 tool → MALFORMED_FUNCTION_CALL
     // / UNEXPECTED_TOOL_CALL 整個 stream 被攔截。
-    if (sessionAttachedFiles.length > 0) {
-      const fileList = sessionAttachedFiles.map(f => {
+    if (hasXlsxAttached) {
+      const xlsxFiles = sessionAttachedFiles.filter(f => f.type === 'xlsx');
+      const fileList = xlsxFiles.map(f => {
         const sheetInfo = (f.sheets || []).map(s =>
           `    - Sheet "${s.name}":${(s.columns || []).map(c => `"${c}"`).join(', ')}`
         ).join('\n');
@@ -2359,17 +2397,17 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
       }).join('\n');
 
       if (excelSkillInjected) {
-        const multiFileHint = sessionAttachedFiles.length > 1
-          ? `\n## ⚠️ 多檔同時 load 規則(本對話有 ${sessionAttachedFiles.length} 個 Excel,可 cross-file JOIN)\n` +
+        const multiFileHint = xlsxFiles.length > 1
+          ? `\n## ⚠️ 多檔同時 load 規則(本對話有 ${xlsxFiles.length} 個 Excel,可 cross-file JOIN)\n` +
             `**每次呼叫 excel_query,系統會自動把所有附檔載入同個 DuckDB instance**:\n` +
-            sessionAttachedFiles.map((f, i) => `  - 檔案 "${f.name}" → table 別名 \`${i === 0 ? 't' : `f${i}`}\``).join('\n') +
+            xlsxFiles.map((f, i) => `  - 檔案 "${f.name}" → table 別名 \`${i === 0 ? 't' : `f${i}`}\``).join('\n') +
             `\n  (主檔 = 你 file_name 指定的那個 → t;其他附檔依 attached_files 順序 → f1, f2, ...)\n\n` +
             `**重要**:比對多檔差異時(例:「比較兩個 BOM 差異」),**請寫一個 cross-file SQL 一次拿到所有資訊**,不要分檔反覆查再自己比對 — 那會跑 10+ round 都收斂不了:\n\n` +
             `\`\`\`sql\n-- 範例:全外連接,左右兩邊都顯示,標出 source\nSELECT COALESCE(a."Item No", b."Item No") AS item,\n       a."Qty" AS qty_left, b."Qty" AS qty_right,\n       CASE WHEN a."Item No" IS NULL THEN 'only in f1'\n            WHEN b."Item No" IS NULL THEN 'only in t'\n            WHEN a."Qty" <> b."Qty" THEN 'qty differ'\n            ELSE 'same' END AS diff\nFROM t a FULL OUTER JOIN f1 b ON a."Item No" = b."Item No"\nWHERE a."Item No" IS NULL OR b."Item No" IS NULL OR a."Qty" <> b."Qty";\n\`\`\`\n\n` +
             `**先用 \`DESCRIBE t\` / \`DESCRIBE f1\` 看欄位**,再決定 JOIN key。第一個 query 應該是 \`SELECT * FROM t LIMIT 3 UNION ALL SELECT * FROM f1 LIMIT 3\`(同時看兩邊樣本)。`
           : '';
         skillSystemPrompts.push(
-          `# Excel 附件處理規則(本對話有 ${sessionAttachedFiles.length} 個 Excel 檔案)\n\n` +
+          `# Excel 附件處理規則(本對話有 ${xlsxFiles.length} 個 Excel 檔案)\n\n` +
           `## 可用檔案\n${fileList}\n\n` +
           `## 強制規則\n` +
           `1. **任何**涉及 Excel 數值的彙總、排序、Top N、篩選、groupby、加總、平均、計數、比對,**必須呼叫 excel_query 工具**,絕對禁止自行從預覽資料估算或推測。\n` +
@@ -2397,6 +2435,42 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
         );
       }
     }
+
+    // ── PDF attachment hint:強制 LLM 用 pdf_to_docx,禁止用 generate_docx 假轉檔 ──
+    // 實測:LLM 看到 inline PDF + 「轉成 Word」會用既有「看 PDF 寫 markdown + ```generate_docx```」
+    // 能力 fake 一份,完全繞過 skill,使用者以為走 vision 卻沒進。對齊 excel 的 hint 機制
+    // 強制走工具。pdfToDocxSkillInjected gate 保證沒 skill 時不下這個指令避免 hallucinate tool call。
+    if (hasPdfAttached) {
+      const pdfFiles = sessionAttachedFiles.filter(f => f.type === 'pdf');
+      const pdfFileList = pdfFiles.map(f => `  - **${f.name}**`).join('\n');
+      if (pdfToDocxSkillInjected) {
+        skillSystemPrompts.push(
+          `# PDF 附件處理規則(本對話有 ${pdfFiles.length} 個 PDF 檔案)\n\n` +
+          `## 可用檔案\n${pdfFileList}\n\n` +
+          `## 強制規則\n` +
+          `1. 使用者要求「PDF 轉 Word / 轉 docx / 轉檔可編輯 / 轉成 Word 檔 / 用 vision mode 轉」等任何 PDF → DOCX 轉檔需求,**必須呼叫 pdf_to_docx 工具**。\n` +
+          `2. **絕對禁止**用 \`\`\`generate_docx:filename\`\`\` 代碼塊自己寫 markdown 假轉檔 — 那會產生看似像但完全是你重打的內容,使用者拿到的不是真正轉檔的結果。\n` +
+          `3. 呼叫 pdf_to_docx 時:\n` +
+          `   - file_name 從上方檔案清單選一個(對話只有一份 PDF 可省略)\n` +
+          `   - format 預設 'auto'(系統依 complexity_score 自動選 editable / vision);若使用者明確說「保留格式 / 表格底色 / 複雜版面 / vision」→ 直接帶 format='vision'\n` +
+          `   - 工具回應會帶 \`complexity_score\`(0-100)+ \`recommended_mode\`;score≥30 通常 editable 會跑版,主動建議使用者改 vision 重做\n` +
+          `4. 加密 PDF 流程:先不帶 password 呼叫,系統回 PASSWORD_REQUIRED → 請使用者提供密碼後再帶入重呼。\n` +
+          `5. 工具會回 \`files: [{type:'docx', publicUrl}]\`,系統會自動推下載連結給前端,你回答只需簡短說明結果(模式、頁數、耗時),不要再貼下載 link(已有 UI 元件顯示)。\n` +
+          `6. 若工具回失敗訊息(MAX_TOKENS 截斷 / vision 失敗),如實轉達給使用者並建議改 vision_model='pro' 或切頁,**不要 fallback 用 generate_docx 假轉**。`
+        );
+      } else {
+        // skill 沒在跑 → 降級:告知使用者轉檔功能未啟用,不要 fake
+        skillSystemPrompts.push(
+          `# PDF 附件處理(降級模式 — pdf_to_docx 工具未啟用)\n\n` +
+          `## 可用檔案\n${pdfFileList}\n\n` +
+          `## 規則\n` +
+          `1. **pdf_to_docx 工具尚未啟用**(admin 須在 Code Runners UI 點啟動)。\n` +
+          `2. 使用者要求 PDF → DOCX 轉檔時,**必須明確告知**:「PDF 轉 Word 技能尚未啟用,請聯絡系統管理員」,**不要**自己用 \`\`\`generate_docx\`\`\` 寫 markdown fake 一份。\n` +
+          `3. 若使用者只是問 PDF 內容,正常基於 inline PDF 內容回答即可。`
+        );
+      }
+    }
+
     // Track skills that have output_template_id (for post-AI-output file generation)
     let skillOutputTemplateIds = null;
     // Track which skills need external-inject calls
