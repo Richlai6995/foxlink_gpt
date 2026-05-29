@@ -34,9 +34,16 @@ const { spawn } = require('child_process');
 const UPLOAD_ROOT = path.resolve(process.env.UPLOAD_DIR || '/app/uploads');
 const GENERATED_DIR = path.join(UPLOAD_ROOT, 'generated');
 
-const PHASE1_PAGE_LIMIT = 50;          // Phase 1d 上線前的同步上限
+const EDITABLE_PAGE_LIMIT = 50;        // editable mode 同步上限(Phase 1d 上線前)
+const VISION_PAGE_LIMIT_FLASH = 20;    // vision flash:每頁 ~3-5s,20 頁 < 110s
+const VISION_PAGE_LIMIT_PRO = 10;      // vision pro:每頁 ~6-8s,10 頁 < 110s
 const CONVERT_TIMEOUT_MS = 110_000;    // chat.js tool dispatch 是 120s,留 10s buffer
 const INSPECT_TIMEOUT_MS = 30_000;
+const VISION_REBUILD_TIMEOUT_MS = 110_000;
+
+// Internal endpoint(主程序 expose 給 skill child 用),走 127.0.0.1
+const INTERNAL_PORT = process.env.PORT || '3007';
+const INTERNAL_VISION_URL = `http://127.0.0.1:${INTERNAL_PORT}/api/_internal/pdf-vision-rebuild`;
 
 // Python venv 路徑:Dockerfile 設 /opt/pdf-venv/bin/python3;dev 機 fallback
 function resolvePython() {
@@ -124,9 +131,44 @@ function safeOutputPath(originalName) {
   return path.join(GENERATED_DIR, `${Date.now()}_${base || 'output'}.docx`);
 }
 
+// ── Vision rebuild 走主程序 internal endpoint(skill child 不能 require server services) ──
+async function callVisionRebuild({ pdfPath, outDocxPath, password, model }) {
+  const secret = process.env.INTERNAL_API_SECRET;
+  if (!secret) {
+    throw new Error('INTERNAL_API_SECRET 未設定 — server 主程序啟動時應自動生成,請確認 skill child env 有繼承到');
+  }
+  const resp = await fetch(INTERNAL_VISION_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Internal-Secret': secret,
+    },
+    body: JSON.stringify({
+      pdfPath, outDocxPath, password, model,
+      concurrency: 3,
+      dpi: 200,
+    }),
+    signal: AbortSignal.timeout(VISION_REBUILD_TIMEOUT_MS),
+  });
+  if (!resp.ok) {
+    let detail = '';
+    try { detail = (await resp.json()).error || ''; } catch (_) {}
+    throw new Error(`vision-rebuild HTTP ${resp.status}: ${detail}`);
+  }
+  return await resp.json();
+}
+
+// Mode 決定:format=auto 看 recommended_mode;explicit format 強制
+function resolveMode(format, recommendedMode) {
+  const f = (format || 'auto').toLowerCase();
+  if (f === 'editable' || f === 'vision') return f;
+  // auto
+  return recommendedMode === 'vision' ? 'vision' : 'editable';
+}
+
 module.exports = async function handler(body) {
   const t0 = Date.now();
-  const { file_name, password, attached_files } = body || {};
+  const { file_name, password, attached_files, format, vision_model } = body || {};
 
   // ── 找檔 ───────────────────────────────────────────────────────────────────
   if (!Array.isArray(attached_files) || attached_files.length === 0) {
@@ -195,32 +237,104 @@ module.exports = async function handler(body) {
     };
   }
 
-  const { pages, is_scanned_pdf, scanned_ratio, encrypted } = inspectResult;
+  const { pages, is_scanned_pdf, scanned_ratio, encrypted, complexity_score, recommended_mode } = inspectResult;
 
-  // ── 掃描型 PDF:Phase 3 才支援 OCR ─────────────────────────────────────────
+  // ── 掃描型 PDF:Phase 3 才支援 OCR(屆時 vision mode 會自動處理)─────────
   if (is_scanned_pdf) {
     return {
       content:
         `📷 此 PDF「${target.name}」為掃描型(${Math.round(scanned_ratio * 100)}% 頁面無可選取文字)。\n` +
-        `目前主轉換流程僅支援文字型 PDF。掃描型 PDF 的 AI OCR 路線(Phase 3)上線後將自動處理,屆時可重新請求轉換。\n\n` +
-        `如需立即取得文字,可請使用者改上傳 OCR 處理過的 PDF,或試試對話中直接貼圖請我辨識。`,
+        `Phase 3 OCR 上線後 vision mode 會自動處理掃描型 PDF。\n\n` +
+        `如需立即取得文字,可請使用者改上傳 OCR 處理過的 PDF。`,
       data: { is_scanned_pdf: true, scanned_ratio, pages, file_name: target.name },
     };
   }
 
-  // ── 頁數上限:Phase 1d 才接背景 job ────────────────────────────────────────
-  if (pages > PHASE1_PAGE_LIMIT) {
+  // ── Mode 決定 ──────────────────────────────────────────────────────────────
+  const mode = resolveMode(format, recommended_mode);
+  const visionModelChoice = (vision_model || '').toLowerCase() === 'pro' ? 'pro' : 'flash';
+  const outPath = safeOutputPath(target.name);
+
+  // ── Vision rebuild 路線 ────────────────────────────────────────────────────
+  if (mode === 'vision') {
+    const visionLimit = visionModelChoice === 'pro' ? VISION_PAGE_LIMIT_PRO : VISION_PAGE_LIMIT_FLASH;
+    if (pages > visionLimit) {
+      return {
+        content:
+          `📄 此 PDF「${target.name}」共 ${pages} 頁,超過 vision mode 同步上限(${visionModelChoice}=${visionLimit} 頁,每頁需 AI 分析 3-5 秒)。\n\n` +
+          `**選項**:\n` +
+          `1. 改 format='editable' 走 pdf2docx(快但複雜表格 layout 可能跑掉,${EDITABLE_PAGE_LIMIT} 頁內可即時)\n` +
+          `2. 等 Phase 1d 背景 job 上線後 vision mode 可處理大檔(完成會通知)\n` +
+          `3. 請使用者分割成 ≤ ${visionLimit} 頁的小檔分次上傳`,
+        data: { pages, vision_limit: visionLimit, vision_model: visionModelChoice, file_name: target.name },
+      };
+    }
+
+    let rebuildResult;
+    try {
+      rebuildResult = await callVisionRebuild({
+        pdfPath: realPath,
+        outDocxPath: outPath,
+        password,
+        model: visionModelChoice,
+      });
+    } catch (e) {
+      return {
+        content:
+          `❌ Vision 重組失敗:${e.message}\n\n` +
+          `可改試 format='editable' 走 pdf2docx 路線(快但複雜表格 layout 可能跑掉)。`,
+        data: { mode: 'vision', error: e.message, file_name: target.name },
+      };
+    }
+    if (!rebuildResult.ok) {
+      return {
+        content: `❌ Vision 重組失敗:${rebuildResult.error || '未知錯誤'}`,
+        data: rebuildResult,
+      };
+    }
+
+    const fname = path.basename(outPath);
+    const publicUrl = `/uploads/generated/${fname}`;
+    const elapsed = Date.now() - t0;
+    const tokens = rebuildResult.totalTokens || { input: 0, output: 0 };
+    const failedPages = rebuildResult.visionFailedPages || [];
+    const failNote = failedPages.length > 0
+      ? `\n⚠️ ${failedPages.length} 頁 vision 失敗(p${failedPages.slice(0, 5).join(', p')}),已標記在 docx 對應位置`
+      : '';
+
     return {
       content:
-        `📄 此 PDF「${target.name}」共 ${pages} 頁,超過目前同步轉換上限(${PHASE1_PAGE_LIMIT} 頁)。\n` +
-        `背景轉換功能(Phase 1d)上線後將自動排入背景處理並通知完成。\n\n` +
-        `如需立即取得結果,可請使用者分割成較小的 PDF 後分次上傳。`,
-      data: { pages, limit: PHASE1_PAGE_LIMIT, file_name: target.name },
+        `✅ 已用 **Vision 智能重組**(${visionModelChoice})將「${target.name}」(${pages} 頁) 轉為 Word。\n` +
+        `[下載 ${fname}](${publicUrl})\n\n` +
+        `_耗時 ${(elapsed / 1000).toFixed(1)}s,Gemini ${visionModelChoice} tokens in=${tokens.input} out=${tokens.output}_${failNote}`,
+      data: {
+        mode: 'vision',
+        vision_model: visionModelChoice,
+        file_name: target.name,
+        pages,
+        encrypted,
+        complexity_score,
+        out_file: fname,
+        out_url: publicUrl,
+        elapsed_ms: elapsed,
+        tokens,
+        failed_pages: failedPages,
+      },
+      files: [{ type: 'docx', filename: fname, publicUrl }],
     };
   }
 
-  // ── 主轉換 ────────────────────────────────────────────────────────────────
-  const outPath = safeOutputPath(target.name);
+  // ── Editable 路線(pdf2docx)─────────────────────────────────────────────
+  if (pages > EDITABLE_PAGE_LIMIT) {
+    return {
+      content:
+        `📄 此 PDF「${target.name}」共 ${pages} 頁,超過 editable 模式同步上限(${EDITABLE_PAGE_LIMIT} 頁)。\n` +
+        `Phase 1d 背景 job 上線後將支援大檔。\n\n` +
+        `如需立即取得結果,可請使用者分割成較小的 PDF 後分次上傳。`,
+      data: { pages, limit: EDITABLE_PAGE_LIMIT, file_name: target.name },
+    };
+  }
+
   let convertResult;
   try {
     const args = ['convert', '--in', realPath, '--out', outPath];
@@ -240,16 +354,24 @@ module.exports = async function handler(body) {
   const fname = path.basename(outPath);
   const publicUrl = `/uploads/generated/${fname}`;
   const elapsed = Date.now() - t0;
+  // 若 inspect 標 complex 但本次仍走 editable(使用者沒指定 format,recommended_mode 卻是 vision),
+  // 提示一句讓 LLM 可以告訴使用者「如果版面跑掉可以改試 vision mode」
+  const upgradeHint = (recommended_mode === 'vision')
+    ? `\n\n💡 此 PDF 結構複雜(complexity ${complexity_score}/100),若 layout 跑掉可請使用者改用 vision mode(\`format='vision'\`)— 較慢且消耗 token,但會保留表格底色 / 合併儲存格。`
+    : '';
 
   return {
     content:
-      `✅ 已將「${target.name}」(${pages} 頁${encrypted ? ',已解密' : ''}) 轉換為 Word 檔。\n` +
+      `✅ 已用 **editable 模式**(pdf2docx)將「${target.name}」(${pages} 頁${encrypted ? ',已解密' : ''}) 轉為 Word 檔。\n` +
       `[下載 ${fname}](${publicUrl})\n\n` +
-      `_pdf2docx 主轉換流程,耗時 ${(elapsed / 1000).toFixed(1)}s_`,
+      `_耗時 ${(elapsed / 1000).toFixed(1)}s,complexity=${complexity_score}/100_${upgradeHint}`,
     data: {
+      mode: 'editable',
       file_name: target.name,
       pages,
       encrypted,
+      complexity_score,
+      recommended_mode,
       out_file: fname,
       out_url: publicUrl,
       elapsed_ms: elapsed,

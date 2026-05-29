@@ -81,6 +81,14 @@ pnpm-debug.log*
 coverage/
 .nyc_output/
 
+# ─── Python (pdf_workers venv 烤在 image,本機跑 worker 會留 __pycache__)──────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+*.egg-info/
+
 # ─── MCP JWT keys (never commit — private key only lives on FOXLINK GPT) ──────
 server/certs/*.pem
 server/certs/*.key

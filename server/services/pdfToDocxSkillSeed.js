@@ -18,19 +18,27 @@
  */
 
 const SKILL_NAME = 'PDF 轉 Word';
-const SKILL_VERSION = '1.0.0-phase1b';
+const SKILL_VERSION = '2.0.0-phase2';
 
 const DESCRIPTION =
-  '將使用者上傳的 PDF 轉換為 Word (.docx),保留版面、表格、圖片。' +
-  '支援加密 PDF(需提供密碼);掃描型 PDF Phase 3 上線後將自動以 AI Vision OCR 處理。' +
-  '使用者說「轉成 Word / 轉 docx / PDF 轉檔 / 把這個 PDF 變成 Word」時呼叫此工具。';
+  '將使用者上傳的 PDF 轉換為 Word (.docx)。提供兩種模式:' +
+  'editable(pdf2docx,快,簡單 PDF 適用)/ vision(Gemini Vision 智能重組,保留複雜表格底色與合併儲存格)。' +
+  '系統會自動依 PDF 複雜度建議模式(complexity ≥ 30 → vision)。' +
+  '支援加密 PDF。使用者說「轉成 Word / 轉 docx / PDF 轉檔」時呼叫。';
 
 const TOOL_SCHEMA = {
   name: 'pdf_to_docx',
   description:
-    '將 PDF 檔案轉換為 Word (.docx),保留原本的版面、表格、圖片。' +
-    '凡是使用者明確要求「PDF 轉 Word / 轉 docx / 轉檔可編輯」都呼叫此工具,不要自行抽文字組 Word。' +
-    '若 PDF 加密,先呼叫一次不帶 password,系統會回 PASSWORD_REQUIRED;再請使用者提供密碼後帶入重呼。',
+    '將 PDF 轉換為 Word (.docx)。\n' +
+    '系統會先 inspect PDF 拿到 `complexity_score`(0-100)+ `recommended_mode`(editable/vision)。\n' +
+    '**模式選擇**:\n' +
+    '- `format=\'auto\'`(預設):依 recommended_mode 自動選\n' +
+    '- `format=\'editable\'`:pdf2docx,快(<10s,50 頁內),layout 可能跑掉但 100% 可編輯;簡單文字型 PDF 適用\n' +
+    '- `format=\'vision\'`:Gemini Vision 智能重組,慢(每頁 3-5s,flash 20 頁內 / pro 10 頁內)且耗 token;**複雜表格 / 多底色 / 合併儲存格** 用這個\n' +
+    '\n' +
+    '**何時主動建議 vision**:使用者抱怨 editable 轉出來「格式跑掉 / 表格底色不見 / 行高怪」→ 建議改 vision 重做。\n' +
+    '\n' +
+    '**加密 PDF**:先呼叫一次不帶 password,系統會回 PASSWORD_REQUIRED;再請使用者提供密碼後帶入重呼。',
   parameters: {
     type: 'object',
     properties: {
@@ -40,12 +48,17 @@ const TOOL_SCHEMA = {
       },
       password: {
         type: 'string',
-        description: '加密 PDF 的密碼。若 PDF 未加密則省略;若使用者尚未提供,本參數請省略,系統會回提示讓你詢問。',
+        description: '加密 PDF 的密碼。未加密則省略;使用者尚未提供時請省略,系統會回提示讓你詢問。',
       },
-      ocr_quality: {
+      format: {
         type: 'string',
-        enum: ['auto', 'flash', 'pro', 'disable'],
-        description: '(Phase 3 才生效)掃描型 PDF 的 OCR 品質:auto=自動 flash,flash=快速便宜,pro=高品質但慢,disable=遇掃描型直接報錯。預設 auto。',
+        enum: ['auto', 'editable', 'vision'],
+        description: '轉換模式:auto(依 complexity 自動,預設)/ editable(pdf2docx 快但可能跑版)/ vision(Gemini 智能重組保 layout)',
+      },
+      vision_model: {
+        type: 'string',
+        enum: ['flash', 'pro'],
+        description: 'vision mode 用的 Gemini 模型:flash(預設,快且便宜)/ pro(高品質但慢且貴,使用者明確要求最高品質才用)',
       },
     },
     required: [],

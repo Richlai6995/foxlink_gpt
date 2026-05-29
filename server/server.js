@@ -169,6 +169,16 @@ app.get('/api/version', (req, res) => {
     console.log('[Route] /api/share OK');
     app.use('/api/skills', require('./routes/skills'));
     console.log('[Route] /api/skills OK');
+
+    // Internal endpoints(只給同機 skill child / background job 用,有 IP + secret 雙重驗證)
+    // 若 INTERNAL_API_SECRET 沒設,啟動時自動生成一個 UUID 並寫到 process.env,
+    // 讓 spawned skill children 透過繼承的 env 拿到一致的 secret。
+    if (!process.env.INTERNAL_API_SECRET) {
+      process.env.INTERNAL_API_SECRET = require('crypto').randomUUID();
+      console.log('[Route] INTERNAL_API_SECRET auto-generated for this process');
+    }
+    app.use('/api/_internal', require('./routes/internalPdf'));
+    console.log('[Route] /api/_internal/pdf-vision-rebuild OK');
     app.use('/api/kb', require('./routes/knowledgeBase'));
     console.log('[Route] /api/kb OK');
     app.use('/api/research', require('./routes/research'));
