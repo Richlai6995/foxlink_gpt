@@ -1067,7 +1067,9 @@ function buildMasterScrapeTask(kbMap, models = {}) {
   (2026-05-25 起 AG 改用 LBMA 為唯一主源,不再用 Westmetall / Kitco)
 
 ═══ 基本金屬 6 種(CU/AL/NI/ZN/PB/SN)主源:Westmetall LME Cash Settlement ═══
-↑ markdaten.php 已在上面 scrape 過,**所有 6 個基本金屬直接從這同一頁解析**。
+{{scrape:https://www.westmetall.com/en/markdaten.php}}
+↑ Westmetall markdaten.php 一頁含 6 個基本金屬 LME Cash-Settlement / 3-month 報價 + 庫存,
+  從這頁解析 CU / AL / NI / ZN / PB / SN 全部。
   ⚠️ **2026-05-25 起,TradingEconomics 全面停用**(CFD 報價不準、來源不可靠)。
   基本金屬只認 LME Cash Settlement(Westmetall 二手轉發)。
 
