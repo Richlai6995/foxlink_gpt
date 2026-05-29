@@ -172,10 +172,11 @@ async function registerPendingPassword({ pdfPath, pdfName, userId, sessionId }) 
   });
 }
 
-async function submitBackgroundJob({ userId, sessionId, pdfPath, pdfName, format, vision_model, pages }) {
+async function submitBackgroundJob({ userId, sessionId, pdfPath, pdfName, format, vision_model, pages, password }) {
   return _internalFetch(INTERNAL_SUBMIT_JOB_URL, {
     userId, sessionId, pdfPath, pdfName,
     format, vision_model, pages,
+    password,  // 加密 PDF + LLM 對話傳密碼 fallback 路徑要把 password 帶到 job(AES 入庫)
   });
 }
 
@@ -246,9 +247,13 @@ module.exports = async function handler(body) {
           pdfPath: realPath, pdfName: target.name, userId: user_id, sessionId: session_id,
         });
         return {
+          // 給 LLM 看的訊息 — 嚴格禁止 LLM 請使用者在對話貼密碼
           content:
-            `🔒 此 PDF「${target.name}」已加密。\n` +
-            `已彈出密碼輸入框,請使用者在獨立輸入框中輸入密碼(密碼**不會**留存於對話內容),系統會自動排背景處理並於完成後通知。`,
+            `[系統訊息給 AI:此 PDF 已加密,**密碼輸入框已彈出**(獨立 modal,密碼不進對話)。\n` +
+            `請告知使用者:「畫面上已彈出密碼輸入視窗,請在該視窗輸入 PDF 密碼即可,系統會自動排背景處理並通知您。」\n` +
+            `**絕對不要請使用者在對話中告知密碼**,絕對不要說「請告訴我密碼」「請提供密碼」等話術。\n` +
+            `若使用者抱怨沒看到 modal,請建議他重新整理頁面或聯絡管理員(modal 可能因瀏覽器設定被擋)。\n` +
+            `**禁止主動建議使用者把密碼貼到對話**,即使第一次 modal 沒收到,也不要 fallback 對話傳密碼路徑。]`,
           // chat.js 會偵測這個欄位 → SSE event 'pdf_password_prompt' → 前端跳 modal
           pdf_password_prompt: {
             token: reg.token,
@@ -309,6 +314,7 @@ module.exports = async function handler(body) {
           format: 'vision',
           vision_model: visionModelChoice,
           pages,
+          password,  // 加密 PDF + LLM 對話傳密碼 fallback,要傳到 job 內 AES 入庫
         });
         return {
           content:
@@ -390,6 +396,7 @@ module.exports = async function handler(body) {
         pdfName: target.name,
         format: 'editable',
         pages,
+        password,  // 加密 PDF + LLM 對話傳密碼 fallback,要傳到 job 內 AES 入庫
       });
       return {
         content:
