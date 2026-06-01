@@ -55,8 +55,11 @@ done
 TAG="${TAG:-${APP_VERSION}}"
 FULL_IMAGE="${REGISTRY}/${IMAGE}:${TAG}"
 
-echo "▶ Building: ${FULL_IMAGE}  (APP_VERSION=${APP_VERSION})"
-docker build --build-arg APP_VERSION="${APP_VERSION}" -t "${FULL_IMAGE}" .
+# BUILD_DATE — scheduler 啟動 gate 用,擋 > 30 天的 image 跑排程(防 ghost container)
+BUILD_DATE="$(date -u +%Y-%m-%d)"
+
+echo "▶ Building: ${FULL_IMAGE}  (APP_VERSION=${APP_VERSION}, BUILD_DATE=${BUILD_DATE})"
+docker build --build-arg APP_VERSION="${APP_VERSION}" --build-arg BUILD_DATE="${BUILD_DATE}" -t "${FULL_IMAGE}" .
 
 echo "▶ Pushing to registry: ${FULL_IMAGE}"
 docker push "${FULL_IMAGE}"

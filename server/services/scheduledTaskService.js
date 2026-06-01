@@ -516,15 +516,18 @@ async function _auditRunDecision(db, taskId, decision, info = {}) {
   try {
     await db.prepare(`
       INSERT INTO scheduled_task_run_audits
-        (task_id, decision, force_flag, status_at_entry, pod_host, caller_hint)
-      VALUES (?, ?, ?, ?, ?, ?)
+        (task_id, decision, force_flag, status_at_entry, pod_host, caller_hint,
+         app_version, build_date)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       taskId,
       decision,
       info.force ? 'Y' : 'N',
       info.status || null,
-      process.env.HOSTNAME || process.env.POD_NAME || null,
+      POD_HOST,
       (info.hint || '').slice(0, 500),
+      APP_VERSION,
+      BUILD_DATE,
     );
   } catch (e) {
     // 升 error level + 帶 ORA code:之前事件(5/22 task=182)audit silent fail,被 console.warn
@@ -993,8 +996,9 @@ async function runTask(db, taskId, opts = {}) {
   // ── Write run record ────────────────────────────────────────────────────────
   await db.prepare(
     `INSERT INTO scheduled_task_runs
-      (task_id, run_at, status, attempt, session_id, response_preview, generated_files_json, email_sent_to, error_msg, duration_ms, tools_used_json, pipeline_log_json, failed_nodes_json)
-     VALUES (?, SYSTIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (task_id, run_at, status, attempt, session_id, response_preview, generated_files_json, email_sent_to, error_msg, duration_ms, tools_used_json, pipeline_log_json, failed_nodes_json,
+       app_version, build_date, pod_host)
+     VALUES (?, SYSTIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     task.id,
     runStatus,
@@ -1008,6 +1012,9 @@ async function runTask(db, taskId, opts = {}) {
     JSON.stringify(toolsUsed),
     pipelineLog.length > 0 ? JSON.stringify(pipelineLog) : null,
     failedNodes.length > 0 ? JSON.stringify(failedNodes) : null,
+    APP_VERSION,
+    BUILD_DATE,
+    POD_HOST,
   );
 
   // ── Update task stats ───────────────────────────────────────────────────────
@@ -1035,6 +1042,12 @@ const _cronJobs = new Map();
 // 只有 scheduler 專用的 deployment(replicas=1)會實際掛 cron。
 // 本機開發 / docker-compose 不設此 env → 預設 true,維持原本單機行為。
 const IS_SCHEDULER_POD = process.env.RUN_SCHEDULERS !== 'false';
+
+// Image version / build date — Dockerfile ARG/ENV 注入,寫進 audit + run record
+// 給「事後找鬼 process」用(2026-06-01 docker-compose ghost 事故)
+const APP_VERSION = process.env.APP_VERSION || 'unknown';
+const BUILD_DATE  = process.env.BUILD_DATE  || '1970-01-01';
+const POD_HOST    = process.env.HOSTNAME || process.env.POD_NAME || 'unknown';
 
 // 用「排程設計時間 + 當天日期」當 lock key,跨 pod 時鐘漂移仍能阻擋重複觸發。
 // 不用 wall-clock minute(舊設計)是因為 enqueue 排隊延遲 + NTP drift 會讓不同 pod
@@ -1147,6 +1160,22 @@ function scheduleTask(db, task) {
       return;
     }
 
+    // 防線:cron expr drift(2026-06-01 加)
+    // race window:user 在 reconcile loop tick 之間改 schedule(Mon→Wed),DB 已更新但
+    // 記憶體舊 cron 還沒換掉,舊 cron 在 Mon 9:00 還是會 fire,光看 status='active' 擋不住,
+    // 結果就是「改成週三仍跑週一」。這裡 re-evaluate latest 的 expr,跟自己這顆 cron 的 expr
+    // 比對,不一樣就 skip,等下一輪 reconcile 把舊 cron 砍掉換新的。
+    const currentExpr = buildCronExpr(latest);
+    if (currentExpr !== expr) {
+      console.log(`[Scheduled] task ${task.id} "${task.name}" cron expr drift (mem=${expr} db=${currentExpr}), skip & wait reconcile`);
+      await _auditRunDecision(db, task.id, 'cron_skip_expr_drift', {
+        force: false,
+        status: latest.status,
+        hint: `mem=${expr}|db=${currentExpr}`,
+      });
+      return;
+    }
+
     // 分散式鎖(slot-based + TTL 600s):scheduler 改成單 pod 後此 lock 主要作為保險 —
     // 萬一未來放寬 replicas / K8s restart 瞬間 overlap / cron handler 重複觸發都擋得住。
     const lockKey = buildLockKey(latest);
@@ -1235,6 +1264,35 @@ async function initScheduler(db) {
     console.log('[Scheduled] RUN_SCHEDULERS=false → this pod will not mount cron jobs (web pod mode)');
     return;
   }
+
+  // ── Startup gate(2026-06-01 ghost container 事故防線)──
+  // 老 image(尤其忘了砍的 docker-compose)會用 image 內 in-memory cron 偷打 prod DB,
+  // 寫 scheduled_task_runs 但繞過所有新 audit code。這層 gate 在 startup 時檢查:
+  // - BUILD_DATE missing → 一定是手 build 沒帶 ARG / 老 image,refuse
+  // - BUILD_DATE > 30 天 → 老到不該再跑排程,refuse(部署紀律:30 天內必有新部署)
+  // refuse = 直接 return,排程一個都不掛,但 web/API 仍可服務(讓 admin 進去查問題)
+  const MAX_BUILD_AGE_DAYS = 30;
+  const buildMs = new Date(BUILD_DATE).getTime();
+  const ageDays = Number.isFinite(buildMs)
+    ? Math.floor((Date.now() - buildMs) / 86_400_000)
+    : Infinity;
+  if (!process.env.BUILD_DATE || ageDays > MAX_BUILD_AGE_DAYS) {
+    console.error(
+      `[Scheduled] STARTUP GATE: refusing to mount cron jobs — `
+      + `BUILD_DATE=${BUILD_DATE} (age=${ageDays}d, limit=${MAX_BUILD_AGE_DAYS}d), APP_VERSION=${APP_VERSION}, POD=${POD_HOST}\n`
+      + `  原因:image 太老或 BUILD_DATE 未注入,可能是忘了砍的 docker-compose ghost / 手 build 沒帶 --build-arg。\n`
+      + `  解法:確認此 process 是不是該存在;若是合法部署,跑 deploy.sh 重 build 帶 BUILD_DATE。`
+    );
+    try {
+      await db.prepare(`
+        INSERT INTO scheduled_task_run_audits (task_id, decision, force_flag, pod_host, caller_hint, app_version, build_date)
+        VALUES (0, 'startup_gate_refused', 'N', ?, ?, ?, ?)
+      `).run(POD_HOST, `age=${ageDays}d limit=${MAX_BUILD_AGE_DAYS}d`, APP_VERSION, BUILD_DATE);
+    } catch (_) { /* audit 寫不進就算了,console 已 error */ }
+    return;
+  }
+  console.log(`[Scheduled] Startup gate passed: BUILD_DATE=${BUILD_DATE} (age=${ageDays}d), APP_VERSION=${APP_VERSION}, POD=${POD_HOST}`);
+
   try {
     const tasks = await db.prepare(`SELECT * FROM scheduled_tasks WHERE status='active'`).all();
     tasks.forEach(t => scheduleTask(db, t));

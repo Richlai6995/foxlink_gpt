@@ -99,6 +99,12 @@ ENV UPLOAD_DIR=/app/uploads
 ARG APP_VERSION=dev
 ENV APP_VERSION=${APP_VERSION}
 
+# Build-time date — scheduler 啟動時用來擋老 image 偷跑排程(>30 天 refuse)
+# 配 [scheduledTaskService.js initScheduler] 的 startup gate
+# 2026-06-01 ghost container 事故根因:2 個月前的 docker-compose 還在打 prod DB
+ARG BUILD_DATE=1970-01-01
+ENV BUILD_DATE=${BUILD_DATE}
+
 EXPOSE 3007
 
 CMD ["node", "server.js"]

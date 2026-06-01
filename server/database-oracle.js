@@ -1924,6 +1924,16 @@ async function runMigrations(db) {
     pod_host        VARCHAR2(100),
     caller_hint     VARCHAR2(500)
   )`);
+
+  // 2026-06-01 ghost container 事故防線:scheduled_task_runs / scheduled_task_run_audits
+  // 加 app_version + build_date,讓事後能直接從 DB 看出鬼 image 在打。
+  // 舊 image 沒寫這欄 → 寫進來都是 NULL → 一查 NULL 就知道是鬼 process。
+  // (不加 NOT NULL,避免老 row 報 ORA-01400;靠 query 「WHERE app_version IS NULL」抓鬼)
+  await addCol('SCHEDULED_TASK_RUNS',       'APP_VERSION', 'VARCHAR2(50)');
+  await addCol('SCHEDULED_TASK_RUNS',       'BUILD_DATE',  'VARCHAR2(20)');
+  await addCol('SCHEDULED_TASK_RUNS',       'POD_HOST',    'VARCHAR2(100)');
+  await addCol('SCHEDULED_TASK_RUN_AUDITS', 'APP_VERSION', 'VARCHAR2(50)');
+  await addCol('SCHEDULED_TASK_RUN_AUDITS', 'BUILD_DATE',  'VARCHAR2(20)');
   try {
     await db.prepare('CREATE INDEX idx_stra_task_time ON scheduled_task_run_audits(task_id, attempted_at DESC)').run();
     console.log('[Migration] idx_stra_task_time created ✓');
