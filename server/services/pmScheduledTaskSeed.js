@@ -1063,10 +1063,11 @@ function buildMasterScrapeTask(kbMap, models = {}) {
   (channel description 會寫 "Johnson Matthey Base Price $/oz - DD MMM YYYY 09:00 (London)"
    驗證這點,但 LLM 看 RSS 內容也可能看不到 channel desc,**不用驗證,信就對了**)
 
-  ✅ **正確做法**:RSS 內 5 個 items 對應 5 個金屬(Platinum/Palladium/Rhodium/Iridium/Ruthenium),
-     **逐一全部寫進 prices 陣列**,price_usd 直接取 description 內 "US$ XXXX per troy oz" 的數字。
+  ✅ **正確做法**:RSS 內 5 個 items 對應 5 個金屬,但**只寫 PT/PD/RH 3 個進 prices 陣列**,
+     **IR(Iridium)/ RU(Ruthenium)跳過不寫**(2026-06-02 起,11 metals dashboard 不認 IR/RU)。
+     price_usd 直接取 description 內 "US$ XXXX per troy oz" 的數字。
      **不需要篩 'London' / 'NY' 字串** — RSS items title 只是金屬名,內容就是該日 London 09:00 fix。
-  - 例:RSS 5 個 items → 寫 5 個 prices row(PT/PD/RH 一定要寫,IR/RU 可選)
+  - 例:RSS 5 個 items → 寫 3 個 prices row(PT/PD/RH),IR/RU 跳過
   - as_of_date 用 item 的 pubDate 那天(通常是今天 / 昨天)
 
   ❌ 千萬不要:看 RSS title/description 沒寫 "London" 就以為是 NY/HK 整筆漏掉
@@ -1215,7 +1216,7 @@ Westmetall markdaten.php 表格從上到下是「日期由新到舊」。Westmet
 ═══ 寫入規則(務必遵守)═══
 - **prices 陣列長度可變**(0-10 筆,**不含 AG**),只放今天真的抓到價的金屬
   - AU 台銀:每天都有 → 一定要寫
-  - **PT/PD/RH JM RSS:RSS 有 items 就一定要寫(整個 RSS 就是 London 9am)**
+  - **PT/PD/RH JM RSS:RSS 有 items 就一定要寫(整個 RSS 就是 London 9am)。IR / RU 跳過不寫**
   - 基本金屬 Westmetall:LME 週末休市 → 週末可能 0 筆,但表頂端有 row 就寫
   - **AG:LLM 完全不要碰,由 server-side LBMA backfill 處理**
 - price_usd 一律換算成 **USD 等價**
@@ -1230,7 +1231,7 @@ Westmetall markdaten.php 表格從上到下是「日期由新到舊」。Westmet
 - [ ] **JSON 內只有 _kb_doc + prices,沒有 news?**(2026-04-29 起新聞已交給 by-source task)
 - [ ] _kb_doc 是 1 筆陣列,title/summary/content 都填好?
 - [ ] **prices 陣列放「來源頁面上能看到的最新報價」**(無論日期是不是今天),只有來源整個失敗才漏
-- [ ] AU 用台銀價、**PT/PD/RH 一定有寫**(RSS 就是 London 9am,5 個 items 對應 5 金屬)?
+- [ ] AU 用台銀價、**PT/PD/RH 一定有寫**(RSS 就是 London 9am)、**IR/RU 跳過不寫**?
 - [ ] **AG row 完全沒寫**(由 server-side LBMA backfill 處理)?
 - [ ] **基本金屬 as_of_date 用 Westmetall 表格實際日期**(不是 {{date}})?
 - [ ] **所有 day_change_pct 都是 null**(LLM 不算,server 後算)
@@ -1771,8 +1772,10 @@ async function patchExistingMasterScrapeAddPriceWrite(db, kbMap, models) {
   const hasLondon9amMarker  = !!promptStr && /London 09:00 fix/.test(promptStr);
   // 2026-06-02:RSS 內容就是 London 9am(不用篩) + AG 不再讓 LLM 抓
   const hasV3Marker         = !!promptStr && /AG row 完全沒寫/.test(promptStr);
+  // 2026-06-02:LLM 跳過 IR/RU(dashboard 不認,且 IR USD/oz 被 normalize 誤算 USD/ton 變天價)
+  const hasNoIrRuMarker     = !!promptStr && /IR \/ RU 跳過/.test(promptStr);
 
-  if (hasPriceWrite && hasJmMarker && hasBotMarker && hasNewsRulesMarker && hasV2Marker && hasKbDocMarker && hasNoTeMarker && hasLbmaAgMarker && hasLatestRowMarker && hasLondon9amMarker && hasV3Marker) return;
+  if (hasPriceWrite && hasJmMarker && hasBotMarker && hasNewsRulesMarker && hasV2Marker && hasKbDocMarker && hasNoTeMarker && hasLbmaAgMarker && hasLatestRowMarker && hasLondon9amMarker && hasV3Marker && hasNoIrRuMarker) return;
 
   try {
     // 一併 update prompt + pipeline + email_subject/body(2026-04-29 重構不發 email)
@@ -1793,6 +1796,7 @@ async function patchExistingMasterScrapeAddPriceWrite(db, kbMap, models) {
       !hasLatestRowMarker && '2026-05-29 抓最頂端 row 邏輯',
       !hasLondon9amMarker && '2026-05-29 PGM 改 London 9am fix',
       !hasV3Marker && '2026-06-02 RSS 不篩 + AG 改 server-side',
+      !hasNoIrRuMarker && '2026-06-02 LLM 跳過 IR/RU',
     ].filter(Boolean).join(' + ');
     console.log(`[PMScheduledTaskSeed] Upgraded "${targetName}" #${id}: ${missing}`);
   } catch (e) {

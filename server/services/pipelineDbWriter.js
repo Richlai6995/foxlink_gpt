@@ -30,7 +30,9 @@ const {
 //   • 貴金屬(AU/AG/PT/PD/RH)→ USD/oz(troy ounce,貴金屬慣例)
 // LLM 給的 original_price / original_currency / original_unit 保留原樣做 audit,
 // price_usd / unit 強制 normalize 後寫入。
-const PRECIOUS_METALS = new Set(['AU', 'AG', 'PT', 'PD', 'RH']);
+// 2026-06-02:加 IR / RU(Iridium / Ruthenium)— JM RSS 一起送 5 個 PGM,LLM 老實寫進 prices,
+// 但這兩個之前不在 set 內被當基本金屬,USD/oz 強制 × 32150 換算成 USD/ton → 變天價(IR 2.3 億)
+const PRECIOUS_METALS = new Set(['AU', 'AG', 'PT', 'PD', 'RH', 'IR', 'RU']);
 // 1 troy oz = 31.1034768 g → 1 ton = 32150.7466 troy oz
 const OZ_PER_TON = 32150.7466;
 const LB_PER_TON = 2204.6226;
