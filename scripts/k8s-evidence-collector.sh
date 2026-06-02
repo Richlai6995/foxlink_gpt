@@ -19,11 +19,14 @@ CPU_THRESHOLD_MILLI="${CPU_THRESHOLD_MILLI:-1200}"   # >1200m 視為 CPU 燒(正
 # 2026-06-02 事故就是這條 — scheduler 被 ExcelJob 273s sync 卡死,CPU 只 26m 但 probe fail 85 次
 UNHEALTHY_THRESHOLD="${UNHEALTHY_THRESHOLD:-10}"     # 近 10 分鐘 Unhealthy event 次數
 MEM_THRESHOLD_PCT="${MEM_THRESHOLD_PCT:-80}"        # heap snapshot 前確認 memory < 80%(避免 OOM)
-EVIDENCE_DIR="${EVIDENCE_DIR:-/var/log/foxlink-evidence}"
+EVIDENCE_DIR="${EVIDENCE_DIR:-$HOME/foxlink-evidence}"   # default 走 $HOME 不需要 sudo
 COOLDOWN_MIN="${COOLDOWN_MIN:-30}"                  # 同 pod 採證冷卻(分鐘)
 RETENTION_DAYS="${RETENTION_DAYS:-7}"
 
-mkdir -p "$EVIDENCE_DIR"
+if ! mkdir -p "$EVIDENCE_DIR" 2>/dev/null; then
+  echo "[FATAL] 無法建立 EVIDENCE_DIR=$EVIDENCE_DIR(權限不足?)→ 試 EVIDENCE_DIR=\$HOME/foxlink-evidence 跑" >&2
+  exit 1
+fi
 
 TS=$(date '+%Y%m%d-%H%M%S')
 LOG_TAG="[$TS]"
