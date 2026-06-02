@@ -49,6 +49,11 @@ const INSERT_BATCH_SIZE     = 1000;
 const HEARTBEAT_INTERVAL_MS = 60_000;
 const STALE_HEARTBEAT_MIN   = 5;
 const MAX_RECOVERY_COUNT    = 3;
+// XLSX.readFile 對 PDF / 其他二進位也會「成功 parse」但結果是垃圾表(40000+ 列 100+ 欄),
+// DuckDB load 會卡 event loop 數分鐘 → K8s liveness fail(2026-06-02 事故)。在進 XLSX 前擋。
+const ALLOWED_EXCEL_EXTS = new Set(['.xlsx', '.xls', '.xlsm', '.xlsb']);
+// DuckDB SQL 結構性錯誤 — retry 一定也是同樣錯,不該再 parse 一遍 xlsx 燒 CPU。
+const PERMANENT_SQL_ERROR_RE = /Binder Error|Parser Error|Catalog Error|Conversion Error/i;
 
 // 跟 transcribeJobService 一樣的 active set,SIGTERM 時 mark for recovery
 const ACTIVE_JOBS = new Set();
@@ -452,13 +457,17 @@ async function runJob(db, jobId) {
       ...extraFiles.map((f, i) => ({ name: f.name, path: f.path, alias: `f${i + 1}`, isMain: false })),
     ];
 
-    // 4. 對所有檔案做安全 + 存在性檢查
+    // 4. 對所有檔案做安全 + 存在性 + 副檔名檢查
     for (const f of allFiles) {
       let rp;
       try { rp = fs.realpathSync(f.path); }
       catch (e) { throw new Error(`檔案已被清除或不存在: ${f.name} (${f.path})`); }
       if (!rp.startsWith(UPLOAD_ROOT)) {
         throw new Error(`拒絕讀取此路徑(超出 ${UPLOAD_ROOT}): ${f.name}`);
+      }
+      const ext = path.extname(rp).toLowerCase();
+      if (!ALLOWED_EXCEL_EXTS.has(ext)) {
+        throw new Error(`不支援的檔案類型: ${f.name}(副檔名 ${ext || '(無)'} 不是 Excel)。excel_query 僅支援 ${Array.from(ALLOWED_EXCEL_EXTS).join('/')}`);
       }
       f.realPath = rp;
     }
@@ -526,6 +535,15 @@ async function runJob(db, jobId) {
     try {
       result = await dbAll(duckdbConn, job.sql_text);
     } catch (e) {
+      // SQL 結構性錯誤 = 同樣 SQL 再 retry 也是同樣錯,不該再 parse 一遍 xlsx 燒 CPU。
+      // mark recovery_count=MAX,讓 recoverStaleJobs 不會把這個 job 撿起來重跑。
+      // (2026-06-02 事故:同一 job 重跑 3 次,每次 273s 卡 event loop → K8s liveness fail)
+      if (PERMANENT_SQL_ERROR_RE.test(e.message)) {
+        try {
+          await db.prepare(`UPDATE excel_query_jobs SET recovery_count=? WHERE id=?`)
+            .run(MAX_RECOVERY_COUNT, jobId);
+        } catch (_) {}
+      }
       const tableInfo = loadedSheets.map(s => {
         const fileTag = s.fileName ? ` [檔:${s.fileName}]` : '';
         return `  - ${s.table}${s.original !== s.table.replace(/^[tf]\d*_?/, '') ? ` (原名:${s.original})` : ''}${fileTag} — ${s.rows} 列, 欄位:${s.columns.join(', ')}`;
