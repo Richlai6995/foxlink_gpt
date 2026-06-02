@@ -1059,25 +1059,29 @@ function buildMasterScrapeTask(kbMap, models = {}) {
 ↑ Pt / Pd / Rh / Ir / Ru 五金屬的 USD/oz 基準價。
   正崴採購合約多以 JM Base Price 為準,**PGM 的 price_usd 一律以此為主源**。
 
-  **⚠️ JM RSS 每天有 4 個盤(HK 08:30 / HK 14:00 / London 09:00 / NY 09:30),
-     使用者只認 London 09:00 的價作 PT/PD/RH/IR/RU 結算基準。**
+  **⚠️ 重要:JM 提供的 rss-feed.xml 整個 feed 內容 = 「最新一個 London 09:00 fix」**
+  (channel description 會寫 "Johnson Matthey Base Price $/oz - DD MMM YYYY 09:00 (London)"
+   驗證這點,但 LLM 看 RSS 內容也可能看不到 channel desc,**不用驗證,信就對了**)
 
-  ✅ **正確做法**:從 RSS 解析「最近一個 London 09:00 fix」(title / description 含
-     "London" 或 "09:00 London" 標記的那筆)。**忽略 HK / NY 其他盤**。
-  - 例:5/28 (週四) London 09:00 → PT=1,920, PD=1,920(從畫面對應)
-  - 例:5/29 (週五) London 09:00 尚未發布(早上 HK 06:00 抓時 London 還沒到 9 點)
-    → 取 5/28 London 09:00,as_of_date 標 "2026-05-28"
+  ✅ **正確做法**:RSS 內 5 個 items 對應 5 個金屬(Platinum/Palladium/Rhodium/Iridium/Ruthenium),
+     **逐一全部寫進 prices 陣列**,price_usd 直接取 description 內 "US$ XXXX per troy oz" 的數字。
+     **不需要篩 'London' / 'NY' 字串** — RSS items title 只是金屬名,內容就是該日 London 09:00 fix。
+  - 例:RSS 5 個 items → 寫 5 個 prices row(PT/PD/RH 一定要寫,IR/RU 可選)
+  - as_of_date 用 item 的 pubDate 那天(通常是今天 / 昨天)
 
-  ❌ 錯誤:抓 RSS 最頂端那筆(常是 NY 09:30,跟 London 差 1-2%)
-  ❌ 錯誤:抓 HK 08:30(用採購端時區但歐美結算不用)
+  ❌ 千萬不要:看 RSS title/description 沒寫 "London" 就以為是 NY/HK 整筆漏掉
+  ❌ 千萬不要:寫一段「JM 今天只發布 NY 09:30 沒 London」之類 narrative — RSS 本身就是 London 9am
 
   RSS 不帶日變動 %,LLM 一律輸出 day_change_pct=null,server 後算(用前一日 London 9am 價)。
 
-═══ AG 白銀主源:LBMA Silver Fix(USD/oz JSON,直接抓)═══
-{{fetch:https://prices.lbma.org.uk/json/silver.json}}
-↑ LBMA Silver Fix 公開 JSON endpoint,每日 USD/oz 已固定,直接用 v[0] 當 price_usd。
-  source = "LBMA", source_url = "https://prices.lbma.org.uk/json/silver.json"
-  (2026-05-25 起 AG 改用 LBMA 為唯一主源,不再用 Westmetall / Kitco)
+═══ AG 白銀:由 server-side LBMA backfill service 處理,LLM 不要寫 AG row ═══
+↑ LBMA Silver JSON (https://prices.lbma.org.uk/json/silver.json) 含 4647+ 筆歷史,
+  陣列從舊到新。fetch 工具回給 LLM 的內容會被截斷,LLM 看到的「最後一筆」常是 1971 年
+  那種早期歷史 row,不是真實最新。為避免錯誤,**AG 改由 server 端 backfillLBMA.js
+  cron service 每天自動跑**,直接 fetch JSON 在 server 端 parse 最後一筆寫進 DB。
+
+  ✅ **LLM 在 prices 陣列裡完全不要輸出 AG row**
+  ❌ 千萬不要寫 AG 進 prices(會跟 server backfill 衝突或寫入錯誤歷史價)
 
 ═══ 基本金屬 6 種(CU/AL/NI/ZN/PB/SN)主源:Westmetall LME Cash Settlement ═══
 {{scrape:https://www.westmetall.com/en/markdaten.php}}
@@ -1179,23 +1183,9 @@ B. **JSON 落地段**(放 markdown 末尾的單一 \`\`\`json 區塊;含 _kb_doc
 - **day_change_pct 一律輸出 null**(server 端會用前一日 London 9am JM 價自動補算)
 
 ═══ AG 寫入規則 ═══
-- **LBMA Silver Fix 為唯一主源**(USD/oz 直接用,不換算)
-  - source = "LBMA", source_url = "https://prices.lbma.org.uk/json/silver.json"
-  - price_type = "fix", market = "LBMA"
-
-**⚠️ 抓取邏輯**(跟基本金屬同樣原則):
-
-JSON shape:\`[{ d: 'YYYY-MM-DD', v: [USD, GBP, EUR] }, ...]\`,陣列從舊到新。
-
-✅ **正確做法**:取**陣列最後一筆**(最新),用 v[0] 當 price_usd,
-   d 欄位當 as_of_date。**無論 d 是不是今天 {{date}}**。
-   - 例:今天 2026-05-29,JSON 最後一筆 d="2026-05-28" → 寫 as_of_date="2026-05-28"
-   - 例:今天 2026-05-29(英國假期延遲),最後一筆 d="2026-05-22" → 寫 as_of_date="2026-05-22"
-   - server upsert 看 (AG, 5/22) 已存在就 skip,沒新資料就沒新 row,不會壞事
-
-❌ **不要看「今天沒對應 d」就整個漏掉**。LBMA 已經是「最新可得」就抓進去。
-
-**唯一漏掉情境**:LBMA JSON endpoint 整個 fetch 失敗。
+- **LLM 完全不要輸出 AG row**(2026-06-02 起改 server-side daily LBMA backfill 處理)
+- 原因:LBMA JSON 4647+ 筆,LLM fetch 拿到的 context 被截斷,LLM 取「最後一筆」
+  常拿到 1971 年那種早期歷史 row,不是真實最新。改 server-side 直接 fetch + parse。
 
 ═══ 基本金屬寫入規則(CU/AL/NI/ZN/PB/SN)═══
 - **只從 Westmetall markdaten.php 解析**,source = "Westmetall"
@@ -1223,26 +1213,26 @@ Westmetall markdaten.php 表格從上到下是「日期由新到舊」。Westmet
 只要表格還有任何一行有該金屬的數字,就要寫進去。
 
 ═══ 寫入規則(務必遵守)═══
-- **prices 陣列長度可變**(0-11 筆),只放今天真的抓到價的金屬
+- **prices 陣列長度可變**(0-10 筆,**不含 AG**),只放今天真的抓到價的金屬
   - AU 台銀:每天都有 → 一定要寫
-  - PT/PD/RH JM RSS:JM 每天 08:30 HK 更新 → 通常有
-  - 基本金屬 Westmetall:LME 週末休市 → 週末可能 0 筆
-  - AG LBMA:LBMA Fix 週末休市 → 週末可能 0 筆
+  - **PT/PD/RH JM RSS:RSS 有 items 就一定要寫(整個 RSS 就是 London 9am)**
+  - 基本金屬 Westmetall:LME 週末休市 → 週末可能 0 筆,但表頂端有 row 就寫
+  - **AG:LLM 完全不要碰,由 server-side LBMA backfill 處理**
 - price_usd 一律換算成 **USD 等價**
 - **as_of_date 規則**:
   - AU 台銀 → 今天 {{date}}
-  - JM RSS PT/PD/RH → 今天 {{date}}(RSS 標記 JM 更新日)
+  - JM RSS PT/PD/RH → item pubDate 那天(通常今天或昨天)
   - **Westmetall 基本金屬 → 用 Westmetall 表格那一行的日期**(可能是 1-3 天前)
-  - **AG LBMA → 用 JSON 最新一筆的 d 欄位**(可能是 1-3 天前)
-- **只輸出一個 \`\`\`json\`\`\` 區塊,內含 prices 陣列(沒有 news!)**
+- **只輸出一個 \`\`\`json\`\`\` 區塊,內含 prices 陣列(沒有 news!沒有 AG!)**
 
 ═══ 自我檢查清單 ═══
 - [ ] A 段中文報價綜述 200-400 字?
 - [ ] **JSON 內只有 _kb_doc + prices,沒有 news?**(2026-04-29 起新聞已交給 by-source task)
 - [ ] _kb_doc 是 1 筆陣列,title/summary/content 都填好?
 - [ ] **prices 陣列放「來源頁面上能看到的最新報價」**(無論日期是不是今天),只有來源整個失敗才漏
-- [ ] AU 用台銀價、PT/PD/RH 用 JM Base Price?
-- [ ] **基本金屬 as_of_date 用 Westmetall 表格實際日期** + **AG as_of_date 用 LBMA JSON d 欄位**(都不是 {{date}})?
+- [ ] AU 用台銀價、**PT/PD/RH 一定有寫**(RSS 就是 London 9am,5 個 items 對應 5 金屬)?
+- [ ] **AG row 完全沒寫**(由 server-side LBMA backfill 處理)?
+- [ ] **基本金屬 as_of_date 用 Westmetall 表格實際日期**(不是 {{date}})?
 - [ ] **所有 day_change_pct 都是 null**(LLM 不算,server 後算)
 - [ ] **完全沒用 TradingEconomics**?(2026-05-25 起停用)
 - [ ] 整份輸出只有一個 \`\`\`json\`\`\` 區塊?`;
@@ -1779,8 +1769,10 @@ async function patchExistingMasterScrapeAddPriceWrite(db, kbMap, models) {
   const hasLatestRowMarker  = !!promptStr && /抓表格\*\*最頂端那一行/.test(promptStr);
   // 2026-05-29:PGM 改 London 9am fix(原本 LLM 預設抓 NY 09:30)
   const hasLondon9amMarker  = !!promptStr && /London 09:00 fix/.test(promptStr);
+  // 2026-06-02:RSS 內容就是 London 9am(不用篩) + AG 不再讓 LLM 抓
+  const hasV3Marker         = !!promptStr && /AG row 完全沒寫/.test(promptStr);
 
-  if (hasPriceWrite && hasJmMarker && hasBotMarker && hasNewsRulesMarker && hasV2Marker && hasKbDocMarker && hasNoTeMarker && hasLbmaAgMarker && hasLatestRowMarker && hasLondon9amMarker) return;
+  if (hasPriceWrite && hasJmMarker && hasBotMarker && hasNewsRulesMarker && hasV2Marker && hasKbDocMarker && hasNoTeMarker && hasLbmaAgMarker && hasLatestRowMarker && hasLondon9amMarker && hasV3Marker) return;
 
   try {
     // 一併 update prompt + pipeline + email_subject/body(2026-04-29 重構不發 email)
@@ -1800,6 +1792,7 @@ async function patchExistingMasterScrapeAddPriceWrite(db, kbMap, models) {
       !hasLbmaAgMarker && '2026-05-25 AG 改 LBMA 主源',
       !hasLatestRowMarker && '2026-05-29 抓最頂端 row 邏輯',
       !hasLondon9amMarker && '2026-05-29 PGM 改 London 9am fix',
+      !hasV3Marker && '2026-06-02 RSS 不篩 + AG 改 server-side',
     ].filter(Boolean).join(' + ');
     console.log(`[PMScheduledTaskSeed] Upgraded "${targetName}" #${id}: ${missing}`);
   } catch (e) {

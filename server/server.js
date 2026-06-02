@@ -416,6 +416,12 @@ app.get('/api/version', (req, res) => {
       startDayChangePctCron();
     } catch (e) { console.error('[PmDayChangePct] Failed to start:', e.message); }
 
+    // 2026-06-02: LBMA Silver Fix daily sync(取代 LLM 抓 AG,避免 fetch 截斷導致誤抓 1971 row)
+    if (RUN_SCHEDULERS) try {
+      const { startLbmaSilverSyncCron } = require('./services/pmLbmaSilverSyncService');
+      startLbmaSilverSyncCron();
+    } catch (e) { console.error('[PmLbmaSilver] Failed to start:', e.message); }
+
     // Phase 5 Track F-2 + F-5: PM Token 預算 + cost aggregator(每 1h)
     if (RUN_SCHEDULERS) try {
       const { startTokenBudgetCron } = require('./services/pmTokenBudgetService');
