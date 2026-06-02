@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { AdminOverrideProvider } from './context/AdminOverrideContext'
 import { MicProvider } from './context/MicContext'
@@ -36,11 +36,25 @@ const PmReviewQueuePage = lazy(() => import('./pages/PmReviewQueuePage'))
 const PmBriefingPage = lazy(() => import('./pages/PmBriefingPage'))
 const MetalsPage = lazy(() => import('./pages/MetalsPage'))
 const ProjectsPlatformPage = lazy(() => import('./pages/ProjectsPlatform'))
+const SharedChatPage = lazy(() => import('./pages/SharedChatPage'))
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth()
-  if (!isAuthenticated) return <Navigate to="/login" replace />
+  const location = useLocation()
+  if (!isAuthenticated) {
+    return <Navigate to="/login" state={{ from: location.pathname + location.search }} replace />
+  }
   return <>{children}</>
+}
+
+function LoginRoute() {
+  const { isAuthenticated } = useAuth()
+  const location = useLocation()
+  if (isAuthenticated) {
+    const from = (location.state as { from?: string } | null)?.from
+    return <Navigate to={from || '/chat'} replace />
+  }
+  return <Login />
 }
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
@@ -66,7 +80,17 @@ function AppRoutes() {
     <AdminOverrideProvider userId={(user as any)?.id ?? null}>
     <MicProvider>
     <Routes>
-      <Route path="/login" element={isAuthenticated ? <Navigate to="/chat" replace /> : <Login />} />
+      <Route path="/login" element={<LoginRoute />} />
+      <Route
+        path="/share/:token"
+        element={
+          <ProtectedRoute>
+            <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400">Loading...</div>}>
+              <SharedChatPage />
+            </Suspense>
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/chat"
         element={

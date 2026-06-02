@@ -3668,5 +3668,21 @@
     "prefsShared": "This preference is shared with the procurement full view; changing here applies to both.",
     "save": "Save",
     "cancel": "Cancel"
+  },
+  "share": {
+    "loading": "Loading...",
+    "loadFailed": "Failed to load share",
+    "notFound": "Share not found or has been deleted",
+    "untitled": "Untitled chat",
+    "sharedBy": "Shared by",
+    "backToChat": "Back to chat",
+    "copyLink": "Copy link",
+    "importToMine": "Import to my chats",
+    "importing": "Importing...",
+    "importError": "Import failed",
+    "deleteShare": "Delete share",
+    "deleteConfirm": "Delete this share link? Others will no longer be able to access it.",
+    "deleteFailed": "Delete failed",
+    "readOnlyNote": "This is a read-only snapshot. Import it to continue in your own chats."
   }
 }

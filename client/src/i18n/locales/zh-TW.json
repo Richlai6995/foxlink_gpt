@@ -3668,5 +3668,21 @@
     "prefsShared": "本偏好與「貴金屬情報(完整版)」共用,改一邊兩邊同步。",
     "save": "儲存",
     "cancel": "取消"
+  },
+  "share": {
+    "loading": "載入中...",
+    "loadFailed": "載入分享失敗",
+    "notFound": "找不到分享或已被刪除",
+    "untitled": "未命名對話",
+    "sharedBy": "分享自",
+    "backToChat": "回到對話",
+    "copyLink": "複製連結",
+    "importToMine": "匯入到我的對話",
+    "importing": "匯入中...",
+    "importError": "匯入失敗",
+    "deleteShare": "刪除分享",
+    "deleteConfirm": "確定要刪除此分享連結?刪除後其他人將無法再透過此連結存取。",
+    "deleteFailed": "刪除失敗",
+    "readOnlyNote": "此為唯讀分享快照,匯入後可在你自己的對話中延續。"
   }
 }

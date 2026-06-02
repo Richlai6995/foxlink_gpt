@@ -3668,5 +3668,21 @@
     "prefsShared": "Tuỳ chỉnh này dùng chung với bản đầy đủ; thay đổi ở đây áp dụng cho cả hai.",
     "save": "Lưu",
     "cancel": "Huỷ"
+  },
+  "share": {
+    "loading": "Đang tải...",
+    "loadFailed": "Tải chia sẻ thất bại",
+    "notFound": "Không tìm thấy chia sẻ hoặc đã bị xoá",
+    "untitled": "Cuộc trò chuyện chưa đặt tên",
+    "sharedBy": "Chia sẻ bởi",
+    "backToChat": "Quay lại trò chuyện",
+    "copyLink": "Sao chép liên kết",
+    "importToMine": "Nhập vào trò chuyện của tôi",
+    "importing": "Đang nhập...",
+    "importError": "Nhập thất bại",
+    "deleteShare": "Xoá chia sẻ",
+    "deleteConfirm": "Xoá liên kết chia sẻ này? Người khác sẽ không thể truy cập qua liên kết này nữa.",
+    "deleteFailed": "Xoá thất bại",
+    "readOnlyNote": "Đây là ảnh chụp chỉ đọc. Nhập vào để tiếp tục trong các cuộc trò chuyện của bạn."
   }
 }

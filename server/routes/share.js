@@ -159,12 +159,13 @@ router.post('/', async (req, res) => {
 router.get('/:token', async (req, res) => {
   try {
     const snap = await db.prepare(
-      `SELECT s.id, s.title, s.model, s.created_at, s.messages_json,
+      `SELECT s.id, s.title, s.model, s.created_at, s.messages_json, s.created_by,
               u.name AS creator_name, u.username AS creator_username
        FROM share_snapshots s JOIN users u ON u.id = s.created_by
        WHERE s.id=?`
     ).get(req.params.token);
     if (!snap) return res.status(404).json({ error: '找不到分享' });
+    const isOwner = snap.created_by === req.user.id;
 
     let messages = [];
     try { messages = JSON.parse(snap.messages_json); } catch {}
@@ -202,7 +203,7 @@ router.get('/:token', async (req, res) => {
       created_at: snap.created_at,
       creator_name: snap.creator_name,
       creator_username: snap.creator_username,
-      is_owner: false, // resolved below
+      is_owner: isOwner,
       messages: transformed,
     });
   } catch (e) {
