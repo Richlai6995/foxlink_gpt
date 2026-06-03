@@ -3,6 +3,7 @@
  * 載入全部使用者，點選輸入框就展開，即時 filter
  */
 import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { Search, X } from 'lucide-react'
 import api from '../../lib/api'
 
@@ -37,6 +38,9 @@ export default function UserPicker({ value, display, onChange, onUserSelect, pla
     (initialCache && Date.now() - initialCache.loadedAt < CACHE_TTL_MS) ? initialCache.users : []
   )
   const ref = useRef<HTMLDivElement>(null)
+  // 2026-06-03: dropdown 改用 portal render 到 body,逃出 modal 的 overflow:auto/hidden 容器
+  // (PM 寄信清單 modal 內容區用 overflow-y-auto,absolute dropdown 被切只看到第一筆 user)
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 })
 
   // 載入全部使用者(TTL 5 分鐘 — 之前是永久 cache,deploy 後 lov 加欄位 stale 不會 refresh)
   useEffect(() => {
@@ -54,6 +58,23 @@ export default function UserPicker({ value, display, onChange, onUserSelect, pla
 
   // 外部 display 改變時同步
   useEffect(() => { setFilter(display) }, [display])
+
+  // dropdown 開啟時 / 視窗 resize 時重算位置(portal 需要 fixed 座標)
+  useEffect(() => {
+    if (!open || !ref.current) return
+    const calc = () => {
+      if (!ref.current) return
+      const r = ref.current.getBoundingClientRect()
+      setDropdownPos({ top: r.bottom + 4, left: r.left, width: r.width })
+    }
+    calc()
+    window.addEventListener('resize', calc)
+    window.addEventListener('scroll', calc, true)  // capture: true 抓所有 scroll container
+    return () => {
+      window.removeEventListener('resize', calc)
+      window.removeEventListener('scroll', calc, true)
+    }
+  }, [open])
 
   // outside click 收起
   useEffect(() => {
@@ -110,8 +131,23 @@ export default function UserPicker({ value, display, onChange, onUserSelect, pla
         )}
       </div>
 
-      {open && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-30 max-h-52 overflow-y-auto">
+      {open && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            top: dropdownPos.top,
+            left: dropdownPos.left,
+            width: dropdownPos.width,
+            zIndex: 10000,
+          }}
+          className="bg-white border border-gray-200 rounded-lg shadow-lg max-h-52 overflow-y-auto"
+          // outside click handler 看 ref.current 是否含 e.target,portal 內也算 contain,
+          // 因為 portal 的 React tree 看起來還在 ref.current 內(只是 DOM 在別處)
+          // 實際上 ref.current.contains() 用 DOM 不是 React tree,portal 元素在 body 下,
+          // 所以 outside click 會誤判 dropdown 是 outside → 點 dropdown 就關閉。
+          // 加 stopPropagation 防止 click 冒泡到 document 的 mousedown listener。
+          onMouseDown={e => e.stopPropagation()}
+        >
           {filtered.length === 0 ? (
             <div className="px-3 py-2 text-xs text-gray-400">無符合結果</div>
           ) : (
@@ -131,7 +167,8 @@ export default function UserPicker({ value, display, onChange, onUserSelect, pla
               </button>
             ))
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )
