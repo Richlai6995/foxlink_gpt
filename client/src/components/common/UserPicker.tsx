@@ -24,20 +24,30 @@ interface Props {
   apiUrl?: string      // override API endpoint (default: /users)
 }
 
-let cachedUsers: Record<string, User[]> = {}
+// 2026-06-03: 加 TTL — 之前是 module-level 永久 cache,deploy 後若 lov 加欄位 (e.g. email)
+// 或修 LIMIT,前端不重整網頁就一直用 stale list。改 5 分鐘 TTL 平衡效能 vs fresh。
+const CACHE_TTL_MS = 5 * 60 * 1000;
+let cachedUsers: Record<string, { users: User[]; loadedAt: number }> = {}
 
 export default function UserPicker({ value, display, onChange, onUserSelect, placeholder = '搜尋姓名 / 帳號 / 工號 / Email', className = '', apiUrl = '/users/lov' }: Props) {
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState(display)
-  const [users, setUsers] = useState<User[]>(cachedUsers[apiUrl] || [])
+  const initialCache = cachedUsers[apiUrl]
+  const [users, setUsers] = useState<User[]>(
+    (initialCache && Date.now() - initialCache.loadedAt < CACHE_TTL_MS) ? initialCache.users : []
+  )
   const ref = useRef<HTMLDivElement>(null)
 
-  // 載入全部使用者（只載一次，cache 在 module level per apiUrl）
+  // 載入全部使用者(TTL 5 分鐘 — 之前是永久 cache,deploy 後 lov 加欄位 stale 不會 refresh)
   useEffect(() => {
-    if (cachedUsers[apiUrl]) { setUsers(cachedUsers[apiUrl]); return }
+    const cached = cachedUsers[apiUrl]
+    if (cached && Date.now() - cached.loadedAt < CACHE_TTL_MS) {
+      setUsers(cached.users)
+      return
+    }
     api.get(apiUrl).then(r => {
       const list: User[] = r.data || []
-      cachedUsers[apiUrl] = list
+      cachedUsers[apiUrl] = { users: list, loadedAt: Date.now() }
       setUsers(list)
     }).catch(() => {})
   }, [])
