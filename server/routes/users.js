@@ -5,12 +5,13 @@ const passwordService = require('../services/passwordService');
 
 router.use(verifyToken);
 
-// GET /api/users/lov — 任何登入者可用的最小欄位 LOV(供 UserPicker、分享對象選擇器)
+// GET /api/users/lov — 任何登入者可用的最小欄位 LOV(供 UserPicker、分享對象選擇器、PM 郵件清單收件人挑選)
+// 2026-06-03:加 email 給 PM 郵件清單 RecipientsManager 拿(從 user 主檔挑後自動帶 email)
 router.get('/lov', async (req, res) => {
   try {
     const db = require('../database-oracle').db;
     const rows = await db.prepare(
-      `SELECT id, username, name, employee_id
+      `SELECT id, username, name, employee_id, email
          FROM users
         WHERE status='active'
         ORDER BY name`

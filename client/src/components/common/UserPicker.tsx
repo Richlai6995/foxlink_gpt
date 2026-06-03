@@ -11,12 +11,14 @@ interface User {
   name: string
   username: string
   employee_id?: string
+  email?: string                // 2026-06-03: /users/lov 加回 email,讓 caller 能拿
 }
 
 interface Props {
   value: string        // grantee_id (user.id as string)
   display: string      // 顯示用文字 (name + username)
   onChange: (id: string, display: string) => void
+  onUserSelect?: (user: User) => void  // 2026-06-03: 拿完整 user 物件(含 email)給 caller 用
   placeholder?: string
   className?: string
   apiUrl?: string      // override API endpoint (default: /users)
@@ -24,7 +26,7 @@ interface Props {
 
 let cachedUsers: Record<string, User[]> = {}
 
-export default function UserPicker({ value, display, onChange, placeholder = '搜尋姓名 / 帳號 / 工號', className = '', apiUrl = '/users/lov' }: Props) {
+export default function UserPicker({ value, display, onChange, onUserSelect, placeholder = '搜尋姓名 / 帳號 / 工號 / Email', className = '', apiUrl = '/users/lov' }: Props) {
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState(display)
   const [users, setUsers] = useState<User[]>(cachedUsers[apiUrl] || [])
@@ -61,13 +63,15 @@ export default function UserPicker({ value, display, onChange, placeholder = '�
     ? users.filter(u =>
         u.name?.toLowerCase().includes(filter.toLowerCase()) ||
         u.username?.toLowerCase().includes(filter.toLowerCase()) ||
-        (u.employee_id || '').toLowerCase().includes(filter.toLowerCase())
+        (u.employee_id || '').toLowerCase().includes(filter.toLowerCase()) ||
+        (u.email || '').toLowerCase().includes(filter.toLowerCase())  // 2026-06-03: email 也納入搜尋
       )
     : users
 
   const select = (u: User) => {
     onChange(String(u.id), `${u.name} (${u.username})`)
     setFilter(`${u.name} (${u.username})`)
+    if (onUserSelect) onUserSelect(u)  // 2026-06-03: 回傳完整 user 物件(含 email)
     setOpen(false)
   }
 
@@ -106,11 +110,14 @@ export default function UserPicker({ value, display, onChange, placeholder = '�
                 key={u.id}
                 type="button"
                 onClick={() => select(u)}
-                className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 border-b border-gray-50 last:border-0 flex items-center justify-between
+                className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 border-b border-gray-50 last:border-0 flex items-center justify-between gap-2
                   ${value === String(u.id) ? 'bg-blue-50 text-blue-700' : 'text-gray-700'}`}
               >
-                <span className="font-medium">{u.name}</span>
-                <span className="text-xs text-gray-400">{u.username}{u.employee_id ? ` · ${u.employee_id}` : ''}</span>
+                <span className="font-medium truncate">{u.name}</span>
+                <span className="text-xs text-gray-400 shrink-0 truncate max-w-[60%] text-right">
+                  {u.username}{u.employee_id ? ` · ${u.employee_id}` : ''}
+                  {u.email ? ` · ${u.email}` : ''}
+                </span>
               </button>
             ))
           )}

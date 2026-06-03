@@ -8,6 +8,7 @@ import { useEffect, useState, Fragment } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Mail, Plus, Trash2, RefreshCw, ChevronDown, ChevronUp, X, Edit3, Power } from 'lucide-react'
 import api from '../../lib/api'
+import UserPicker from '../common/UserPicker'
 
 interface MailingList {
   id: number
@@ -204,20 +205,29 @@ function RecipientsManager({ listId, recipients, onChanged, onRemove }: {
   onChanged: () => void
   onRemove: (rid: number) => void
 }) {
-  const [email, setEmail] = useState('')
-  const [displayName, setDisplayName] = useState('')
+  // 2026-06-03:改用 UserPicker 從 user 主檔挑(姓名/帳號/工號/email 都可搜尋),
+  // 選到後自動帶 email + name → POST。舊 free-text 模式不再支援。
+  const [pickerKey, setPickerKey] = useState(0)
   const [adding, setAdding] = useState(false)
 
-  const add = async () => {
-    if (!email.trim()) return
+  const addUser = async (user: { id: number; name: string; username: string; email?: string }) => {
+    if (!user.email) {
+      alert(`使用者「${user.name}」沒設定 email,無法加入清單。請先請 admin 補上 email。`)
+      return
+    }
+    // 同 email 已在清單內 → skip(避免重複 POST 顯示 unique constraint 錯誤)
+    if (recipients.some(r => r.email.toLowerCase() === user.email!.toLowerCase())) {
+      alert(`${user.email} 已經在清單內`)
+      setPickerKey(k => k + 1)
+      return
+    }
     setAdding(true)
     try {
       await api.post(`/pm/briefing/mailing-lists/${listId}/recipients`, {
-        email: email.trim(),
-        display_name: displayName.trim() || null,
+        email: user.email,
+        display_name: user.name,
       })
-      setEmail('')
-      setDisplayName('')
+      setPickerKey(k => k + 1)  // reset picker 輸入框
       onChanged()
     } catch (e: any) {
       alert(e?.response?.data?.error || e.message)
@@ -227,17 +237,15 @@ function RecipientsManager({ listId, recipients, onChanged, onRemove }: {
   return (
     <div className="space-y-2">
       <div className="text-[11px] text-slate-500">收件人(共 {recipients.length})</div>
-      <div className="flex items-center gap-1.5 text-xs">
-        <input className="input flex-1" value={email} onChange={e => setEmail(e.target.value)}
-          placeholder="email@example.com" type="email"
-          onKeyDown={e => e.key === 'Enter' && add()} />
-        <input className="input w-40" value={displayName} onChange={e => setDisplayName(e.target.value)}
-          placeholder="顯示名稱(選填)"
-          onKeyDown={e => e.key === 'Enter' && add()} />
-        <button onClick={add} disabled={adding || !email.trim()}
-          className="text-xs px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">
-          + 加入
-        </button>
+      <div className="text-xs">
+        <UserPicker
+          key={pickerKey}
+          value=""
+          display=""
+          onChange={() => {}}
+          onUserSelect={u => addUser(u)}
+          placeholder={adding ? '加入中…' : '搜尋使用者(姓名 / 帳號 / 工號 / Email)→ 點選即加入'}
+        />
       </div>
       {recipients.length === 0 ? (
         <div className="text-[11px] text-slate-400 italic">尚無收件人</div>
