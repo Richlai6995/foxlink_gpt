@@ -1233,9 +1233,17 @@ router.post('/purchaser-reports/:id/publish', verifyToken, verifyPmUser, async (
     const db = require('../database-oracle').db;
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid id' });
+    // 2026-06-04: publish 時把 as_of_date 對齊到「發布當天」。
+    // 之前複製 LLM 舊 draft (5/4 那週) → as_of_date 帶到 5/4 → 發布後精簡版按本週(6/4)
+    // ISO week 對齊抓不到,user 看不到剛發布的報告。
+    // 改成 publish 一律覆寫 as_of_date = TRUNC(SYSDATE),不論複製哪份 LLM draft,
+    // 發布按下去那刻 = 該週/該月的 official version。
     await db.prepare(`
       UPDATE pm_purchaser_reports
-      SET is_published = 1, published_at = SYSTIMESTAMP, last_updated_date = SYSTIMESTAMP
+      SET is_published = 1,
+          published_at = SYSTIMESTAMP,
+          as_of_date = TRUNC(SYSDATE),
+          last_updated_date = SYSTIMESTAMP
       WHERE id = ?
     `).run(id);
     res.json({ ok: true });
