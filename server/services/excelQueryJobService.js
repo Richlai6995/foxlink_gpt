@@ -246,6 +246,28 @@ function rowsToMarkdown(rows) {
  * @returns {Promise<string>} jobId
  */
 async function createJob(db, opts) {
+  // Dedupe:同 user + 同檔 + 同 SQL 已經有 pending/running 的 job,直接重用,不再建新。
+  // 2026-06-05 事件:user 等不及又按了一次,同個 7.96MB xlsx 兩個 worker 同時 parse → CPU 爆。
+  // 撈最近 30 分鐘候選(候選通常 < 5 筆,JS 比 sql_text 字串很快),不會掃全表。
+  try {
+    const candidates = await db.prepare(`
+      SELECT id, sql_text FROM excel_query_jobs
+      WHERE user_id = ?
+        AND file_path = ?
+        AND COALESCE(sheet_name, '') = COALESCE(?, '')
+        AND status IN ('pending', 'running')
+        AND created_at > SYSTIMESTAMP - INTERVAL '30' MINUTE
+    `).all(opts.userId, opts.filePath, opts.sheetName || null);
+    const match = (candidates || []).find(r => (r.sql_text || r.SQL_TEXT) === opts.sql);
+    if (match) {
+      const reusedId = match.id || match.ID;
+      console.log(`[ExcelJob] dedupe hit → reusing ${reusedId} for user=${opts.userId} file=${opts.fileName}`);
+      return reusedId;
+    }
+  } catch (e) {
+    console.warn(`[ExcelJob] dedupe check failed (continuing to create new): ${e.message}`);
+  }
+
   const jobId = crypto.randomUUID();
   const extraFilesJson = opts.extraFiles && opts.extraFiles.length > 0
     ? JSON.stringify(opts.extraFiles.map(f => ({ name: f.name, path: f.path })))
@@ -326,11 +348,16 @@ async function waitForResult(db, jobId, opts = {}) {
 // ─── SIGTERM / Recovery(對齊 transcribeJobService)──────────────────────────
 
 async function _markJobForRecovery(db, jobId) {
+  // 不要把 heartbeat 設成「10 分鐘前」立刻變 stale — 那會讓新 pod 在 SIGTERM 後立刻撿走 job,
+  // 但舊 pod 還在 graceful shutdown 60s 內可能繼續處理 → 兩顆 pod 同時跑同一個 job(2026-06-05 事件)。
+  // 設成「現在」讓 recoverStaleJobs 等 STALE_HEARTBEAT_MIN(5 min)後才認為失蹤,
+  // 期間舊 pod 60s graceful 自然結束 / 完成 job → 新舊不重疊。
+  // 代價:job 在 deploy 後最多卡 5 分鐘才被撿回來重跑(可接受 — 比並發雪崩好太多)。
   try {
     await db.prepare(`
       UPDATE excel_query_jobs SET
         lock_token = NULL,
-        heartbeat_at = SYSTIMESTAMP - INTERVAL '10' MINUTE,
+        heartbeat_at = SYSTIMESTAMP,
         updated_at = SYSTIMESTAMP
       WHERE id = ? AND status = 'running'
     `).run(jobId);
