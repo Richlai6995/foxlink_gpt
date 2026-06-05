@@ -360,7 +360,9 @@ router.put('/tickets/:id/reopen', async (req, res) => {
     const db = require('../database-oracle').db;
     const ticket = await feedbackService.getTicketById(db, Number(req.params.id));
     if (!ticket) return res.status(404).json({ error: '工單不存在' });
-    if (ticket.user_id !== req.user.id) return res.status(403).json({ error: '只有申請者可以重開' });
+    if (ticket.user_id !== req.user.id && !canManageTicket(req.user, ticket)) {
+      return res.status(403).json({ error: '只有申請者或管理員可以重開' });
+    }
     if (ticket.status !== 'closed') return res.status(400).json({ error: '只有已關閉的工單可以重開' });
 
     // 檢查 72hr 限制（從 closed_at 起算；fallback resolved_at）
