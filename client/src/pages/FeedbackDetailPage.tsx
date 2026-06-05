@@ -132,7 +132,7 @@ export default function FeedbackDetailPage() {
 
   const isOwner = ticket?.user_id === (user as any)?.id
   // ERP admin 可管理 ERP 分類工單（顯示 Lock / 接單 / 結案 admin 欄位等）
-  const canManage = isAdmin || (!!((user as any)?.is_erp_admin) && Number(ticket?.category_is_erp) === 1)
+  const canManage = isAdmin || !!((user as any)?.is_erp_admin)
 
   // WebSocket 即時連線
   const { typingUsers, lastEvent, sendTyping, sendStopTyping } = useFeedbackSocket(id ? Number(id) : undefined)
@@ -472,7 +472,7 @@ export default function FeedbackDetailPage() {
   const canChat = !['closed', 'draft'].includes(ticket.status)
   const canResolve = ['processing', 'open', 'pending_user', 'reopened'].includes(ticket.status)
   const canReopen = ticket.status === 'resolved' && isOwner
-  const canClose = ticket.status === 'resolved' && canManage
+  const canClose = ticket.status === 'resolved' && (canManage || isOwner)
 
   return (
     <div className="h-dvh bg-white text-gray-900 flex flex-col">

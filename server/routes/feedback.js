@@ -44,12 +44,11 @@ router.use(verifyToken);
 
 // ─── Permission helpers ──────────────────────────────────────────────────────
 
-/** 可處理工單：Cortex admin 或（ERP admin + 該工單是 ERP 分類） */
+/** 可處理工單：Cortex admin 或 ERP admin（不再卡分類 — ERP admin 補錄歷史對話常無分類） */
 function canManageTicket(user, ticket) {
   if (!ticket) return false;
   if (user.role === 'admin') return true;
-  const isErp = ticket.category_is_erp === 1 || ticket.category_is_erp === '1';
-  return !!(user.is_erp_admin && isErp);
+  return !!user.is_erp_admin;
 }
 
 /** 可檢視：可處理 或 申請者本人 */
