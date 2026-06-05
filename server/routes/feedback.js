@@ -361,12 +361,14 @@ router.put('/tickets/:id/reopen', async (req, res) => {
     const ticket = await feedbackService.getTicketById(db, Number(req.params.id));
     if (!ticket) return res.status(404).json({ error: '工單不存在' });
     if (ticket.user_id !== req.user.id) return res.status(403).json({ error: '只有申請者可以重開' });
+    if (ticket.status !== 'closed') return res.status(400).json({ error: '只有已關閉的工單可以重開' });
 
-    // 檢查 72hr 限制
-    if (ticket.resolved_at) {
-      const resolvedAt = new Date(ticket.resolved_at);
+    // 檢查 72hr 限制（從 closed_at 起算；fallback resolved_at）
+    const baseTime = ticket.closed_at || ticket.resolved_at;
+    if (baseTime) {
+      const base = new Date(baseTime);
       const now = new Date();
-      if (now - resolvedAt > 72 * 3600000) {
+      if (now - base > 72 * 3600000) {
         return res.status(400).json({ error: '已超過 72 小時，無法重開' });
       }
     }

@@ -471,7 +471,7 @@ export default function FeedbackDetailPage() {
   const isDraft = ticket.status === 'draft'
   const canChat = !['closed', 'draft'].includes(ticket.status)
   const canResolve = ['processing', 'open', 'pending_user', 'reopened'].includes(ticket.status)
-  const canReopen = ticket.status === 'resolved' && isOwner
+  const canReopen = ticket.status === 'closed' && isOwner
   const canClose = ticket.status === 'resolved' && (canManage || isOwner)
 
   return (
