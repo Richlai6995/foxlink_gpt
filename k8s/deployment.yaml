@@ -161,12 +161,17 @@ spec:
               cpu: "2000m"
 
           # ── Health Checks ─────────────────────────────────────────────────
+          # timeoutSeconds: 5 (預設 1s 太嚴 — Node.js GC pause / Oracle pool stall /
+          # 大量 SSE flush 都可能讓 health endpoint > 1s 回應,連帶 false-positive 殺 pod。
+          # 5s + failureThreshold=3 = 真的卡 15s 才殺,比較合理。2026-06-06 事件:
+          # scheduler 累積 17 次 restart 部分是 timeout=1s 太嚴連帶觸發)
           livenessProbe:
             httpGet:
               path: /api/health
               port: 3007
             initialDelaySeconds: 30
             periodSeconds: 10
+            timeoutSeconds: 5
             failureThreshold: 3
 
           readinessProbe:
@@ -175,6 +180,7 @@ spec:
               port: 3007
             initialDelaySeconds: 10
             periodSeconds: 5
+            timeoutSeconds: 5
             failureThreshold: 2
 
           # ── Graceful Shutdown ─────────────────────────────────────────────

@@ -136,12 +136,16 @@ spec:
               cpu: "1500m"     # 高峰時排程任務含 LLM call + 檔案生成,留足夠 burst
 
           # ── Health Checks(scheduler pod 也跑 Express,/api/health 仍可用)──
+          # timeoutSeconds: 5(預設 1s 太嚴,scheduler 跑 ExcelJob/Pipeline 大量 sync 時
+          # event loop 偶爾撞 1s 就被殺。5s + failureThreshold=3 = 真的卡 15s 才殺,
+          # 比 06-06 那波 17 次 restart 安全多了)
           livenessProbe:
             httpGet:
               path: /api/health
               port: 3007
             initialDelaySeconds: 30
             periodSeconds: 10
+            timeoutSeconds: 5
             failureThreshold: 3
 
           readinessProbe:
@@ -150,6 +154,7 @@ spec:
               port: 3007
             initialDelaySeconds: 10
             periodSeconds: 5
+            timeoutSeconds: 5
             failureThreshold: 2
 
           # ── Graceful Shutdown ─────────────────────────────────────────────

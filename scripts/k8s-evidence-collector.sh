@@ -84,12 +84,22 @@ for ev in "${UNHEALTHY_LINES[@]}"; do
     [ "$age" -gt 600 ] && continue
   fi
   if [ "$count" -ge "$UNHEALTHY_THRESHOLD" ]; then
+    # 同一個 pod 多條 Unhealthy event(readiness + liveness 分開記),取 max 不要 append。
+    # 避免 REASON 變成 "unhealthy=25,unhealthy=181,unhealthy=51" 這種讀起來很亂的串。
     existing="${HOT_REASON[$pod_name]:-}"
-    new="unhealthy=${count}"
-    if [ -n "$existing" ]; then
-      HOT_REASON["$pod_name"]="${existing},${new}"
-    else
-      HOT_REASON["$pod_name"]="$new"
+    prev_unhealthy=0
+    if [[ "$existing" =~ unhealthy=([0-9]+) ]]; then
+      prev_unhealthy="${BASH_REMATCH[1]}"
+    fi
+    if [ "$count" -gt "$prev_unhealthy" ]; then
+      # 用新 count 取代舊的 unhealthy=N,其他 reason 保留(例如 cpu=)
+      if [ -z "$existing" ]; then
+        HOT_REASON["$pod_name"]="unhealthy=${count}"
+      elif [[ "$existing" == *"unhealthy="* ]]; then
+        HOT_REASON["$pod_name"]=$(echo "$existing" | sed -E "s/unhealthy=[0-9]+/unhealthy=${count}/")
+      else
+        HOT_REASON["$pod_name"]="${existing},unhealthy=${count}"
+      fi
     fi
   fi
 done
