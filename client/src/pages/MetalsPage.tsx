@@ -234,6 +234,46 @@ export default function MetalsPage() {
             focusedSet={focusedSet}
             theme="precious"
           />
+
+          {/* 參考網站清單 — 採購情報資料來源,放左欄空白空間。橫向 overflow-x-auto 防止
+              中英混排撐爆 280px 左欄寬度。tooltip 顯示完整 URL。 */}
+          <div className="bg-white border rounded-lg overflow-hidden shrink-0">
+            <div className="px-3 py-1.5 border-b bg-slate-50 text-xs font-bold text-slate-700">
+              參考網站
+            </div>
+            <ul className="text-[11px] text-slate-600 px-3 py-2 space-y-1.5 overflow-x-auto">
+              <li className="whitespace-nowrap">
+                <a href="https://www.lme.com/metals/non-ferrous/lme-copper#Trading+summary"
+                  target="_blank" rel="noreferrer" title="https://www.lme.com/metals/non-ferrous/lme-copper"
+                  className="text-blue-600 hover:underline font-medium">LME</a>
+                <span className="text-slate-400 ml-1">— 基本金屬報價</span>
+              </li>
+              <li className="whitespace-nowrap">
+                <a href="https://www.westmetall.com/en/markdaten.php"
+                  target="_blank" rel="noreferrer" title="https://www.westmetall.com/en/markdaten.php"
+                  className="text-blue-600 hover:underline font-medium">Westmetall</a>
+                <span className="text-slate-400 ml-1">— LME 歷史表</span>
+              </li>
+              <li className="whitespace-nowrap">
+                <a href="https://rate.bot.com.tw/gold/obu?Lang=zh-TW"
+                  target="_blank" rel="noreferrer" title="https://rate.bot.com.tw/gold/obu?Lang=zh-TW"
+                  className="text-blue-600 hover:underline font-medium">台灣銀行</a>
+                <span className="text-slate-400 ml-1">— 黃金存摺牌價</span>
+              </li>
+              <li className="whitespace-nowrap">
+                <a href="https://www.lbma.org.uk/"
+                  target="_blank" rel="noreferrer" title="https://www.lbma.org.uk/"
+                  className="text-blue-600 hover:underline font-medium">LBMA</a>
+                <span className="text-slate-400 ml-1">— Silver Fix 定盤價</span>
+              </li>
+              <li className="whitespace-nowrap">
+                <a href="https://matthey.com/pmm"
+                  target="_blank" rel="noreferrer" title="https://matthey.com/pmm"
+                  className="text-blue-600 hover:underline font-medium">Johnson Matthey</a>
+                <span className="text-slate-400 ml-1">— PGM Base Price</span>
+              </li>
+            </ul>
+          </div>
         </div>
 
         {/* 中欄 — 兩 chart */}

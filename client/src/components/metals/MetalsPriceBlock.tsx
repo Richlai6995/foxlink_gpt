@@ -54,12 +54,12 @@ export default function MetalsPriceBlock({ title, rows, metalsAllowed, loading, 
         {loading && <Loader2 size={14} className="animate-spin opacity-50" />}
       </div>
 
-      {/* 欄位標題小提示 */}
+      {/* 欄位標題小提示 — 基本金屬 USD/Ton,貴金屬 USD/Troy Oz */}
       <div className="grid items-center gap-0.5 px-1.5 py-1 text-[9px] text-slate-400 border-b bg-slate-50/50"
         style={{ gridTemplateColumns: '34px minmax(0,1fr) 64px 42px 42px 42px' }}>
         <span>代碼</span>
         <span></span>
-        <span className="text-right">USD</span>
+        <span className="text-right">{theme === 'precious' ? 'USD/Troy Oz' : 'USD/Ton'}</span>
         <span className="text-right">D%</span>
         <span className="text-right">W%</span>
         <span className="text-right">M%</span>
