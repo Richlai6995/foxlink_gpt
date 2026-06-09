@@ -9,9 +9,10 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ReactECharts from 'echarts-for-react'
-import { Loader2, Maximize2, Minimize2, Sparkles, Minus, TrendingUp, Type, Trash2, MousePointer2, PencilLine } from 'lucide-react'
+import { Loader2, Maximize2, Minimize2, Sparkles, Minus, TrendingUp, Type, Trash2, MousePointer2, PencilLine, Download } from 'lucide-react'
 import api from '../../lib/api'
 import { buildIndicatorSeries, type IndicatorKey, type PricePoint } from '../../lib/metalsIndicators'
+import { exportMetalsChartToXlsx } from '../../lib/metalsExportXlsx'
 import MetalsTAPanel from './MetalsTAPanel'
 
 type DrawTool = 'none' | 'horizontal' | 'trendline' | 'text'
@@ -84,6 +85,7 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
   const [indicators, setIndicators] = useState<IndicatorKey[]>([])
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showTA, setShowTA] = useState(false)
+  const [exporting, setExporting] = useState(false)  // 2026-06-09: 匯出 Excel 中的狀態
   // 標註工具列預設收起,點筆 icon 才展開 — 一般 user 不常用,展開會壓縮 indicator 列空間
   const [showAnnotationToolbar, setShowAnnotationToolbar] = useState(false)
 
@@ -497,6 +499,43 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
           title="用當前 chart 配置產 AI 技術分析摘要"
         >
           <Sparkles size={11} /> AI TA
+        </button>
+        <button
+          onClick={async () => {
+            if (exporting) return
+            const chart = chartRef.current
+            if (!chart) { alert('Chart 尚未就緒'); return }
+            setExporting(true)
+            try {
+              // 拿 ECharts PNG(pixelRatio=2 看起來更清晰)
+              const pngDataUrl = chart.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#ffffff' })
+              const allMetals = [primaryMetal, ...overlay]
+              const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+              const rangeLabel = RANGE_LABEL[range]
+              const filename = `${title}_${allMetals.join('-')}_${rangeLabel}_${todayStr}.xlsx`
+                .replace(/[\\/:*?"<>|]/g, '_')  // Windows 檔名違法字元 → _
+              await exportMetalsChartToXlsx({
+                filename,
+                metals: allMetals,
+                pointsByMetal: seriesByMetal,
+                chartPngBase64: pngDataUrl,
+                metaInfo: {
+                  title,
+                  range: rangeLabel,
+                  days,
+                  exportedAt: new Date().toISOString(),
+                },
+              })
+            } catch (e: any) {
+              alert('匯出失敗:' + (e?.message || String(e)))
+            } finally { setExporting(false) }
+          }}
+          disabled={exporting || primaryPoints.length === 0}
+          className="ml-1 flex items-center gap-1 px-2 py-0.5 text-[11px] rounded bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
+          title="匯出當前時間區間原始資料 + 線圖 PNG 到 Excel(兩個 Sheet)"
+        >
+          {exporting ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+          {exporting ? '匯出中…' : '匯出 Excel'}
         </button>
         <button
           onClick={() => setIsFullscreen(v => !v)}
