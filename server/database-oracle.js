@@ -3820,12 +3820,11 @@ async function runMigrations(db) {
     console.warn('[Migration] erp proxy skill backfill skipped:', e.message);
   }
 
-  // 修正:ERP proxy skill 預設改非公開(需透過分享或手動公開)
-  try {
-    await db.prepare(`UPDATE skills SET is_public = 0 WHERE type = 'erp_proc' AND is_public = 1`).run();
-  } catch (e) {
-    console.warn('[Migration] erp proxy skill is_public fix:', e.message);
-  }
+  // ⚠️ 已移除:原本這裡每次啟動都跑 `UPDATE skills SET is_public=0 WHERE type='erp_proc'`,
+  //    本意是一次性把舊資料預設改非公開,但放在每次都跑的 migration 又沒 run-once 旗標,
+  //    導致每次 deploy/pod 重啟都把 admin 手動設的「公開」清掉(2026-06-10 排查)。
+  //    現在 createProxySkill 建立時就預設 is_public=0、編輯不動 is_public,
+  //    is_public=1 的 erp_proc skill 全是 admin 刻意設的,故此 fix 已過時且有害,直接移除。
 
   // 重新生成所有 ERP tool 的 tool_schema_json（讓 default_config 生效）
   // + Migration:把有動態 LOV 但沒設 llm_resolve_mode 的參數補上 'auto'
