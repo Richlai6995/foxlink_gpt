@@ -182,14 +182,14 @@ async function extractTextFromFile(filePath, mimeType, originalName) {
 function _detectDegenerate(text, lang) {
   if (!text || text.length < 40) return { degenerate: false };
 
-  // 1) 連續同字 ≥ 20(那那那… / 。。。…):repetition loop 最典型,截在起點
-  const run = text.match(/(.)\1{19,}/u);
+  // 1) 連續同字 ≥ DEGEN_CHAR_RUN_MIN(那那那… / 。。。…):repetition loop 最典型,截在起點
+  const run = text.match(new RegExp(`(.)\\1{${DEGEN_CHAR_RUN_MIN - 1},}`, 'u'));
   if (run) {
     return { degenerate: true, reason: `char-run "${run[1]}"×${run[0].length}`, cleanText: text.slice(0, run.index).trim() };
   }
 
-  // 2) 短語/句子重複迴圈:8~60 字片段連續重複 ≥ 4 次,截在起點
-  const phrase = text.match(/(.{8,60}?)\1{3,}/su);
+  // 2) 短語/句子重複迴圈:8~60 字片段連續重複 ≥ DEGEN_PHRASE_REPEAT_MIN 次,截在起點
+  const phrase = text.match(new RegExp(`(.{8,60}?)\\1{${DEGEN_PHRASE_REPEAT_MIN - 1},}`, 'su'));
   if (phrase) {
     return { degenerate: true, reason: `phrase-loop ×${Math.floor(phrase[0].length / phrase[1].length)}`, cleanText: text.slice(0, phrase.index).trim() };
   }
@@ -199,7 +199,7 @@ function _detectDegenerate(text, lang) {
   if (lang === 'zh-TW') {
     const simp = (text.match(/[们这边东车专门类资过还进运际质达员见观图实发务团队样阳树叶恋绝经历应个为觉间长现开关难让离时会单脑铭]/gu) || []).length;
     const cjk = (text.match(/[一-鿿]/gu) || []).length || 1;
-    if (simp >= 20 && simp / cjk >= 0.008) {
+    if (simp >= DEGEN_SIMPLIFIED_MIN && simp / cjk >= DEGEN_SIMPLIFIED_RATIO) {
       return { degenerate: true, reason: `simplified-hallucination simp=${simp}/${cjk}`, cleanText: text };
     }
   }
@@ -273,9 +273,9 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
         // frequencyPenalty:對「已出現過的 token」按出現次數懲罰 logit,是壓制「那那那…」
         // 重複迴圈的關鍵 knob。temperature=0 greedy 一旦卡進重複沒有隨機性可逃,penalty 會把
         // 重複字 logit 壓到讓別的 token 勝出 → 打斷迴圈,連帶避免後面脫稿成幻覺。
-        // presencePenalty:輕度鼓勵換新詞,進一步降低 degenerate 機率。
-        frequencyPenalty: 0.5,
-        presencePenalty: 0.3,
+        // presencePenalty:輕度鼓勵換新詞,進一步降低 degenerate 機率。(調值見檔案 LONG_AUDIO 區常數)
+        frequencyPenalty: TRANSCRIBE_FREQUENCY_PENALTY,
+        presencePenalty: TRANSCRIBE_PRESENCE_PENALTY,
         thinkingConfig: { thinkingBudget },
       },
     });
@@ -356,6 +356,16 @@ const LONG_AUDIO_CONCURRENCY = 7;
 const LONG_AUDIO_PER_SEG_TIMEOUT_MS = 35 * 60 * 1000;
 const LONG_AUDIO_RETRY_BACKOFF_MS = [10000, 30000, 60000]; // 3 次 retry,10s/30s/60s
 
+// ── Degenerate(重複迴圈/脫稿幻覺)防護 — 可調超參數 ───────────────────────────
+// 改這裡就能調,不用動 transcribeAudio / _detectDegenerate / _transcribeWithRetry 內文。
+const TRANSCRIBE_FREQUENCY_PENALTY = 0.5;  // 壓「已出現 token」logit,打斷「那那那…」重複迴圈
+const TRANSCRIBE_PRESENCE_PENALTY  = 0.3;  // 輕度鼓勵換新詞,進一步降 degenerate 機率
+const TRANSCRIBE_RETRY_TEMPERATURE = 0.4;  // degenerate 重試時加溫,給逃脫迴圈的隨機性(0=greedy)
+const DEGEN_CHAR_RUN_MIN     = 20;    // 連續同字 ≥ N → 判定重複迴圈,截在起點
+const DEGEN_PHRASE_REPEAT_MIN = 4;    // 8~60 字片段連續重複 ≥ N 次 → 判定 phrase loop
+const DEGEN_SIMPLIFIED_MIN    = 20;   // zh-TW 出現 ≥ N 個簡體獨有字 → 判定脫稿幻覺
+const DEGEN_SIMPLIFIED_RATIO  = 0.008; // 且簡體字 / CJK 字數 ≥ 此比例(避免零星簡體誤判)
+
 function _runCmd(cmd, args) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -434,10 +444,10 @@ async function _transcribeWithRetry(partPath, mimeType, lang, segIdx, segTotal, 
   // 後兩次 attempt 加溫(temperature 0.4):degenerate(重複/脫稿)時 greedy 沒隨機性可逃,
   // 加溫 + 換模型給逃脫機會。frequencyPenalty 在 transcribeAudio 一律開著。
   const ATTEMPT_PLAN = [
-    { useProModel: true,  temperature: 0,   label: 'Pro' },
-    { useProModel: false, temperature: 0,   label: 'Flash' },
-    { useProModel: true,  temperature: 0.4, label: 'Pro+T' },
-    { useProModel: false, temperature: 0.4, label: 'Flash+T' },
+    { useProModel: true,  temperature: 0,                          label: 'Pro' },
+    { useProModel: false, temperature: 0,                          label: 'Flash' },
+    { useProModel: true,  temperature: TRANSCRIBE_RETRY_TEMPERATURE, label: 'Pro+T' },
+    { useProModel: false, temperature: TRANSCRIBE_RETRY_TEMPERATURE, label: 'Flash+T' },
   ];
   const maxAttempts = ATTEMPT_PLAN.length;
   let lastErr;
