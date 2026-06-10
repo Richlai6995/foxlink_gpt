@@ -133,12 +133,14 @@ router.get('/prices', verifyToken, verifyMetalsAccess, async (req, res) => {
       ORDER BY metal_code
     `).all(...priceBinds, ...params);
 
-    // 2) 對每金屬算 W% / M% — 改用「上週/上月結束對齊」(2026-05-25)
+    // 2) 對每金屬算 W% / M% — 改用「N 天前固定窗口」(2026-06-10,採購要求對齊「一週前」/「一個月前」)
     //
-    // 之前 -7d / -30d ±7 容錯,週末 / 假日多時抓不準。改用 ISO week / month 邊界:
-    //   W% = latest_price vs MAX(as_of_date) WHERE as_of_date < TRUNC(latest, 'IW') (上週日為止)
-    //   M% = latest_price vs MAX(as_of_date) WHERE as_of_date < TRUNC(latest, 'MM') (上月底為止)
-    // 跟 Bloomberg / TradingEconomics 顯示一致。
+    // 算法歷次:
+    //   v1 (~2026-05-25 之前):latest vs N 天前 ±7 容錯 — 太鬆,基準日期不固定
+    //   v2 (2026-05-25):latest vs 上週末 / 上月底 LME 交易日 — 跟 Bloomberg 一致但採購覺得跟「一週前」直觀脫節
+    //   v3 (2026-06-10):latest vs 「latest - 7d / 30d」之前最近一筆 — 「6/8 latest → 抓 6/1,沒就抓 ≤ 6/1 最近」
+    //
+    // 改 v3 後 W% 等於 7-day rolling change(常見銀行採購報表習慣),M% 等於 30-day rolling change。
     const result = [];
     for (const r of latestRows) {
       const code = r.metal_code || r.METAL_CODE;
@@ -169,14 +171,14 @@ router.get('/prices', verifyToken, verifyMetalsAccess, async (req, res) => {
       };
 
       // D% = 前一個 LME 交易日(latest_date - 1 day 起往前找)
-      // W% = 上週結束日(以 latest 為基準 → 本週週一 = TRUNC IW,上週結束 = 本週週一 - 1)
-      // M% = 上月結束日(以 latest 為基準 → 本月初 = TRUNC MM,上月底 = 本月初 - 1)
+      // W% = latest - 7 calendar days 起往前找最近一筆
+      // M% = latest - 30 calendar days 起往前找最近一筆
       const prevDay = await fetchPriceBefore(
         `TO_DATE(?, 'YYYY-MM-DD') - 1`, 'prev_trading_day');
       const prevWeek = await fetchPriceBefore(
-        `TRUNC(TO_DATE(?, 'YYYY-MM-DD'), 'IW') - 1`, 'last_week_end');
+        `TO_DATE(?, 'YYYY-MM-DD') - 7`, 'seven_days_ago');
       const prevMonth = await fetchPriceBefore(
-        `TRUNC(TO_DATE(?, 'YYYY-MM-DD'), 'MM') - 1`, 'last_month_end');
+        `TO_DATE(?, 'YYYY-MM-DD') - 30`, 'thirty_days_ago');
 
       const weekChg = Number.isFinite(prevWeek.price) && prevWeek.price > 0
         ? ((latestPrice - prevWeek.price) / prevWeek.price) * 100 : null;

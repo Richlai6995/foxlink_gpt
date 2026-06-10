@@ -94,11 +94,11 @@ export default function MetalsPriceBlock({ title, rows, metalsAllowed, loading, 
               />
               <ChangePct
                 value={r.week_change_pct ?? null}
-                tooltip={r.week_baseline_date ? `本週最新 vs 上週末 (${r.week_baseline_date})` : '本週最新 vs 上週末'}
+                tooltip={r.week_baseline_date ? `最新 vs 7 天前 (${r.week_baseline_date})` : '最新 vs 7 天前'}
               />
               <ChangePct
                 value={r.month_change_pct ?? null}
-                tooltip={r.month_baseline_date ? `本月最新 vs 上月末 (${r.month_baseline_date})` : '本月最新 vs 上月末'}
+                tooltip={r.month_baseline_date ? `最新 vs 30 天前 (${r.month_baseline_date})` : '最新 vs 30 天前'}
               />
             </button>
           )

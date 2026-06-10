@@ -433,14 +433,14 @@ async function substituteVarsAsync(template, taskName, outBag) {
     result = result.replaceAll('{{pm_current_prices}}', priceText);
   }
 
-  // {{pm_weekly_changes}} / {{pm_monthly_changes}} — 11 金屬「本週/月最新 vs 上週/月結束」實際漲跌幅,
-  // 給週/月報 LLM 當 anchor。2026-05-25 改用 ISO week / month boundary 對齊,跟 Bloomberg / TE 一致:
-  //   W%: latest_price vs MAX(as_of_date) WHERE as_of_date < TRUNC(latest, 'IW') (上週日為止)
-  //   M%: latest_price vs MAX(as_of_date) WHERE as_of_date < TRUNC(latest, 'MM') (上月底為止)
-  // 不再用 ±7d 容錯,直接「<= 邊界、有資料、最近一筆」邏輯,自然 fallback。
+  // {{pm_weekly_changes}} / {{pm_monthly_changes}} — 11 金屬「最新 vs N 天前」實際漲跌幅,
+  // 給週/月報 LLM 當 anchor。2026-06-10 採購要求改「N 天前固定窗口」(對齊 metals.js v3):
+  //   W%: latest_price vs MAX(as_of_date) WHERE as_of_date <= latest - 7d (7 calendar days ago)
+  //   M%: latest_price vs MAX(as_of_date) WHERE as_of_date <= latest - 30d
+  // 對應 dashboard / 精簡版 W% / M%,跑出來數字 100% 一致。週末/假日沒 row 就 fallback ≤ cutoff 最近一筆。
   for (const [placeholder, boundarySql, label, periodLabel] of [
-    ['{{pm_weekly_changes}}',  `TRUNC(TO_DATE(?, 'YYYY-MM-DD'), 'IW') - 1`, '上週',  '週'],
-    ['{{pm_monthly_changes}}', `TRUNC(TO_DATE(?, 'YYYY-MM-DD'), 'MM') - 1`, '上月',  '月'],
+    ['{{pm_weekly_changes}}',  `TO_DATE(?, 'YYYY-MM-DD') - 7`,  '一週前', '週'],
+    ['{{pm_monthly_changes}}', `TO_DATE(?, 'YYYY-MM-DD') - 30`, '一個月前', '月'],
   ]) {
     if (!result.includes(placeholder)) continue;
     let txt = '';
@@ -479,21 +479,21 @@ async function substituteVarsAsync(template, taskName, outBag) {
             const chg = ((latest - prevPrice) / prevPrice) * 100;
             const chgStr = `${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%`;
             lines.push(
-              `- ${code}: ${label}收盤 **${prevPrice.toLocaleString()}** (${prevDate}) `
-              + `→ 本${periodLabel}最新 ${latest.toLocaleString()} (${latestDate}) `
+              `- ${code}: ${label} **${prevPrice.toLocaleString()}** (${prevDate}) `
+              + `→ 最新 ${latest.toLocaleString()} (${latestDate}) `
               + `= ${periodLabel}漲跌 **${chgStr}**`
             );
           } else {
             lines.push(`- ${code}: 資料不足(${prevDate || '?'} → ${latestDate})`);
           }
         }
-        txt = `\n═══ 11 金屬 ${periodLabel}漲跌實際報價 anchor(${label}結束 vs 本${periodLabel}最新)═══\n${lines.join('\n')}\n\n`
+        txt = `\n═══ 11 金屬 ${periodLabel}漲跌實際報價 anchor(${label}價 vs 最新)═══\n${lines.join('\n')}\n\n`
           + `⚠️ **表格欄位對應規則(必須照抄,不准 round / 改數字 / 用新聞推測):**\n`
-          + `   - 「本${periodLabel}最新報價」欄 = 上面每行「本${periodLabel}最新」的數字(箭頭右側那個)\n`
+          + `   - 「本${periodLabel}最新報價」欄 = 上面每行「最新」的數字(箭頭右側那個)\n`
           + `   - 「${periodLabel}漲跌幅」欄 = 上面每行「${periodLabel}漲跌」的 % 數字(最後一個粗體)\n`
-          + `   - 報價後面括號的日期就是「真實資料日期」,如果跟今天 {{date}} 差距 > 3 天,務必標註在欄位旁邊\n`
+          + `   - ${label}價是「${label === '一週前' ? '7' : '30'} 天前(或之前最近一筆)」的價格,如果跟今天差距較大,務必在報價欄括號標日期\n`
           + `   你的工作是「解釋為什麼這個漲跌」(主要驅動因素欄),不是「推測漲跌幅」。\n`;
-        console.log(`[Scheduled] ${placeholder} injected ${rows.length} metals (${label}結束對齊)`);
+        console.log(`[Scheduled] ${placeholder} injected ${rows.length} metals (${label})`);
       } else {
         txt = `\n═══ ${periodLabel}漲跌幅 ═══\n(pm_price_history 暫無資料)\n`;
       }
