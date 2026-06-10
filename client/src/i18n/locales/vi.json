@@ -470,7 +470,9 @@
       "mixedName": "Tên CJK+EN hỗn hợp",
       "enName": "Tên có tiếng Anh",
       "noEid": "Không có mã NV",
-      "noEmail": "Không có Email"
+      "noEmail": "Không có Email",
+      "exempt": "Đã miễn",
+      "exemptTip": "Miễn đối chiếu ({{reason}}) — bấm để hủy"
     },
     "cols": {
       "username": "Tài khoản",
@@ -608,6 +610,34 @@
       "emailLocal": "Phần trước @ Email",
       "sso": "SSO",
       "manual": "Thủ công"
+    },
+    "empMatch": {
+      "title": "Bổ sung dữ liệu ERP",
+      "intro": "Tra cứu hồ sơ nhân viên ERP theo tên để bổ sung mã NV / Email còn thiếu. AI chỉ xử lý tên CJK+EN hỗn hợp hoặc trùng tên; khớp chính xác duy nhất có thể chấp nhận hàng loạt. Đánh dấu tài khoản dùng chung/quản trị là Miễn để bỏ qua vĩnh viễn.",
+      "scan": "Quét & bổ sung",
+      "scanning": "Đang quét…",
+      "scanDone": "Đã quét {{scanned}}: chính xác {{a}}, AI/nhiều {{b}}, không thấy {{n}}",
+      "useLLM": "AI đối chiếu ngữ nghĩa",
+      "tabPending": "Chờ duyệt",
+      "tabConflict": "Trùng mã NV",
+      "tabNoMatch": "Không thấy / Miễn",
+      "tabDone": "Đã xử lý",
+      "tierA": "Chính xác",
+      "tierB": "AI/Nhiều",
+      "tierC": "Không có tên CJK",
+      "colAccount": "Tài khoản / Hiện tại",
+      "colSuggestion": "Gợi ý AI",
+      "colConfidence": "Độ tin cậy / Lý do",
+      "noMatch": "Không thấy",
+      "conflict": "Trùng mã NV",
+      "conflictDetail": "Mã NV {{emp}} đã được {{user}} sử dụng",
+      "pickCandidate": "— Chọn ứng viên —",
+      "accept": "Chấp nhận & ghi",
+      "reject": "Từ chối (gợi ý sai)",
+      "exempt": "Tài khoản dùng chung/quản trị, miễn vĩnh viễn",
+      "exemptReasonPrompt": "Đánh dấu là tài khoản dùng chung/quản trị và bỏ qua đối chiếu vĩnh viễn. Lý do:",
+      "batchAcceptA": "Chấp nhận hàng loạt khớp chính xác ({{n}})",
+      "batchConfirm": "Chấp nhận hàng loạt {{n}} khớp chính xác?"
     }
   },
   "audit": {

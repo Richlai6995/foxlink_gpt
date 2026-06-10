@@ -399,6 +399,12 @@ async function runMigrations(db) {
   // ERP 分流：分類 flag + 使用者 ERP 管理員 flag
   await addCol('FEEDBACK_CATEGORIES', 'IS_ERP', 'NUMBER(1) DEFAULT 0');
   await addCol('USERS', 'IS_ERP_ADMIN', 'NUMBER(1) DEFAULT 0');
+  // ERP 補資料(emp-match):共用/管理帳號豁免旗標 — 結構上非真人,scan 永久跳過
+  // (跟 emp_match_suggestions.status='rejected' 不同:rejected 是「這筆建議錯」會再試,exempt 是「帳號非真人」)
+  await addCol('USERS', 'EMP_MATCH_EXEMPT',        'NUMBER(1) DEFAULT 0');
+  await addCol('USERS', 'EMP_MATCH_EXEMPT_REASON', 'VARCHAR2(200)');
+  await addCol('USERS', 'EMP_MATCH_EXEMPT_BY',     'VARCHAR2(50)');
+  await addCol('USERS', 'EMP_MATCH_EXEMPT_AT',     'TIMESTAMP');
   // [2026-05-08] 密碼 bcrypt hash 化 — Lazy migration:既有明文密碼下次登入成功時自動 hash。
   // password_hashed='Y' → password 是 bcrypt hash;'N' → 仍是明文(過渡期)。
   // 設計詳見 docs/auth-password-hashing-plan.md
@@ -2139,6 +2145,34 @@ async function runMigrations(db) {
     error_msg        VARCHAR2(2000),
     synced_at        TIMESTAMP DEFAULT SYSTIMESTAMP
   )`);
+
+  // ── ERP 補資料：emp-match 建議(姓名反查 ERP → 權威工號/Email,人工審核) ──────────
+  // 一個 user 最多一筆建議(unique index);scan 用 delete-then-insert 刷新非 accepted/rejected 列。
+  // status: pending(待審) | accepted(已寫入) | rejected(這筆建議錯,admin 拒) | no_match(查無) | conflict(工號已被占用,擋下人工)
+  // tier:  A(精確唯一命中,免 LLM) | B(LLM 語意比對:混英文/同名多人) | C(無中文名,疑似共用帳號,建議豁免)
+  await createTable('EMP_MATCH_SUGGESTIONS', `CREATE TABLE emp_match_suggestions (
+    id               NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id          NUMBER NOT NULL,
+    status           VARCHAR2(20) DEFAULT 'pending',
+    tier             VARCHAR2(2),
+    suggested_emp_no VARCHAR2(50),
+    suggested_email  VARCHAR2(200),
+    suggested_name   VARCHAR2(200),
+    suggested_dept   VARCHAR2(200),
+    confidence       NUMBER,
+    reason           VARCHAR2(1000),
+    candidates_json  CLOB,
+    conflict_user_id NUMBER,
+    reviewed_by      VARCHAR2(50),
+    reviewed_at      TIMESTAMP,
+    created_at       TIMESTAMP DEFAULT SYSTIMESTAMP
+  )`);
+  try {
+    await db.prepare(`CREATE UNIQUE INDEX emp_match_suggestions_uid ON emp_match_suggestions(user_id)`).run();
+    console.log('[Migration] emp_match_suggestions_uid unique index created ✓');
+  } catch (e) {
+    if (!/ORA-00955|ORA-01408/.test(e.message)) console.warn('[Migration] emp_match_suggestions_uid:', e.message);
+  }
 
   // ── 政策類別 (Policy Categories) ────────────────────────────────────────────
   await createTable('AI_POLICY_CATEGORIES', `CREATE TABLE ai_policy_categories (

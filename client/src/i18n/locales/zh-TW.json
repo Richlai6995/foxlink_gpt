@@ -470,7 +470,9 @@
       "mixedName": "姓名中英混雜",
       "enName": "姓名含英文",
       "noEid": "無工號",
-      "noEmail": "無 Email"
+      "noEmail": "無 Email",
+      "exempt": "已豁免",
+      "exemptTip": "免比對（{{reason}}）— 點擊取消"
     },
     "cols": {
       "username": "帳號",
@@ -608,6 +610,34 @@
       "emailLocal": "Email 前綴",
       "sso": "SSO",
       "manual": "人工"
+    },
+    "empMatch": {
+      "title": "ERP 補資料",
+      "intro": "以「姓名」反查 ERP 員工主檔，補上缺失的工號 / Email。AI 只處理混英文名或同名多人的情況；精確唯一命中可直接批次接受。共用/管理帳號請標記「免比對」永久跳過。",
+      "scan": "掃描補資料",
+      "scanning": "掃描中…",
+      "scanDone": "掃描 {{scanned}} 人：精確 {{a}}、AI/多候選 {{b}}、查無 {{n}}",
+      "useLLM": "AI 語意比對",
+      "tabPending": "待審",
+      "tabConflict": "工號衝突",
+      "tabNoMatch": "查無/建議豁免",
+      "tabDone": "已處理",
+      "tierA": "精確",
+      "tierB": "AI/多候選",
+      "tierC": "無中文名",
+      "colAccount": "帳號 / 現值",
+      "colSuggestion": "AI 建議",
+      "colConfidence": "信心 / 原因",
+      "noMatch": "查無對應",
+      "conflict": "工號衝突",
+      "conflictDetail": "工號 {{emp}} 已被 {{user}} 使用",
+      "pickCandidate": "— 選擇候選 —",
+      "accept": "接受寫入",
+      "reject": "拒絕（這筆建議錯）",
+      "exempt": "共用/管理帳號，永久免比對",
+      "exemptReasonPrompt": "標記為共用/管理帳號，永久跳過比對。原因：",
+      "batchAcceptA": "批次接受精確命中 ({{n}})",
+      "batchConfirm": "批次接受 {{n}} 筆精確命中？"
     }
   },
   "audit": {

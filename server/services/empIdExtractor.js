@@ -113,6 +113,7 @@ const SOURCE_LABELS = {
   sAMAccountName:      'AD 帳號',
   email_local_part:    'Email 前綴',
   sso_emp_cd:          'SSO emp_cd',
+  ai_matched:          'AI 比對',
   manual:              '人工手動',
 };
 

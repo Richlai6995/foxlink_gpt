@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
-import { Plus, Edit, Trash2, Save, X, Check, Download, UserCog, FileText, Mic, Image, CalendarClock, RefreshCw, Building2, Search, ShieldCheck, Clock, ChevronDown, ChevronUp, AlertTriangle, LogOut } from 'lucide-react'
+import { Plus, Edit, Trash2, Save, X, Check, Download, UserCog, FileText, Mic, Image, CalendarClock, RefreshCw, Building2, Search, ShieldCheck, Clock, ChevronDown, ChevronUp, AlertTriangle, LogOut, ScanSearch, Ban } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { User } from '../../types'
 import api from '../../lib/api'
 import { fmtTW } from '../../lib/fmtTW'
+import EmpMatchPanel from './EmpMatchPanel'
 
 // ── Org Sync Schedule Panel ───────────────────────────────────────────────────
 interface OrgSyncSchedule { enabled: boolean; hour: number; lastRun: string | null }
@@ -276,7 +277,8 @@ export default function UserManagement() {
   const [syncingAll, setSyncingAll] = useState(false)
   const [syncMsg, setSyncMsg] = useState('')
   const [search, setSearch] = useState('')
-  const [quickFilter, setQuickFilter] = useState<'mixed_name' | 'en_name' | 'no_eid' | 'no_email' | ''>('')
+  const [quickFilter, setQuickFilter] = useState<'mixed_name' | 'en_name' | 'no_eid' | 'no_email' | 'exempt' | ''>('')
+  const [view, setView] = useState<'list' | 'empMatch'>('list')
 
   const load = async () => {
     const [usersRes, rolesRes, policiesRes, assignRes] = await Promise.all([
@@ -323,8 +325,14 @@ export default function UserManagement() {
     if (quickFilter === 'en_name') return hasEnChar(name)
     if (quickFilter === 'no_eid') return !u.employee_id
     if (quickFilter === 'no_email') return !u.email
+    if (quickFilter === 'exempt') return u2.emp_match_exempt === 1
     return true
   })
+
+  const handleUnexempt = async (id: number) => {
+    try { await api.delete(`/users/emp-match/users/${id}/exempt`); await load() }
+    catch (e: any) { alert(e?.response?.data?.error || '操作失敗') }
+  }
 
   const openNew = () => {
     setForm(empty)
@@ -514,12 +522,21 @@ export default function UserManagement() {
     return role ? (role as any)[field] : null
   }
 
+  if (view === 'empMatch') {
+    return <EmpMatchPanel onBack={() => setView('list')} onChanged={load} />
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold text-slate-800">{t('users.title')}</h2>
         <div className="flex gap-2 flex-wrap items-center">
           {syncMsg && <span className="text-xs text-blue-600 max-w-xs truncate">{syncMsg}</span>}
+          <button onClick={() => setView('empMatch')}
+            className="btn-ghost flex items-center gap-1.5 text-sm">
+            <ScanSearch size={14} />
+            {t('users.empMatch.title', 'ERP 補資料')}
+          </button>
           <button onClick={handleSyncAll} disabled={syncingAll}
             className="btn-ghost flex items-center gap-1.5 text-sm">
             <RefreshCw size={14} className={syncingAll ? 'animate-spin' : ''} />
@@ -559,6 +576,7 @@ export default function UserManagement() {
           { key: 'en_name', label: t('users.filter.enName', '姓名含英文') },
           { key: 'no_eid', label: t('users.filter.noEid', '無工號') },
           { key: 'no_email', label: t('users.filter.noEmail', '無 Email') },
+          { key: 'exempt', label: t('users.filter.exempt', '已豁免') },
         ] as const).map((f) => (
           <button
             key={f.key}
@@ -1144,7 +1162,20 @@ export default function UserManagement() {
                 return (
                   <tr key={u.id} className="hover:bg-slate-50 transition">
                     <td className="px-4 py-3 font-medium text-slate-800">{u.username}</td>
-                    <td className="px-4 py-3">{u.name}</td>
+                    <td className="px-4 py-3">
+                      <span className="flex items-center gap-1.5">
+                        {u.name}
+                        {u2.emp_match_exempt === 1 && (
+                          <button
+                            onClick={() => handleUnexempt(u.id)}
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-500 hover:bg-red-50 hover:text-red-500 transition"
+                            title={t('users.filter.exemptTip', { reason: u2.emp_match_exempt_reason || '', defaultValue: `免比對（${u2.emp_match_exempt_reason || ''}）— 點擊取消` })}
+                          >
+                            <Ban size={10} /> {t('users.filter.exempt', '已豁免')}
+                          </button>
+                        )}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-slate-500">
                       {u.employee_id ? (
                         <span className="flex items-center gap-1.5">

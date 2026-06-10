@@ -45,6 +45,7 @@ router.get('/', async (req, res) => {
                 u.budget_daily, u.budget_weekly, u.budget_monthly, u.quota_exceed_action,
                 u.webex_bot_enabled, u.name_manually_set, u.is_erp_admin,
                 u.is_pipeline_admin,
+                u.emp_match_exempt, u.emp_match_exempt_reason,
                 ${ORG_COLS}
          FROM users u
          LEFT JOIN roles r ON r.id = u.role_id`;
@@ -263,6 +264,95 @@ router.put('/:id', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ERP 補資料(emp-match):姓名反查 ERP → 權威工號/Email,人工審核
+// 設計詳見 docs/emp-data-fill-design.md
+// ─────────────────────────────────────────────────────────────────────────────
+
+// POST /api/users/emp-match/scan — 掃描缺工號/Email 的帳號,產生建議
+router.post('/emp-match/scan', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const empMatch = require('../services/empMatchService');
+    const { userIds, useLLM } = req.body || {};
+    const result = await empMatch.scanUsers(db, {
+      userIds: Array.isArray(userIds) && userIds.length ? userIds.map(Number) : null,
+      useLLM: useLLM !== false,
+    });
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/users/emp-match/suggestions?status=pending — 審核清單
+router.get('/emp-match/suggestions', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const { status } = req.query;
+    let sql = `
+      SELECT s.id, s.user_id, s.status, s.tier, s.suggested_emp_no, s.suggested_email,
+             s.suggested_name, s.suggested_dept, s.confidence, s.reason, s.candidates_json,
+             s.conflict_user_id, s.reviewed_by,
+             TO_CHAR(s.reviewed_at,'YYYY-MM-DD HH24:MI') AS reviewed_at,
+             TO_CHAR(s.created_at,'YYYY-MM-DD HH24:MI')  AS created_at,
+             u.username, u.name AS current_name, u.employee_id AS current_emp_id,
+             u.employee_id_source AS current_emp_source, u.email AS current_email,
+             u.dept_name, u.profit_center_name, u.factory_code,
+             cu.username AS conflict_username, cu.name AS conflict_name, cu.employee_id AS conflict_emp_id
+      FROM emp_match_suggestions s
+      JOIN users u ON u.id = s.user_id
+      LEFT JOIN users cu ON cu.id = s.conflict_user_id`;
+    const params = [];
+    if (status) { sql += ` WHERE s.status = ?`; params.push(status); }
+    sql += ` ORDER BY CASE s.status WHEN 'conflict' THEN 0 WHEN 'pending' THEN 1 WHEN 'no_match' THEN 2 ELSE 3 END,
+                       s.tier, s.confidence DESC NULLS LAST, s.id`;
+    const rows = await db.prepare(sql).all(...params);
+    for (const r of rows) {
+      try { r.candidates = r.candidates_json ? JSON.parse(r.candidates_json) : []; } catch { r.candidates = []; }
+      delete r.candidates_json;
+    }
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/users/emp-match/suggestions/:id/accept — 接受(可帶 emp_no 人工改選候選)
+router.post('/emp-match/suggestions/:id/accept', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const empMatch = require('../services/empMatchService');
+    const { emp_no } = req.body || {};
+    const result = await empMatch.acceptSuggestion(db, Number(req.params.id), req.user.username, emp_no || null);
+    if (result.conflict) return res.status(409).json(result); // 衝突 → 擋下人工處理
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/users/emp-match/suggestions/:id/reject — 拒絕(這筆建議錯,人還在)
+router.post('/emp-match/suggestions/:id/reject', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const empMatch = require('../services/empMatchService');
+    res.json(await empMatch.rejectSuggestion(db, Number(req.params.id), req.user.username));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/users/emp-match/users/:id/exempt — 標記共用/管理帳號,永久跳過比對
+router.post('/emp-match/users/:id/exempt', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const empMatch = require('../services/empMatchService');
+    res.json(await empMatch.exemptUser(db, Number(req.params.id), req.body?.reason, req.user.username));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/users/emp-match/users/:id/exempt — 取消豁免
+router.delete('/emp-match/users/:id/exempt', async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const empMatch = require('../services/empMatchService');
+    res.json(await empMatch.unexemptUser(db, Number(req.params.id)));
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // DELETE /api/users/:id

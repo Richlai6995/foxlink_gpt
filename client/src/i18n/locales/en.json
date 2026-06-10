@@ -470,7 +470,9 @@
       "mixedName": "Mixed CJK+EN name",
       "enName": "Name has English",
       "noEid": "No Employee ID",
-      "noEmail": "No Email"
+      "noEmail": "No Email",
+      "exempt": "Exempted",
+      "exemptTip": "Exempt from matching ({{reason}}) — click to undo"
     },
     "cols": {
       "username": "Account",
@@ -608,6 +610,34 @@
       "emailLocal": "Email local-part",
       "sso": "SSO",
       "manual": "Manual"
+    },
+    "empMatch": {
+      "title": "ERP Data Fill",
+      "intro": "Look up the ERP employee master by name to fill in missing Employee ID / Email. AI only handles mixed CJK+EN names or same-name duplicates; exact unique matches can be batch-accepted. Mark shared/admin accounts as Exempt to skip them permanently.",
+      "scan": "Scan & Fill",
+      "scanning": "Scanning…",
+      "scanDone": "Scanned {{scanned}}: exact {{a}}, AI/multi {{b}}, no match {{n}}",
+      "useLLM": "AI semantic match",
+      "tabPending": "Pending",
+      "tabConflict": "ID Conflict",
+      "tabNoMatch": "No match / Exempt",
+      "tabDone": "Done",
+      "tierA": "Exact",
+      "tierB": "AI/Multi",
+      "tierC": "No CJK name",
+      "colAccount": "Account / Current",
+      "colSuggestion": "AI Suggestion",
+      "colConfidence": "Confidence / Reason",
+      "noMatch": "No match",
+      "conflict": "ID conflict",
+      "conflictDetail": "Employee ID {{emp}} is already used by {{user}}",
+      "pickCandidate": "— Pick candidate —",
+      "accept": "Accept & write",
+      "reject": "Reject (wrong suggestion)",
+      "exempt": "Shared/admin account, exempt forever",
+      "exemptReasonPrompt": "Mark as shared/admin account and skip matching forever. Reason:",
+      "batchAcceptA": "Batch accept exact matches ({{n}})",
+      "batchConfirm": "Batch accept {{n}} exact matches?"
     }
   },
   "audit": {
