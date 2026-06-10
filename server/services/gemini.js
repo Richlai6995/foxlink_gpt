@@ -174,6 +174,39 @@ async function extractTextFromFile(filePath, mimeType, originalName) {
  * @param {boolean} [opts.useProModel] - use MODEL_PRO instead of MODEL_FLASH (long audio benefits from Pro)
  * @param {boolean} [opts.verbatim] - use verbatim prompt (forbid summarization, keep filler words)
  */
+// ── 偵測 Gemini 轉錄「跑掉」(repetition loop / 脫稿幻覺)──────────────────────
+// 失效模式:靜音、低訊噪、或口語贅字(「那…那…」)的段落,greedy decoding 卡進「重複同一
+// token」迴圈(那那那…幾百次),無隨機性可逃脫;吐到 context 飄移後語言先驗接管 → 生出流暢
+// 但與音訊無關的內容(常見簡體散文/小說)。重複迴圈是脫稿的橋 → 截在重複起點同時砍掉幻覺。
+// 回傳 { degenerate, reason, cleanText },cleanText = 最佳可救前綴(無乾淨切點時 = 全文,僅標記)。
+function _detectDegenerate(text, lang) {
+  if (!text || text.length < 40) return { degenerate: false };
+
+  // 1) 連續同字 ≥ 20(那那那… / 。。。…):repetition loop 最典型,截在起點
+  const run = text.match(/(.)\1{19,}/u);
+  if (run) {
+    return { degenerate: true, reason: `char-run "${run[1]}"×${run[0].length}`, cleanText: text.slice(0, run.index).trim() };
+  }
+
+  // 2) 短語/句子重複迴圈:8~60 字片段連續重複 ≥ 4 次,截在起點
+  const phrase = text.match(/(.{8,60}?)\1{3,}/su);
+  if (phrase) {
+    return { degenerate: true, reason: `phrase-loop ×${Math.floor(phrase[0].length / phrase[1].length)}`, cleanText: text.slice(0, phrase.index).trim() };
+  }
+
+  // 3) zh-TW 任務卻大量簡體字 → 脫稿自由生成(無重複橋可乾淨截斷,整段重試;保留全文僅標記)。
+  //    prompt 已強制繁體,正常輸出應幾乎 0 個簡體獨有字,出現一堆即模型脫稿的可靠訊號。
+  if (lang === 'zh-TW') {
+    const simp = (text.match(/[们这边东车专门类资过还进运际质达员见观图实发务团队样阳树叶恋绝经历应个为觉间长现开关难让离时会单脑铭]/gu) || []).length;
+    const cjk = (text.match(/[一-鿿]/gu) || []).length || 1;
+    if (simp >= 20 && simp / cjk >= 0.008) {
+      return { degenerate: true, reason: `simplified-hallucination simp=${simp}/${cjk}`, cleanText: text };
+    }
+  }
+
+  return { degenerate: false };
+}
+
 async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25 * 60 * 1000, opts = {}) {
   // Backward-compat: old callers pass (filePath, mimeType, timeoutMs:number)
   let lang;
@@ -186,6 +219,8 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
 
   const useProModel = opts.useProModel === true;
   const verbatim = opts.verbatim === true;
+  // 預設 greedy(0);_transcribeWithRetry 在偵測到脫稿/重複時會用後段 attempt 加溫(0.4)逃脫迴圈
+  const temperature = typeof opts.temperature === 'number' ? opts.temperature : 0;
 
   const PROMPTS_NORMAL = {
     'zh-TW': '請完整轉錄這段音訊，使用繁體中文，只回傳轉錄文字，不要加任何說明。',
@@ -234,7 +269,13 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
       provider,
       generationConfig: {
         maxOutputTokens: maxOut,
-        temperature: 0,
+        temperature,
+        // frequencyPenalty:對「已出現過的 token」按出現次數懲罰 logit,是壓制「那那那…」
+        // 重複迴圈的關鍵 knob。temperature=0 greedy 一旦卡進重複沒有隨機性可逃,penalty 會把
+        // 重複字 logit 壓到讓別的 token 勝出 → 打斷迴圈,連帶避免後面脫稿成幻覺。
+        // presencePenalty:輕度鼓勵換新詞,進一步降低 degenerate 機率。
+        frequencyPenalty: 0.5,
+        presencePenalty: 0.3,
         thinkingConfig: { thinkingBudget },
       },
     });
@@ -271,6 +312,17 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
     if (!text || text.trim().length === 0) {
       const err = new Error(`Empty text (finishReason=${finishReason}, in=${usage.inputTokens}, out=${usage.outputTokens})`);
       err.code = 'TRANSCRIBE_EMPTY';
+      throw err;
+    }
+    // 偵測「跑掉」:重複迴圈(那那那…)或脫稿幻覺(簡體小說)。當成可重試錯誤丟出,
+    // 讓 _transcribeWithRetry 換模型 / 加溫重打;partialText 帶可救前綴給最終搶救用。
+    const deg = _detectDegenerate(text, lang);
+    if (deg.degenerate) {
+      console.warn(`[Transcribe] ${tagId} ${provider} DEGENERATE (${deg.reason}) text=${text.length}chars salvage=${deg.cleanText.length}chars`);
+      const err = new Error(`Degenerate output: ${deg.reason}`);
+      err.code = 'TRANSCRIBE_DEGENERATE';
+      err.degenerateReason = deg.reason;
+      err.partialText = deg.cleanText;
       throw err;
     }
     return { text, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens };
@@ -379,19 +431,23 @@ function _isTransientGeminiErr(e) {
 //   attempt 2: Pro + verbatim    ← 30s backoff,給 Pro 一次恢復機會
 //   attempt 3: Flash + verbatim  ← 60s backoff,最後保險
 async function _transcribeWithRetry(partPath, mimeType, lang, segIdx, segTotal, tagId) {
+  // 後兩次 attempt 加溫(temperature 0.4):degenerate(重複/脫稿)時 greedy 沒隨機性可逃,
+  // 加溫 + 換模型給逃脫機會。frequencyPenalty 在 transcribeAudio 一律開著。
   const ATTEMPT_PLAN = [
-    { useProModel: true,  label: 'Pro' },
-    { useProModel: false, label: 'Flash' },
-    { useProModel: true,  label: 'Pro' },
-    { useProModel: false, label: 'Flash' },
+    { useProModel: true,  temperature: 0,   label: 'Pro' },
+    { useProModel: false, temperature: 0,   label: 'Flash' },
+    { useProModel: true,  temperature: 0.4, label: 'Pro+T' },
+    { useProModel: false, temperature: 0.4, label: 'Flash+T' },
   ];
   const maxAttempts = ATTEMPT_PLAN.length;
   let lastErr;
+  let bestSalvage = ''; // 跨 attempt 保留最長的「可救前綴」(degenerate 截斷前的正常內容)
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const plan = ATTEMPT_PLAN[attempt];
     const opts = {
       useProModel: plan.useProModel,
       verbatim: true,
+      temperature: plan.temperature,
     };
     try {
       const r = await transcribeAudio(partPath, mimeType, lang, LONG_AUDIO_PER_SEG_TIMEOUT_MS, opts);
@@ -404,21 +460,33 @@ async function _transcribeWithRetry(partPath, mimeType, lang, segIdx, segTotal, 
       };
     } catch (e) {
       lastErr = e;
-      const transient = _isTransientGeminiErr(e);
-      if (!transient || attempt >= maxAttempts - 1) {
-        // 非 transient 或已用完 retry → 結束
-        break;
-      }
-      const wait = LONG_AUDIO_RETRY_BACKOFF_MS[attempt];
-      const status = e?.status || e?.statusCode || 'UNKNOWN';
+      const degenerate = e.code === 'TRANSCRIBE_DEGENERATE';
+      if (degenerate && (e.partialText || '').length > bestSalvage.length) bestSalvage = e.partialText;
+      // degenerate(成功回傳但內容是垃圾)也要重試 — 換模型/加溫常能修好
+      const retriable = _isTransientGeminiErr(e) || degenerate;
+      if (!retriable || attempt >= maxAttempts - 1) break;
+      const wait = degenerate ? 2000 : LONG_AUDIO_RETRY_BACKOFF_MS[attempt];
+      const status = degenerate ? `DEGENERATE(${e.degenerateReason})` : (e?.status || e?.statusCode || 'UNKNOWN');
       const nextLabel = ATTEMPT_PLAN[attempt + 1]?.label || '?';
       console.warn(`[TranscribeLong] ${tagId} part ${segIdx}/${segTotal} attempt ${attempt + 1}/${maxAttempts} (${plan.label}) got ${status},等 ${wait}ms 後 retry (next=${nextLabel})`);
       await new Promise((resolve) => setTimeout(resolve, wait));
     }
   }
+  // 全打完仍 degenerate:有可救前綴(重複前的正常段)就回它 + 警示,別把整段丟掉或塞幻覺進 .txt
+  if (bestSalvage && bestSalvage.length > 20) {
+    console.warn(`[TranscribeLong] ${tagId} part ${segIdx}/${segTotal} 全 attempt degenerate,搶救前綴 ${bestSalvage.length}chars`);
+    return {
+      ok: true,
+      text: `${bestSalvage}\n[⚠ 此段後半偵測到異常重複/脫稿幻覺,已自動截斷。原因: ${lastErr?.degenerateReason || 'degenerate'}]`,
+      inputTokens: 0,
+      outputTokens: 0,
+      attempts: maxAttempts,
+      degenerated: true,
+    };
+  }
   return {
     ok: false,
-    text: `[此段轉錄失敗 (${LONG_AUDIO_RETRY_BACKOFF_MS.length + 1} 次嘗試後仍失敗): ${lastErr?.message || 'unknown error'}]`,
+    text: `[此段轉錄失敗 (${maxAttempts} 次嘗試後仍失敗): ${lastErr?.message || 'unknown error'}]`,
     inputTokens: 0,
     outputTokens: 0,
     attempts: maxAttempts,
@@ -1206,10 +1274,46 @@ async function generateWithToolsStream(
   // ⭐ 自管 contents — 不用 chat.startChat()，因為舊 SDK 會洗掉 thoughtSignature
   // 導致 Gemini 3 thinking model 多輪 tool call 失敗
   const contents = [...history, { role: 'user', parts: userParts }];
+  const baselineLen = contents.length; // 之後新增的都是本輪 tool 對話,要回傳給 caller 持久化
   let inputTokens = 0, outputTokens = 0;
   let toolCallCount = 0;
   let fullText = '';
   const MAX_TOOL_ROUNDS = 10;
+
+  // ── 擷取本輪新增的 tool 對話(functionCall / functionResponse)回傳給 caller 持久化。
+  //    讓多輪 tool workflow(如 MCP 引導式問答)能跨「聊天訊息」保留已選參數,
+  //    解決使用者第 2 輪輸入「3 / 直方圖」時 LLM 忘記前一步的問題。
+  //    text 不收(已在 fullText / m.content);thoughtSignature 刻意不收 —
+  //    跨「聊天訊息」重播一個已完結的 function call 不需要 continue,帶舊 sig 反而
+  //    可能讓 Gemini 3 回 400(stale signature)炸掉整個對話。
+  //    必須在 functionResponse 已 push 進 contents 後才呼叫,否則會留下 orphan functionCall。
+  const REPLAY_FR_MAX = 8000;
+  const captureToolTurns = () => {
+    const turns = [];
+    for (let i = baselineLen; i < contents.length; i++) {
+      const turn = contents[i];
+      if (turn.role === 'model') {
+        const fcParts = (turn.parts || [])
+          .filter((p) => p.functionCall)
+          .map((p) => ({ functionCall: p.functionCall }));
+        if (fcParts.length) turns.push({ role: 'model', parts: fcParts });
+      } else {
+        // functionResponse 可能很大 — 持久化重播時截斷,避免 DB / 後續每輪 token 膨脹
+        const frParts = (turn.parts || [])
+          .filter((p) => p.functionResponse)
+          .map((p) => {
+            const fr = p.functionResponse;
+            const c = fr?.response?.content;
+            if (typeof c === 'string' && c.length > REPLAY_FR_MAX) {
+              return { functionResponse: { name: fr.name, response: { content: c.slice(0, REPLAY_FR_MAX) + '\n…[truncated]' } } };
+            }
+            return { functionResponse: fr };
+          });
+        if (frParts.length) turns.push({ role: 'user', parts: frParts });
+      }
+    }
+    return turns;
+  };
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const result = await model.generateContentStream({ contents });
@@ -1313,14 +1417,16 @@ async function generateWithToolsStream(
       });
     }
 
-    if (directAnswerText !== null) {
-      return { text: directAnswerText, inputTokens, outputTokens, toolCallCount, isDirectAnswer: true };
-    }
-
+    // direct-answer:先把本輪 fnResponses push 進 contents(完成 functionCall/Response 配對),
+    // 再 capture,避免留下 orphan functionCall 破壞重播
     contents.push({ role: 'user', parts: fnResponses });
+
+    if (directAnswerText !== null) {
+      return { text: directAnswerText, inputTokens, outputTokens, toolCallCount, isDirectAnswer: true, toolTurns: captureToolTurns() };
+    }
   }
 
-  return { text: fullText, inputTokens, outputTokens, toolCallCount };
+  return { text: fullText, inputTokens, outputTokens, toolCallCount, toolTurns: captureToolTurns() };
 }
 
 module.exports = {
