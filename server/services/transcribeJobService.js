@@ -303,6 +303,20 @@ async function runTranscribeJob(db, jobId) {
           console.error(`[TranscribeJob] ${tagId} part ${seg.idx + 1}/${segments.length} FAILED after ${Date.now() - tPart}ms attempts=${r.attempts}: ${r.error}`);
         }
 
+        // 記 token 帳(token_usage,dashboard 讀這張)— 背景 job 原本完全沒記 → 長音檔轉錄
+        // 不計費。每段成功即記一次(upsert 累加),分 Pro/Flash model 計費。
+        // recovery 時已完成段是 ok=true 不會再進 batch → 不會重複計;rerun-segment 重置該段
+        // 後會重新計(真的又打了一次 API,計費正確)。
+        if (r.ok && (seg.inputTokens || seg.outputTokens)) {
+          try {
+            const { upsertTokenUsage } = require('./tokenService');
+            const today = new Date().toISOString().slice(0, 10);
+            await upsertTokenUsage(db, job.user_id, today, r.model || 'pro', seg.inputTokens, seg.outputTokens, 0);
+          } catch (e) {
+            console.warn(`[TranscribeJob] ${tagId} part ${seg.idx + 1} token accounting failed: ${e.message}`);
+          }
+        }
+
         // ★ 每段完成立即 flush DB(關鍵):
         //   原本是 batch 結束後才 UPDATE。但 SIGTERM 可能在 Promise.all 中間發生,
         //   in-memory 的 seg.ok=true 沒寫進 DB → recovery 看 segments_json 還是空

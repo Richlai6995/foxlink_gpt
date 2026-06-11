@@ -519,6 +519,7 @@ async function _transcribeWithRetry(partPath, mimeType, lang, segIdx, segTotal, 
         inputTokens: r.inputTokens,
         outputTokens: r.outputTokens,
         attempts: attempt + 1,
+        model: plan.useProModel ? MODEL_PRO : MODEL_FLASH, // 給上層記 token 帳用(分 Pro/Flash 計費)
       };
     } catch (e) {
       lastErr = e;
