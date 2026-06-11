@@ -1423,6 +1423,7 @@ async function runMigrations(db) {
     out_tokens_total  NUMBER         DEFAULT 0,
     estimated_usd     NUMBER,
     actual_usd        NUMBER         DEFAULT 0,
+    tokens_billed     NUMBER(1)      DEFAULT 0,              -- 是否已記入 token_usage(防 backfill 重複計)
     error_msg         VARCHAR2(1000),
     is_notified       NUMBER(1)      DEFAULT 0,
     recovery_count    NUMBER         DEFAULT 0,              -- 中斷後 resume 次數,>=3 標 failed
@@ -1442,6 +1443,8 @@ async function runMigrations(db) {
   await safeCreateTranscribeIdx('IDX_TRANSJOBS_USER_STATUS', 'CREATE INDEX idx_transjobs_user_status ON transcribe_jobs(user_id, status)');
   await safeCreateTranscribeIdx('IDX_TRANSJOBS_RECOVERY',    'CREATE INDEX idx_transjobs_recovery ON transcribe_jobs(status, heartbeat_at)');
   await safeCreateTranscribeIdx('IDX_TRANSJOBS_SESSION',     'CREATE INDEX idx_transjobs_session ON transcribe_jobs(session_id)');
+  // 既有部署補欄:是否已記入 token_usage(forward 路徑完成時標 1;backfill 只補 0/NULL 的舊 job)
+  await addCol('TRANSCRIBE_JOBS', 'TOKENS_BILLED', 'NUMBER(1) DEFAULT 0');
 
   // ── PDF → DOCX 背景轉檔 Job(Phase 1d:複雜 vision 同步會超 chat.js 120s) ──
   // 解決問題:

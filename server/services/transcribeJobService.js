@@ -386,7 +386,8 @@ async function runTranscribeJob(db, jobId) {
         transcript_chars=?,
         error_msg=?,
         completed_at=SYSTIMESTAMP,
-        updated_at=SYSTIMESTAMP
+        updated_at=SYSTIMESTAMP,
+        tokens_billed=1
       WHERE id=?
     `).run(finalStatus, txtFname, merged.length, finalError, jobId);
 
