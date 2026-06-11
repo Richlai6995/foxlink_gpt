@@ -338,6 +338,10 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
   try {
     return await attempt('vertex');
   } catch (e1) {
+    // 脫稿/重複是「內容問題」不是 provider 問題 — studio 八成一樣 loop,且 loop 會吐滿
+    // maxOutputTokens(~6-13 分鐘/段)。別在這再跑一次 full degenerate,直接丟給上層
+    // _transcribeWithRetry 用「加溫 + 換模型」escape(那才是打斷 loop 的有效手段)。
+    if (e1.code === 'TRANSCRIBE_DEGENERATE') throw e1;
     console.warn(`[Transcribe] ${tagId} vertex FAILED (${e1.code || e1.message}), retrying with studio fallback...`);
     return await attempt('studio');
   }
@@ -364,7 +368,9 @@ const LONG_AUDIO_RETRY_BACKOFF_MS = [10000, 30000, 60000]; // 3 次 retry,10s/30
 // 改這裡就能調,不用動 transcribeAudio / _detectDegenerate / _transcribeWithRetry 內文。
 const TRANSCRIBE_FREQUENCY_PENALTY = 0.5;  // 壓「已出現 token」logit,打斷「那那那…」重複迴圈(僅 vertex,Studio 不支援會 400)
 const TRANSCRIBE_PRESENCE_PENALTY  = 0.3;  // 輕度鼓勵換新詞,進一步降 degenerate 機率(僅 vertex;設 0 完全關閉)
-const TRANSCRIBE_RETRY_TEMPERATURE = 0.4;  // degenerate 重試時加溫,給逃脫迴圈的隨機性(0=greedy)
+const TRANSCRIBE_RETRY_TEMPERATURE = 0.4;  // (transient retry 的後段 attempt 加溫)
+const DEGEN_RETRY_TEMPERATURE = 0.7;  // degenerate 專用:打斷 loop 要更強隨機性,比 transient 高
+const DEGEN_MAX_ATTEMPTS = 2;         // degenerate 最多打幾次(loop 一次燒 6-13 分鐘,多打只浪費)
 const DEGEN_CHAR_RUN_MIN     = 20;    // 連續同字 ≥ N → 判定重複迴圈,截在起點
 const DEGEN_PHRASE_REPEAT_MIN = 4;    // 8~60 字片段連續重複 ≥ N 次 → 判定 phrase loop
 const DEGEN_SIMPLIFIED_MIN    = 20;   // zh-TW 出現 ≥ N 個簡體獨有字 → 判定脫稿幻覺
@@ -456,6 +462,8 @@ async function _transcribeWithRetry(partPath, mimeType, lang, segIdx, segTotal, 
   const maxAttempts = ATTEMPT_PLAN.length;
   let lastErr;
   let attemptsRun = 0;  // 實際跑了幾次(非 transient 會提早 break,別誤報 maxAttempts)
+  let degenSeen = 0;    // 看過幾次 degenerate(脫稿/重複)
+  let forceTemp = 0;    // 上一輪 degenerate → 下一輪強制加溫逃脫 loop(plan 的 temp 太低沒用)
   let bestSalvage = ''; // 跨 attempt 保留最長的「可救前綴」(degenerate 截斷前的正常內容)
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     attemptsRun = attempt + 1;
@@ -463,8 +471,9 @@ async function _transcribeWithRetry(partPath, mimeType, lang, segIdx, segTotal, 
     const opts = {
       useProModel: plan.useProModel,
       verbatim: true,
-      temperature: plan.temperature,
+      temperature: Math.max(plan.temperature, forceTemp),
     };
+    forceTemp = 0;
     try {
       const r = await transcribeAudio(partPath, mimeType, lang, LONG_AUDIO_PER_SEG_TIMEOUT_MS, opts);
       return {
@@ -477,14 +486,19 @@ async function _transcribeWithRetry(partPath, mimeType, lang, segIdx, segTotal, 
     } catch (e) {
       lastErr = e;
       const degenerate = e.code === 'TRANSCRIBE_DEGENERATE';
-      if (degenerate && (e.partialText || '').length > bestSalvage.length) bestSalvage = e.partialText;
-      // degenerate(成功回傳但內容是垃圾)也要重試 — 換模型/加溫常能修好
-      const retriable = _isTransientGeminiErr(e) || degenerate;
+      if (degenerate) {
+        degenSeen++;
+        if ((e.partialText || '').length > bestSalvage.length) bestSalvage = e.partialText;
+        forceTemp = DEGEN_RETRY_TEMPERATURE; // 下一輪加溫(loop 的真正解;temp0 再跑只會再 loop)
+      }
+      // degenerate 最多重試 DEGEN_MAX_ATTEMPTS 次:loop 一次跑滿 maxOutputTokens(~6-13 分鐘),
+      // 嚴重度通常越retry越糟(654→1326),多打只是燒時間;加溫換模型那次沒救就直接 salvage。
+      const retriable = _isTransientGeminiErr(e) || (degenerate && degenSeen < DEGEN_MAX_ATTEMPTS);
       if (!retriable || attempt >= maxAttempts - 1) break;
       const wait = degenerate ? 2000 : LONG_AUDIO_RETRY_BACKOFF_MS[attempt];
       const status = degenerate ? `DEGENERATE(${e.degenerateReason})` : (e?.status || e?.statusCode || 'UNKNOWN');
       const nextLabel = ATTEMPT_PLAN[attempt + 1]?.label || '?';
-      console.warn(`[TranscribeLong] ${tagId} part ${segIdx}/${segTotal} attempt ${attempt + 1}/${maxAttempts} (${plan.label}) got ${status},等 ${wait}ms 後 retry (next=${nextLabel})`);
+      console.warn(`[TranscribeLong] ${tagId} part ${segIdx}/${segTotal} attempt ${attempt + 1}/${maxAttempts} (${plan.label}) got ${status},等 ${wait}ms 後 retry (next=${nextLabel}${degenerate ? `, temp→${DEGEN_RETRY_TEMPERATURE}` : ''})`);
       await new Promise((resolve) => setTimeout(resolve, wait));
     }
   }
