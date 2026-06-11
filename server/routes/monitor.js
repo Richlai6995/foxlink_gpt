@@ -808,7 +808,8 @@ router.get('/logs/loki/pod/:ns/:pod', async (req, res) => {
   const http = require('http');
   const { ns, pod } = req.params;
   const sinceRaw = req.query.since || '1h';
-  const limit = parseInt(req.query.limit) || 5000;
+  const LOKI_PAGE = 5000;                                                    // Loki max_entries_limit_per_query 預設上限,單次查詢不可超過(超過 Loki 回 400)
+  const maxLines = Math.min(parseInt(req.query.limit) || LOKI_PAGE, 200000); // 總回填上限,可由 ?limit= 調大;clamp 20 萬保護記憶體
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -838,13 +839,13 @@ router.get('/logs/loki/pod/:ns/:pod', async (req, res) => {
   let closed = false;
   req.on('close', () => { closed = true; });
 
-  function queryRange(startNs, endNs) {
+  function queryRange(startNs, endNs, pageLimit) {
     return new Promise((resolve) => {
       const params = new URLSearchParams({
         query: expr,
         start: String(startNs),
         end: String(endNs),
-        limit: String(limit),
+        limit: String(pageLimit),
         direction: 'forward',
       });
       const url = new URL(`${lokiBase}/loki/api/v1/query_range?${params}`);
@@ -896,21 +897,29 @@ router.get('/logs/loki/pod/:ns/:pod', async (req, res) => {
     return `${ts} ${String(line).trimEnd()}`;
   }
 
-  // 初始撈 [from, now]
-  const initial = await queryRange(lastTsNs, BigInt(Date.now()) * 1000000n);
-  if (initial.error) {
-    res.write(`data: ${JSON.stringify({ error: initial.error })}\n\n`);
-  }
-  for (const e of initial.entries) {
-    if (closed) return;
-    res.write(`data: ${JSON.stringify({ line: formatEntry(e.tsStr, e.raw) })}\n\n`);
-    if (BigInt(e.tsStr) > lastTsNs) lastTsNs = BigInt(e.tsStr);
+  // 初始回填 [from, now]:分頁撈(每頁 ≤ LOKI_PAGE 避開 Loki max_entries 上限),
+  // 直到追上 now 或達到 maxLines 總上限 — 一次連線把整段歷史灌完,不靠 3s poll 慢慢補。
+  let backfilled = 0;
+  let cursorNs = lastTsNs;
+  while (!closed && backfilled < maxLines) {
+    const want = Math.min(LOKI_PAGE, maxLines - backfilled);
+    const page = await queryRange(cursorNs, BigInt(Date.now()) * 1000000n, want);
+    if (page.error) { res.write(`data: ${JSON.stringify({ error: page.error })}\n\n`); break; }
+    if (page.entries.length === 0) break;
+    for (const e of page.entries) {
+      if (closed) return;
+      res.write(`data: ${JSON.stringify({ line: formatEntry(e.tsStr, e.raw) })}\n\n`);
+      backfilled++;
+      if (BigInt(e.tsStr) > lastTsNs) lastTsNs = BigInt(e.tsStr);
+    }
+    if (page.entries.length < want) break;   // 拿到的比要的少 = 沒更多了
+    cursorNs = lastTsNs + 1n;                // 下一頁從最後一筆 +1ns 續撈
   }
 
   // Live tail polling(每 3 秒撈 [lastTsNs+1, now])
   const pollInterval = setInterval(async () => {
     if (closed) { clearInterval(pollInterval); return; }
-    const r = await queryRange(lastTsNs + 1n, BigInt(Date.now()) * 1000000n);
+    const r = await queryRange(lastTsNs + 1n, BigInt(Date.now()) * 1000000n, LOKI_PAGE);
     for (const e of r.entries) {
       if (closed) return;
       res.write(`data: ${JSON.stringify({ line: formatEntry(e.tsStr, e.raw) })}\n\n`);
@@ -937,7 +946,8 @@ router.get('/logs/loki/app/:ns/:app', async (req, res) => {
   const http = require('http');
   const { ns, app } = req.params;
   const sinceRaw = req.query.since || '1h';
-  const limit = parseInt(req.query.limit) || 5000;
+  const LOKI_PAGE = 5000;                                                    // Loki max_entries_limit_per_query 預設上限,單次查詢不可超過(超過 Loki 回 400)
+  const maxLines = Math.min(parseInt(req.query.limit) || LOKI_PAGE, 200000); // 總回填上限,可由 ?limit= 調大;clamp 20 萬保護記憶體
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -960,13 +970,13 @@ router.get('/logs/loki/app/:ns/:app', async (req, res) => {
   let closed = false;
   req.on('close', () => { closed = true; });
 
-  function queryRange(startNs, endNs) {
+  function queryRange(startNs, endNs, pageLimit) {
     return new Promise((resolve) => {
       const params = new URLSearchParams({
         query: expr,
         start: String(startNs),
         end: String(endNs),
-        limit: String(limit),
+        limit: String(pageLimit),
         direction: 'forward',
       });
       const url = new URL(`${lokiBase}/loki/api/v1/query_range?${params}`);
@@ -1025,19 +1035,28 @@ router.get('/logs/loki/app/:ns/:app', async (req, res) => {
     return `[${podSuffix(pod)}] ${ts} ${String(line).trimEnd()}`;
   }
 
-  const initial = await queryRange(lastTsNs, BigInt(Date.now()) * 1000000n);
-  if (initial.error) {
-    res.write(`data: ${JSON.stringify({ error: initial.error })}\n\n`);
-  }
-  for (const e of initial.entries) {
-    if (closed) return;
-    res.write(`data: ${JSON.stringify({ line: formatEntry(e.tsStr, e.raw, e.pod) })}\n\n`);
-    if (BigInt(e.tsStr) > lastTsNs) lastTsNs = BigInt(e.tsStr);
+  // 初始回填 [from, now]:分頁撈(每頁 ≤ LOKI_PAGE 避開 Loki max_entries 上限),
+  // 直到追上 now 或達到 maxLines 總上限 — 合併多 pod 量更大,分頁更必要。
+  let backfilled = 0;
+  let cursorNs = lastTsNs;
+  while (!closed && backfilled < maxLines) {
+    const want = Math.min(LOKI_PAGE, maxLines - backfilled);
+    const page = await queryRange(cursorNs, BigInt(Date.now()) * 1000000n, want);
+    if (page.error) { res.write(`data: ${JSON.stringify({ error: page.error })}\n\n`); break; }
+    if (page.entries.length === 0) break;
+    for (const e of page.entries) {
+      if (closed) return;
+      res.write(`data: ${JSON.stringify({ line: formatEntry(e.tsStr, e.raw, e.pod) })}\n\n`);
+      backfilled++;
+      if (BigInt(e.tsStr) > lastTsNs) lastTsNs = BigInt(e.tsStr);
+    }
+    if (page.entries.length < want) break;   // 拿到的比要的少 = 沒更多了
+    cursorNs = lastTsNs + 1n;                // 下一頁從最後一筆 +1ns 續撈
   }
 
   const pollInterval = setInterval(async () => {
     if (closed) { clearInterval(pollInterval); return; }
-    const r = await queryRange(lastTsNs + 1n, BigInt(Date.now()) * 1000000n);
+    const r = await queryRange(lastTsNs + 1n, BigInt(Date.now()) * 1000000n, LOKI_PAGE);
     for (const e of r.entries) {
       if (closed) return;
       res.write(`data: ${JSON.stringify({ line: formatEntry(e.tsStr, e.raw, e.pod) })}\n\n`);

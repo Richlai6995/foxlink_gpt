@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Search, Download, X, Calendar, History, Layers } from 'lucide-react'
+import { Search, Download, X, Calendar, History, Layers, List } from 'lucide-react'
 
 interface Props {
   type: 'pod' | 'container'
@@ -85,6 +85,8 @@ export default function LogViewer({ type, target, onClose }: Props) {
   const [search, setSearch] = useState('')
   const [sincePreset, setSincePreset] = useState<SincePreset>('1h')
   const [customDate, setCustomDate] = useState('')
+  // 一次回填的最大行數(後端分頁撈到這個量,前端 buffer 也跟著放大)。查整天調大,預設 1 萬。
+  const [maxLines, setMaxLines] = useState(10000)
   const [showDatePicker, setShowDatePicker] = useState(false)
   const [autoScroll, setAutoScroll] = useState(true)
   const [streaming, setStreaming] = useState(true)
@@ -136,7 +138,9 @@ export default function LogViewer({ type, target, onClose }: Props) {
     if (esRef.current) esRef.current.close()
 
     const since = getSinceValue(sincePreset, customDate)
-    const params = new URLSearchParams({ token: token || '', since })
+    const params = new URLSearchParams({ token: token || '', since, limit: String(maxLines) })
+    // 前端 buffer 上限 = 回填量 + LIVE tail 留白(至少 5 萬),避免回填完馬上被砍掉開頭
+    const bufferCap = Math.max(maxLines + 20000, 50000)
     // Loki 模式優先(只對 pod 生效;container target 沒 K8s label 沒 Loki 入口)
     // 跨 pod 重建可看歷史,kubelet pod log 只剩活著的 pod 那段。
     // grafana.baseUrl 沒設(代表沒部 Loki)就退回 kubelet endpoint。
@@ -171,7 +175,7 @@ export default function LogViewer({ type, target, onClose }: Props) {
         if (data.line) {
           setLines(prev => {
             const next = [...prev, data.line]
-            return next.length > 50000 ? next.slice(-50000) : next
+            return next.length > bufferCap ? next.slice(-bufferCap) : next
           })
         }
       } catch {}
@@ -182,7 +186,7 @@ export default function LogViewer({ type, target, onClose }: Props) {
       setStreaming(false)
       es.close()
     }
-  }, [type, target, sincePreset, customDate, token, grafana.baseUrl, aggregateMode, canAggregate, targetApp, targetNs])
+  }, [type, target, sincePreset, customDate, maxLines, token, grafana.baseUrl, aggregateMode, canAggregate, targetApp, targetNs])
 
   useEffect(() => {
     if (!grafanaLoaded) return  // 等 grafana config 確認後再 stream,避免 kubelet→Loki 切換清空畫面
@@ -328,6 +332,21 @@ export default function LogViewer({ type, target, onClose }: Props) {
                 className="text-[11px] bg-slate-800 border border-slate-600 rounded px-2 py-0.5 text-white focus:outline-none focus:border-blue-500"
               />
             )}
+            {/* 最大載入行數 — 查整天時調大,突破舊的 5000/50000 兩道閘 */}
+            <div className="flex items-center gap-1" title="一次回填的最大行數。查整天/合併多 pod 時調大;太大會吃瀏覽器記憶體。">
+              <List size={12} className="text-slate-500" />
+              <select
+                value={maxLines}
+                onChange={e => setMaxLines(Number(e.target.value))}
+                className="text-[11px] bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-slate-300 focus:outline-none focus:border-blue-500"
+              >
+                {[5000, 10000, 50000, 100000, 200000].map(n => (
+                  <option key={n} value={n}>
+                    {n >= 10000 ? `${n / 10000} 萬行` : `${n / 1000} 千行`}
+                  </option>
+                ))}
+              </select>
+            </div>
             {/* 搜尋 */}
             <div className="relative">
               <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" />
