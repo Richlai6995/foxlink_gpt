@@ -33,6 +33,7 @@ const {
   _transcribeWithRetry,
   LONG_AUDIO_SEGMENT_SEC,
   LONG_AUDIO_CONCURRENCY,
+  LONG_AUDIO_OVERLAP_SEC,
 } = require('./gemini');
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR
@@ -327,13 +328,19 @@ async function runTranscribeJob(db, jobId) {
     }
 
     // 6. Concat → 寫 .txt
-    const merged = segments.map(s => `[${s.marker}]\n${s.text}`).join('\n\n');
+    // 切片有 lead-in overlap(每段除第 1 段外開頭約 LONG_AUDIO_OVERLAP_SEC 秒與上一段重疊,
+    // 防接縫漏資料),所以接縫處會有重複內容 → 第 2 段起標記提醒,避免讀者誤以為轉錯。
+    const overlapSec = LONG_AUDIO_OVERLAP_SEC;
+    const merged = segments.map((s, i) => {
+      const seam = i > 0 ? `\n(↑ 開頭約 ${overlapSec} 秒與上一段重疊,防接縫漏句)` : '';
+      return `[${s.marker}]${seam}\n${s.text}`;
+    }).join('\n\n');
     const generatedDir = path.join(UPLOAD_DIR, 'generated');
     if (!fs.existsSync(generatedDir)) fs.mkdirSync(generatedDir, { recursive: true });
     const safeBase = job.audio_filename.replace(/\.[^.]+$/, '').replace(/[^\w一-龥\-]/g, '_').slice(0, 50);
     const txtFname = `transcript_${safeBase}_${Date.now()}.txt`;
     const txtPath = path.join(generatedDir, txtFname);
-    const header = `音訊逐字稿\n檔案: ${job.audio_filename}\n時間: ${new Date().toISOString()}\n字數: ${merged.length}\n段數: ${segments.length}\n${'='.repeat(60)}\n\n`;
+    const header = `音訊逐字稿\n檔案: ${job.audio_filename}\n時間: ${new Date().toISOString()}\n字數: ${merged.length}\n段數: ${segments.length}\n備註: 段與段間有約 ${overlapSec} 秒重疊(防接縫漏資料),接縫處內容可能重複\n${'='.repeat(60)}\n\n`;
     fs.writeFileSync(txtPath, header + merged, 'utf-8');
 
     const allFailed = segments.every(s => !s.ok);

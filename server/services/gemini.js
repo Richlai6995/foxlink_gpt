@@ -363,6 +363,11 @@ const LONG_AUDIO_CONCURRENCY = 7;
 // (實測正常 part 3-9 分鐘,35 分鐘只是極端 fallback 上限)
 const LONG_AUDIO_PER_SEG_TIMEOUT_MS = 35 * 60 * 1000;
 const LONG_AUDIO_RETRY_BACKOFF_MS = [10000, 30000, 60000]; // 3 次 retry,10s/30s/60s
+// lead-in overlap:每段(第 0 段除外)往「前」多含 N 秒。防接縫漏資料的兩個機制:
+//   ① 跨 30:00 的句子被切兩半 → 在下一段開頭是完整的
+//   ② 上一段尾巴模型偷懶 trailing off → 那段音訊在下一段開頭被再轉一次
+// 代價:接縫處約 N 秒重複內容(方案 A:接受重複 + 標記,寧可重複也不要漏)。
+const LONG_AUDIO_OVERLAP_SEC = 60;
 
 // ── Degenerate(重複迴圈/脫稿幻覺)防護 — 可調超參數 ───────────────────────────
 // 改這裡就能調,不用動 transcribeAudio / _detectDegenerate / _transcribeWithRetry 內文。
@@ -407,23 +412,47 @@ async function _probeAudioDuration(filePath) {
   }
 }
 
+// 重疊切片:每段 = [contentStart - overlap, contentEnd],第 0 段不往前。
+// 段數 / marker 仍以「不重疊的內容窗」(i*segmentSec)為準 — overlap 只是多餵給模型的
+// lead-in 音訊,不改變邏輯時間軸。逐段 ffmpeg(-ss 在 -i 前 = 快速 seek;AAC 每 frame
+// 獨立,copy seek 夠準),段數=6-7 各 ~0.5s,可接受。
 async function _splitAudio(filePath, segmentSec, outDir) {
   const ext = path.extname(filePath) || '.m4a';
-  // -c copy 不重編碼(30 秒切完 185MB);-reset_timestamps 1 讓每段時間從 0 開始
-  await _runCmd('ffmpeg', [
-    '-hide_banner', '-loglevel', 'error',
-    '-i', filePath,
-    '-f', 'segment',
-    '-segment_time', String(segmentSec),
-    '-c', 'copy',
-    '-reset_timestamps', '1',
-    '-y',
-    path.join(outDir, `part_%03d${ext}`),
-  ]);
-  return fs.readdirSync(outDir)
-    .filter((n) => n.startsWith('part_'))
-    .sort()
-    .map((n) => path.join(outDir, n));
+  const totalDuration = await _probeAudioDuration(filePath);
+
+  // duration 拿不到(probe 失敗回 0)→ fallback 舊的無重疊 -f segment(至少不會壞)
+  if (!totalDuration || totalDuration <= 0) {
+    console.warn(`[_splitAudio] duration probe=0, fallback to non-overlap -f segment`);
+    await _runCmd('ffmpeg', [
+      '-hide_banner', '-loglevel', 'error',
+      '-i', filePath,
+      '-f', 'segment', '-segment_time', String(segmentSec),
+      '-c', 'copy', '-reset_timestamps', '1', '-y',
+      path.join(outDir, `part_%03d${ext}`),
+    ]);
+    return fs.readdirSync(outDir).filter((n) => n.startsWith('part_')).sort().map((n) => path.join(outDir, n));
+  }
+
+  const numSegments = Math.ceil(totalDuration / segmentSec);
+  const parts = [];
+  for (let i = 0; i < numSegments; i++) {
+    const start = Math.max(0, i * segmentSec - (i > 0 ? LONG_AUDIO_OVERLAP_SEC : 0)); // 第 0 段不往前
+    const end = Math.min((i + 1) * segmentSec, totalDuration);
+    const dur = end - start;
+    if (dur <= 0) break;
+    const outPath = path.join(outDir, `part_${String(i).padStart(3, '0')}${ext}`);
+    await _runCmd('ffmpeg', [
+      '-hide_banner', '-loglevel', 'error',
+      '-ss', String(start),   // 在 -i 前 = input seek(快),copy 模式 seek 到最近 packet
+      '-t', String(dur),
+      '-i', filePath,
+      '-c', 'copy',
+      '-y',
+      outPath,
+    ]);
+    parts.push(outPath);
+  }
+  return parts;
 }
 
 function _fmtTime(sec) {
@@ -586,9 +615,10 @@ async function transcribeLongAudio(filePath, mimeType, lang) {
         ? Math.min((idx + 1) * LONG_AUDIO_SEGMENT_SEC, totalDuration)
         : (idx + 1) * LONG_AUDIO_SEGMENT_SEC;
       const marker = `[${_fmtTime(startSec)}–${_fmtTime(endSec)}]`;
+      const seam = idx > 0 ? `\n(↑ 開頭約 ${LONG_AUDIO_OVERLAP_SEC} 秒與上一段重疊,防接縫漏句)` : '';
       totalIn += r.inputTokens;
       totalOut += r.outputTokens;
-      return `${marker}\n${r.text}`;
+      return `${marker}${seam}\n${r.text}`;
     });
     const merged = segments.join('\n\n');
 
@@ -1473,5 +1503,5 @@ module.exports = {
   MODEL_PRO, MODEL_FLASH,
   // 給 transcribeJobService.js 用(背景 job 重用同一套 ffmpeg + retry + Pro→Flash fallback)
   _probeAudioDuration, _splitAudio, _fmtTime, _transcribeWithRetry,
-  LONG_AUDIO_SEGMENT_SEC, LONG_AUDIO_CONCURRENCY, LONG_AUDIO_PER_SEG_TIMEOUT_MS,
+  LONG_AUDIO_SEGMENT_SEC, LONG_AUDIO_CONCURRENCY, LONG_AUDIO_PER_SEG_TIMEOUT_MS, LONG_AUDIO_OVERLAP_SEC,
 };
