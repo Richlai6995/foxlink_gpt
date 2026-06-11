@@ -264,20 +264,24 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
   // 單次嘗試:給 provider 跑一次,回 { text, inputTokens, outputTokens, finishReason }
   // 失敗(timeout / SDK 5xx / empty text)會 throw,讓 caller 決定要不要 fallback
   const attempt = async (provider) => {
+    const genConfig = {
+      maxOutputTokens: maxOut,
+      temperature,
+      thinkingConfig: { thinkingBudget },
+    };
+    // frequencyPenalty:對「已出現過的 token」按次數懲罰 logit,是壓制「那那那…」重複迴圈的關鍵
+    // knob(greedy 下也有效,會把重複字 logit 壓到讓別的 token 勝出 → 打斷迴圈、連帶避免脫稿)。
+    // ★ 只在 vertex 開:實測 Vertex global 接受,但 Studio 端對 gemini-3.x 回
+    //   400 "Penalty is not enabled for this model"。Studio 是 transient fallback 路徑,
+    //   若帶 penalty 會讓「vertex 撞 503 → studio 兜底」整段 400 死掉。常數設 0 = 完全關閉。
+    if (provider === 'vertex') {
+      if (TRANSCRIBE_FREQUENCY_PENALTY > 0) genConfig.frequencyPenalty = TRANSCRIBE_FREQUENCY_PENALTY;
+      if (TRANSCRIBE_PRESENCE_PENALTY > 0) genConfig.presencePenalty = TRANSCRIBE_PRESENCE_PENALTY;
+    }
     const model = getGenerativeModel({
       model: modelName,
       provider,
-      generationConfig: {
-        maxOutputTokens: maxOut,
-        temperature,
-        // frequencyPenalty:對「已出現過的 token」按出現次數懲罰 logit,是壓制「那那那…」
-        // 重複迴圈的關鍵 knob。temperature=0 greedy 一旦卡進重複沒有隨機性可逃,penalty 會把
-        // 重複字 logit 壓到讓別的 token 勝出 → 打斷迴圈,連帶避免後面脫稿成幻覺。
-        // presencePenalty:輕度鼓勵換新詞,進一步降低 degenerate 機率。(調值見檔案 LONG_AUDIO 區常數)
-        frequencyPenalty: TRANSCRIBE_FREQUENCY_PENALTY,
-        presencePenalty: TRANSCRIBE_PRESENCE_PENALTY,
-        thinkingConfig: { thinkingBudget },
-      },
+      generationConfig: genConfig,
     });
     const tCall0 = Date.now();
     console.log(`[Transcribe] ${tagId} calling SDK (model=${modelName}, provider=${provider}, concurrency=${LONG_AUDIO_CONCURRENCY})...`);
@@ -358,8 +362,8 @@ const LONG_AUDIO_RETRY_BACKOFF_MS = [10000, 30000, 60000]; // 3 次 retry,10s/30
 
 // ── Degenerate(重複迴圈/脫稿幻覺)防護 — 可調超參數 ───────────────────────────
 // 改這裡就能調,不用動 transcribeAudio / _detectDegenerate / _transcribeWithRetry 內文。
-const TRANSCRIBE_FREQUENCY_PENALTY = 0.5;  // 壓「已出現 token」logit,打斷「那那那…」重複迴圈
-const TRANSCRIBE_PRESENCE_PENALTY  = 0.3;  // 輕度鼓勵換新詞,進一步降 degenerate 機率
+const TRANSCRIBE_FREQUENCY_PENALTY = 0.5;  // 壓「已出現 token」logit,打斷「那那那…」重複迴圈(僅 vertex,Studio 不支援會 400)
+const TRANSCRIBE_PRESENCE_PENALTY  = 0.3;  // 輕度鼓勵換新詞,進一步降 degenerate 機率(僅 vertex;設 0 完全關閉)
 const TRANSCRIBE_RETRY_TEMPERATURE = 0.4;  // degenerate 重試時加溫,給逃脫迴圈的隨機性(0=greedy)
 const DEGEN_CHAR_RUN_MIN     = 20;    // 連續同字 ≥ N → 判定重複迴圈,截在起點
 const DEGEN_PHRASE_REPEAT_MIN = 4;    // 8~60 字片段連續重複 ≥ N 次 → 判定 phrase loop
@@ -442,7 +446,7 @@ function _isTransientGeminiErr(e) {
 //   attempt 3: Flash + verbatim  ← 60s backoff,最後保險
 async function _transcribeWithRetry(partPath, mimeType, lang, segIdx, segTotal, tagId) {
   // 後兩次 attempt 加溫(temperature 0.4):degenerate(重複/脫稿)時 greedy 沒隨機性可逃,
-  // 加溫 + 換模型給逃脫機會。frequencyPenalty 在 transcribeAudio 一律開著。
+  // 加溫 + 換模型給逃脫機會。frequencyPenalty 在 transcribeAudio 僅對 vertex 開(Studio 不支援)。
   const ATTEMPT_PLAN = [
     { useProModel: true,  temperature: 0,                          label: 'Pro' },
     { useProModel: false, temperature: 0,                          label: 'Flash' },
@@ -451,8 +455,10 @@ async function _transcribeWithRetry(partPath, mimeType, lang, segIdx, segTotal, 
   ];
   const maxAttempts = ATTEMPT_PLAN.length;
   let lastErr;
+  let attemptsRun = 0;  // 實際跑了幾次(非 transient 會提早 break,別誤報 maxAttempts)
   let bestSalvage = ''; // 跨 attempt 保留最長的「可救前綴」(degenerate 截斷前的正常內容)
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    attemptsRun = attempt + 1;
     const plan = ATTEMPT_PLAN[attempt];
     const opts = {
       useProModel: plan.useProModel,
@@ -490,16 +496,16 @@ async function _transcribeWithRetry(partPath, mimeType, lang, segIdx, segTotal, 
       text: `${bestSalvage}\n[⚠ 此段後半偵測到異常重複/脫稿幻覺,已自動截斷。原因: ${lastErr?.degenerateReason || 'degenerate'}]`,
       inputTokens: 0,
       outputTokens: 0,
-      attempts: maxAttempts,
+      attempts: attemptsRun,
       degenerated: true,
     };
   }
   return {
     ok: false,
-    text: `[此段轉錄失敗 (${maxAttempts} 次嘗試後仍失敗): ${lastErr?.message || 'unknown error'}]`,
+    text: `[此段轉錄失敗 (${attemptsRun} 次嘗試後仍失敗): ${lastErr?.message || 'unknown error'}]`,
     inputTokens: 0,
     outputTokens: 0,
-    attempts: maxAttempts,
+    attempts: attemptsRun,
     error: lastErr?.message || 'unknown error',
   };
 }
