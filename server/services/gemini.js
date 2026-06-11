@@ -369,8 +369,8 @@ const LONG_AUDIO_RETRY_BACKOFF_MS = [10000, 30000, 60000]; // 3 次 retry,10s/30
 const TRANSCRIBE_FREQUENCY_PENALTY = 0.5;  // 壓「已出現 token」logit,打斷「那那那…」重複迴圈(僅 vertex,Studio 不支援會 400)
 const TRANSCRIBE_PRESENCE_PENALTY  = 0.3;  // 輕度鼓勵換新詞,進一步降 degenerate 機率(僅 vertex;設 0 完全關閉)
 const TRANSCRIBE_RETRY_TEMPERATURE = 0.4;  // (transient retry 的後段 attempt 加溫)
-const DEGEN_RETRY_TEMPERATURE = 0.7;  // degenerate 專用:打斷 loop 要更強隨機性,比 transient 高
-const DEGEN_MAX_ATTEMPTS = 2;         // degenerate 最多打幾次(loop 一次燒 6-13 分鐘,多打只浪費)
+const DEGEN_RETRY_TEMPERATURE = 0.7;  // degenerate 第 1 次 retry 溫度(第 2 次升到 1.0);皆保持 Pro
+const DEGEN_MAX_ATTEMPTS = 3;         // degenerate 最多打幾次:Pro temp 0→0.7→1.0(實證 Pro+加溫才救得回)
 const DEGEN_CHAR_RUN_MIN     = 20;    // 連續同字 ≥ N → 判定重複迴圈,截在起點
 const DEGEN_PHRASE_REPEAT_MIN = 4;    // 8~60 字片段連續重複 ≥ N 次 → 判定 phrase loop
 const DEGEN_SIMPLIFIED_MIN    = 20;   // zh-TW 出現 ≥ N 個簡體獨有字 → 判定脫稿幻覺
@@ -463,17 +463,22 @@ async function _transcribeWithRetry(partPath, mimeType, lang, segIdx, segTotal, 
   let lastErr;
   let attemptsRun = 0;  // 實際跑了幾次(非 transient 會提早 break,別誤報 maxAttempts)
   let degenSeen = 0;    // 看過幾次 degenerate(脫稿/重複)
-  let forceTemp = 0;    // 上一輪 degenerate → 下一輪強制加溫逃脫 loop(plan 的 temp 太低沒用)
+  // degenerate 專用 override:實證(2026-06-11)脫稿段唯一救得回的是「Pro + 加溫」,
+  // 換 Flash 反而 loop 更嚴重(temp0:Pro ×654 vs Flash ×1326)。degenerate 是 greedy
+  // decoding 問題不是模型能力問題 → 保持 Pro、純逐級加溫逃脫,不降級。
+  let forceTemp = 0;    // >0 = 下一輪強制此溫度(plan 的 temp 太低,temp0 再跑只會再 loop)
+  let forcePro = false; // true = 下一輪強制 Pro(degenerate 時別降 Flash)
   let bestSalvage = ''; // 跨 attempt 保留最長的「可救前綴」(degenerate 截斷前的正常內容)
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     attemptsRun = attempt + 1;
     const plan = ATTEMPT_PLAN[attempt];
     const opts = {
-      useProModel: plan.useProModel,
+      useProModel: forcePro || plan.useProModel,
       verbatim: true,
       temperature: Math.max(plan.temperature, forceTemp),
     };
     forceTemp = 0;
+    forcePro = false;
     try {
       const r = await transcribeAudio(partPath, mimeType, lang, LONG_AUDIO_PER_SEG_TIMEOUT_MS, opts);
       return {
@@ -489,16 +494,19 @@ async function _transcribeWithRetry(partPath, mimeType, lang, segIdx, segTotal, 
       if (degenerate) {
         degenSeen++;
         if ((e.partialText || '').length > bestSalvage.length) bestSalvage = e.partialText;
-        forceTemp = DEGEN_RETRY_TEMPERATURE; // 下一輪加溫(loop 的真正解;temp0 再跑只會再 loop)
+        // 逐級加溫:第 1 次 retry 0.7、第 2 次 1.0(都保持 Pro)
+        forceTemp = degenSeen === 1 ? DEGEN_RETRY_TEMPERATURE : 1.0;
+        forcePro = true;
       }
-      // degenerate 最多重試 DEGEN_MAX_ATTEMPTS 次:loop 一次跑滿 maxOutputTokens(~6-13 分鐘),
-      // 嚴重度通常越retry越糟(654→1326),多打只是燒時間;加溫換模型那次沒救就直接 salvage。
+      // degenerate 最多打 DEGEN_MAX_ATTEMPTS 次(Pro temp 0→0.7→1.0):loop 一次跑滿
+      // maxOutputTokens(~6-13 分鐘),逐級加溫逃脫;全沒救才 salvage(loop 前正常前綴)。
       const retriable = _isTransientGeminiErr(e) || (degenerate && degenSeen < DEGEN_MAX_ATTEMPTS);
       if (!retriable || attempt >= maxAttempts - 1) break;
       const wait = degenerate ? 2000 : LONG_AUDIO_RETRY_BACKOFF_MS[attempt];
+      const nextTemp = degenSeen === 1 ? DEGEN_RETRY_TEMPERATURE : 1.0;
       const status = degenerate ? `DEGENERATE(${e.degenerateReason})` : (e?.status || e?.statusCode || 'UNKNOWN');
-      const nextLabel = ATTEMPT_PLAN[attempt + 1]?.label || '?';
-      console.warn(`[TranscribeLong] ${tagId} part ${segIdx}/${segTotal} attempt ${attempt + 1}/${maxAttempts} (${plan.label}) got ${status},等 ${wait}ms 後 retry (next=${nextLabel}${degenerate ? `, temp→${DEGEN_RETRY_TEMPERATURE}` : ''})`);
+      const nextLabel = degenerate ? `Pro+T${nextTemp}` : (ATTEMPT_PLAN[attempt + 1]?.label || '?');
+      console.warn(`[TranscribeLong] ${tagId} part ${segIdx}/${segTotal} attempt ${attempt + 1}/${maxAttempts} (${plan.label}) got ${status},等 ${wait}ms 後 retry (next=${nextLabel})`);
       await new Promise((resolve) => setTimeout(resolve, wait));
     }
   }
