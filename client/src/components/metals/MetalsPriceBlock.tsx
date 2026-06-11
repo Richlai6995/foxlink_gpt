@@ -56,10 +56,11 @@ export default function MetalsPriceBlock({ title, rows, metalsAllowed, loading, 
 
       {/* 欄位標題小提示 — 基本金屬 USD/Ton,貴金屬 USD/Troy Oz */}
       <div className="grid items-center gap-0.5 px-1.5 py-1 text-[9px] text-slate-400 border-b bg-slate-50/50"
-        style={{ gridTemplateColumns: '34px minmax(0,1fr) 64px 42px 42px 42px' }}>
+        style={{ gridTemplateColumns: '34px minmax(0,1fr) 56px 34px 42px 42px 42px' }}>
         <span>代碼</span>
         <span></span>
         <span className="text-right">{theme === 'precious' ? 'USD/Troy Oz' : 'USD/Ton'}</span>
+        <span className="text-right text-[8px]">日期</span>
         <span className="text-right">D%</span>
         <span className="text-right">W%</span>
         <span className="text-right">M%</span>
@@ -80,13 +81,20 @@ export default function MetalsPriceBlock({ title, rows, metalsAllowed, loading, 
               className={`w-full grid items-center gap-0.5 px-1.5 py-1.5 text-xs border-b last:border-b-0 transition ${
                 isSelected ? (theme === 'precious' ? 'bg-emerald-50' : 'bg-amber-50') : 'hover:bg-slate-50'
               } ${noData ? 'opacity-50' : ''}`}
-              style={{ gridTemplateColumns: '34px minmax(0,1fr) 64px 42px 42px 42px' }}
-              title={`${code} 資料日期 ${r.as_of_date || '—'}${r.source ? ' / ' + r.source : ''}`}
+              style={{ gridTemplateColumns: '34px minmax(0,1fr) 56px 34px 42px 42px 42px' }}
+              title={`${code} ${r.source ? '來源: ' + r.source : ''}`}
             >
               <span className="font-mono font-bold text-slate-800 text-left">{code}</span>
               <span className="text-[11px] text-slate-500 text-left truncate">{r.metal_name || ''}</span>
               <span className="font-mono text-slate-700 text-right tabular-nums">
                 {noData ? '—' : Number(r.price_usd).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+              </span>
+              {/* 2026-06-11: 資料日期直接顯示在價格旁(原本只在 hover tooltip),避免採購誤會切日期看不到當天 row */}
+              <span className="text-[9px] text-slate-400 text-right tabular-nums">
+                {noData || !r.as_of_date ? '—' : (() => {
+                  const m = r.as_of_date.match(/^\d{4}-(\d{2})-(\d{2})$/)
+                  return m ? `${Number(m[1])}/${Number(m[2])}` : r.as_of_date
+                })()}
               </span>
               <ChangePct
                 value={r.day_change_pct ?? null}

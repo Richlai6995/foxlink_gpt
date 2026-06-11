@@ -102,20 +102,27 @@ router.get('/prices', verifyToken, verifyMetalsAccess, async (req, res) => {
       : '';
     const params = metalsCsv ? metalsCsv.split(',') : [];
 
-    // 基準日 SQL fragment — 給定就 TO_DATE,沒給就 TRUNC(SYSDATE)
-    // 用 TRUNC(as_of_date) 比較避 DATE 帶時分秒被 <= 'YYYY-MM-DD' 排掉的雷
-    // (e.g. as_of_date='2026-05-10 18:00:00' 對 <= TO_DATE('2026-05-10') 是 false)
+    // 基準日 SQL fragment — 2026-06-11 改:以 scraped_at(資料抓取日)為篩選依據,
+    // 而非 as_of_date(LME 交易日)。原因:
+    //
+    // 採購切日期想看「該日當下 DB 內可見的最新報價快照」,例如:
+    //   - 6/10 master scrape 06:00 跑時 Westmetall 還沒 publish 6/9 → 抓到 6/8 為最新
+    //   - 6/11 master scrape 06:00 跑時 Westmetall 已 publish 6/9 → 抓到 6/9 為最新
+    //   - 採購切 6/10 應看 6/8 行情(該日當下實際看到的),不是「現在回頭看 6/10 之前 ≤ 6/10 的 row」
+    //     (那會看到 6/9,因為 6/9 row 是隔天 6/11 才寫進來,但 as_of_date 還是 6/9)
+    //
+    // scraped_at 是 INSERT 當下時間(append-only 不會被改),用它篩等於「DB 在那刻的快照狀態」
     const validAsOf = /^\d{4}-\d{2}-\d{2}$/.test(asOf) ? asOf : null;
 
-    // 半開區間 [start, end+1):確保 as_of_date 帶時分秒也能撈到
+    // scraped_at 上界 = selected_date + 1(整天),下界 = -60 天避全表掃描
     let priceWhere, priceBinds;
     if (validAsOf) {
-      priceWhere = `as_of_date >= TO_DATE(?, 'YYYY-MM-DD') - 60
-                    AND as_of_date <  TO_DATE(?, 'YYYY-MM-DD') + 1`;
+      priceWhere = `scraped_at <  TO_DATE(?, 'YYYY-MM-DD') + 1
+                    AND scraped_at >= TO_DATE(?, 'YYYY-MM-DD') - 60`;
       priceBinds = [validAsOf, validAsOf];
     } else {
-      priceWhere = `as_of_date >= TRUNC(SYSDATE) - 60
-                    AND as_of_date <  TRUNC(SYSDATE) + 1`;
+      priceWhere = `scraped_at <  TRUNC(SYSDATE) + 1
+                    AND scraped_at >= TRUNC(SYSDATE) - 60`;
       priceBinds = [];
     }
 
@@ -149,6 +156,10 @@ router.get('/prices', verifyToken, verifyMetalsAccess, async (req, res) => {
 
       // 通用 helper:取「<= 邊界日」最近一筆有資料的 price
       // 2026-05-25:不再用 ±7 容錯,直接往前找(無上限),week/month 跨假期也撈得到
+      // 2026-06-11:baseline 也加 scraped_at 篩 — 跟 latest 一致用「selected_date 那刻能看到」邏輯
+      const scrapedAtClause = validAsOf
+        ? `AND scraped_at <  TO_DATE('${validAsOf}', 'YYYY-MM-DD') + 1`
+        : `AND scraped_at <  TRUNC(SYSDATE) + 1`;
       const fetchPriceBefore = async (boundarySql, boundaryDescr) => {
         try {
           const row = await db.prepare(`
@@ -157,6 +168,7 @@ router.get('/prices', verifyToken, verifyMetalsAccess, async (req, res) => {
               WHERE UPPER(metal_code) = UPPER(?)
                 AND as_of_date <= ${boundarySql}
                 AND price_usd IS NOT NULL
+                ${scrapedAtClause}
               ORDER BY as_of_date DESC
             ) WHERE ROWNUM = 1
           `).get(code, asOfStr);
