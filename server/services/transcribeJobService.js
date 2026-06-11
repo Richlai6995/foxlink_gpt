@@ -34,6 +34,8 @@ const {
   LONG_AUDIO_SEGMENT_SEC,
   LONG_AUDIO_CONCURRENCY,
   LONG_AUDIO_OVERLAP_SEC,
+  LONG_AUDIO_STITCH,
+  _llmFindSeamAnchor,
 } = require('./gemini');
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR
@@ -329,11 +331,27 @@ async function runTranscribeJob(db, jobId) {
 
     // 6. Concat → 寫 .txt
     // 切片有 lead-in overlap(每段除第 1 段外開頭約 LONG_AUDIO_OVERLAP_SEC 秒與上一段重疊,
-    // 防接縫漏資料),所以接縫處會有重複內容 → 第 2 段起標記提醒,避免讀者誤以為轉錯。
+    // 防接縫漏資料)。方案 B:合併時自動接縫去重(字串 + LLM 錨點),剪掉重複的開頭。
     const overlapSec = LONG_AUDIO_OVERLAP_SEC;
+    let texts = segments.map(s => s.text);
+    let stitchInfo = texts.map(() => ({ cut: false }));
+    if (LONG_AUDIO_STITCH) {
+      try {
+        const { stitchSegments } = require('./transcriptStitch');
+        const okFlags = segments.map(s => s.ok);
+        const st = await stitchSegments(texts, { overlapSec, okFlags }, _llmFindSeamAnchor);
+        texts = st.texts;
+        stitchInfo = st.info;
+        console.log(`[TranscribeJob] ${tagId} stitch: ${stitchInfo.filter(x => x?.cut).length}/${segments.length - 1} 接縫去重`);
+      } catch (e) {
+        console.warn(`[TranscribeJob] ${tagId} stitch failed, keep overlap: ${e.message}`);
+      }
+    }
     const merged = segments.map((s, i) => {
-      const seam = i > 0 ? `\n(↑ 開頭約 ${overlapSec} 秒與上一段重疊,防接縫漏句)` : '';
-      return `[${s.marker}]${seam}\n${s.text}`;
+      const seam = i === 0 ? ''
+        : stitchInfo[i]?.cut ? `\n(↑ 已自動接合去重 ${stitchInfo[i].cutChars} 字)`
+        : `\n(↑ 開頭約 ${overlapSec} 秒與上一段重疊,未去重)`;
+      return `[${s.marker}]${seam}\n${texts[i]}`;
     }).join('\n\n');
     const generatedDir = path.join(UPLOAD_DIR, 'generated');
     if (!fs.existsSync(generatedDir)) fs.mkdirSync(generatedDir, { recursive: true });

@@ -366,8 +366,11 @@ const LONG_AUDIO_RETRY_BACKOFF_MS = [10000, 30000, 60000]; // 3 次 retry,10s/30
 // lead-in overlap:每段(第 0 段除外)往「前」多含 N 秒。防接縫漏資料的兩個機制:
 //   ① 跨 30:00 的句子被切兩半 → 在下一段開頭是完整的
 //   ② 上一段尾巴模型偷懶 trailing off → 那段音訊在下一段開頭被再轉一次
-// 代價:接縫處約 N 秒重複內容(方案 A:接受重複 + 標記,寧可重複也不要漏)。
+// 代價:接縫處約 N 秒重複內容。方案 B(LONG_AUDIO_STITCH)會在合併時把這段重複剪掉。
 const LONG_AUDIO_OVERLAP_SEC = 60;
+// 方案 B:合併時自動接縫去重(字串為主 + LLM 錨點 fallback,見 transcriptStitch.js)。
+// 設 false → 退回方案 A(保留重複 + 標記)。
+const LONG_AUDIO_STITCH = true;
 
 // ── Degenerate(重複迴圈/脫稿幻覺)防護 — 可調超參數 ───────────────────────────
 // 改這裡就能調,不用動 transcribeAudio / _detectDegenerate / _transcribeWithRetry 內文。
@@ -561,6 +564,24 @@ async function _transcribeWithRetry(partPath, mimeType, lang, segIdx, segTotal, 
   };
 }
 
+// 接縫去重 LLM fallback(transcriptStitch 的字串法找不到重疊時才呼叫):
+// 給「上段尾 + 下段頭」,只要模型回「下段第一句新內容」當錨點,不重寫內容 → 零誤改風險。
+// 用 Flash + temp0 + thinkingBudget=0(純定位任務),便宜快。
+async function _llmFindSeamAnchor(prevTail, curHead) {
+  const model = getGenerativeModel({
+    model: MODEL_FLASH,
+    provider: 'vertex',
+    generationConfig: { maxOutputTokens: 64, temperature: 0, thinkingConfig: { thinkingBudget: 0 } },
+  });
+  const prompt =
+    `A、B 兩段逐字稿錄到同一段重疊音訊,B 的開頭有一部分跟 A 的結尾是「同一段話」(重複)。\n` +
+    `請找出 B 段中「第一句不再屬於重疊、A 沒講過的新內容」,只回那句話的前 12 個字,不要標點、不要解釋。\n` +
+    `若 B 開頭完全沒跟 A 重複(整段都是新的),只回 NONE。\n\n` +
+    `=== A 段結尾 ===\n${String(prevTail).slice(-800)}\n\n=== B 段開頭 ===\n${String(curHead).slice(0, 800)}`;
+  const result = await model.generateContent([{ text: prompt }]);
+  return (extractText(result) || '').trim().slice(0, 40);
+}
+
 /**
  * Long-audio transcription: ffmpeg split → sequential Pro transcribe (with retry+fallback) → concat with time markers.
  * Use for files >50MB or >30 min where single-shot Gemini under-produces output.
@@ -608,17 +629,34 @@ async function transcribeLongAudio(filePath, mimeType, lang) {
     }
 
     let totalIn = 0;
-    let totalOut = 0;
-    const segments = results.map((r, idx) => {
+    results.forEach((r) => { totalIn += r.inputTokens; });
+    const totalOut = results.reduce((sum, r) => sum + r.outputTokens, 0);
+
+    // 接縫去重(方案 B):剪掉各段開頭跟上一段重疊的部分
+    let texts = results.map((r) => r.text);
+    let stitchInfo = texts.map(() => ({ cut: false }));
+    if (LONG_AUDIO_STITCH) {
+      try {
+        const { stitchSegments } = require('./transcriptStitch');
+        const okFlags = results.map((r) => r.ok);
+        const st = await stitchSegments(texts, { overlapSec: LONG_AUDIO_OVERLAP_SEC, okFlags }, _llmFindSeamAnchor);
+        texts = st.texts;
+        stitchInfo = st.info;
+      } catch (e) {
+        console.warn(`[TranscribeLong] ${tagId} stitch failed, keep overlap: ${e.message}`);
+      }
+    }
+
+    const segments = texts.map((txt, idx) => {
       const startSec = idx * LONG_AUDIO_SEGMENT_SEC;
       const endSec = totalDuration > 0
         ? Math.min((idx + 1) * LONG_AUDIO_SEGMENT_SEC, totalDuration)
         : (idx + 1) * LONG_AUDIO_SEGMENT_SEC;
       const marker = `[${_fmtTime(startSec)}–${_fmtTime(endSec)}]`;
-      const seam = idx > 0 ? `\n(↑ 開頭約 ${LONG_AUDIO_OVERLAP_SEC} 秒與上一段重疊,防接縫漏句)` : '';
-      totalIn += r.inputTokens;
-      totalOut += r.outputTokens;
-      return `${marker}${seam}\n${r.text}`;
+      const seam = idx === 0 ? ''
+        : stitchInfo[idx]?.cut ? `\n(↑ 已自動接合去重 ${stitchInfo[idx].cutChars} 字)`
+        : `\n(↑ 開頭約 ${LONG_AUDIO_OVERLAP_SEC} 秒與上一段重疊,未去重)`;
+      return `${marker}${seam}\n${txt}`;
     });
     const merged = segments.join('\n\n');
 
@@ -1504,4 +1542,5 @@ module.exports = {
   // 給 transcribeJobService.js 用(背景 job 重用同一套 ffmpeg + retry + Pro→Flash fallback)
   _probeAudioDuration, _splitAudio, _fmtTime, _transcribeWithRetry,
   LONG_AUDIO_SEGMENT_SEC, LONG_AUDIO_CONCURRENCY, LONG_AUDIO_PER_SEG_TIMEOUT_MS, LONG_AUDIO_OVERLAP_SEC,
+  LONG_AUDIO_STITCH, _llmFindSeamAnchor,
 };

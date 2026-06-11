@@ -271,6 +271,62 @@ router.post('/jobs/:id/cancel', verifyToken, async (req, res) => {
   }
 });
 
+// POST /api/transcribe/jobs/:id/rerun-segment — 只重轉某一段(不用整份重傳)
+//   segments_json 是 source of truth,把該段 ok 清掉 + 觸發 runTranscribeJob,
+//   worker 會跳過其他已完成段、只重切 + 重轉這一段,完成後重新 merge .txt(含接縫去重)。
+//   用途:某段漏資料 / 脫稿截斷,補單段省得整份 180MB 重傳 + 重轉 6-7 段。
+router.post('/jobs/:id/rerun-segment', verifyToken, async (req, res) => {
+  try {
+    const db = require('../database-oracle').db;
+    const row = await db.prepare('SELECT * FROM transcribe_jobs WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'job not found' });
+    if (row.user_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    if (row.status === 'running' || row.status === 'pending') {
+      return res.status(400).json({ error: 'job 進行中,請等完成或取消後再重轉單段' });
+    }
+    if (!row.audio_path) {
+      return res.status(400).json({ error: '原始音檔已被清理(>30 天),無法重轉,請重新上傳' });
+    }
+    if (!fs.existsSync(row.audio_path)) {
+      return res.status(400).json({ error: '原始音檔不存在,無法重轉' });
+    }
+
+    const segIdx = parseInt(req.body?.segIdx);
+    let segments = [];
+    try { segments = JSON.parse(row.segments_json || '[]'); } catch (_) {}
+    if (!Number.isInteger(segIdx) || segIdx < 0 || segIdx >= segments.length) {
+      return res.status(400).json({ error: `segIdx 超出範圍 (0-${segments.length - 1})` });
+    }
+
+    // 重置該段 → 強制 worker 重切 + 重轉(其他 ok 段照舊跳過)
+    segments[segIdx].ok = false;
+    segments[segIdx].text = '';
+    segments[segIdx].error = null;
+    segments[segIdx].attempts = 0;
+    segments[segIdx].partPath = null;
+    const done = segments.filter(s => s.ok).length;
+
+    await db.prepare(`
+      UPDATE transcribe_jobs SET
+        status='running', lock_token=NULL, heartbeat_at=NULL,
+        segments_json=?, segment_done=?, error_msg=NULL, completed_at=NULL,
+        recovery_count=0, updated_at=SYSTIMESTAMP
+      WHERE id=?
+    `).run(JSON.stringify(segments), done, req.params.id);
+
+    const { runTranscribeJob } = require('../services/transcribeJobService');
+    setImmediate(() => runTranscribeJob(db, req.params.id).catch(e =>
+      console.error(`[TranscribeJob] rerun-segment ${req.params.id} seg=${segIdx} failed:`, e.message)));
+
+    console.log(`[TranscribeJob] rerun-segment ${req.params.id} seg=${segIdx} by user=${req.user.id}`);
+    res.json({ ok: true, segIdx, message: `第 ${segIdx + 1} 段已排入重轉` });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/transcribe/admin/jobs — admin 監控(全系統)
 router.get('/admin/jobs', verifyToken, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'admin only' });

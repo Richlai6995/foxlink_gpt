@@ -22,6 +22,7 @@ interface TranscribeJob {
   recovery_count?: number
   created_at?: string
   completed_at?: string
+  segments?: { idx: number; ok: boolean; marker?: string; attempts?: number; chars?: number; error?: string }[]
 }
 
 const STATUS_LABEL: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
@@ -44,6 +45,20 @@ export default function TranscribeJobsPanel() {
   const [status, setStatus] = useState<string>('')
   const [loading, setLoading] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [rerunning, setRerunning] = useState<string | null>(null)
+
+  const rerunSeg = async (jobId: string, segIdx: number) => {
+    if (!confirm(`確定重轉第 ${segIdx + 1} 段?\n會重新切片、只重轉這一段,完成後更新逐字稿(其他段不動)。`)) return
+    setRerunning(`${jobId}-${segIdx}`)
+    try {
+      await api.post(`/transcribe/jobs/${jobId}/rerun-segment`, { segIdx })
+      await load()
+    } catch (e: any) {
+      alert(e?.response?.data?.error || '重轉失敗')
+    } finally {
+      setRerunning(null)
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -189,6 +204,41 @@ export default function TranscribeJobsPanel() {
                           )}
                           {j.error_msg && (
                             <div className="text-red-600 break-all"><span className="text-slate-400">錯誤:</span> {j.error_msg}</div>
+                          )}
+                          {Array.isArray(j.segments) && j.segments.length > 0 && (
+                            <div className="pt-2">
+                              <div className="text-slate-400 mb-1">分段(可單獨重轉):</div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {j.segments.map(seg => {
+                                  const canRerun = (j.status === 'done' || j.status === 'failed')
+                                  const busy = rerunning === `${j.id}-${seg.idx}`
+                                  return (
+                                    <div
+                                      key={seg.idx}
+                                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] ${
+                                        seg.ok ? 'border-slate-200 bg-white text-slate-600' : 'border-red-200 bg-red-50 text-red-600'
+                                      }`}
+                                      title={seg.error || seg.marker || ''}
+                                    >
+                                      <span className="font-mono">#{seg.idx + 1}</span>
+                                      <span className="text-slate-400">{seg.marker}</span>
+                                      <span className="text-slate-400">{(seg.chars || 0).toLocaleString()}字</span>
+                                      {!seg.ok && <span className="text-red-500">✗</span>}
+                                      {canRerun && (
+                                        <button
+                                          onClick={() => rerunSeg(j.id, seg.idx)}
+                                          disabled={busy}
+                                          className="ml-0.5 inline-flex items-center text-blue-500 hover:text-blue-700 disabled:opacity-40"
+                                          title="重轉此段"
+                                        >
+                                          <RefreshCw size={11} className={busy ? 'animate-spin' : ''} />
+                                        </button>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            </div>
                           )}
                         </td>
                       </tr>
