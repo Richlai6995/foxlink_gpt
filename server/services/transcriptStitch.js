@@ -39,6 +39,58 @@ function _suffixPrefixOverlap(prevNorm, curNorm, minMatch, maxCap = 600) {
   return 0;
 }
 
+// ── 模糊去重(容忍「同段音訊轉成不同字」:廢液↔費用、L-pad↔AirPods)──────────────
+// exact suffix==prefix 在 LLM 轉錄上常失敗(同段每次用字會變)。改句級 LCS 相似度比對:
+// cur 開頭逐句去 prev 尾段找相似句(sim≥門檻),連續命中=重疊,截在第一句找不到對應的新內容。
+function _lcsLen(a, b) {
+  const n = a.length, m = b.length;
+  if (!n || !m) return 0;
+  let prev = new Array(m + 1).fill(0);
+  for (let i = 1; i <= n; i++) {
+    const cur = new Array(m + 1).fill(0);
+    const ai = a[i - 1];
+    for (let j = 1; j <= m; j++) {
+      cur[j] = ai === b[j - 1] ? prev[j - 1] + 1 : (prev[j] >= cur[j - 1] ? prev[j] : cur[j - 1]);
+    }
+    prev = cur;
+  }
+  return prev[m];
+}
+function _sim(a, b) { return _lcsLen(a, b) / Math.max(a.length, b.length, 1); }
+function _normSent(s) { return s.replace(/[^一-鿿A-Za-z0-9]/g, ''); }
+function _splitSents(s) {
+  return s.split(/(?<=[。！？!?\n])/).map(t => t.trim()).filter(t => _normSent(t).length >= 4);
+}
+// 回傳 curHead 開頭要剪掉的「原始字元數」(0 = 沒重疊 / 沒把握)
+function _fuzzyPrefixOverlap(prevTail, curHead, simThreshold = 0.6) {
+  const prevSents = _splitSents(prevTail);
+  const curSents = _splitSents(curHead);
+  if (prevSents.length < 2 || curSents.length < 2) return 0;
+  const prevNorm = prevSents.map(_normSent);
+  let lastMatchedCur = -1;
+  let searchFrom = 0;     // prev 指標單調前進(重疊區順序一致)
+  let misses = 0;
+  for (let ci = 0; ci < curSents.length && ci < 40; ci++) {
+    const cn = _normSent(curSents[ci]);
+    if (cn.length < 4) continue;
+    let found = -1;
+    for (let pi = searchFrom; pi < prevNorm.length; pi++) {
+      if (_sim(cn, prevNorm[pi]) >= simThreshold) { found = pi; break; }
+    }
+    if (found >= 0) { lastMatchedCur = ci; searchFrom = found + 1; misses = 0; }
+    else if (lastMatchedCur >= 1) { if (++misses >= 2) break; } // 容忍 1 句改寫橋,連 2 句找不到才停
+  }
+  if (lastMatchedCur < 1) return 0; // 至少連 2 句命中才有把握剪
+  // 算到「最後命中句」結尾的原始字元位置
+  let offset = 0;
+  for (let i = 0; i <= lastMatchedCur; i++) {
+    const at = curHead.indexOf(curSents[i], offset);
+    if (at < 0) break;
+    offset = at + curSents[i].length;
+  }
+  return offset;
+}
+
 /**
  * @param {string[]} texts 各段逐字稿(index 對齊段序)
  * @param {object} opts { overlapSec, charsPerSec, minMatch, okFlags }
@@ -70,25 +122,33 @@ async function stitchSegments(texts, opts = {}, llmAnchorFn = null) {
     const { norm: prevNorm } = _normalizeWithMap(prevTail);
     const { norm: curNorm, map: curMap } = _normalizeWithMap(curHead);
 
-    let cutNormLen = _suffixPrefixOverlap(prevNorm, curNorm, minMatch, window);
-    let method = cutNormLen > 0 ? 'string' : null;
+    // ① 精確 suffix==prefix(同段轉出相同字時最準)
+    const cutNormLen = _suffixPrefixOverlap(prevNorm, curNorm, minMatch, window);
+    let origCut = cutNormLen > 0 ? (curMap[cutNormLen] ?? 0) : 0;
+    let method = origCut > 0 ? 'string' : null;
 
-    // 字串法找不到 → LLM 錨點 fallback(只定位不重寫,找不到就不剪)
-    if (cutNormLen === 0 && llmAnchorFn) {
+    // ② 模糊句級(精確法 under-cut 時補):同段被轉成不同字(廢液↔費用)→ exact 對不上,
+    //    但句級 LCS 相似度抓得到。expect = overlap 秒數 × ~4 字/秒的下界,精確法低於一半就試 fuzzy。
+    const expectChars = overlapSec * 4;
+    if (origCut < expectChars * 0.5) {
+      const fz = _fuzzyPrefixOverlap(prevTail, curHead);
+      if (fz > origCut) { origCut = fz; method = 'fuzzy'; }
+    }
+
+    // ③ 都不夠 → LLM 錨點 fallback(只定位不重寫,找不到就不剪)
+    if (origCut === 0 && llmAnchorFn) {
       try {
         const anchor = await llmAnchorFn(prevTail, curHead);
         const aNorm = anchor ? _normalizeWithMap(anchor).norm : '';
         if (aNorm && anchor.trim().toUpperCase() !== 'NONE' && aNorm.length >= 6) {
           const idx = curNorm.indexOf(aNorm.slice(0, Math.min(aNorm.length, 16)));
-          if (idx > 0) { cutNormLen = idx; method = 'llm'; }
+          if (idx > 0) { origCut = curMap[idx] ?? 0; method = 'llm'; }
         }
       } catch (_) { /* LLM 失敗 → 不剪 */ }
     }
 
-    if (cutNormLen > 0 && cutNormLen < curMap.length) {
-      // 正規化 cut 位置 → 原始字串位置。cut 點就是 overlap/新內容的交界,不再往後 snap
-      // (往後吸句界會在「新內容只有一句」時吃掉整段)。只去掉開頭殘留的標點/空白。
-      const origCut = curMap[cutNormLen] ?? 0;
+    if (origCut > 0 && origCut < cur.length) {
+      // cut 點 = overlap/新內容交界;只去掉開頭殘留標點/空白,不往後 snap(會吃掉只有一句的新內容)。
       const trimmed = cur.slice(origCut).replace(/^[\s。!?！？，、]+/, '');
       if (trimmed.length > 10) { // 剪完還有實質內容才採用,否則保留全文(不誤刪)
         out[i] = trimmed;
