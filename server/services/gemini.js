@@ -384,7 +384,9 @@ const LONG_AUDIO_FLASH_LAST_RESORT = true;
 // 改這裡就能調,不用動 transcribeAudio / _detectDegenerate / _transcribeWithRetry 內文。
 const TRANSCRIBE_FREQUENCY_PENALTY = 0.5;  // 壓「已出現 token」logit,打斷「那那那…」重複迴圈(僅 vertex,Studio 不支援會 400)
 const TRANSCRIBE_PRESENCE_PENALTY  = 0.3;  // 輕度鼓勵換新詞,進一步降 degenerate 機率(僅 vertex;設 0 完全關閉)
-const TRANSCRIBE_RETRY_TEMPERATURE = 0.4;  // (transient retry 的後段 attempt 加溫)
+const TRANSCRIBE_RETRY_TEMPERATURE = 0;  // transient(503/timeout)重試一律 greedy temp0:503 只是服務忙,
+//                                          該忠實重打同一份,加溫只會讓逐字轉錄更易早停/跳段(part5 7924 字根因)。
+//                                          degenerate 的逃脫加溫走獨立的 DEGEN_RETRY_TEMPERATURE,不受此影響。
 const DEGEN_RETRY_TEMPERATURE = 0.7;  // degenerate 第 1 次 retry 溫度(第 2 次升到 1.0);皆保持 Pro
 const DEGEN_MAX_ATTEMPTS = 3;         // degenerate 最多打幾次:Pro temp 0→0.7→1.0(實證 Pro+加溫才救得回)
 const DEGEN_CHAR_RUN_MIN     = 20;    // 連續同字 ≥ N → 判定重複迴圈,截在起點

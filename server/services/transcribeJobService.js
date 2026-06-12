@@ -46,6 +46,9 @@ const UNDERPRODUCE_MIN_GAIN = 1.2; // 補救後字數至少多 20% 才採用
 // 絕對密度下限(字/秒):補相對中位數的盲區 — 整 job 系統性偷懶時 median 自降會抓不到,
 // 加這個絕對門檻接住。正常 ≈5.3 字/秒(9600 字 / 1800 秒),設 3.0 留足餘裕。
 const UNDERPRODUCE_ABS_FLOOR = 3.0;
+// F2:成功在第 N 次嘗試的段「掙扎過」(連兩次失敗靠重試才吐出來)→ 視為可疑、送 sub-split 驗證。
+// 必須 ≥3:attempts=2 = 第一次 transient retry 就成功,尖峰 503 期是常態、非異常,設 2 會誤判爆炸。
+const UNDERPRODUCE_ATTEMPTS_FLAG = 3;
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR
   ? path.resolve(process.env.UPLOAD_DIR)
@@ -196,17 +199,22 @@ async function _recoverUnderproducedSegments(db, job, segments, totalDuration, t
   const mid = sorted.slice(k, sorted.length - k);
   const baseArr = mid.length ? mid : sorted;
   const median = baseArr[Math.floor(baseArr.length / 2)];
-  // 相對(< 0.5×median)OR 絕對(< ABS_FLOOR 字/秒)— 絕對門檻接住「整 job 系統性偷懶
-  // → median 自降 → 相對抓不到」的盲區,順帶接住壓在 0.5×median 邊緣的段。
+  // 三個信號 OR:① 相對(< 0.5×median)② 絕對(< ABS_FLOOR 字/秒,接系統性偷懶盲區)
+  // ③ attempts ≥ N(F2:這段「掙扎過」— 連兩次失敗靠重試才吐出來,密度可能正常但內容可疑;
+  //    排除 degenerate 段,它已有獨立 salvage)。part5 密度 4.0 兩條密度都不觸發,靠 attempts 接。
+  const attemptsFlag = (x) => (x.seg.attempts || 1) >= UNDERPRODUCE_ATTEMPTS_FLAG && !x.seg.degenerated;
+  // suspicion 越小越可疑:density 低本身可疑;attempts-flag 的段給「0.7×median」當等效可疑度,
+  // 確保它排進前列、不被低密度段在 MAX_FIX 額滿時擠掉,但也不會蓋過真正極低密度的段(part4 型)。
+  const suspicion = (x) => Math.min(x.d, attemptsFlag(x) ? 0.7 * median : Infinity);
   const flagged = densities
-    .filter(x => x.d < UNDERPRODUCE_RATIO * median || x.d < UNDERPRODUCE_ABS_FLOOR)
-    .sort((a, b) => a.d - b.d)
+    .filter(x => x.d < UNDERPRODUCE_RATIO * median || x.d < UNDERPRODUCE_ABS_FLOOR || attemptsFlag(x))
+    .sort((a, b) => suspicion(a) - suspicion(b))
     .slice(0, UNDERPRODUCE_MAX_FIX);
   if (flagged.length === 0) return;
 
   console.log(`[TranscribeJob] ${tagId} under-production 偵測: ${flagged.length} 段疑似提早收尾 ` +
-    `(density < ${UNDERPRODUCE_RATIO}×median(${median.toFixed(1)}) 或 < ${UNDERPRODUCE_ABS_FLOOR} 字/秒): ` +
-    flagged.map(f => `#${f.seg.idx + 1}(${f.d.toFixed(1)})`).join(','));
+    `(density < ${UNDERPRODUCE_RATIO}×median(${median.toFixed(1)}) / < ${UNDERPRODUCE_ABS_FLOOR}字/秒 / attempts≥${UNDERPRODUCE_ATTEMPTS_FLAG}): ` +
+    flagged.map(f => `#${f.seg.idx + 1}(d=${f.d.toFixed(1)},a=${f.seg.attempts || 1})`).join(','));
 
   const lang = 'zh-TW';
   for (const { seg } of flagged) {
@@ -385,6 +393,7 @@ async function runTranscribeJob(db, jobId) {
         seg.inputTokens = r.inputTokens || 0;
         seg.outputTokens = r.outputTokens || 0;
         seg.attempts = r.attempts || 1;
+        seg.degenerated = !!r.degenerated; // F2 用:degenerate 段已有獨立 salvage,attempts flag 要排除它
         if (!r.ok) seg.error = r.error;
         if (r.ok) {
           console.log(`[TranscribeJob] ${tagId} part ${seg.idx + 1}/${segments.length} ok in ${Date.now() - tPart}ms text=${r.text.length}chars attempts=${r.attempts}`);
