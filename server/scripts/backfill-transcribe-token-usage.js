@@ -23,9 +23,11 @@
 try { require('dotenv').config({ path: require('path').join(__dirname, '../.env') }); }
 catch (_) { /* K8s pod 沒 dotenv,跳過 */ }
 
-let db;
-try { db = require('../database-oracle').db; }
-catch (_) { db = require('/app/database-oracle').db; }
+// 注意:database-oracle 的 .db 要 init() 後才會被賦值(standalone script 沒有 server 啟動流程,
+// 必須自己呼叫 init() 建 pool)。init() 同時跑 migration(idempotent,順便保證 tokens_billed 欄存在)。
+let dbModule;
+try { dbModule = require('../database-oracle'); }
+catch (_) { dbModule = require('/app/database-oracle'); }
 
 let upsertTokenUsage;
 try { ({ upsertTokenUsage } = require('../services/tokenService')); }
@@ -42,6 +44,10 @@ const userArg = (process.argv.find(a => a.startsWith('--user=')) || '').split('=
 (async () => {
   console.log(`Backfill transcribe token_usage  model=${modelArg}${userArg ? ` user=${userArg}` : ''}  ${dryRun ? '(DRY-RUN)' : '(LIVE)'}`);
   console.log('---');
+
+  await dbModule.init();
+  const db = dbModule.db;
+  if (!db) { console.error('FATAL: DB init 後仍為 null'); process.exit(1); }
 
   const params = [];
   let userFilter = '';
