@@ -36,7 +36,13 @@ const {
   LONG_AUDIO_OVERLAP_SEC,
   LONG_AUDIO_STITCH,
   _llmFindSeamAnchor,
+  _transcribeSegmentSubsplit,
 } = require('./gemini');
+
+// under-production 偵測:某段字/秒密度 < 中位數 × 此比例 → 疑似模型提早收尾
+const UNDERPRODUCE_RATIO   = 0.5;
+const UNDERPRODUCE_MAX_FIX = 3;   // 一個 job 最多 sub-split 補幾段(限制延遲)
+const UNDERPRODUCE_MIN_GAIN = 1.2; // 補救後字數至少多 20% 才採用
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR
   ? path.resolve(process.env.UPLOAD_DIR)
@@ -160,6 +166,76 @@ async function recoverStaleJobs(db) {
     }
   } catch (e) {
     console.error('[TranscribeJob] recoverStaleJobs error:', e.message);
+  }
+}
+
+// ─── 未完整轉錄補救 ───────────────────────────────────────────────────────────
+// 模型對某段提早收尾(輸出合法但只有正常的一半不到),用 chars/sec 密度跟同 job 其他段
+// 的中位數比,低於 UNDERPRODUCE_RATIO× 的判定 under-produced → sub-split 重轉補回。
+// 只在補回 ≥UNDERPRODUCE_MIN_GAIN 倍才採用(不會變差);最多補 UNDERPRODUCE_MAX_FIX 段(限延遲)。
+async function _recoverUnderproducedSegments(db, job, segments, totalDuration, tagId) {
+  const segSec = (idx) => {
+    const total = totalDuration || (idx + 1) * LONG_AUDIO_SEGMENT_SEC;
+    return Math.min((idx + 1) * LONG_AUDIO_SEGMENT_SEC, total) - idx * LONG_AUDIO_SEGMENT_SEC;
+  };
+  const ok = segments.filter(s =>
+    s.ok && s.text && !s.text.startsWith('[此段轉錄失敗') && !s.text.includes('已自動截斷'));
+  if (ok.length < 3) return; // 樣本太少,沒有可靠的 median
+
+  const densities = ok.map(s => ({ seg: s, d: s.text.length / Math.max(1, segSec(s.idx)) }));
+  const sorted = densities.map(x => x.d).slice().sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  const flagged = densities
+    .filter(x => x.d < UNDERPRODUCE_RATIO * median)
+    .sort((a, b) => a.d - b.d)
+    .slice(0, UNDERPRODUCE_MAX_FIX);
+  if (flagged.length === 0) return;
+
+  console.log(`[TranscribeJob] ${tagId} under-production 偵測: ${flagged.length} 段疑似提早收尾 ` +
+    `(density<${UNDERPRODUCE_RATIO}×median=${median.toFixed(0)}字/秒): ` +
+    flagged.map(f => `#${f.seg.idx + 1}(${f.d.toFixed(0)})`).join(','));
+
+  const lang = 'zh-TW';
+  for (const { seg } of flagged) {
+    if (!seg.partPath || !fs.existsSync(seg.partPath)) {
+      console.warn(`[TranscribeJob] ${tagId} #${seg.idx + 1} partPath 不在,跳過 sub-split 補救`);
+      continue;
+    }
+    const before = seg.text.length;
+    let r = null;
+    try {
+      r = await _transcribeSegmentSubsplit(seg.partPath, job.audio_mime_type, lang, tagId);
+    } catch (e) {
+      console.warn(`[TranscribeJob] ${tagId} #${seg.idx + 1} sub-split error: ${e.message}`);
+      continue;
+    }
+    if (r && r.text && r.text.length > before * UNDERPRODUCE_MIN_GAIN) {
+      console.log(`[TranscribeJob] ${tagId} #${seg.idx + 1} sub-split 補救: ${before} → ${r.text.length} chars`);
+      seg.text = r.text;
+      seg.inputTokens = (seg.inputTokens || 0) + (r.inputTokens || 0);
+      seg.outputTokens = (seg.outputTokens || 0) + (r.outputTokens || 0);
+      seg.subsplit = true;
+      if (r.inputTokens || r.outputTokens) {
+        try {
+          const { upsertTokenUsage } = require('./tokenService');
+          await upsertTokenUsage(db, job.user_id, new Date().toISOString().slice(0, 10), 'pro', r.inputTokens, r.outputTokens, 0);
+        } catch (_) {}
+      }
+    } else {
+      console.log(`[TranscribeJob] ${tagId} #${seg.idx + 1} sub-split 無明顯改善(${before} → ${r?.text?.length || 0}),保留原文`);
+    }
+  }
+
+  // flush 補救後的 segments_json + token 總計(補救多打的 token 算進去)
+  try {
+    const totalChars = segments.filter(s => s.ok).reduce((sum, s) => sum + (s.text?.length || 0), 0);
+    const totalIn = segments.reduce((sum, s) => sum + (s.inputTokens || 0), 0);
+    const totalOut = segments.reduce((sum, s) => sum + (s.outputTokens || 0), 0);
+    await db.prepare(
+      `UPDATE transcribe_jobs SET segments_json=?, transcript_chars=?, in_tokens_total=?, out_tokens_total=?, updated_at=SYSTIMESTAMP WHERE id=?`
+    ).run(JSON.stringify(segments), totalChars, totalIn, totalOut, job.id);
+  } catch (e) {
+    console.warn(`[TranscribeJob] ${tagId} under-produce flush failed: ${e.message}`);
   }
 }
 
@@ -341,6 +417,15 @@ async function runTranscribeJob(db, jobId) {
           console.warn(`[TranscribeJob] ${tagId} part ${seg.idx + 1} DB flush failed: ${e.message}`);
         }
       }));
+    }
+
+    // 5b. 未完整轉錄(under-production)偵測 + sub-split 補救
+    //    某段模型提早收尾(輸出合法但密度遠低於同 job 其他段)→ 切小段重轉補回漏掉的尾段。
+    //    脫稿/重複/接縫偵測都抓不到這種(輸出合法、不重複、就是短)。
+    try {
+      await _recoverUnderproducedSegments(db, job, segments, totalDuration, tagId);
+    } catch (e) {
+      console.warn(`[TranscribeJob] ${tagId} underproduce recovery failed: ${e.message}`);
     }
 
     // 6. Concat → 寫 .txt

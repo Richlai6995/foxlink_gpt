@@ -583,6 +583,40 @@ async function _llmFindSeamAnchor(prevTail, curHead) {
   return (extractText(result) || '').trim().slice(0, 40);
 }
 
+// 未完整轉錄(under-production)補救:某段模型提早收尾(輸出合法但只有正常的一半不到),
+// 把該段音檔再切成 subSegSec 小段、各自重轉、stitch 串起來。短段模型不會提早收尾 → 補回漏掉的尾段。
+// 回 { text, inputTokens, outputTokens },切不出更多段(段本來就短)回 null。
+async function _transcribeSegmentSubsplit(partPath, mimeType, lang, tagId, subSegSec = 10 * 60) {
+  const subRoot = path.join(os.tmpdir(), `subsplit_${crypto.randomUUID().slice(0, 8)}`);
+  fs.mkdirSync(subRoot, { recursive: true });
+  try {
+    const subParts = await _splitAudio(partPath, subSegSec, subRoot);
+    if (subParts.length <= 1) return null; // 切不出更多段 → 放棄(段本來就短,sub-split 無意義)
+    console.log(`[Subsplit] ${tagId} 切 ${subParts.length} 小段重轉(${subSegSec / 60}分/段)`);
+    const results = [];
+    for (let i = 0; i < subParts.length; i += LONG_AUDIO_CONCURRENCY) {
+      const batch = subParts.slice(i, i + LONG_AUDIO_CONCURRENCY);
+      const br = await Promise.all(batch.map((p, j) =>
+        _transcribeWithRetry(p, mimeType, lang, i + j + 1, subParts.length, `${tagId}#sub`)));
+      results.push(...br);
+    }
+    let texts = results.map(r => r.text);
+    try {
+      const { stitchSegments } = require('./transcriptStitch');
+      const okFlags = results.map(r => r.ok);
+      const st = await stitchSegments(texts, { overlapSec: LONG_AUDIO_OVERLAP_SEC, okFlags }, _llmFindSeamAnchor);
+      texts = st.texts;
+    } catch (_) { /* stitch 失敗就保留重複,不影響補回內容 */ }
+    return {
+      text: texts.join('\n'),
+      inputTokens: results.reduce((s, r) => s + (r.inputTokens || 0), 0),
+      outputTokens: results.reduce((s, r) => s + (r.outputTokens || 0), 0),
+    };
+  } finally {
+    try { fs.rmSync(subRoot, { recursive: true, force: true }); } catch (_) {}
+  }
+}
+
 /**
  * Long-audio transcription: ffmpeg split → sequential Pro transcribe (with retry+fallback) → concat with time markers.
  * Use for files >50MB or >30 min where single-shot Gemini under-produces output.
@@ -1543,5 +1577,5 @@ module.exports = {
   // 給 transcribeJobService.js 用(背景 job 重用同一套 ffmpeg + retry + Pro→Flash fallback)
   _probeAudioDuration, _splitAudio, _fmtTime, _transcribeWithRetry,
   LONG_AUDIO_SEGMENT_SEC, LONG_AUDIO_CONCURRENCY, LONG_AUDIO_PER_SEG_TIMEOUT_MS, LONG_AUDIO_OVERLAP_SEC,
-  LONG_AUDIO_STITCH, _llmFindSeamAnchor,
+  LONG_AUDIO_STITCH, _llmFindSeamAnchor, _transcribeSegmentSubsplit,
 };
