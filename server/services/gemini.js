@@ -371,6 +371,11 @@ const LONG_AUDIO_OVERLAP_SEC = 60;
 // 方案 B:合併時自動接縫去重(字串為主 + LLM 錨點 fallback,見 transcriptStitch.js)。
 // 設 false → 退回方案 A(保留重複 + 標記)。
 const LONG_AUDIO_STITCH = true;
+// retry plan:Flash 對長段必偷懶(under-produce,part4 型 1018 字根因)。transient(503)
+// 不再「單次就掉 Flash」,改 Pro 連 retry,Flash 只在 Pro 連失 3 次(真耗盡)當最後保險。
+//   true  = 保留 Flash 當第 4 手保險(Pro 真的打不出來時至少有劣質輸出,recovery 還能補)
+//   false = 完全禁用 Flash(第 4 手也 Pro;Pro 耗盡 → 該段失敗,靠 rerun-segment 手動補)
+const LONG_AUDIO_FLASH_LAST_RESORT = true;
 
 // ── Degenerate(重複迴圈/脫稿幻覺)防護 — 可調超參數 ───────────────────────────
 // 改這裡就能調,不用動 transcribeAudio / _detectDegenerate / _transcribeWithRetry 內文。
@@ -476,20 +481,24 @@ function _isTransientGeminiErr(e) {
 }
 
 // 單段轉錄 + retry + 模型切換策略
-// 策略:Pro 為主 + Flash 快速 fallback(第 2 次就 Flash,不浪費 2 次 Pro timeout)
-//   attempt 0: Pro + verbatim    ← 主路徑,長段 verbatim 最完整
-//   attempt 1: Flash + verbatim  ← 10s backoff,Pro 撞 deadline/503 直接 Flash 救
-//                                  (實測 attempt 1 Pro 通常還是慢,不如直接 Flash)
-//   attempt 2: Pro + verbatim    ← 30s backoff,給 Pro 一次恢復機會
-//   attempt 3: Flash + verbatim  ← 60s backoff,最後保險
+// 策略:Pro 為主,Flash 只當「Pro 連失 3 次=真耗盡」的最後保險(2026-06-12 改)。
+//   舊版 attempt1 就掉 Flash → 單次 transient 503 立刻落 lazy Flash = part4 型 under-produce 根因。
+//   attempt 0: Pro            ← 主路徑
+//   attempt 1: Pro (10s)      ← transient 多半 retry 就好,不再立刻掉 Flash
+//   attempt 2: Pro+T (30s)    ← 再給 Pro 一次(加溫)
+//   attempt 3: Flash (60s)    ← 僅 Pro 連失 3 次的容量保險;LONG_AUDIO_FLASH_LAST_RESORT=false 則也用 Pro
+//   degenerate 路徑另有 forcePro override,永遠不碰 Flash(見下方)
 async function _transcribeWithRetry(partPath, mimeType, lang, segIdx, segTotal, tagId) {
-  // 後兩次 attempt 加溫(temperature 0.4):degenerate(重複/脫稿)時 greedy 沒隨機性可逃,
-  // 加溫 + 換模型給逃脫機會。frequencyPenalty 在 transcribeAudio 僅對 vertex 開(Studio 不支援)。
+  // 後段 attempt 加溫(temperature):degenerate(重複/脫稿)時 greedy 沒隨機性可逃,加溫給逃脫。
+  // frequencyPenalty 在 transcribeAudio 僅對 vertex 開(Studio 不支援)。
   const ATTEMPT_PLAN = [
-    { useProModel: true,  temperature: 0,                          label: 'Pro' },
-    { useProModel: false, temperature: 0,                          label: 'Flash' },
-    { useProModel: true,  temperature: TRANSCRIBE_RETRY_TEMPERATURE, label: 'Pro+T' },
-    { useProModel: false, temperature: TRANSCRIBE_RETRY_TEMPERATURE, label: 'Flash+T' },
+    { useProModel: true, temperature: 0,                          label: 'Pro' },
+    { useProModel: true, temperature: 0,                          label: 'Pro(retry)' },
+    { useProModel: true, temperature: TRANSCRIBE_RETRY_TEMPERATURE, label: 'Pro+T' },
+    // 第 4 手:預設 Flash 當 Pro 真耗盡的保險;設 false 則全 Pro(完全禁 Flash)
+    LONG_AUDIO_FLASH_LAST_RESORT
+      ? { useProModel: false, temperature: TRANSCRIBE_RETRY_TEMPERATURE, label: 'Flash(last)' }
+      : { useProModel: true,  temperature: 1.0,                          label: 'Pro+T1.0' },
   ];
   const maxAttempts = ATTEMPT_PLAN.length;
   let lastErr;

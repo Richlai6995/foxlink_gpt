@@ -43,6 +43,9 @@ const {
 const UNDERPRODUCE_RATIO   = 0.5;
 const UNDERPRODUCE_MAX_FIX = 3;   // 一個 job 最多 sub-split 補幾段(限制延遲)
 const UNDERPRODUCE_MIN_GAIN = 1.2; // 補救後字數至少多 20% 才採用
+// 絕對密度下限(字/秒):補相對中位數的盲區 — 整 job 系統性偷懶時 median 自降會抓不到,
+// 加這個絕對門檻接住。正常 ≈5.3 字/秒(9600 字 / 1800 秒),設 3.0 留足餘裕。
+const UNDERPRODUCE_ABS_FLOOR = 3.0;
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR
   ? path.resolve(process.env.UPLOAD_DIR)
@@ -185,15 +188,17 @@ async function _recoverUnderproducedSegments(db, job, segments, totalDuration, t
   const densities = ok.map(s => ({ seg: s, d: s.text.length / Math.max(1, segSec(s.idx)) }));
   const sorted = densities.map(x => x.d).slice().sort((a, b) => a - b);
   const median = sorted[Math.floor(sorted.length / 2)];
+  // 相對(< 0.5×median)OR 絕對(< ABS_FLOOR 字/秒)— 絕對門檻接住「整 job 系統性偷懶
+  // → median 自降 → 相對抓不到」的盲區,順帶接住壓在 0.5×median 邊緣的段。
   const flagged = densities
-    .filter(x => x.d < UNDERPRODUCE_RATIO * median)
+    .filter(x => x.d < UNDERPRODUCE_RATIO * median || x.d < UNDERPRODUCE_ABS_FLOOR)
     .sort((a, b) => a.d - b.d)
     .slice(0, UNDERPRODUCE_MAX_FIX);
   if (flagged.length === 0) return;
 
   console.log(`[TranscribeJob] ${tagId} under-production 偵測: ${flagged.length} 段疑似提早收尾 ` +
-    `(density<${UNDERPRODUCE_RATIO}×median=${median.toFixed(0)}字/秒): ` +
-    flagged.map(f => `#${f.seg.idx + 1}(${f.d.toFixed(0)})`).join(','));
+    `(density < ${UNDERPRODUCE_RATIO}×median(${median.toFixed(1)}) 或 < ${UNDERPRODUCE_ABS_FLOOR} 字/秒): ` +
+    flagged.map(f => `#${f.seg.idx + 1}(${f.d.toFixed(1)})`).join(','));
 
   const lang = 'zh-TW';
   for (const { seg } of flagged) {
