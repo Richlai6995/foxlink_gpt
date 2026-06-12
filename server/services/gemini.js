@@ -367,7 +367,10 @@ const LONG_AUDIO_RETRY_BACKOFF_MS = [10000, 30000, 60000]; // 3 次 retry,10s/30
 //   ① 跨 30:00 的句子被切兩半 → 在下一段開頭是完整的
 //   ② 上一段尾巴模型偷懶 trailing off → 那段音訊在下一段開頭被再轉一次
 // 代價:接縫處約 N 秒重複內容。方案 B(LONG_AUDIO_STITCH)會在合併時把這段重複剪掉。
-const LONG_AUDIO_OVERLAP_SEC = 60;
+// 180s(2026-06-12 從 60s 加大):tail-drop 是 under-production 最常見形態(模型在段尾 trailing
+// off),把「最易漏的段尾」搬到「下一段最新鮮的段頭」重轉一次補回。實機 part5 漏最後 3 分,
+// 60s 只蓋到 [-1分,0],180s 才完整覆蓋。需配合 stitch maxCap 隨 window 放大(見 transcriptStitch)。
+const LONG_AUDIO_OVERLAP_SEC = 180;
 // 方案 B:合併時自動接縫去重(字串為主 + LLM 錨點 fallback,見 transcriptStitch.js)。
 // 設 false → 退回方案 A(保留重複 + 標記)。
 const LONG_AUDIO_STITCH = true;

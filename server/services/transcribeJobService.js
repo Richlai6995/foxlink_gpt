@@ -177,17 +177,25 @@ async function recoverStaleJobs(db) {
 // 的中位數比,低於 UNDERPRODUCE_RATIO× 的判定 under-produced → sub-split 重轉補回。
 // 只在補回 ≥UNDERPRODUCE_MIN_GAIN 倍才採用(不會變差);最多補 UNDERPRODUCE_MAX_FIX 段(限延遲)。
 async function _recoverUnderproducedSegments(db, job, segments, totalDuration, tagId) {
+  // density 分母用「實際 fed 秒數」(含 lead-in overlap),對齊 _splitAudio 的切法。
+  // 原本用 nominal 1800,但 seg.text 含 overlap 重轉的字 → 分母偏小、密度系統性高估。
   const segSec = (idx) => {
     const total = totalDuration || (idx + 1) * LONG_AUDIO_SEGMENT_SEC;
-    return Math.min((idx + 1) * LONG_AUDIO_SEGMENT_SEC, total) - idx * LONG_AUDIO_SEGMENT_SEC;
+    const fedStart = Math.max(0, idx * LONG_AUDIO_SEGMENT_SEC - (idx > 0 ? LONG_AUDIO_OVERLAP_SEC : 0));
+    const fedEnd = Math.min((idx + 1) * LONG_AUDIO_SEGMENT_SEC, total);
+    return Math.max(1, fedEnd - fedStart);
   };
   const ok = segments.filter(s =>
     s.ok && s.text && !s.text.startsWith('[此段轉錄失敗') && !s.text.includes('已自動截斷'));
   if (ok.length < 3) return; // 樣本太少,沒有可靠的 median
 
-  const densities = ok.map(s => ({ seg: s, d: s.text.length / Math.max(1, segSec(s.idx)) }));
+  const densities = ok.map(s => ({ seg: s, d: s.text.length / segSec(s.idx) }));
+  // trimmed median:去掉最低/最高各 25% 再取中位,避免 under-produced 段把基準拉低(它們正是要抓的)
   const sorted = densities.map(x => x.d).slice().sort((a, b) => a - b);
-  const median = sorted[Math.floor(sorted.length / 2)];
+  const k = Math.floor(sorted.length / 4);
+  const mid = sorted.slice(k, sorted.length - k);
+  const baseArr = mid.length ? mid : sorted;
+  const median = baseArr[Math.floor(baseArr.length / 2)];
   // 相對(< 0.5×median)OR 絕對(< ABS_FLOOR 字/秒)— 絕對門檻接住「整 job 系統性偷懶
   // → median 自降 → 相對抓不到」的盲區,順帶接住壓在 0.5×median 邊緣的段。
   const flagged = densities

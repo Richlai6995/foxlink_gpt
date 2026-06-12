@@ -30,8 +30,9 @@ function _normalizeWithMap(s) {
 
 // 找最大 L 使「prev 尾 L 字 == cur 頭 L 字」(正規化後)。回傳 L(0 = 沒重疊)。
 // 這正是 lead-in overlap 的模型:cur 頭 = prev 尾的同段音訊。
-function _suffixPrefixOverlap(prevNorm, curNorm, minMatch) {
-  const maxL = Math.min(prevNorm.length, curNorm.length, 600);
+function _suffixPrefixOverlap(prevNorm, curNorm, minMatch, maxCap = 600) {
+  // maxCap 隨 overlap 放大:overlap 180s ≈ 950 字重疊,寫死 600 會去不乾淨 → 殘留重複。
+  const maxL = Math.min(prevNorm.length, curNorm.length, maxCap);
   for (let L = maxL; L >= minMatch; L--) {
     if (prevNorm.slice(prevNorm.length - L) === curNorm.slice(0, L)) return L;
   }
@@ -69,7 +70,7 @@ async function stitchSegments(texts, opts = {}, llmAnchorFn = null) {
     const { norm: prevNorm } = _normalizeWithMap(prevTail);
     const { norm: curNorm, map: curMap } = _normalizeWithMap(curHead);
 
-    let cutNormLen = _suffixPrefixOverlap(prevNorm, curNorm, minMatch);
+    let cutNormLen = _suffixPrefixOverlap(prevNorm, curNorm, minMatch, window);
     let method = cutNormLen > 0 ? 'string' : null;
 
     // 字串法找不到 → LLM 錨點 fallback(只定位不重寫,找不到就不剪)
