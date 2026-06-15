@@ -4514,6 +4514,19 @@ async function runMigrations(db) {
     } catch (_) { /* 已經 nullable 或 constraint 不存在 */ }
   } catch (e) { console.warn('[Migration] alert_schedules interval support:', e.message); }
 
+  // 2026-06-15: 加 threshold_pct_override — schedule-level threshold 覆蓋 rule-level。
+  // 一條 rule(>8%) 掛日/週/月三個 schedule,實務上日週要 10%、月要 15%,需要 per-schedule 設定。
+  // alertRuleScheduler 跑時若 schedule.threshold_pct_override 非 NULL,蓋掉 rule.comparison_config.threshold_pct。
+  try {
+    const overCheck = await db.prepare(
+      `SELECT COUNT(*) AS cnt FROM user_tab_columns WHERE table_name='ALERT_SCHEDULES' AND column_name='THRESHOLD_PCT_OVERRIDE'`
+    ).get();
+    if (Number(overCheck?.cnt ?? overCheck?.CNT ?? 0) === 0) {
+      await db.prepare(`ALTER TABLE alert_schedules ADD threshold_pct_override NUMBER`).run();
+      console.log('[Migration] alert_schedules.threshold_pct_override added');
+    }
+  } catch (e) { console.warn('[Migration] alert_schedules threshold override:', e.message); }
+
   // ── Phase 5 Track B: Forecast 校驗 + Self-Improving Loop ─────────────────
   // pm_forecast_accuracy — 每日校驗結果(7 天前 forecast vs 今日 actual)
   await createTable('PM_FORECAST_ACCURACY', `CREATE TABLE pm_forecast_accuracy (
