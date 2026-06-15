@@ -371,21 +371,27 @@ async function runTranscribeJob(db, jobId) {
       }
     }
 
-    // 5. 平行轉錄,sequential batch(concurrency=2)
+    // 5. 滾動並發 pool(取代分批 barrier:誰先空誰抓下一段,不被每批最慢段綁架)
+    //    舊版 for(i+=N){ await Promise.all(batch) } 是同步 barrier:整批要全跑完才開下一批,
+    //    被每批最慢那一段綁架(13 段 7 並發時,batch1 的 6.7 分慢段害 batch2 乾等 4.5 分)。
+    //    改 worker pool 後,任一 worker 一空就抓下一段,wall-clock 只受真正的尾段牽制。
     const lang = 'zh-TW'; // TODO: 之後可以從 session 拉
-    for (let i = 0; i < segments.length; i += LONG_AUDIO_CONCURRENCY) {
-      // batch 間檢查 status — 若被外部 cancel(改成 failed),立刻 abort worker,
-      // 不再啟動新 batch、不要 overwrite cancelled status
-      const cur = await db.prepare('SELECT status FROM transcribe_jobs WHERE id=?').get(jobId);
-      if (cur?.status !== 'running') {
-        console.log(`[TranscribeJob] ${tagId} status changed to ${cur?.status},abort worker`);
-        return; // finally 會清 heartbeat / tmp
-      }
+    const pending = segments.filter(s => !s.ok); // recovery 時已完成段不重跑
+    let cursor = 0;
+    let aborted = false;
+    const runWorker = async () => {
+      while (!aborted) {
+        // 每抓一段前檢查 status — 若被外部 cancel(改成 failed),立刻收手,
+        // 不再啟動新段、不要 overwrite cancelled status
+        const cur = await db.prepare('SELECT status FROM transcribe_jobs WHERE id=?').get(jobId);
+        if (cur?.status !== 'running') {
+          aborted = true;
+          console.log(`[TranscribeJob] ${tagId} status changed to ${cur?.status},abort worker`);
+          return;
+        }
+        const seg = pending[cursor++]; // 單執行緒 JS,await 之間原子,不會兩個 worker 搶到同段
+        if (!seg) return; // 沒段可抓 → 收工
 
-      const batch = segments.slice(i, i + LONG_AUDIO_CONCURRENCY).filter(s => !s.ok);
-      if (batch.length === 0) continue;
-
-      await Promise.all(batch.map(async (seg) => {
         const tPart = Date.now();
         const r = await _transcribeWithRetry(seg.partPath, job.audio_mime_type, lang, seg.idx + 1, segments.length, tagId);
         seg.ok = r.ok;
@@ -438,8 +444,12 @@ async function runTranscribeJob(db, jobId) {
         } catch (e) {
           console.warn(`[TranscribeJob] ${tagId} part ${seg.idx + 1} DB flush failed: ${e.message}`);
         }
-      }));
-    }
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(LONG_AUDIO_CONCURRENCY, pending.length) }, () => runWorker())
+    );
+    if (aborted) return; // 被 cancel → finally 清 heartbeat / tmp,不往下做 recovery/stitch
 
     // 5b. 未完整轉錄(under-production)偵測 + sub-split 補救
     //    某段模型提早收尾(輸出合法但密度遠低於同 job 其他段)→ 切小段重轉補回漏掉的尾段。
@@ -586,6 +596,7 @@ async function cleanupOldJobAudio(db) {
         AND completed_at IS NOT NULL
         AND completed_at < SYSTIMESTAMP - INTERVAL '${CLEANUP_AUDIO_AFTER_DAYS}' DAY
         AND audio_path IS NOT NULL
+        AND COALESCE(audio_purged, 0) = 0
     `).all();
 
     let cleaned = 0;
@@ -598,8 +609,9 @@ async function cleanupOldJobAudio(db) {
         } else {
           missed++;
         }
-        // 把 audio_path 清空,標示已清(避免重跑同 job 又 query)
-        await db.prepare(`UPDATE transcribe_jobs SET audio_path=NULL WHERE id=?`).run(row.id);
+        // 標記已清(audio_purged flag)。不可 `SET audio_path=NULL` — 該欄 NOT NULL,會 ORA-01407
+        // 每次失敗 → row 永遠標不掉 → 重掃 + 刷 error log(2026-06-13 修)。audio_path 保留供查歷史。
+        await db.prepare(`UPDATE transcribe_jobs SET audio_purged=1 WHERE id=?`).run(row.id);
       } catch (e) {
         console.warn(`[TranscribeJob] cleanup ${row.id} (${row.audio_path}) error:`, e.message);
       }

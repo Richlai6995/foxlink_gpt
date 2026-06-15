@@ -352,16 +352,21 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
 // 表現為 finishReason=STOP 但 output 只有幾百 token。3.5 小時會議只回 2k token 就是這狀況。
 // 切成 30 分鐘/段、每段獨立用 Pro 轉錄,attention 集中度大幅提升,單段就能吐滿 maxOutputTokens。
 
-// 15 分鐘/段(2026-06-15 從 30 分改):30 分太長,Pro attention 在段尾衰減 → under-production
-// (提早收尾漏整塊)。實證 sub-split recovery 切 10 分小段幾乎都補得回 → Pro 對 ≤15 分段不偷懶。
-// 把「事後補」提前成「一開始就切 15 分」根本不漏。代價:段數加倍、跨 concurrency=7 變 2 batch,
-// 但 overlap/stitch/recovery 仍當保險。density 門檻(字/秒)與段長無關不用改。
+// 15 分鐘/段(2026-06-15 從 30 分改):30 分太長,Pro 的 attention 在段尾衰減 → under-production
+// (提早收尾漏整塊)。實證 sub-split recovery 切 10 分小段幾乎都補得回 → 證明 Pro 對 ≤15 分段不偷懶。
+// 把 recovery「事後補」提前成「一開始就切短」根本不漏。代價:段數加倍(2.5hr 6→11 段、跨 concurrency=7
+// 變 2 batch)+ 接縫變多,但 overlap/stitch/recovery 仍在當保險。
 const LONG_AUDIO_SEGMENT_SEC = 15 * 60;
 // concurrency=7:全並發(2026-05-08 切 Vertex 後)。Vertex quota 寬(1500+ RPM)、
 // 沒 Studio Pro 20 分鐘 deadline,可以全段同時送 SDK。
 // 7 段 × 7-8 分鐘 / 7 並發 = 8-12 分鐘 total(對比 sequential ~50 分鐘)。
 // 撞 503/quota 還有 retry+Flash fallback 兜底。
 const LONG_AUDIO_CONCURRENCY = 7;
+// sub-split 第二波(under-production 補救)獨立、較低的並發。subsplit 把單一過短段再切 10 分鐘
+// 小段重轉,各小段同樣走 inline-base64 → 用 7 並發會在補救階段再堆一波 native buffer。補救本來
+// 就慢、非熱路徑(只在某段提早收尾時觸發,且 _recoverUnderproducedSegments 是逐段序列呼叫),
+// 降到 3 對體感無影響卻砍掉 OOM 尾風險(2026-06-13 排查發現的潛在風險,非當次事故主因)。
+const LONG_AUDIO_SUBSPLIT_CONCURRENCY = 3;
 // per-seg 35 分鐘:Vertex 沒 Studio 20 分鐘 silent deadline,可以拉長給長 outlier 段
 // (實測正常 part 3-9 分鐘,35 分鐘只是極端 fallback 上限)
 const LONG_AUDIO_PER_SEG_TIMEOUT_MS = 35 * 60 * 1000;
@@ -372,6 +377,7 @@ const LONG_AUDIO_RETRY_BACKOFF_MS = [10000, 30000, 60000]; // 3 次 retry,10s/30
 // 代價:接縫處約 N 秒重複內容。方案 B(LONG_AUDIO_STITCH)會在合併時把這段重複剪掉。
 // 90s(2026-06-15 從 180s 調小):segment 改 15 分後 tail-drop 變少、即使漏尾也較短,180s 重疊
 // (佔 15 分段 20%)太浪費。90s(佔 10%)夠蓋接縫斷句 + 小尾段,又省一半重複轉錄。需要再大可調回。
+// stitch maxCap 隨 window 自動放大(見 transcriptStitch),不用同步改。
 const LONG_AUDIO_OVERLAP_SEC = 90;
 // 方案 B:合併時自動接縫去重(字串為主 + LLM 錨點 fallback,見 transcriptStitch.js)。
 // 設 false → 退回方案 A(保留重複 + 標記)。
@@ -610,8 +616,8 @@ async function _transcribeSegmentSubsplit(partPath, mimeType, lang, tagId, subSe
     if (subParts.length <= 1) return null; // 切不出更多段 → 放棄(段本來就短,sub-split 無意義)
     console.log(`[Subsplit] ${tagId} 切 ${subParts.length} 小段重轉(${subSegSec / 60}分/段)`);
     const results = [];
-    for (let i = 0; i < subParts.length; i += LONG_AUDIO_CONCURRENCY) {
-      const batch = subParts.slice(i, i + LONG_AUDIO_CONCURRENCY);
+    for (let i = 0; i < subParts.length; i += LONG_AUDIO_SUBSPLIT_CONCURRENCY) {
+      const batch = subParts.slice(i, i + LONG_AUDIO_SUBSPLIT_CONCURRENCY);
       const br = await Promise.all(batch.map((p, j) =>
         _transcribeWithRetry(p, mimeType, lang, i + j + 1, subParts.length, `${tagId}#sub`)));
       results.push(...br);
@@ -662,22 +668,27 @@ async function transcribeLongAudio(filePath, mimeType, lang) {
     // 每段最多 4 次嘗試(原始 + 3 retry):
     //   attempt 0/1/2 = Pro + verbatim,503/429 時 backoff 5s/15s/30s 後重打
     //   attempt 3 = Flash + verbatim(Pro 滿載時的最後逃生門)
+    // 滾動並發 pool(去掉分批 barrier:誰先空誰抓下一段,不被每批最慢段綁架。
+    // 同 transcribeJobService 的修法,只是這裡無 DB / cancel,純填 results[idx])
     const results = new Array(parts.length);
-    for (let i = 0; i < parts.length; i += LONG_AUDIO_CONCURRENCY) {
-      const batch = parts.slice(i, i + LONG_AUDIO_CONCURRENCY);
-      const batchResults = await Promise.all(batch.map(async (partPath, j) => {
-        const idx = i + j;
+    let cursor = 0;
+    const runWorker = async () => {
+      while (true) {
+        const idx = cursor++; // 單執行緒 JS,await 之間原子,不會兩 worker 搶到同段
+        if (idx >= parts.length) return;
         const tPart = Date.now();
-        const r = await _transcribeWithRetry(partPath, mimeType, lang, idx + 1, parts.length, tagId);
+        const r = await _transcribeWithRetry(parts[idx], mimeType, lang, idx + 1, parts.length, tagId);
         if (r.ok) {
           console.log(`[TranscribeLong] ${tagId} part ${idx + 1}/${parts.length} ok in ${Date.now() - tPart}ms text=${r.text.length}chars in=${r.inputTokens} out=${r.outputTokens} attempts=${r.attempts}`);
         } else {
           console.error(`[TranscribeLong] ${tagId} part ${idx + 1}/${parts.length} FAILED after ${Date.now() - tPart}ms attempts=${r.attempts}: ${r.error}`);
         }
-        return r;
-      }));
-      batchResults.forEach((r, j) => { results[i + j] = r; });
-    }
+        results[idx] = r;
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(LONG_AUDIO_CONCURRENCY, parts.length) }, () => runWorker())
+    );
 
     let totalIn = 0;
     results.forEach((r) => { totalIn += r.inputTokens; });

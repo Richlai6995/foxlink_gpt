@@ -1707,7 +1707,13 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
         };
         let preview = '';
         const sheets = [];
-        try {
+        // 大檔上傳:XLSX.readFile 即使 sheetRows=50 仍同步解壓整包 + 解析所有 sheet/shared-strings,
+        // 大檔會卡 web 主執行緒 event loop → /api/health 逾時 → liveness SIGKILL(與 excel_query 同類
+        // crash vector,2026-06-15 補)。超過門檻就跳過 in-thread 預覽,改提示 LLM/使用者走 excel_query。
+        const PREVIEW_MAX_BYTES = Number(process.env.EXCEL_PREVIEW_MAX_BYTES) || 5 * 1024 * 1024;
+        let previewSkipped = false;
+        try { if (fs.statSync(persistPath).size > PREVIEW_MAX_BYTES) previewSkipped = true; } catch (_) {}
+        if (!previewSkipped) try {
           const XLSX = require('xlsx');
           // sheetRows=31 之前太緊;若 header 在第 5 列,只剩 26 列資料預覽。改 50,
           // 讓 detectHeaderRow 有空間找,並仍保留 30 列實際資料給 LLM 看。
@@ -1740,11 +1746,18 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
         // ⚠️ 此段文字會被 TAG router 掃過(它對 message 做 substring match),
         // 不可用「分析」「深度」「比較」「金屬」等常見動詞/名詞 — 會誤觸發 pm_deep_analysis_workflow、
         // pm_what_if_cost_impact 等 PM workflow 的 TAG match。用「處理」「回答」這類中性詞。
-        combinedUserText += `\n\n[Excel: ${originalName}]\n` +
-          `(此檔案已完整保存。以下僅為前 30 列預覽。\n` +
-          ` 若 excel_query 工具可用,精確的彙總/排序/Top N/篩選請透過該工具查詢;\n` +
-          ` 若工具未提供,以預覽資料盡力回答並向使用者說明限制。)\n` +
-          preview;
+        if (previewSkipped) {
+          combinedUserText += `\n\n[Excel: ${originalName}]\n` +
+            `(此檔案較大,已完整保存但略過即時預覽以保護服務。\n` +
+            ` 請一律透過 excel_query 工具查詢(它在背景以子程序處理大檔);\n` +
+            ` 若該工具未提供,請告知使用者此檔過大需用工具查詢、無法直接預覽。)\n`;
+        } else {
+          combinedUserText += `\n\n[Excel: ${originalName}]\n` +
+            `(此檔案已完整保存。以下僅為前 30 列預覽。\n` +
+            ` 若 excel_query 工具可用,精確的彙總/排序/Top N/篩選請透過該工具查詢;\n` +
+            ` 若工具未提供,以預覽資料盡力回答並向使用者說明限制。)\n` +
+            preview;
+        }
 
         fileMetas.push({
           name: originalName,
@@ -2057,22 +2070,31 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
     }
 
     // Determine if we need image-aware history (resolved after resolveApiModel below)
-    const buildHistory = (msgs, withImages) => {
-      if (!withImages) {
-        return msgs.map((m) => ({
-          role: m.role === 'user' ? 'user' : 'model',
-          // Gemini rejects empty string parts — use single space as placeholder
-          parts: [{ text: m.content || ' ' }],
-        }));
+    // 用 flatMap:一則 assistant 訊息可能展開成多個 turn(tool workflow 重播)
+    const buildHistory = (msgs, withImages) => msgs.flatMap((m) => {
+      const role = m.role === 'user' ? 'user' : 'model';
+      let parsed = null;
+      if (m.files_json) {
+        try { parsed = JSON.parse(m.files_json); } catch { }
       }
-      // Include saved images in history for multi-turn image editing
-      return msgs.map((m) => {
-        const role = m.role === 'user' ? 'user' : 'model';
-        let parsed = null;
-        if (m.files_json) {
-          try { parsed = JSON.parse(m.files_json); } catch { }
-        }
 
+      // ── Tool-call 重播:把上一輪的 functionCall / functionResponse 還原回 history,
+      //    讓多輪 tool workflow(MCP 引導式問答)跨「聊天訊息」保留已選參數。
+      //    replayTurns 已是 Gemini 原生 shape,直接攤平 + 補上最終文字回覆(= m.content)。 ──
+      if (role === 'model' && parsed?.replayTurns?.length) {
+        return [
+          ...parsed.replayTurns.map((t) => ({ role: t.role, parts: t.parts })),
+          { role: 'model', parts: [{ text: m.content || ' ' }] },
+        ];
+      }
+
+      if (!withImages) {
+        // Gemini rejects empty string parts — use single space as placeholder
+        return [{ role, parts: [{ text: m.content || ' ' }] }];
+      }
+
+      // Include saved images in history for multi-turn image editing
+      const entry = (() => {
         // ── Model message: use historyParts for verbatim replay (includes thoughtSignatures) ──
         if (role === 'model' && parsed?.historyParts) {
           const parts = [];
@@ -2123,8 +2145,9 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
         }
         if (parts.length === 0) parts.push({ text: ' ' });
         return { role, parts };
-      });
-    };
+      })();
+      return [entry];
+    });
 
     /**
      * Sanitize Gemini history:
@@ -3278,6 +3301,7 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
     let displayText;
     let imgResult = null;
     let allGeneratedFiles = [];  // collect for DB persistence
+    let toolTurns = null;        // 本輪 tool 對話(functionCall/functionResponse),持久化供跨輪重播
     // ── Chat Inline Chart:收集 toolHandler 結果,供 chartSpecParser 解析 data_ref ──
     //   結構:[{ id, name, args, result }],id = `${name}_${seq}`(同名多次呼叫用 suffix)
     const toolCallResults = [];
@@ -4216,13 +4240,13 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
           // 把 langInstruction 一併塞進 system instruction,確保工具路徑也會依 UI 語言回
           const toolsInstruction = [skillExtraInstruction, mcpInstruction, langInstruction, chartInstruction].filter(Boolean).join('\n\n---\n\n');
           if (providerType === 'azure_openai' && modelRow) {
-            ({ text, inputTokens, outputTokens, isDirectAnswer } = await streamChatAoaiWithTools(
+            ({ text, inputTokens, outputTokens, isDirectAnswer, toolTurns } = await streamChatAoaiWithTools(
               modelRow, history, userParts, allDeclarations, toolHandler,
               _onToolChunk, _onToolStatus, toolsInstruction,
               { directAnswerTools }, genConfig
             ));
           } else {
-            ({ text, inputTokens, outputTokens, isDirectAnswer } = await generateWithToolsStream(
+            ({ text, inputTokens, outputTokens, isDirectAnswer, toolTurns } = await generateWithToolsStream(
               apiModel, history, userParts, allDeclarations, toolHandler,
               _onToolChunk, _onToolStatus, toolsInstruction,
               { directAnswerTools }, genConfig
@@ -4567,7 +4591,18 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
 
     // Save AI message
     // allGeneratedFiles is either an array (text/file path) or { generated, historyParts } (image path)
+    // toolTurns 存在時統一升級為 object 格式並掛 replayTurns(跨輪 tool workflow 重播)
     const filesJsonToStore = (() => {
+      const hasReplay = Array.isArray(toolTurns) && toolTurns.length > 0;
+      if (hasReplay) {
+        const generated = Array.isArray(allGeneratedFiles)
+          ? allGeneratedFiles
+          : (allGeneratedFiles?.generated || []);
+        const obj = (allGeneratedFiles && !Array.isArray(allGeneratedFiles)) ? { ...allGeneratedFiles } : {};
+        obj.generated = generated;
+        obj.replayTurns = toolTurns;
+        return JSON.stringify(obj);
+      }
       if (!allGeneratedFiles || (Array.isArray(allGeneratedFiles) && allGeneratedFiles.length === 0)) return null;
       if (Array.isArray(allGeneratedFiles)) return JSON.stringify(allGeneratedFiles);
       // Object format (image-output): { generated, historyParts }

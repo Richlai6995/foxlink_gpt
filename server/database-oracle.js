@@ -1443,6 +1443,18 @@ async function runMigrations(db) {
   await safeCreateTranscribeIdx('IDX_TRANSJOBS_USER_STATUS', 'CREATE INDEX idx_transjobs_user_status ON transcribe_jobs(user_id, status)');
   await safeCreateTranscribeIdx('IDX_TRANSJOBS_RECOVERY',    'CREATE INDEX idx_transjobs_recovery ON transcribe_jobs(status, heartbeat_at)');
   await safeCreateTranscribeIdx('IDX_TRANSJOBS_SESSION',     'CREATE INDEX idx_transjobs_session ON transcribe_jobs(session_id)');
+
+  // ── audio_purged flag(2026-06-13 修 ORA-01407)─────────────────────────────
+  // 原 cleanupOldJobAudio 刪檔後 `UPDATE audio_path=NULL` 標記已清,但 audio_path 是 NOT NULL
+  // → 每次 cleanup 都 ORA-01407、row 永遠標不掉 → 每跑一次就重掃同批 + 刷 error log,且 >30d
+  //   集合隨時間無限變大。改用獨立 flag,不動 NOT NULL 約束。
+  try {
+    await db.prepare(`ALTER TABLE transcribe_jobs ADD audio_purged NUMBER(1) DEFAULT 0`).run();
+    console.log('[Migration] Added audio_purged to transcribe_jobs');
+  } catch (e) {
+    // ORA-01430:column being added already exists
+    if (!e.message?.includes('ORA-01430')) console.warn('[Migration] audio_purged add:', e.message);
+  }
   // 既有部署補欄:是否已記入 token_usage(forward 路徑完成時標 1;backfill 只補 0/NULL 的舊 job)
   await addCol('TRANSCRIBE_JOBS', 'TOKENS_BILLED', 'NUMBER(1) DEFAULT 0');
 
