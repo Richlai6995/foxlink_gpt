@@ -74,11 +74,12 @@ const METALS = [
 
 const THRESHOLD_PCT = 8;
 
-// 3 個 schedule 套餐:cron + lookback_days + cooldown
+// 3 個 schedule 套餐:cron + lookback_days + cooldown + threshold_override
+// 2026-06-15 採購要求:日週 10%、月 15%(rule 本身仍 8% 作 fallback)
 const SCHEDULES = [
-  { key: 'daily',   cron: '0 8 * * *',  lookback: 1,  cooldown: 24 * 60 },        // 每天 08:00
-  { key: 'weekly',  cron: '0 8 * * 1',  lookback: 5,  cooldown: 7 * 24 * 60 },    // 每週一 08:00
-  { key: 'monthly', cron: '0 8 1 * *',  lookback: 22, cooldown: 30 * 24 * 60 },   // 每月 1 號 08:00
+  { key: 'daily',   cron: '0 8 * * *',  lookback: 1,  cooldown: 24 * 60,        threshold: 10 },  // 每天 08:00
+  { key: 'weekly',  cron: '0 8 * * 1',  lookback: 5,  cooldown: 7 * 24 * 60,    threshold: 10 },  // 每週一 08:00
+  { key: 'monthly', cron: '0 8 1 * *',  lookback: 22, cooldown: 30 * 24 * 60,   threshold: 15 },  // 每月 1 號 08:00
 ];
 
 // SQL template:取 metal 的「最新 + {{lookback_days}} 個交易日前」兩筆,排成 [base, current]
@@ -338,10 +339,10 @@ function isoToOracleTs(d) {
       await db.prepare(`
         INSERT INTO alert_schedules
           (rule_id, schedule_key, schedule_cron_expr, lookback_days,
-           cooldown_minutes, is_active, next_evaluate_at)
-        VALUES (?, ?, ?, ?, ?, 1, TO_TIMESTAMP(?, 'YYYY-MM-DD HH24:MI:SS'))
-      `).run(ruleId, s.key, s.cron, s.lookback, s.cooldown, nextSql);
-      console.log(`    ✓  schedule "${s.key}" 新增 (next=${nextAt.toISOString()})`);
+           cooldown_minutes, is_active, next_evaluate_at, threshold_pct_override)
+        VALUES (?, ?, ?, ?, ?, 1, TO_TIMESTAMP(?, 'YYYY-MM-DD HH24:MI:SS'), ?)
+      `).run(ruleId, s.key, s.cron, s.lookback, s.cooldown, nextSql, s.threshold ?? null);
+      console.log(`    ✓  schedule "${s.key}" 新增 (next=${nextAt.toISOString()}, threshold=${s.threshold ?? 'inherit'}%)`);
     }
   }
 

@@ -46,6 +46,7 @@ async function tickOnce(db) {
         s.schedule_interval_minutes AS sched_interval,
         s.lookback_days   AS lookback_days,
         s.cooldown_minutes AS sched_cooldown,
+        s.threshold_pct_override AS threshold_override,
         r.rule_name       AS rule_name
       FROM alert_schedules s
       JOIN alert_rules r ON r.id = s.rule_id
@@ -96,6 +97,8 @@ async function tickOnce(db) {
       const schedInterval = Number(s.sched_interval ?? s.SCHED_INTERVAL) || 0;
       const lookbackDays = (s.lookback_days ?? s.LOOKBACK_DAYS);
       const ruleName = s.rule_name || s.RULE_NAME || `rule_${ruleId}`;
+      // 2026-06-15: schedule-level threshold override(日/週 10% / 月 15%)
+      const thresholdOverride = s.threshold_override ?? s.THRESHOLD_OVERRIDE;
 
       const lockKey = `alert_sched_eval:${schedId}:${minute}`;
       let acquired = false;
@@ -141,6 +144,13 @@ async function tickOnce(db) {
         // SQL template 替換
         if (lookbackDays != null && inlineRule.data_config) {
           inlineRule.data_config = injectLookback(inlineRule.data_config, lookbackDays);
+        }
+        // 2026-06-15: 覆蓋 comparison_config.threshold_pct(if schedule 有 override)
+        if (thresholdOverride != null && Number.isFinite(Number(thresholdOverride))) {
+          inlineRule.comparison_config = overrideThresholdPct(
+            inlineRule.comparison_config,
+            Number(thresholdOverride),
+          );
         }
 
         // 把 schedule meta 注入 vars(message_template 可用 {{timeframe_label}} 等)
@@ -255,6 +265,22 @@ function normalizeRuleForExecutor(r) {
   const out = {};
   for (const [k, v] of Object.entries(r)) out[k.toLowerCase()] = v;
   return out;
+}
+
+// 2026-06-15: schedule-level threshold override — 把 comparison_config.threshold_pct 蓋掉
+// (一條 rule 的 8% threshold 可由不同 schedule 改 10%/15% 不同期間)
+function overrideThresholdPct(comparisonConfig, newThresholdPct) {
+  let cfg;
+  if (typeof comparisonConfig === 'string') {
+    try { cfg = JSON.parse(comparisonConfig); }
+    catch (_) { cfg = {}; }
+  } else if (comparisonConfig && typeof comparisonConfig === 'object') {
+    cfg = { ...comparisonConfig };
+  } else {
+    cfg = {};
+  }
+  cfg.threshold_pct = newThresholdPct;
+  return JSON.stringify(cfg);
 }
 
 // 把 data_config(JSON string 或 object)內的 SQL 做 {{lookback_days}} 替換,回 JSON string
