@@ -21,6 +21,7 @@ interface AlertRule {
   active_schedule_count?: number
   next_schedule_at?: string | null
   schedule_cooldowns?: string | null  // 各 schedule cooldown 逗號/斜線清單,例 "1440/10080/43200"
+  schedule_thresholds?: string | null  // 2026-06-15: 「daily:10|weekly:10|monthly:15」串接 schedule key+threshold
   last_evaluated_at?: string | null
   next_evaluate_at?: string | null
   last_eval_result?: string | null
@@ -35,6 +36,7 @@ interface AlertSchedule {
   schedule_interval_minutes: number | null
   lookback_days: number | null
   cooldown_minutes: number
+  threshold_pct_override?: number | null  // 2026-06-15: schedule 自己的 threshold(覆蓋 rule.comparison_config.threshold_pct)
   is_active: number
   last_evaluated_at?: string | null
   next_evaluate_at?: string | null
@@ -315,10 +317,25 @@ export default function AlertRulesPanel() {
                   <td className="px-3 py-2 text-slate-600">
                     {r.bound_to === 'standalone'
                       ? ((r.schedule_count ?? 0) > 0
-                          ? <span title={r.next_schedule_at ? `next: ${new Date(r.next_schedule_at).toLocaleString('zh-TW')}` : ''}>
-                              <Clock size={10} className="inline mr-0.5 text-slate-400" />
-                              {r.active_schedule_count ?? r.schedule_count} 個排程
-                            </span>
+                          ? (() => {
+                              // 2026-06-15: 把 "daily:10|weekly:10|monthly:15" 拆成 「日 10% / 週 10% / 月 15%」
+                              const KEY_ZH: Record<string, string> = { daily: '日', weekly: '週', monthly: '月', interval: '間隔' }
+                              const pairs = (r.schedule_thresholds || '').split('|').filter(Boolean)
+                                .map(p => {
+                                  const [k, t] = p.split(':')
+                                  const zh = KEY_ZH[k] || k
+                                  return t && t !== '-' ? `${zh} ${t}%` : `${zh}(inherit)`
+                                })
+                              const tip = r.next_schedule_at ? `next: ${new Date(r.next_schedule_at).toLocaleString('zh-TW')}` : ''
+                              return (
+                                <span title={tip} className="inline-flex items-center gap-1 flex-wrap">
+                                  <Clock size={10} className="text-slate-400" />
+                                  {pairs.length > 0
+                                    ? <span className="font-mono text-[11px]">{pairs.join(' / ')}</span>
+                                    : <span>{r.active_schedule_count ?? r.schedule_count} 個排程</span>}
+                                </span>
+                              )
+                            })()
                           : (r.schedule_interval_minutes
                               ? <span title={r.next_evaluate_at ? `next: ${new Date(r.next_evaluate_at).toLocaleString('zh-TW')}` : ''}>
                                   <Clock size={10} className="inline mr-0.5 text-slate-400" />
@@ -720,7 +737,7 @@ function AlertRuleEditor({ mode, initial, onClose, onSaved }: EditorProps) {
                         <button type="button" onClick={() => removeSchedule(idx)} className="text-slate-300 hover:text-rose-500 ml-0.5"><X size={11} /></button>
                       </div>
 
-                      {/* Row 2: lookback + cooldown — inline */}
+                      {/* Row 2: lookback + cooldown + threshold override — inline */}
                       <div className="flex items-center gap-2 text-[11px] text-slate-600">
                         <span>lookback</span>
                         <input type="number" className={`${compactInput} w-12`}
@@ -733,6 +750,13 @@ function AlertRuleEditor({ mode, initial, onClose, onSaved }: EditorProps) {
                           value={s.cooldown_minutes}
                           onChange={e => updateSchedule(idx, { cooldown_minutes: Number(e.target.value) })} />
                         <span>分</span>
+                        {/* 2026-06-15: schedule-level threshold override(空白=用 rule 的 threshold) */}
+                        <span className="ml-2" title="該排程的漲跌警示閾值;空白沿用上方比較模式 threshold_pct">閾值</span>
+                        <input type="number" step="any" className={`${compactInput} w-14`}
+                          value={s.threshold_pct_override ?? ''}
+                          onChange={e => updateSchedule(idx, { threshold_pct_override: e.target.value === '' ? null : Number(e.target.value) })}
+                          placeholder="繼承" />
+                        <span>%</span>
                         <span className="text-slate-300 ml-auto text-[10px] font-mono">
                           {s.schedule_cron_expr ? s.schedule_cron_expr : `每 ${s.schedule_interval_minutes} 分`}
                         </span>

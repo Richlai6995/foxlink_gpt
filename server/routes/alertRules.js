@@ -50,7 +50,8 @@ async function fetchRule(id) {
 async function fetchSchedules(ruleId) {
   const rows = await db().prepare(`
     SELECT id, rule_id, schedule_key, schedule_cron_expr, schedule_interval_minutes, lookback_days,
-           cooldown_minutes, is_active, last_evaluated_at, next_evaluate_at, last_eval_result
+           cooldown_minutes, threshold_pct_override, is_active,
+           last_evaluated_at, next_evaluate_at, last_eval_result
     FROM alert_schedules WHERE rule_id=?
     ORDER BY id
   `).all(Number(ruleId));
@@ -118,6 +119,10 @@ async function syncSchedules(ruleId, schedules) {
     const lookback = (s.lookback_days != null && s.lookback_days !== '') ? Number(s.lookback_days) : null;
     const cooldown = Number(s.cooldown_minutes) || 1440;
     const isActive = s.is_active === 0 ? 0 : 1;
+    // 2026-06-15: schedule-level threshold override(rule.comparison_config.threshold_pct 的覆寫)
+    const thresholdOverride = (s.threshold_pct_override != null && s.threshold_pct_override !== '')
+      ? Number(s.threshold_pct_override)
+      : null;
     const nextAt = calcNext({ schedule_cron_expr: cronExpr, schedule_interval_minutes: intervalMin });
     const nextSql = nextAt ? isoToOracleTs(nextAt) : null;
 
@@ -132,28 +137,28 @@ async function syncSchedules(ruleId, schedules) {
         await db().prepare(`
           UPDATE alert_schedules SET
             schedule_cron_expr=?, schedule_interval_minutes=?, lookback_days=?,
-            cooldown_minutes=?, is_active=?,
+            cooldown_minutes=?, threshold_pct_override=?, is_active=?,
             next_evaluate_at = TO_TIMESTAMP(?, 'YYYY-MM-DD HH24:MI:SS'),
             last_modified=SYSTIMESTAMP
           WHERE id=?
-        `).run(cronExpr, intervalMin, lookback, cooldown, isActive, nextSql, schedId);
+        `).run(cronExpr, intervalMin, lookback, cooldown, thresholdOverride, isActive, nextSql, schedId);
       } else {
         await db().prepare(`
           UPDATE alert_schedules SET
             schedule_cron_expr=?, schedule_interval_minutes=?, lookback_days=?,
-            cooldown_minutes=?, is_active=?,
+            cooldown_minutes=?, threshold_pct_override=?, is_active=?,
             last_modified=SYSTIMESTAMP
           WHERE id=?
-        `).run(cronExpr, intervalMin, lookback, cooldown, isActive, schedId);
+        `).run(cronExpr, intervalMin, lookback, cooldown, thresholdOverride, isActive, schedId);
       }
     } else {
       // INSERT
       await db().prepare(`
         INSERT INTO alert_schedules
           (rule_id, schedule_key, schedule_cron_expr, schedule_interval_minutes, lookback_days,
-           cooldown_minutes, is_active, next_evaluate_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, TO_TIMESTAMP(?, 'YYYY-MM-DD HH24:MI:SS'))
-      `).run(Number(ruleId), key, cronExpr, intervalMin, lookback, cooldown, isActive, nextSql);
+           cooldown_minutes, threshold_pct_override, is_active, next_evaluate_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, TO_TIMESTAMP(?, 'YYYY-MM-DD HH24:MI:SS'))
+      `).run(Number(ruleId), key, cronExpr, intervalMin, lookback, cooldown, thresholdOverride, isActive, nextSql);
     }
   }
 
@@ -182,7 +187,11 @@ router.get('/', async (req, res) => {
               (SELECT COUNT(*) FROM alert_schedules s WHERE s.rule_id=r.id) AS schedule_count,
               (SELECT COUNT(*) FROM alert_schedules s WHERE s.rule_id=r.id AND s.is_active=1) AS active_schedule_count,
               (SELECT MIN(s.next_evaluate_at) FROM alert_schedules s WHERE s.rule_id=r.id AND s.is_active=1) AS next_schedule_at,
-              (SELECT LISTAGG(s.cooldown_minutes, '/') WITHIN GROUP (ORDER BY s.id) FROM alert_schedules s WHERE s.rule_id=r.id) AS schedule_cooldowns
+              (SELECT LISTAGG(s.cooldown_minutes, '/') WITHIN GROUP (ORDER BY s.id) FROM alert_schedules s WHERE s.rule_id=r.id) AS schedule_cooldowns,
+              -- 2026-06-15: 把每個 schedule 的 (key, threshold) 串成「daily:10|weekly:10|monthly:15」給前端 list 顯示
+              (SELECT LISTAGG(s.schedule_key || ':' || NVL(TO_CHAR(s.threshold_pct_override), '-'), '|')
+                      WITHIN GROUP (ORDER BY s.id)
+                 FROM alert_schedules s WHERE s.rule_id=r.id) AS schedule_thresholds
        FROM alert_rules r
        ${whereOwner}
        ORDER BY r.is_active DESC, r.last_modified DESC`
