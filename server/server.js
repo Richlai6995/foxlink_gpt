@@ -580,6 +580,13 @@ app.get('/api/version', (req, res) => {
         excelQueryJobService.recoverStaleJobs(db).catch((e) => console.warn('[ExcelJob] recovery tick:', e.message));
       }, 5 * 60 * 1000);
 
+      // 大檔路由(2026-06-15):web pod 把過大 excel job 留 pending,scheduler(3Gi、無 SSE)在此撿來跑。
+      // 10s 輪詢:deferred 大檔本來就是背景(>90s 走鈴鐺),pickup 慢一點點無妨;但比 5min recovery 快得多。
+      excelQueryJobService.runPendingJobs(db).catch((e) => console.warn('[ExcelJob] startup pending:', e.message));
+      setInterval(() => {
+        excelQueryJobService.runPendingJobs(db).catch((e) => console.warn('[ExcelJob] pending tick:', e.message));
+      }, 10 * 1000);
+
       // 每天跑一次 cleanup(> 7 天 done/failed 的 job 清 result_md / data_json,節省 DB CLOB 空間)
       excelQueryJobService.cleanupOldJobs(db).catch((e) => console.warn('[ExcelJob] startup cleanup:', e.message));
       setInterval(() => {

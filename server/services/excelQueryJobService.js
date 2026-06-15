@@ -72,8 +72,22 @@ const RERUN_FAILFAST_BYTES = 8 * 1024 * 1024; // 合計 > 8MB 視為大檔
 //   scheduler pod(k8s/scheduler-deployment.yaml):limit 3Gi,--max-old-space-size=2560(recovery 走這)
 // web 的 2Gi 是上限:主程序老生代峰值 + 1 個 worker + DuckDB native(256MB)+ xlsx buffer + Oracle pool
 // 都共用這 2Gi。所以 worker heap 必須小,且「同時只准 1 個 worker」(見下方 semaphore)。
-// 768MB:單一一般大檔夠用;真‧超大檔會 worker isolate OOM 優雅失敗(job failed、pod 活),這是對的取捨。
-const WORKER_MAX_OLD_GEN_MB = Number(process.env.EXCEL_WORKER_HEAP_MB) || 768;
+// heap 上限 pod-aware:大檔已路由到 scheduler 跑(見下方大檔路由),所以 scheduler 給較大的 1536
+// (3Gi pod),web 只跑小檔給 768(2Gi pod、又要服務 SSE)。EXCEL_WORKER_HEAP_MB 可覆寫。
+// 真‧超大檔會 worker isolate OOM 優雅失敗(job failed、pod 活),這是對的取捨。
+const IS_SCHEDULER_POD = process.env.RUN_SCHEDULERS === 'true';
+const WORKER_MAX_OLD_GEN_MB = Number(process.env.EXCEL_WORKER_HEAP_MB) || (IS_SCHEDULER_POD ? 1536 : 768);
+
+// ── 大檔路由(2026-06-15 follow-up:避免過大 excel 撐爆 web pod)──────────────────
+// web pod(2Gi、又要扛 SSE chat)不該做重 parse。三層分流:
+//   ≤ INLINE          → web 本地 inline 跑(快、互動體驗不變)
+//   INLINE ~ ABSOLUTE → web 不 spawn、留 pending,交給 scheduler(3Gi、無 SSE)背景撿來跑(runPendingJobs)
+//   > ABSOLUTE        → 直接拒(連 scheduler 都別撐),回清楚訊息給 LLM
+const LOCAL_INLINE_MAX_BYTES = Number(process.env.EXCEL_INLINE_MAX_BYTES) || 5 * 1024 * 1024;
+const ABSOLUTE_MAX_BYTES = Number(process.env.EXCEL_ABSOLUTE_MAX_BYTES) || 50 * 1024 * 1024;
+// scheduler poller 只撿「夠老」的 pending,避免搶到 web 正要 inline 的小檔(web inline 會先把它 claim 成
+// running,poller 只看 pending,雙保險)。
+const PENDING_POLL_AGE_SEC = Number(process.env.EXCEL_PENDING_POLL_AGE_SEC) || 5;
 
 // 全域(per-process)worker 並發上限。web pod 2Gi 只容得下 1 個 worker 同時跑,所以預設 1:
 // 多餘的 job(recovery 一次撿多個 stale、或多使用者同時 excel_query)排隊等,不並發 spawn → 不會
@@ -105,6 +119,16 @@ function _releaseWorkerSlot() {
   else _activeWorkers = Math.max(0, _activeWorkers - 1);
 }
 
+// 合計主檔 + extraFiles 的位元組(best-effort;檔案在 NFS,web/scheduler 都讀得到)。用於大檔路由。
+function _statTotalBytes(filePath, extraFiles) {
+  let total = 0;
+  const paths = [filePath, ...((extraFiles || []).map((f) => f && f.path))].filter(Boolean);
+  for (const p of paths) {
+    try { total += fs.statSync(p).size; } catch (_) {}
+  }
+  return total;
+}
+
 // ─── createJob ───────────────────────────────────────────────────────────────
 
 /**
@@ -123,6 +147,15 @@ function _releaseWorkerSlot() {
  * @returns {Promise<string>} jobId
  */
 async function createJob(db, opts) {
+  // 大檔路由 step 0:超過絕對上限直接拒,連 job row 都不建(連 scheduler 都別撐)。
+  const totalBytes = _statTotalBytes(opts.filePath, opts.extraFiles);
+  if (totalBytes > ABSOLUTE_MAX_BYTES) {
+    throw new Error(
+      `Excel 檔過大(合計 ${(totalBytes / 1024 / 1024).toFixed(1)}MB,上限 ${Math.round(ABSOLUTE_MAX_BYTES / 1024 / 1024)}MB)。` +
+      `請拆分工作表、移除不需要的欄位/sheet 或縮小檔案後再查詢。`
+    );
+  }
+
   // Dedupe:同 user + 同檔 + 同 SQL 已經有 pending/running 的 job,直接重用,不再建新。
   // 2026-06-05 事件:user 等不及又按了一次,同個 7.96MB xlsx 兩個 worker 同時 parse → CPU 爆。
   // 撈最近 30 分鐘候選(候選通常 < 5 筆,JS 比 sql_text 字串很快),不會掃全表。
@@ -164,12 +197,28 @@ async function createJob(db, opts) {
     opts.sql,
     extraFilesJson,
   );
-  console.log(`[ExcelJob] created ${jobId} user=${opts.userId} file=${opts.fileName} sheet=${opts.sheetName || '(auto)'} sql.len=${opts.sql.length} extras=${opts.extraFiles?.length || 0}`);
+  const sizeMB = (totalBytes / 1024 / 1024).toFixed(1);
+  console.log(`[ExcelJob] created ${jobId} user=${opts.userId} file=${opts.fileName} sheet=${opts.sheetName || '(auto)'} sql.len=${opts.sql.length} extras=${opts.extraFiles?.length || 0} size=${sizeMB}MB`);
 
-  // 同 process setImmediate worker(跟 transcribeJobService 一致)
-  setImmediate(() => runJob(db, jobId).catch(e =>
-    console.error(`[ExcelJob] ${jobId} worker error:`, e.message)
-  ));
+  // 大檔路由:小檔本地 inline 跑;大檔留 pending 交給 scheduler(3Gi、無 SSE)背景跑,避免撐爆 web pod。
+  // 注意:不論這支在 web 還 scheduler 跑,規則一致(scheduler 自己 createJob 的大檔也會丟回 pending 由
+  // 自己的 poller 撿,差一個 tick,無妨)。
+  if (totalBytes <= LOCAL_INLINE_MAX_BYTES) {
+    // 小檔本地跑:先 claim 成 running(scheduler poller 只撿 pending → 不會搶走重跑),再 setImmediate。
+    try {
+      await db.prepare(
+        `UPDATE excel_query_jobs SET status='running', heartbeat_at=SYSTIMESTAMP, updated_at=SYSTIMESTAMP
+         WHERE id=? AND status='pending'`
+      ).run(jobId);
+    } catch (e) {
+      console.warn(`[ExcelJob] ${jobId} inline claim failed (continuing): ${e.message}`);
+    }
+    setImmediate(() => runJob(db, jobId).catch(e =>
+      console.error(`[ExcelJob] ${jobId} worker error:`, e.message)
+    ));
+  } else {
+    console.log(`[ExcelJob] ${jobId} deferred to scheduler (${sizeMB}MB > ${Math.round(LOCAL_INLINE_MAX_BYTES / 1024 / 1024)}MB inline 上限)— 留 pending 等 scheduler 背景撿`);
+  }
   return jobId;
 }
 
@@ -298,6 +347,43 @@ async function recoverStaleJobs(db) {
     }
   } catch (e) {
     console.error('[ExcelJob] recoverStaleJobs error:', e.message);
+  }
+}
+
+// 撿被 web pod 刻意 defer 的大檔(status='pending' 且夠老)→ 在 scheduler(3Gi、無 SSE)上跑。
+// 只有 scheduler 跑這支(server.js gated on RUN_SCHEDULERS),所以同一個 deferred job 只會被一個
+// pod 撿;atomic claim(pending→running + rowsAffected 檢查)再擋住自己重疊 tick 的雙撿。
+// 注意:web inline 的小檔在 createJob 已被 claim 成 'running',poller 只看 'pending' → 不會被搶。
+async function runPendingJobs(db) {
+  try {
+    const rows = await db.prepare(`
+      SELECT id FROM excel_query_jobs
+      WHERE status='pending'
+        AND created_at < SYSTIMESTAMP - INTERVAL '${PENDING_POLL_AGE_SEC}' SECOND
+    `).all();
+
+    for (const row of rows) {
+      const id = row.id || row.ID;
+      try {
+        // atomic claim:只有把 pending → running 成功的那一個才執行(擋重疊 tick)
+        const res = await db.prepare(`
+          UPDATE excel_query_jobs SET
+            status='running', heartbeat_at=SYSTIMESTAMP, updated_at=SYSTIMESTAMP
+          WHERE id=? AND status='pending'
+        `).run(id);
+        const affected = res?.rowsAffected || res?.changes || 0;
+        if (affected > 0) {
+          console.log(`[ExcelJob] picking up deferred job ${id} (scheduler)`);
+          setImmediate(() => runJob(db, id).catch((e) =>
+            console.error(`[ExcelJob] deferred run ${id} failed:`, e.message)
+          ));
+        }
+      } catch (e) {
+        console.warn(`[ExcelJob] runPendingJobs claim ${id} error:`, e.message);
+      }
+    }
+  } catch (e) {
+    console.error('[ExcelJob] runPendingJobs error:', e.message);
   }
 }
 
@@ -626,6 +712,7 @@ module.exports = {
   waitForResult,
   runJob,
   recoverStaleJobs,
+  runPendingJobs,
   gracefullyPauseActiveJobs,
   cleanupOldJobs,
   // 給 chat.js xlsx preview 用 — preview 餵 LLM 的欄位名必須跟 worker 建表後一致,
