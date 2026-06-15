@@ -352,8 +352,11 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
 // 表現為 finishReason=STOP 但 output 只有幾百 token。3.5 小時會議只回 2k token 就是這狀況。
 // 切成 30 分鐘/段、每段獨立用 Pro 轉錄,attention 集中度大幅提升,單段就能吐滿 maxOutputTokens。
 
-// 30 分鐘/段:Pro 對長段 verbatim 服從度高,內容更完整(Flash 即使 15 分鐘段仍偷懶)
-const LONG_AUDIO_SEGMENT_SEC = 30 * 60;
+// 15 分鐘/段(2026-06-15 從 30 分改):30 分太長,Pro 的 attention 在段尾衰減 → under-production
+// (提早收尾漏整塊)。實證 sub-split recovery 切 10 分小段幾乎都補得回 → 證明 Pro 對 ≤15 分段不偷懶。
+// 把 recovery「事後補」提前成「一開始就切短」根本不漏。代價:段數加倍(2.5hr 6→11 段、跨 concurrency=7
+// 變 2 batch)+ 接縫變多,但 overlap/stitch/recovery 仍在當保險。
+const LONG_AUDIO_SEGMENT_SEC = 15 * 60;
 // concurrency=7:全並發(2026-05-08 切 Vertex 後)。Vertex quota 寬(1500+ RPM)、
 // 沒 Studio Pro 20 分鐘 deadline,可以全段同時送 SDK。
 // 7 段 × 7-8 分鐘 / 7 並發 = 8-12 分鐘 total(對比 sequential ~50 分鐘)。
@@ -372,10 +375,10 @@ const LONG_AUDIO_RETRY_BACKOFF_MS = [10000, 30000, 60000]; // 3 次 retry,10s/30
 //   ① 跨 30:00 的句子被切兩半 → 在下一段開頭是完整的
 //   ② 上一段尾巴模型偷懶 trailing off → 那段音訊在下一段開頭被再轉一次
 // 代價:接縫處約 N 秒重複內容。方案 B(LONG_AUDIO_STITCH)會在合併時把這段重複剪掉。
-// 180s(2026-06-12 從 60s 加大):tail-drop 是 under-production 最常見形態(模型在段尾 trailing
-// off),把「最易漏的段尾」搬到「下一段最新鮮的段頭」重轉一次補回。實機 part5 漏最後 3 分,
-// 60s 只蓋到 [-1分,0],180s 才完整覆蓋。需配合 stitch maxCap 隨 window 放大(見 transcriptStitch)。
-const LONG_AUDIO_OVERLAP_SEC = 180;
+// 90s(2026-06-15 從 180s 調小):segment 改 15 分後 tail-drop 變少、即使漏尾也較短,180s 重疊
+// (佔 15 分段 20%)太浪費。90s(佔 10%)夠蓋接縫斷句 + 小尾段,又省一半重複轉錄。需要再大可調回。
+// stitch maxCap 隨 window 自動放大(見 transcriptStitch),不用同步改。
+const LONG_AUDIO_OVERLAP_SEC = 90;
 // 方案 B:合併時自動接縫去重(字串為主 + LLM 錨點 fallback,見 transcriptStitch.js)。
 // 設 false → 退回方案 A(保留重複 + 標記)。
 const LONG_AUDIO_STITCH = true;
