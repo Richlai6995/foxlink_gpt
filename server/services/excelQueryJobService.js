@@ -525,6 +525,15 @@ async function runJob(db, jobId) {
       );
     }
 
+    // 絕對上限再把關一次:createJob 的檢查可能因 stat 失敗(sizeUnknown)被低估繞過,scheduler 第一次
+    // 跑也要擋,避免把超大檔餵進子程序(雖然子程序 cell-guard + oom_score_adj 不會炸 pod,但白費一次)。
+    if (totalBytes > ABSOLUTE_MAX_BYTES) {
+      throw Object.assign(
+        new Error(`Excel 檔過大(合計 ${(totalBytes / 1024 / 1024).toFixed(1)}MB,上限 ${Math.round(ABSOLUTE_MAX_BYTES / 1024 / 1024)}MB),已中止`),
+        { __permanentSql: true },
+      );
+    }
+
     // 5. parse + DuckDB load + SQL 全進 forked 子程序(主 event loop 永遠有空回 liveness;native 爆
     //    只殺子程序、pod 不倒)。經全域 semaphore 限流:同時最多 MAX_CONCURRENT_WORKERS 個子程序,其餘
     //    排隊(排隊期間 heartbeat 照跑、status 仍 running,不會被 recovery 誤撿)。
@@ -581,6 +590,17 @@ async function runJob(db, jobId) {
 
   } catch (e) {
     console.error(`[ExcelJob] ${jobId} FATAL: ${e.message}`);
+    // 暫時性 fork/spawn 失敗(EAGAIN/ENOMEM/EMFILE,資源瞬間吃緊)→ 不判死,退回 pending 讓
+    // poller/recovery 重試(別把一次性的 fork 短缺當永久失敗)。若持續失敗,>20min 由 aged-sweep 收尾。
+    if (e && e.__transientSpawn) {
+      console.warn(`[ExcelJob] ${jobId} 暫時性 spawn 失敗(${e.code || e.message}),退回 pending 重試`);
+      try {
+        await db.prepare(
+          `UPDATE excel_query_jobs SET status='pending', lock_token=NULL, updated_at=SYSTIMESTAMP WHERE id=?`
+        ).run(jobId);
+      } catch (_) {}
+      return; // finally 會清 heartbeat / ACTIVE_JOBS;不走下面的 failed + notify
+    }
     // SQL 結構性錯誤(worker 標 __permanentSql)或 worker 崩潰 → recovery_count=MAX,
     // recoverStaleJobs 不再撿起重跑(2026-06-02 / 2026-06-13 事故防護)。
     if (e && e.__permanentSql) {
@@ -673,9 +693,16 @@ function _runInChild(db, jobId, tagId, wData) {
       }
     });
 
-    // fork/spawn 失敗(找不到檔、無法起 process)→ 標 __permanentSql,recovery 不重撿。
+    // child 'error' 只在 fork/spawn / IPC infra 失敗時觸發(child 內例外走 IPC {type:'error'},不來這)。
+    // ENOENT(worker 檔不見)等真‧永久錯 → __permanentSql;EAGAIN/ENOMEM/EMFILE 等資源瞬間吃緊的暫時性
+    // spawn 失敗 → __transientSpawn,讓 runJob 退回 pending 重試(別把一次性短缺判成永久失敗)。
     child.on('error', (err) => {
-      try { err.__permanentSql = true; } catch (_) {}
+      const transient = ['EAGAIN', 'ENOMEM', 'EMFILE', 'ENFILE', 'ETXTBSY'].includes(err && err.code)
+        || (err && err.syscall === 'spawn' && err.code !== 'ENOENT');
+      try {
+        if (transient) err.__transientSpawn = true;
+        else err.__permanentSql = true;
+      } catch (_) {}
       finish(reject, err);
     });
 
