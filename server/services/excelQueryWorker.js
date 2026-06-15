@@ -1,31 +1,34 @@
 'use strict';
 /**
- * Excel 精確查詢 — parse / load / SQL 的 worker_thread 入口
+ * Excel 精確查詢 — parse / load / SQL 的 **child_process**(forked 子程序)入口
  *
- * 2026-06-13 事故根因修正(P1 治本):
- *   `XLSX.readFile` + `sheet_to_json` + DuckDB load 全是同步/重 I/O,放在主執行緒跑時,
- *   一個多 sheet 大檔就能卡死 event loop 數十秒 → liveness `GET /api/health` 連 3 次逾時
- *   → kubelet SIGKILL(exit 137 / Reason=Error)→ recovery 重跑同檔 → CrashLoop。
- *   把整段 parse + load + SQL 搬到這個 worker_thread:主執行緒只留 DB bookkeeping(lock /
- *   heartbeat / progress / 結果落地),event loop 永遠有空回 liveness。
+ * 為什麼是 child_process 而非 worker_thread(2026-06-15 改):
+ *   worker_thread 與主程序共用同一個 process / K8s cgroup,`maxOldGenerationSizeMb` 只能限 V8 heap,
+ *   限不到 DuckDB native arena 與 SheetJS 解壓 Buffer。一個夠大的 xlsx 把 native 撐過 pod cgroup 時,
+ *   是 kernel OOM-killer 砍「整個 process」(= pod 倒),不是優雅的 worker isolate OOM。
+ *   改成獨立子程序 + 子程序自設 `oom_score_adj=1000`:cgroup 壓力時 kernel **一定先砍這個子程序、
+ *   不砍主服務(web/SSE / scheduler)** → 失控 parse 只讓「這個 excel job 失敗」,pod 不倒。
+ *   這是真正關掉 native/cgroup OOM pod-crash vector 的做法(2026-06-13/06-15 事故收尾)。
  *
- * 附帶好處:worker 有獨立 V8 isolate(resourceLimits.maxOldGenerationSizeMb),
- *   超大 workbook → 只有 worker isolate 丟 'heap out of memory',parent 收到 'error'
- *   事件把 job 標 failed,不會殺掉整個 pod。
+ * 通訊(process IPC,fork 自帶 channel):
+ *   parent → child:{ type:'init', data:{ allFiles, sheetName, sql, tagId, duckdbMemLimit } }
+ *   child → parent:{type:'progress',progress,stage} / {type:'log',msg}
+ *                  / {type:'done',rowsReturned,mdTable,loadedSheets} / {type:'error',message,permanent}
  *
- * 通訊協定(postMessage → parent):
- *   { type:'progress', progress, stage }
- *   { type:'log', msg }                                   ← 保留原本診斷用的 read/sheet log
- *   { type:'done', rowsReturned, mdTable, loadedSheets }
- *   { type:'error', message, permanent }                  ← permanent=true 代表 SQL 結構性錯,parent 不再 recovery
- *
- * workerData: { allFiles:[{name, realPath, alias, isMain}], sheetName, sql, tagId }
- *   注意:realPath 已在主執行緒做完 UPLOAD_ROOT 安全檢查 + 副檔名白名單,worker 不再驗。
+ * 記憶體防線(雙層):
+ *   ① fork 帶 --max-old-space-size(parent execArgv)→ V8 heap 爆 = 子程序乾淨退(parent 收 exit)
+ *   ② oom_score_adj=1000 → 連 native 都爆到 cgroup 時,被砍的也是子程序、不是 pod 主程序
+ *   ③ MAX_TOTAL_CELLS 早期 bail → 病態超大 sheet 給乾淨錯誤,不必等 OOM
  */
 
-const { parentPort, workerData } = require('worker_threads');
-const path = require('path');
 const fs = require('fs');
+const path = require('path');
+
+// 讓本子程序成為 cgroup OOM 的首選犧牲者。非特權程序可「調高」自己的 oom_score_adj(調低才需特權),
+// best-effort;失敗就靠 --max-old-space-size 那層。
+try {
+  if (process.platform === 'linux') fs.writeFileSync('/proc/self/oom_score_adj', '1000');
+} catch (_) {}
 
 const duckdb = require('duckdb');
 const { INSERT_BATCH_SIZE, inferType, sanitizeIdent, readSheet, pickSheet, rowsToMarkdown } = require('./excelQueryUtils');
@@ -33,9 +36,16 @@ const XLSX = require('xlsx');
 
 // DuckDB SQL 結構性錯誤 — retry 一定也是同樣錯,不該再 parse 一遍 xlsx 燒 CPU(2026-06-02 事故)。
 const PERMANENT_SQL_ERROR_RE = /Binder Error|Parser Error|Catalog Error|Conversion Error/i;
+// 早期 bail 上限:XLSX.readFile 後、跑 sheet_to_json(大配置者)前先估總 cell 數,過大給乾淨錯誤。
+const MAX_TOTAL_CELLS = Number(process.env.EXCEL_MAX_TOTAL_CELLS) || 20_000_000;
 
-function post(type, payload = {}) {
-  parentPort.postMessage({ type, ...payload });
+function send(type, payload = {}) {
+  try { process.send({ type, ...payload }); } catch (_) {}
+}
+// 送完終局訊息再退出(IPC 開著不會自動退;直接 exit 會吞掉還沒 flush 的訊息)。
+function sendThenExit(type, payload, code) {
+  try { process.send({ type, ...payload }, () => process.exit(code)); }
+  catch (_) { process.exit(code); }
 }
 
 function dbAll(conn, sql, params) {
@@ -98,16 +108,26 @@ function buildSqlErrorMsg(rawMsg, sql, loadedSheets) {
   );
 }
 
-async function run() {
-  const { allFiles, sheetName, sql, tagId } = workerData;
+// 估算 workbook 全部 sheet 的總 cell 數(用 '!ref' range,不展開資料)。
+function _countCells(wb) {
+  let total = 0;
+  for (const name of wb.SheetNames) {
+    const ws = wb.Sheets[name];
+    if (!ws || !ws['!ref']) continue;
+    try {
+      const r = XLSX.utils.decode_range(ws['!ref']);
+      total += (r.e.r - r.s.r + 1) * (r.e.c - r.s.c + 1);
+    } catch (_) {}
+  }
+  return total;
+}
+
+async function run(workerData) {
+  const { allFiles, sheetName, sql, duckdbMemLimit } = workerData;
   let db = null;
   let conn = null;
   const loadedSheets = []; // { original, table, rows, columns, fileName, alias, isMain }
 
-  // 先關 DuckDB 再對 parent 發終局訊息(done/error)。parent 收到後會 worker.terminate(),
-  // 若 terminate 搶在 conn.close()/db.close() 之前,worker 是被強制砍掉的執行緒,DuckDB 的
-  // native 資源來不及釋放 → 因 worker_threads 共用 process heap,會洩漏到主程序(每個 job 累積)。
-  // idempotent:關完設 null,finally 再呼叫也不會 double-close。
   const closeDuck = () => {
     try { if (conn) conn.close(); } catch (_) {}
     try { if (db) db.close(); } catch (_) {}
@@ -118,19 +138,25 @@ async function run() {
   try {
     db = new duckdb.Database(':memory:');
     conn = db.connect();
-    await dbRun(conn, `SET memory_limit='256MB'`);
+    await dbRun(conn, `SET memory_limit='${duckdbMemLimit || '256MB'}'`);
     await dbRun(conn, `SET threads=2`);
 
-    post('progress', { progress: 5, stage: 'reading_xlsx' });
+    send('progress', { progress: 5, stage: 'reading_xlsx' });
 
     for (let fi = 0; fi < allFiles.length; fi++) {
       const f = allFiles[fi];
       const fileSize = fs.statSync(f.realPath).size;
       const tFile = Date.now();
       const wb = XLSX.readFile(f.realPath, { cellDates: true });
-      post('log', {
+      send('log', {
         msg: `read "${f.name}" (alias=${f.alias}) ${(fileSize / 1024 / 1024).toFixed(2)}MB in ${Date.now() - tFile}ms, sheets=${wb.SheetNames.length}`,
       });
+
+      // 早期 bail:sheet_to_json(展開成 array-of-arrays)是記憶體大戶,病態超大 sheet 先擋。
+      const cells = _countCells(wb);
+      if (cells > MAX_TOTAL_CELLS) {
+        throw new Error(`${f.name}: 工作表太大(約 ${cells.toLocaleString()} 格,上限 ${MAX_TOTAL_CELLS.toLocaleString()})。請縮小範圍、刪除空白欄列或拆分後再查詢。`);
+      }
 
       let pickedSheet;
       try {
@@ -140,7 +166,7 @@ async function run() {
       }
 
       const baseProg = 5 + Math.round((55 * fi) / allFiles.length);
-      post('progress', { progress: baseProg, stage: 'loading_duckdb' });
+      send('progress', { progress: baseProg, stage: 'loading_duckdb' });
 
       for (const name of wb.SheetNames) {
         const ws = wb.Sheets[name];
@@ -152,7 +178,7 @@ async function run() {
         const tblName = name === pickedSheet ? f.alias : `${f.alias}_${sanitizeIdent(name)}`;
         try {
           await loadTable(conn, tblName, headers, data);
-          post('log', {
+          send('log', {
             msg: `"${f.name}" sheet "${name}" → table "${tblName}": ${data.length} rows, ${headers.length} cols, ${Date.now() - tSheet}ms`,
           });
           loadedSheets.push({
@@ -165,40 +191,46 @@ async function run() {
             isMain: f.isMain && name === pickedSheet,
           });
         } catch (e) {
-          post('log', { msg: `Failed to load "${f.name}" sheet "${name}": ${e.message}` });
+          send('log', { msg: `Failed to load "${f.name}" sheet "${name}": ${e.message}` });
         }
       }
     }
 
-    post('progress', { progress: 60, stage: 'loading_duckdb' });
+    send('progress', { progress: 60, stage: 'loading_duckdb' });
 
     if (loadedSheets.length === 0) {
       throw new Error('所有 Excel 都沒有可讀取的工作表(全部空白)');
     }
 
-    post('progress', { progress: 65, stage: 'executing_sql' });
+    send('progress', { progress: 65, stage: 'executing_sql' });
     const tSql = Date.now();
     let result;
     try {
       result = await dbAll(conn, sql);
     } catch (e) {
       const permanent = PERMANENT_SQL_ERROR_RE.test(e.message);
-      closeDuck(); // 先關再通知,parent terminate() 不會 race cleanup
-      post('error', { message: buildSqlErrorMsg(e.message, sql, loadedSheets), permanent });
+      closeDuck();
+      sendThenExit('error', { message: buildSqlErrorMsg(e.message, sql, loadedSheets), permanent }, 0);
       return;
     }
-    post('log', { msg: `SQL OK: ${result.length} rows in ${Date.now() - tSql}ms` });
+    send('log', { msg: `SQL OK: ${result.length} rows in ${Date.now() - tSql}ms` });
 
-    post('progress', { progress: 90, stage: 'executing_sql' });
+    send('progress', { progress: 90, stage: 'executing_sql' });
     const mdTable = rowsToMarkdown(result); // result 已是純 JS array,可先關 DuckDB
     closeDuck();
-    post('done', { rowsReturned: result.length, mdTable, loadedSheets });
+    sendThenExit('done', { rowsReturned: result.length, mdTable, loadedSheets }, 0);
   } catch (e) {
     closeDuck();
-    post('error', { message: e.message || 'unknown worker error', permanent: false });
-  } finally {
-    closeDuck(); // 雙保險(idempotent)
+    sendThenExit('error', { message: e.message || 'unknown worker error', permanent: false }, 0);
   }
 }
 
-run();
+// 等 parent 送 init data 才開工(避免 import 即執行)。
+process.once('message', (m) => {
+  if (m && m.type === 'init') {
+    run(m.data).catch((e) => {
+      try { process.send({ type: 'error', message: e.message || 'child fatal', permanent: false }); } catch (_) {}
+      process.exit(1);
+    });
+  }
+});

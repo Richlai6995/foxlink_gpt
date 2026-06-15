@@ -37,10 +37,12 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { Worker } = require('worker_threads');
+const { fork } = require('child_process');
 
-// parse / load / SQL 已搬進 excelQueryWorker.js(worker_thread)— 主執行緒不再 require duckdb/xlsx,
-// 也不在 event loop 上做同步 parse(2026-06-13 CrashLoop 事故根因修正)。純函式共用見 excelQueryUtils。
+// parse / load / SQL 跑在 excelQueryWorker.js(forked **child_process**,2026-06-15 由 worker_thread 改:
+// worker_thread 限不到 DuckDB/SheetJS 的 native 記憶體、又與主程序同 cgroup,native 爆 = pod 倒;
+// 改子程序 + 子程序 oom_score_adj=1000 → cgroup 壓力時只砍子程序、主服務存活、pod 不倒)。
+// 主執行緒不再 require duckdb/xlsx、不在 event loop 做同步 parse。純函式共用見 excelQueryUtils。
 const { sanitizeIdent, dedupNames } = require('./excelQueryUtils');
 
 // 重要:預設值必須對齊 chat.js / transcribeJobService 用的 `path.join(__dirname, '../uploads')`,
@@ -65,18 +67,15 @@ const ALLOWED_EXCEL_EXTS = new Set(['.xlsx', '.xls', '.xlsm', '.xlsb']);
 const RERUN_FAILFAST_RECOVERY = 1;            // 第 1 次 recovery 起就套用
 const RERUN_FAILFAST_BYTES = 8 * 1024 * 1024; // 合計 > 8MB 視為大檔
 
-// worker V8 isolate 上限:超大 workbook → worker 自己 heap OOM(parent 收 error 標 failed,
-// pod 不掛),而不是把整個 process 拖爆。
-// cgroup 數學(綁定條件是「最小」的那個 pod):excel worker 兩種 pod 都會跑 —
-//   web pod(k8s/deployment.yaml):limit 2Gi,主程序 --max-old-space-size=1536
-//   scheduler pod(k8s/scheduler-deployment.yaml):limit 3Gi,--max-old-space-size=2560(recovery 走這)
-// web 的 2Gi 是上限:主程序老生代峰值 + 1 個 worker + DuckDB native(256MB)+ xlsx buffer + Oracle pool
-// 都共用這 2Gi。所以 worker heap 必須小,且「同時只准 1 個 worker」(見下方 semaphore)。
-// heap 上限 pod-aware:大檔已路由到 scheduler 跑(見下方大檔路由),所以 scheduler 給較大的 1536
-// (3Gi pod),web 只跑小檔給 768(2Gi pod、又要服務 SSE)。EXCEL_WORKER_HEAP_MB 可覆寫。
-// 真‧超大檔會 worker isolate OOM 優雅失敗(job failed、pod 活),這是對的取捨。
+// 子程序記憶體防線(pod-aware)。真正的 pod-crash 硬保證來自 child_process 的 oom_score_adj=1000
+// (見 excelQueryWorker.js)— cgroup 壓力時 kernel 砍子程序、不砍主服務。以下是「讓子程序盡量在自己
+// 範圍內優雅失敗、少觸發 cgroup 壓力」的輔助上限,非 pod 存活的唯一依賴:
+//   CHILD_HEAP_MB     → fork execArgv --max-old-space-size,V8 heap 爆時子程序乾淨退
+//   DUCKDB_MEM_LIMIT  → 傳進子程序給 DuckDB SET memory_limit(限 native arena)
+// web pod 2Gi / scheduler pod 3Gi;大檔已路由到 scheduler,那邊給較大值。
 const IS_SCHEDULER_POD = process.env.RUN_SCHEDULERS === 'true';
-const WORKER_MAX_OLD_GEN_MB = Number(process.env.EXCEL_WORKER_HEAP_MB) || (IS_SCHEDULER_POD ? 1536 : 768);
+const CHILD_HEAP_MB = Number(process.env.EXCEL_CHILD_HEAP_MB) || (IS_SCHEDULER_POD ? 1024 : 512);
+const DUCKDB_MEM_LIMIT = process.env.EXCEL_DUCKDB_MEM_LIMIT || (IS_SCHEDULER_POD ? '256MB' : '192MB');
 
 // ── 大檔路由(2026-06-15 follow-up:避免過大 excel 撐爆 web pod)──────────────────
 // web pod(2Gi、又要扛 SSE chat)不該做重 parse。三層分流:
@@ -88,6 +87,8 @@ const ABSOLUTE_MAX_BYTES = Number(process.env.EXCEL_ABSOLUTE_MAX_BYTES) || 50 * 
 // scheduler poller 只撿「夠老」的 pending,避免搶到 web 正要 inline 的小檔(web inline 會先把它 claim 成
 // running,poller 只看 pending,雙保險)。
 const PENDING_POLL_AGE_SEC = Number(process.env.EXCEL_PENDING_POLL_AGE_SEC) || 5;
+// pending 太久沒被撿(scheduler 掛掉/重啟空窗)→ 標 failed + 推鈴鐺,避免使用者等永不響的鈴。
+const PENDING_MAX_AGE_MIN = Number(process.env.EXCEL_PENDING_MAX_AGE_MIN) || 20;
 
 // 全域(per-process)worker 並發上限。web pod 2Gi 只容得下 1 個 worker 同時跑,所以預設 1:
 // 多餘的 job(recovery 一次撿多個 stale、或多使用者同時 excel_query)排隊等,不並發 spawn → 不會
@@ -119,14 +120,18 @@ function _releaseWorkerSlot() {
   else _activeWorkers = Math.max(0, _activeWorkers - 1);
 }
 
-// 合計主檔 + extraFiles 的位元組(best-effort;檔案在 NFS,web/scheduler 都讀得到)。用於大檔路由。
-function _statTotalBytes(filePath, extraFiles) {
-  let total = 0;
+// 合計主檔 + extraFiles 的位元組(用於大檔路由)。async fs.promises 並行 stat,避免在 web 主執行緒
+// 同步戳 NFS。回 { total, anyFailed }:anyFailed=true(檔案還沒 flush 到 NFS / 暫時讀不到)時,
+// caller 必須保守路由(別把可能很大的檔當小檔 inline 跑),否則 stat 失敗當 0 會誤判成小檔。
+async function _statTotalBytes(filePath, extraFiles) {
   const paths = [filePath, ...((extraFiles || []).map((f) => f && f.path))].filter(Boolean);
-  for (const p of paths) {
-    try { total += fs.statSync(p).size; } catch (_) {}
-  }
-  return total;
+  let total = 0;
+  let anyFailed = false;
+  const sizes = await Promise.all(paths.map((p) =>
+    fs.promises.stat(p).then((s) => s.size).catch(() => { anyFailed = true; return 0; })
+  ));
+  for (const s of sizes) total += s;
+  return { total, anyFailed };
 }
 
 // ─── createJob ───────────────────────────────────────────────────────────────
@@ -148,7 +153,7 @@ function _statTotalBytes(filePath, extraFiles) {
  */
 async function createJob(db, opts) {
   // 大檔路由 step 0:超過絕對上限直接拒,連 job row 都不建(連 scheduler 都別撐)。
-  const totalBytes = _statTotalBytes(opts.filePath, opts.extraFiles);
+  const { total: totalBytes, anyFailed: sizeUnknown } = await _statTotalBytes(opts.filePath, opts.extraFiles);
   if (totalBytes > ABSOLUTE_MAX_BYTES) {
     throw new Error(
       `Excel 檔過大(合計 ${(totalBytes / 1024 / 1024).toFixed(1)}MB,上限 ${Math.round(ABSOLUTE_MAX_BYTES / 1024 / 1024)}MB)。` +
@@ -200,24 +205,32 @@ async function createJob(db, opts) {
   const sizeMB = (totalBytes / 1024 / 1024).toFixed(1);
   console.log(`[ExcelJob] created ${jobId} user=${opts.userId} file=${opts.fileName} sheet=${opts.sheetName || '(auto)'} sql.len=${opts.sql.length} extras=${opts.extraFiles?.length || 0} size=${sizeMB}MB`);
 
-  // 大檔路由:小檔本地 inline 跑;大檔留 pending 交給 scheduler(3Gi、無 SSE)背景跑,避免撐爆 web pod。
-  // 注意:不論這支在 web 還 scheduler 跑,規則一致(scheduler 自己 createJob 的大檔也會丟回 pending 由
-  // 自己的 poller 撿,差一個 tick,無妨)。
-  if (totalBytes <= LOCAL_INLINE_MAX_BYTES) {
-    // 小檔本地跑:先 claim 成 running(scheduler poller 只撿 pending → 不會搶走重跑),再 setImmediate。
+  // 大檔路由:小檔本地 inline 跑;大檔(或大小未知 = 保守當大檔)留 pending 交給 scheduler(3Gi、
+  // 無 SSE)背景跑,避免撐爆 web pod。sizeUnknown(NFS 還沒 flush / 暫讀不到)走 defer,不冒險 inline。
+  if (!sizeUnknown && totalBytes <= LOCAL_INLINE_MAX_BYTES) {
+    // 小檔本地跑:先 atomic claim 成 running(scheduler poller 只撿 pending → 不會搶走重跑)。
+    // 只有 claim 成功(rowsAffected>0)才 setImmediate(runJob);claim 沒中(0 row,理論上不會,
+    // 防 race)就留 pending 讓 poller 撿,避免「claim 失敗卻照跑」變成跨 pod 雙跑。
+    let claimed = 0;
     try {
-      await db.prepare(
+      const r = await db.prepare(
         `UPDATE excel_query_jobs SET status='running', heartbeat_at=SYSTIMESTAMP, updated_at=SYSTIMESTAMP
          WHERE id=? AND status='pending'`
       ).run(jobId);
+      claimed = r?.rowsAffected || r?.changes || 0;
     } catch (e) {
-      console.warn(`[ExcelJob] ${jobId} inline claim failed (continuing): ${e.message}`);
+      console.warn(`[ExcelJob] ${jobId} inline claim failed: ${e.message}`);
     }
-    setImmediate(() => runJob(db, jobId).catch(e =>
-      console.error(`[ExcelJob] ${jobId} worker error:`, e.message)
-    ));
+    if (claimed > 0) {
+      setImmediate(() => runJob(db, jobId).catch(e =>
+        console.error(`[ExcelJob] ${jobId} worker error:`, e.message)
+      ));
+    } else {
+      console.log(`[ExcelJob] ${jobId} inline claim 沒中 → 留 pending 交給 scheduler`);
+    }
   } else {
-    console.log(`[ExcelJob] ${jobId} deferred to scheduler (${sizeMB}MB > ${Math.round(LOCAL_INLINE_MAX_BYTES / 1024 / 1024)}MB inline 上限)— 留 pending 等 scheduler 背景撿`);
+    const why = sizeUnknown ? '檔案大小未知' : `${sizeMB}MB > ${Math.round(LOCAL_INLINE_MAX_BYTES / 1024 / 1024)}MB inline 上限`;
+    console.log(`[ExcelJob] ${jobId} deferred to scheduler (${why})— 留 pending 等 scheduler 背景撿`);
   }
   return jobId;
 }
@@ -356,6 +369,34 @@ async function recoverStaleJobs(db) {
 // 注意:web inline 的小檔在 createJob 已被 claim 成 'running',poller 只看 'pending' → 不會被搶。
 async function runPendingJobs(db) {
   try {
+    // 0. 過老的 pending(scheduler 曾掛掉/重啟空窗沒撿到)→ 標 failed + 推鈴鐺,
+    //    別讓使用者等永不響的鈴(chat 端早已回「背景中,完成會通知」)。
+    try {
+      const stale = await db.prepare(`
+        SELECT * FROM excel_query_jobs
+        WHERE status='pending'
+          AND created_at < SYSTIMESTAMP - INTERVAL '${PENDING_MAX_AGE_MIN}' MINUTE
+      `).all();
+      for (const j of (stale || [])) {
+        const id = j.id || j.ID;
+        const res = await db.prepare(`
+          UPDATE excel_query_jobs SET status='failed',
+            error_msg='deferred Excel job 逾期未被排程執行(scheduler 不可用?),已中止',
+            completed_at=SYSTIMESTAMP, updated_at=SYSTIMESTAMP
+          WHERE id=? AND status='pending'
+        `).run(id);
+        if ((res?.rowsAffected || res?.changes || 0) > 0) {
+          console.warn(`[ExcelJob] aged-out pending job ${id} (>${PENDING_MAX_AGE_MIN}min) → failed + notify`);
+          try {
+            const job = { id, session_id: j.session_id || j.SESSION_ID, user_id: j.user_id || j.USER_ID, file_name: j.file_name || j.FILE_NAME };
+            await _pushCompletionNotification(db, job, 'failed', null, 0, '查詢逾期未被執行(系統忙碌),請重試');
+          } catch (_) {}
+        }
+      }
+    } catch (e) {
+      console.warn('[ExcelJob] aged-pending sweep error:', e.message);
+    }
+
     const rows = await db.prepare(`
       SELECT id FROM excel_query_jobs
       WHERE status='pending'
@@ -412,14 +453,21 @@ async function runJob(db, jobId) {
     job = await db.prepare('SELECT * FROM excel_query_jobs WHERE id=?').get(jobId);
     if (!job) { ACTIVE_JOBS.delete(jobId); return; }
 
-    // 1. 取 lock
+    // 1. 取 lock(authoritative:檢查 rowsAffected,搶輸就放棄,防跨 pod 雙跑 — 2026-06-05 類)。
+    //    所有 claim 路徑(inline createJob / poller / recovery)都先把 lock_token 設 NULL + status='running'
+    //    才 setImmediate(runJob),所以第一個把 lock_token NULL→token 的 runJob 贏,第二個 0 rows 退出。
     lockToken = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
-    await db.prepare(`
+    const lockRes = await db.prepare(`
       UPDATE excel_query_jobs SET
         lock_token=?, heartbeat_at=SYSTIMESTAMP, started_at=COALESCE(started_at, SYSTIMESTAMP),
         updated_at=SYSTIMESTAMP, status='running'
-      WHERE id=? AND (lock_token IS NULL OR lock_token=?)
-    `).run(lockToken, jobId, lockToken);
+      WHERE id=? AND lock_token IS NULL AND status IN ('pending','running')
+    `).run(lockToken, jobId);
+    if ((lockRes?.rowsAffected || lockRes?.changes || 0) === 0) {
+      console.warn(`[ExcelJob] ${jobId} 取 lock 失敗(已被其他 pod/worker 接走或非可執行狀態),放棄`);
+      ACTIVE_JOBS.delete(jobId);
+      return;
+    }
 
     // 2. heartbeat(主執行緒不再被同步 parse 卡住 → heartbeat / liveness 都穩定)
     heartbeatTimer = setInterval(async () => {
@@ -447,11 +495,13 @@ async function runJob(db, jobId) {
       ...extraFiles.map((f, i) => ({ name: f.name, path: f.path, alias: `f${i + 1}`, isMain: false })),
     ];
 
-    // 4. 對所有檔案做安全 + 存在性 + 副檔名檢查(主執行緒做完才把 realPath 丟進 worker)
+    // 4. 對所有檔案做安全 + 存在性 + 副檔名檢查(主執行緒做完才把 realPath 丟進子程序)。
+    //    用 async fs.promises:檔案在 NFS,同步 realpath/stat 在 NFS 卡頓時會 block event loop →
+    //    /api/health 逾時 → 同一條 liveness SIGKILL(把 parse 移出主執行緒就不該再留同步 FS 呼叫)。
     let totalBytes = 0;
     for (const f of allFiles) {
       let rp;
-      try { rp = fs.realpathSync(f.path); }
+      try { rp = await fs.promises.realpath(f.path); }
       catch (e) { throw new Error(`檔案已被清除或不存在: ${f.name} (${f.path})`); }
       if (!rp.startsWith(UPLOAD_ROOT)) {
         throw new Error(`拒絕讀取此路徑(超出 ${UPLOAD_ROOT}): ${f.name}`);
@@ -461,32 +511,36 @@ async function runJob(db, jobId) {
         throw new Error(`不支援的檔案類型: ${f.name}(副檔名 ${ext || '(無)'} 不是 Excel)。excel_query 僅支援 ${Array.from(ALLOWED_EXCEL_EXTS).join('/')}`);
       }
       f.realPath = rp;
-      try { totalBytes += fs.statSync(rp).size; } catch (_) {}
+      try { totalBytes += (await fs.promises.stat(rp)).size; } catch (_) {}
     }
 
-    // ③ re-run fail-fast:背景重試遇大檔直接放棄,毒藥檔不再反覆重跑打掛服務(2026-06-13 事故)
-    if ((job.recovery_count || 0) >= RERUN_FAILFAST_RECOVERY && totalBytes > RERUN_FAILFAST_BYTES) {
+    // ③ re-run fail-fast:背景重試遇大檔直接放棄,毒藥檔不再反覆重跑打掛服務(2026-06-13 事故)。
+    // 門檻取 min(8MB, inline 上限):任何被 defer 到 scheduler 的檔(都 > inline 上限)在第 1 次
+    // recovery 就 fail-fast,不留 5–8MB 縫隙(否則那段檔會被重跑到 MAX_RECOVERY_COUNT 次)。
+    const failfastBytes = Math.min(RERUN_FAILFAST_BYTES, LOCAL_INLINE_MAX_BYTES);
+    if ((job.recovery_count || 0) >= RERUN_FAILFAST_RECOVERY && totalBytes > failfastBytes) {
       throw new Error(
         `大型 Excel(合計 ${(totalBytes / 1024 / 1024).toFixed(1)}MB)在背景重試中曾導致服務逾時,` +
         `已停止自動重跑以保護服務;請拆 sheet 或縮小檔案後重新查詢`
       );
     }
 
-    // 5. parse + DuckDB load + SQL 全進 worker_thread(主 event loop 永遠有空回 liveness)
-    //    經全域 semaphore 限流:同時最多 MAX_CONCURRENT_WORKERS 個 worker,其餘排隊
-    //    (排隊期間 heartbeat 照跑、status 仍 running,不會被 recovery 誤撿)。
+    // 5. parse + DuckDB load + SQL 全進 forked 子程序(主 event loop 永遠有空回 liveness;native 爆
+    //    只殺子程序、pod 不倒)。經全域 semaphore 限流:同時最多 MAX_CONCURRENT_WORKERS 個子程序,其餘
+    //    排隊(排隊期間 heartbeat 照跑、status 仍 running,不會被 recovery 誤撿)。
     const tRead = Date.now();
     await _acquireWorkerSlot();
     let workerResult;
     try {
-      workerResult = await _runInWorker(db, jobId, tagId, {
+      workerResult = await _runInChild(db, jobId, tagId, {
         allFiles: allFiles.map((f) => ({ name: f.name, realPath: f.realPath, alias: f.alias, isMain: f.isMain })),
         sheetName: job.sheet_name || null,
         sql: job.sql_text,
         tagId,
+        duckdbMemLimit: DUCKDB_MEM_LIMIT,
       });
     } finally {
-      _releaseWorkerSlot(); // worker 已 settle(done/error/timeout)→ 釋放給排隊者
+      _releaseWorkerSlot(); // 子程序已 settle(done/error/timeout)→ 釋放給排隊者
     }
     const { rowsReturned, mdTable, loadedSheets } = workerResult;
 
@@ -557,29 +611,37 @@ async function runJob(db, jobId) {
 }
 
 /**
- * 把 parse / load / SQL 丟進 worker_thread 跑,progress/log 轉回 DB/console,
- * 完成 resolve { rowsReturned, mdTable, loadedSheets },失敗 reject(SQL 結構性錯 / worker 崩潰
+ * 把 parse / load / SQL 丟進 forked child_process 跑,progress/log 轉回 DB/console,
+ * 完成 resolve { rowsReturned, mdTable, loadedSheets },失敗 reject(SQL 結構性錯 / 子程序崩潰 / 逾時
  * 會帶 __permanentSql=true 讓上層不再 recovery)。
+ *
+ * 子程序記憶體爆掉時:V8 heap 爆 → 子程序自己退(exit≠0);native 爆到 cgroup → kernel 砍子程序
+ * (oom_score_adj=1000)→ 'exit' with signal=SIGKILL。兩者主程序都只收到 'exit' 把 job 標 failed,
+ * **pod 不倒**。
  */
-function _runInWorker(db, jobId, tagId, wData) {
+function _runInChild(db, jobId, tagId, wData) {
   return new Promise((resolve, reject) => {
-    let worker;
+    let child;
     try {
-      worker = new Worker(path.join(__dirname, 'excelQueryWorker.js'), {
-        workerData: wData,
-        resourceLimits: { maxOldGenerationSizeMb: WORKER_MAX_OLD_GEN_MB },
+      child = fork(path.join(__dirname, 'excelQueryWorker.js'), [], {
+        // 子程序自己的 V8 heap 上限;native(DuckDB/SheetJS)靠 DUCKDB_MEM_LIMIT + oom_score_adj 那層。
+        // 清掉繼承的 NODE_OPTIONS(prod 含 --max-old-space-size=2560)→ 子程序 heap 只由 execArgv 決定,
+        // 不被父層的大 heap 設定汙染(否則 web 子程序可能用到 2560MB,失去 pod-aware 限制的意義)。
+        execArgv: [`--max-old-space-size=${CHILD_HEAP_MB}`],
+        stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+        env: { ...process.env, NODE_OPTIONS: '' },
       });
     } catch (e) {
       return reject(e);
     }
 
     let settled = false;
-    // wall-clock watchdog:worker 壞掉/失控(壞 SQL、cartesian blow-up、native stall)時可能永遠不
-    // post done/error 也不 exit。沒這個 → main heartbeat 一直刷新 → recoverStaleJobs 永遠撿不回 →
-    // 殭屍 'running' + 洩漏 worker。逾時就強砍 worker + reject(__permanentSql,別重跑同樣會 hang 的檔)。
+    // wall-clock watchdog:子程序壞掉/失控(壞 SQL、cartesian blow-up、native stall)時可能永遠不
+    // 回 done/error 也不 exit。沒這個 → main heartbeat 一直刷新 → recoverStaleJobs 永遠撿不回 →
+    // 殭屍 'running' + 洩漏子程序。逾時就 SIGKILL 子程序 + reject(__permanentSql,別重跑同樣會 hang 的檔)。
     const watchdog = setTimeout(() => {
       finish(reject, Object.assign(
-        new Error(`Excel parse worker 逾時(>${Math.round(WORKER_TIMEOUT_MS / 1000)}s),已中止`),
+        new Error(`Excel parse 子程序逾時(>${Math.round(WORKER_TIMEOUT_MS / 1000)}s),已中止`),
         { __permanentSql: true },
       ));
     }, WORKER_TIMEOUT_MS);
@@ -587,11 +649,11 @@ function _runInWorker(db, jobId, tagId, wData) {
       if (settled) return;
       settled = true;
       clearTimeout(watchdog);
-      try { worker.terminate(); } catch (_) {}
+      try { child.kill('SIGKILL'); } catch (_) {}
       fn(arg);
     };
 
-    worker.on('message', (m) => {
+    child.on('message', (m) => {
       if (!m || typeof m !== 'object') return;
       if (m.type === 'progress') {
         if (settled) return; // 終局後不再寫 progress(避免蓋掉 done row)
@@ -605,26 +667,32 @@ function _runInWorker(db, jobId, tagId, wData) {
           loadedSheets: m.loadedSheets || [],
         });
       } else if (m.type === 'error') {
-        const err = new Error(m.message || 'worker error');
+        const err = new Error(m.message || 'child error');
         if (m.permanent) err.__permanentSql = true;
         finish(reject, err);
       }
     });
 
-    // worker 內未捕捉例外(含 V8 'heap out of memory',會以 'error' event 先於 'exit' 觸發)→
-    // 一律視為對「這個檔」不可恢復(再跑同檔還是會崩),標 __permanentSql 讓 recovery 不重撿。
-    worker.on('error', (err) => {
+    // fork/spawn 失敗(找不到檔、無法起 process)→ 標 __permanentSql,recovery 不重撿。
+    child.on('error', (err) => {
       try { err.__permanentSql = true; } catch (_) {}
       finish(reject, err);
     });
 
-    worker.on('exit', (code) => {
-      if (settled) return;
-      const err = new Error(`Excel parse worker 異常結束 (exit ${code})`);
-      // 非 0 exit = worker 崩潰(OOM 等)→ 別讓 recovery 再撿同檔重跑
-      if (code !== 0) err.__permanentSql = true;
+    child.on('exit', (code, signal) => {
+      if (settled) return; // 正常結束會先收到 done/error message → 這裡只處理沒回訊息就死掉的情況
+      const err = new Error(`Excel parse 子程序異常結束 (code=${code}, signal=${signal || 'none'})`);
+      // 非 0 exit 或被 signal 砍(含 OOM SIGKILL)→ 對「這個檔」不可恢復,別讓 recovery 再撿重跑
+      if (code !== 0 || signal) err.__permanentSql = true;
       finish(reject, err);
     });
+
+    // 送 init data 觸發子程序開工(child 內 process.once('message') 接)
+    try {
+      child.send({ type: 'init', data: wData });
+    } catch (e) {
+      finish(reject, e);
+    }
   });
 }
 
