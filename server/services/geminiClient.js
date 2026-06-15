@@ -216,6 +216,10 @@ class NewSdkModel {
       if (extraReq.tools && extraReq.tools.length) cfg.tools = extraReq.tools;
       if (extraReq.systemInstruction) cfg.systemInstruction = extraReq.systemInstruction;
       if (extraReq.safetySettings) cfg.safetySettings = extraReq.safetySettings;
+      // 取消 / 逾時 / SDK 內部 retry 控制(per-call,透傳給 @google/genai GenerateContentConfig)。
+      // 只有顯式帶的 caller(目前=轉錄 transcribeAudio)會用到;其餘 caller 不帶 → 行為完全不變。
+      if (extraReq.abortSignal) cfg.abortSignal = extraReq.abortSignal;
+      if (extraReq.httpOptions) cfg.httpOptions = extraReq.httpOptions;
     }
     // Gemini 3.x(preview)預設 includeThoughts=false → thought 合併進 final text 回,
     // streamChat 會把英文 planning leak 到中文回答前。強制開讓 SDK 切獨立 parts,
