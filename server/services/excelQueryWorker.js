@@ -104,6 +104,17 @@ async function run() {
   let conn = null;
   const loadedSheets = []; // { original, table, rows, columns, fileName, alias, isMain }
 
+  // 先關 DuckDB 再對 parent 發終局訊息(done/error)。parent 收到後會 worker.terminate(),
+  // 若 terminate 搶在 conn.close()/db.close() 之前,worker 是被強制砍掉的執行緒,DuckDB 的
+  // native 資源來不及釋放 → 因 worker_threads 共用 process heap,會洩漏到主程序(每個 job 累積)。
+  // idempotent:關完設 null,finally 再呼叫也不會 double-close。
+  const closeDuck = () => {
+    try { if (conn) conn.close(); } catch (_) {}
+    try { if (db) db.close(); } catch (_) {}
+    conn = null;
+    db = null;
+  };
+
   try {
     db = new duckdb.Database(':memory:');
     conn = db.connect();
@@ -172,23 +183,21 @@ async function run() {
       result = await dbAll(conn, sql);
     } catch (e) {
       const permanent = PERMANENT_SQL_ERROR_RE.test(e.message);
+      closeDuck(); // 先關再通知,parent terminate() 不會 race cleanup
       post('error', { message: buildSqlErrorMsg(e.message, sql, loadedSheets), permanent });
       return;
     }
     post('log', { msg: `SQL OK: ${result.length} rows in ${Date.now() - tSql}ms` });
 
     post('progress', { progress: 90, stage: 'executing_sql' });
-    const mdTable = rowsToMarkdown(result);
+    const mdTable = rowsToMarkdown(result); // result 已是純 JS array,可先關 DuckDB
+    closeDuck();
     post('done', { rowsReturned: result.length, mdTable, loadedSheets });
   } catch (e) {
+    closeDuck();
     post('error', { message: e.message || 'unknown worker error', permanent: false });
   } finally {
-    try {
-      if (conn) conn.close();
-    } catch (_) {}
-    try {
-      if (db) db.close();
-    } catch (_) {}
+    closeDuck(); // 雙保險(idempotent)
   }
 }
 
