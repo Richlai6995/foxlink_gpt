@@ -158,6 +158,57 @@ function geminiPartsToAoaiContent(parts) {
   return contentParts;
 }
 
+// ── Convert Gemini-style history(含跨輪 tool replay 的 functionCall /
+//    functionResponse turns)→ OpenAI messages。
+//    functionCall → assistant.tool_calls;functionResponse → role:'tool'。
+//    OpenAI 靠 tool_call_id 配對、Gemini 靠順序,所以這裡 synth id 並按出現順序
+//    把 functionResponse 對回上一個 assistant 的 tool_calls。
+//    讓 GPT-5 + MCP 也能跨「聊天訊息」保留多輪 tool workflow(引導式問答)的狀態。 ──
+function geminiHistoryToAoaiMessages(history) {
+  const out = [];
+  let pendingCallIds = [];
+  let seq = 0;
+  for (const h of history) {
+    const parts = Array.isArray(h.parts) ? h.parts : [];
+    const fcs = parts.filter((p) => p.functionCall);
+    const frs = parts.filter((p) => p.functionResponse);
+
+    if (h.role === 'model' && fcs.length) {
+      const textContent = geminiPartsToAoaiContent(parts.filter((p) => p.text));
+      const tool_calls = fcs.map((p) => {
+        const id = `histcall_${seq++}`; // 前綴避免與本輪 live OpenAI 的 call_* id 撞
+        return {
+          id,
+          type: 'function',
+          function: { name: p.functionCall.name, arguments: JSON.stringify(p.functionCall.args || {}) },
+        };
+      });
+      pendingCallIds = tool_calls.map((tc) => tc.id);
+      out.push({ role: 'assistant', content: textContent || null, tool_calls });
+    } else if (frs.length) {
+      frs.forEach((p, i) => {
+        const id = pendingCallIds[i] || pendingCallIds[pendingCallIds.length - 1] || `histcall_${seq++}`;
+        out.push({ role: 'tool', tool_call_id: id, content: String(p.functionResponse?.response?.content ?? '') });
+      });
+      pendingCallIds = [];
+    } else {
+      const role = h.role === 'model' ? 'assistant' : 'user';
+      const content = geminiPartsToAoaiContent(parts);
+      if (content) out.push({ role, content });
+    }
+  }
+
+  // 安全網:trailing functionResponse 被 sanitizeHistory 砍掉的罕見 case 會留下
+  // 帶 tool_calls 卻沒 tool 訊息接的 assistant → OpenAI 會因 orphan tool_call 回 400。
+  // 拔掉 tool_calls 改 placeholder 文字。
+  const last = out[out.length - 1];
+  if (last && last.role === 'assistant' && last.tool_calls && last.content == null) {
+    delete last.tool_calls;
+    last.content = ' ';
+  }
+  return out;
+}
+
 // ── Convert Gemini-style contents → OpenAI messages ──────────────────────────
 function contentsToOpenAI(contents, systemPrompt) {
   const messages = [];
@@ -315,11 +366,7 @@ async function streamChatAoaiWithTools(
   ].filter(Boolean).join('\n\n---\n\n');
 
   const messages = [{ role: 'system', content: systemPrompt }];
-  for (const h of history) {
-    const role = h.role === 'model' ? 'assistant' : 'user';
-    const content = geminiPartsToAoaiContent(h.parts);
-    if (content) messages.push({ role, content });
-  }
+  messages.push(...geminiHistoryToAoaiMessages(history));
   const userContent = geminiPartsToAoaiContent(userParts);
   if (userContent) messages.push({ role: 'user', content: userContent });
 
@@ -355,6 +402,10 @@ async function streamChatAoaiWithTools(
   let fullText = '';
   let inputTokens = 0, outputTokens = 0;
   let toolCallCount = 0;
+  // 本輪 tool 對話以 Gemini 原生 shape 累積,回傳給 caller 持久化(與 Gemini path 統一格式,
+  // 重播時由 geminiHistoryToAoaiMessages 轉回 OpenAI)。讓 GPT-5 + MCP 也有跨輪 tool 記憶。
+  const toolTurns = [];
+  const REPLAY_FR_MAX = 8000;
   const MAX_TOOL_ROUNDS = 10;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -419,6 +470,7 @@ async function streamChatAoaiWithTools(
 
     // ── Execute tools ────────────────────────────────────────────────────
     let directAnswerText = null;
+    const frParts = []; // 本 round 的 functionResponse(Gemini shape,供持久化)
     for (const call of toolCalls) {
       toolCallCount++;
       const name = call.function.name;
@@ -443,16 +495,23 @@ async function streamChatAoaiWithTools(
         tool_call_id: call.id,
         content:      String(toolResult),
       });
+
+      const rStr = String(toolResult);
+      frParts.push({ functionResponse: { name, response: { content: rStr.length > REPLAY_FR_MAX ? rStr.slice(0, REPLAY_FR_MAX) + '\n…[truncated]' : rStr } } });
     }
 
+    // 累積成 Gemini shape 的 tool turns(model functionCall + user functionResponse)
+    toolTurns.push({ role: 'model', parts: toolCalls.map((c) => ({ functionCall: { name: c.function.name, args: (() => { try { return c.function.arguments ? JSON.parse(c.function.arguments) : {}; } catch { return {}; } })() } })) });
+    toolTurns.push({ role: 'user', parts: frParts });
+
     if (directAnswerText !== null) {
-      return { text: directAnswerText, inputTokens, outputTokens, toolCallCount, isDirectAnswer: true };
+      return { text: directAnswerText, inputTokens, outputTokens, toolCallCount, isDirectAnswer: true, toolTurns };
     }
 
     // Loop → next round will call the model with tool results appended
   }
 
-  return { text: fullText, inputTokens, outputTokens, toolCallCount };
+  return { text: fullText, inputTokens, outputTokens, toolCallCount, toolTurns };
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -463,4 +522,4 @@ async function createClient(db, modelKey) {
   return makeGeminiClient(model);
 }
 
-module.exports = { createClient, resolveModel, streamChatAoai, streamChatAoaiWithTools };
+module.exports = { createClient, resolveModel, streamChatAoai, streamChatAoaiWithTools, geminiHistoryToAoaiMessages };
