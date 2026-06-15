@@ -668,22 +668,27 @@ async function transcribeLongAudio(filePath, mimeType, lang) {
     // 每段最多 4 次嘗試(原始 + 3 retry):
     //   attempt 0/1/2 = Pro + verbatim,503/429 時 backoff 5s/15s/30s 後重打
     //   attempt 3 = Flash + verbatim(Pro 滿載時的最後逃生門)
+    // 滾動並發 pool(去掉分批 barrier:誰先空誰抓下一段,不被每批最慢段綁架。
+    // 同 transcribeJobService 的修法,只是這裡無 DB / cancel,純填 results[idx])
     const results = new Array(parts.length);
-    for (let i = 0; i < parts.length; i += LONG_AUDIO_CONCURRENCY) {
-      const batch = parts.slice(i, i + LONG_AUDIO_CONCURRENCY);
-      const batchResults = await Promise.all(batch.map(async (partPath, j) => {
-        const idx = i + j;
+    let cursor = 0;
+    const runWorker = async () => {
+      while (true) {
+        const idx = cursor++; // 單執行緒 JS,await 之間原子,不會兩 worker 搶到同段
+        if (idx >= parts.length) return;
         const tPart = Date.now();
-        const r = await _transcribeWithRetry(partPath, mimeType, lang, idx + 1, parts.length, tagId);
+        const r = await _transcribeWithRetry(parts[idx], mimeType, lang, idx + 1, parts.length, tagId);
         if (r.ok) {
           console.log(`[TranscribeLong] ${tagId} part ${idx + 1}/${parts.length} ok in ${Date.now() - tPart}ms text=${r.text.length}chars in=${r.inputTokens} out=${r.outputTokens} attempts=${r.attempts}`);
         } else {
           console.error(`[TranscribeLong] ${tagId} part ${idx + 1}/${parts.length} FAILED after ${Date.now() - tPart}ms attempts=${r.attempts}: ${r.error}`);
         }
-        return r;
-      }));
-      batchResults.forEach((r, j) => { results[i + j] = r; });
-    }
+        results[idx] = r;
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(LONG_AUDIO_CONCURRENCY, parts.length) }, () => runWorker())
+    );
 
     let totalIn = 0;
     results.forEach((r) => { totalIn += r.inputTokens; });
