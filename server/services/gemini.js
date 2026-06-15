@@ -285,10 +285,21 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
     });
     const tCall0 = Date.now();
     console.log(`[Transcribe] ${tagId} calling SDK (model=${modelName}, provider=${provider}, concurrency=${LONG_AUDIO_CONCURRENCY})...`);
-    const callPromise = model.generateContent([audioPart, { text: prompt }]);
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`Audio transcription timeout (${(timeoutMs/60000).toFixed(1)} min)`)), timeoutMs)
-    );
+    // AbortController:timeout 到就「真的取消」SDK 請求(連同 SDK 內部 retry loop 一起停),
+    // 不再只是 Promise.race 不理它、把背景請求放生跑滿 30 分。retryOptions 壓掉 503 內部重打。
+    const controller = new AbortController();
+    let timeoutTimer;
+    const callPromise = model.generateContent({
+      contents: [audioPart, { text: prompt }],
+      abortSignal: controller.signal,
+      httpOptions: { timeout: timeoutMs, retryOptions: { attempts: TRANSCRIBE_SDK_ATTEMPTS } },
+    });
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutTimer = setTimeout(() => {
+        controller.abort();
+        reject(new Error(`Audio transcription timeout (${(timeoutMs / 60000).toFixed(1)} min)`));
+      }, timeoutMs);
+    });
     let result;
     try {
       result = await Promise.race([callPromise, timeoutPromise]);
@@ -306,6 +317,8 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
         `  response.data: ${e.response?.data ? JSON.stringify(e.response.data).slice(0, 500) : 'n/a'}`
       );
       throw e;
+    } finally {
+      clearTimeout(timeoutTimer); // 成功也要清,否則 timer 晚點 fire 會 abort 已完成請求 + 留 pending timer
     }
     const usage = extractUsage(result);
     const text = extractText(result);
@@ -367,9 +380,14 @@ const LONG_AUDIO_CONCURRENCY = 7;
 // 就慢、非熱路徑(只在某段提早收尾時觸發,且 _recoverUnderproducedSegments 是逐段序列呼叫),
 // 降到 3 對體感無影響卻砍掉 OOM 尾風險(2026-06-13 排查發現的潛在風險,非當次事故主因)。
 const LONG_AUDIO_SUBSPLIT_CONCURRENCY = 3;
-// per-seg 35 分鐘:Vertex 沒 Studio 20 分鐘 silent deadline,可以拉長給長 outlier 段
-// (實測正常 part 3-9 分鐘,35 分鐘只是極端 fallback 上限)
-const LONG_AUDIO_PER_SEG_TIMEOUT_MS = 35 * 60 * 1000;
+// per-seg 12 分鐘硬上限(2026-06-15 從 35 分砍):健康的 15 分段實測 0.5-7 分鐘轉完,
+// 超過 12 分代表卡死(Vertex 503 內部 retry / 連線 hang)→ 砍掉重試比乾等划算。
+// ★ 這個 timeout 現在會「真的 abort SDK 呼叫」(透過 AbortController),不再只是 Promise.race 放生背景。
+const LONG_AUDIO_PER_SEG_TIMEOUT_MS = 12 * 60 * 1000;
+// SDK 內部 5xx/503 retry 上限(@google/genai httpOptions.retryOptions.attempts)。預設 5 →
+// Vertex 尖峰過載時單次呼叫會悄悄重打 5 次、累積 ~30 分才把 503 拋上來(2026-06-15 part9/13 實測)。
+// 設 2(= 最多 1 次內部 retry)讓 503 快速冒泡,交給我們自己的 _transcribeWithRetry 退避重試。
+const TRANSCRIBE_SDK_ATTEMPTS = 2;
 const LONG_AUDIO_RETRY_BACKOFF_MS = [10000, 30000, 60000]; // 3 次 retry,10s/30s/60s
 // lead-in overlap:每段(第 0 段除外)往「前」多含 N 秒。防接縫漏資料的兩個機制:
 //   ① 跨 30:00 的句子被切兩半 → 在下一段開頭是完整的
