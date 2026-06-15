@@ -359,6 +359,11 @@ const LONG_AUDIO_SEGMENT_SEC = 30 * 60;
 // 7 段 × 7-8 分鐘 / 7 並發 = 8-12 分鐘 total(對比 sequential ~50 分鐘)。
 // 撞 503/quota 還有 retry+Flash fallback 兜底。
 const LONG_AUDIO_CONCURRENCY = 7;
+// sub-split 第二波(under-production 補救)獨立、較低的並發。subsplit 把單一過短段再切 10 分鐘
+// 小段重轉,各小段同樣走 inline-base64 → 用 7 並發會在補救階段再堆一波 native buffer。補救本來
+// 就慢、非熱路徑(只在某段提早收尾時觸發,且 _recoverUnderproducedSegments 是逐段序列呼叫),
+// 降到 3 對體感無影響卻砍掉 OOM 尾風險(2026-06-13 排查發現的潛在風險,非當次事故主因)。
+const LONG_AUDIO_SUBSPLIT_CONCURRENCY = 3;
 // per-seg 35 分鐘:Vertex 沒 Studio 20 分鐘 silent deadline,可以拉長給長 outlier 段
 // (實測正常 part 3-9 分鐘,35 分鐘只是極端 fallback 上限)
 const LONG_AUDIO_PER_SEG_TIMEOUT_MS = 35 * 60 * 1000;
@@ -608,8 +613,8 @@ async function _transcribeSegmentSubsplit(partPath, mimeType, lang, tagId, subSe
     if (subParts.length <= 1) return null; // 切不出更多段 → 放棄(段本來就短,sub-split 無意義)
     console.log(`[Subsplit] ${tagId} 切 ${subParts.length} 小段重轉(${subSegSec / 60}分/段)`);
     const results = [];
-    for (let i = 0; i < subParts.length; i += LONG_AUDIO_CONCURRENCY) {
-      const batch = subParts.slice(i, i + LONG_AUDIO_CONCURRENCY);
+    for (let i = 0; i < subParts.length; i += LONG_AUDIO_SUBSPLIT_CONCURRENCY) {
+      const batch = subParts.slice(i, i + LONG_AUDIO_SUBSPLIT_CONCURRENCY);
       const br = await Promise.all(batch.map((p, j) =>
         _transcribeWithRetry(p, mimeType, lang, i + j + 1, subParts.length, `${tagId}#sub`)));
       results.push(...br);

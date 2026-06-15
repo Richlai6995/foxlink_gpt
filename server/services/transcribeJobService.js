@@ -586,6 +586,7 @@ async function cleanupOldJobAudio(db) {
         AND completed_at IS NOT NULL
         AND completed_at < SYSTIMESTAMP - INTERVAL '${CLEANUP_AUDIO_AFTER_DAYS}' DAY
         AND audio_path IS NOT NULL
+        AND COALESCE(audio_purged, 0) = 0
     `).all();
 
     let cleaned = 0;
@@ -598,8 +599,9 @@ async function cleanupOldJobAudio(db) {
         } else {
           missed++;
         }
-        // 把 audio_path 清空,標示已清(避免重跑同 job 又 query)
-        await db.prepare(`UPDATE transcribe_jobs SET audio_path=NULL WHERE id=?`).run(row.id);
+        // 標記已清(audio_purged flag)。不可 `SET audio_path=NULL` — 該欄 NOT NULL,會 ORA-01407
+        // 每次失敗 → row 永遠標不掉 → 重掃 + 刷 error log(2026-06-13 修)。audio_path 保留供查歷史。
+        await db.prepare(`UPDATE transcribe_jobs SET audio_purged=1 WHERE id=?`).run(row.id);
       } catch (e) {
         console.warn(`[TranscribeJob] cleanup ${row.id} (${row.audio_path}) error:`, e.message);
       }
