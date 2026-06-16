@@ -389,14 +389,17 @@ const LONG_AUDIO_PER_SEG_TIMEOUT_MS = 12 * 60 * 1000;
 // 設 2(= 最多 1 次內部 retry)讓 503 快速冒泡,交給我們自己的 _transcribeWithRetry 退避重試。
 const TRANSCRIBE_SDK_ATTEMPTS = 2;
 const LONG_AUDIO_RETRY_BACKOFF_MS = [10000, 30000, 60000]; // 3 次 retry,10s/30s/60s
-// lead-in overlap:每段(第 0 段除外)往「前」多含 N 秒。防接縫漏資料的兩個機制:
-//   ① 跨 30:00 的句子被切兩半 → 在下一段開頭是完整的
-//   ② 上一段尾巴模型偷懶 trailing off → 那段音訊在下一段開頭被再轉一次
-// 代價:接縫處約 N 秒重複內容。方案 B(LONG_AUDIO_STITCH)會在合併時把這段重複剪掉。
-// 90s(2026-06-15 從 180s 調小):segment 改 15 分後 tail-drop 變少、即使漏尾也較短,180s 重疊
-// (佔 15 分段 20%)太浪費。90s(佔 10%)夠蓋接縫斷句 + 小尾段,又省一半重複轉錄。需要再大可調回。
-// stitch maxCap 隨 window 自動放大(見 transcriptStitch),不用同步改。
-const LONG_AUDIO_OVERLAP_SEC = 90;
+// ── 接縫切割策略(2026-06-16 改靜音感知切割)─────────────────────────────────────
+// 切片改成「切在靜音處」:在每個理想切點(k×segmentSec)±窗內找最近的靜音停頓切下去,
+// 切點落在沒人講話的地方 → 不剁穿句子 → 該接縫不需要 overlap、不需要去重 → 去重錯誤從根上消失。
+// 只有「窗內找不到靜音」(有人連續講話跨過切點)的那一個接縫才退回硬切 + 小 lead-in overlap。
+const LONG_AUDIO_SILENCE_SEARCH_WIN = 25;  // 理想切點 ±N 秒窗內找靜音(900s 段 ±25s 不會交叉)
+const LONG_AUDIO_SILENCE_NOISE_DB  = -30;  // silencedetect 噪音門檻:低於 -30dB 視為靜音(噪音大可調 -25)
+const LONG_AUDIO_SILENCE_MIN_DUR   = 0.3;  // 最短靜音長度(秒);太短的氣口不算切點
+// lead-in overlap:僅「硬切 fallback」接縫用(窗內找不到靜音時),每段往前多含 N 秒,把被切穿的
+// 句子在下一段開頭補完整。靜音切點的接縫 overlap=0(乾淨、不去重)。
+// 30s(2026-06-16 從 90 砍):靜音切割後 overlap 只剩少數 fallback 接縫用,蓋一句邊界句 + 餘量即可。
+const LONG_AUDIO_OVERLAP_SEC = 30;
 // 方案 B:合併時自動接縫去重(字串為主 + LLM 錨點 fallback,見 transcriptStitch.js)。
 // 設 false → 退回方案 A(保留重複 + 標記)。
 const LONG_AUDIO_STITCH = true;
@@ -451,10 +454,51 @@ async function _probeAudioDuration(filePath) {
   }
 }
 
-// 重疊切片:每段 = [contentStart - overlap, contentEnd],第 0 段不往前。
-// 段數 / marker 仍以「不重疊的內容窗」(i*segmentSec)為準 — overlap 只是多餵給模型的
-// lead-in 音訊,不改變邏輯時間軸。逐段 ffmpeg(-ss 在 -i 前 = 快速 seek;AAC 每 frame
-// 獨立,copy seek 夠準),段數=6-7 各 ~0.5s,可接受。
+// 偵測 target 秒附近 ±win 窗內、離 target 最近的「靜音中點」當切點。找到回絕對秒,找不到回 null。
+// 用 input-seek(-ss 在 -i 前)只解碼那段窗 → 每個切點各解 ~2×win 秒,比全檔掃快得多。
+async function _findSilenceCutNear(filePath, target, win, noiseDb, minDur) {
+  const from = Math.max(0, target - win);
+  const span = win * 2;
+  let stderr;
+  try {
+    ({ stderr } = await _runCmd('ffmpeg', [
+      '-hide_banner', '-nostats',
+      '-ss', String(from), '-t', String(span),
+      '-i', filePath,
+      '-af', `silencedetect=noise=${noiseDb}dB:d=${minDur}`,
+      '-f', 'null', '-',
+    ]));
+  } catch (e) {
+    return null; // silencedetect 失敗(極少)→ 交給 caller 硬切 fallback
+  }
+  // -ss 在 -i 前 → output 時間軸 reset 從 0 起算,silencedetect 報的是「相對窗起點」→ 加回 from。
+  const mids = [];
+  let curStart = null;
+  for (const line of stderr.split('\n')) {
+    const ms = line.match(/silence_start:\s*(-?[0-9.]+)/);
+    const me = line.match(/silence_end:\s*(-?[0-9.]+)/);
+    if (ms) curStart = parseFloat(ms[1]);
+    else if (me && curStart != null) {
+      const s = from + curStart;
+      const e = from + parseFloat(me[1]);
+      if (e > s) mids.push((s + e) / 2);  // 取靜音中點,留兩側餘量吸收 copy seek 的 ~23ms 誤差
+      curStart = null;
+    }
+  }
+  let best = null, bestD = Infinity;
+  for (const mid of mids) {
+    if (mid < from || mid > from + span) continue; // 防 PTS 沒 reset 的異常值
+    const d = Math.abs(mid - target);
+    if (d < bestD) { bestD = d; best = mid; }
+  }
+  return best;
+}
+
+// 靜音感知切片(2026-06-16):每個理想切點 k×segmentSec snap 到附近最近的靜音停頓,切在沒人講話處
+// → 不剁穿句子 → 該接縫不需 overlap、不去重。窗內找不到靜音才退回硬切 + 小 lead-in overlap。
+// 回 Array<{ path, contentStart, contentEnd, overlapSec }>:
+//   contentStart/End = 該段「不含 overlap」的內容時間軸(給 marker);overlapSec = 開頭 lead-in 秒數(0=乾淨)。
+// silencedetect 對同檔同參數是確定性的 → resume 重切會得到相同邊界,partPath 仍對齊 idx。
 async function _splitAudio(filePath, segmentSec, outDir) {
   const ext = path.extname(filePath) || '.m4a';
   const totalDuration = await _probeAudioDuration(filePath);
@@ -469,29 +513,48 @@ async function _splitAudio(filePath, segmentSec, outDir) {
       '-c', 'copy', '-reset_timestamps', '1', '-y',
       path.join(outDir, `part_%03d${ext}`),
     ]);
-    return fs.readdirSync(outDir).filter((n) => n.startsWith('part_')).sort().map((n) => path.join(outDir, n));
+    return fs.readdirSync(outDir).filter((n) => n.startsWith('part_')).sort()
+      .map((n, i) => ({ path: path.join(outDir, n), contentStart: i * segmentSec, contentEnd: (i + 1) * segmentSec, overlapSec: 0 }));
   }
 
+  // 1. 內部理想切點 k×segmentSec → snap 到最近靜音中點(找不到=硬切 fallback)
   const numSegments = Math.ceil(totalDuration / segmentSec);
-  const parts = [];
-  for (let i = 0; i < numSegments; i++) {
-    const start = Math.max(0, i * segmentSec - (i > 0 ? LONG_AUDIO_OVERLAP_SEC : 0)); // 第 0 段不往前
-    const end = Math.min((i + 1) * segmentSec, totalDuration);
-    const dur = end - start;
-    if (dur <= 0) break;
+  const cuts = [];      // 內部切點(絕對秒,遞增)
+  const cutHard = [];   // 對應切點是否 fallback 硬切(決定下一段要不要 lead-in)
+  let snapped = 0;
+  for (let k = 1; k < numSegments; k++) {
+    const ideal = k * segmentSec;
+    const mid = await _findSilenceCutNear(
+      filePath, ideal, LONG_AUDIO_SILENCE_SEARCH_WIN, LONG_AUDIO_SILENCE_NOISE_DB, LONG_AUDIO_SILENCE_MIN_DUR);
+    if (mid != null) { cuts.push(mid); cutHard.push(false); snapped++; }
+    else { cuts.push(ideal); cutHard.push(true); }
+  }
+  console.log(`[_splitAudio] ${path.basename(filePath)} 靜音切點 ${snapped}/${Math.max(0, numSegments - 1)},硬切 fallback ${numSegments - 1 - snapped}`);
+  const bounds = [0, ...cuts, totalDuration];
+
+  // 2. 逐段 ffmpeg 切。硬切接縫(前一個切點 cutHard)→ 這段往前 lead-in overlap 補被切穿的句子。
+  const meta = [];
+  for (let i = 0; i < bounds.length - 1; i++) {
+    const contentStart = bounds[i];
+    const contentEnd = bounds[i + 1];
+    const prevHard = i > 0 ? cutHard[i - 1] : false; // 第 0 段不往前
+    const ov = prevHard ? Math.min(LONG_AUDIO_OVERLAP_SEC, contentStart) : 0;
+    const fileStart = Math.max(0, contentStart - ov);
+    const dur = contentEnd - fileStart;
+    if (dur <= 0) continue;
     const outPath = path.join(outDir, `part_${String(i).padStart(3, '0')}${ext}`);
     await _runCmd('ffmpeg', [
       '-hide_banner', '-loglevel', 'error',
-      '-ss', String(start),   // 在 -i 前 = input seek(快),copy 模式 seek 到最近 packet
+      '-ss', String(fileStart),   // 在 -i 前 = input seek(快),copy 模式 seek 到最近 packet
       '-t', String(dur),
       '-i', filePath,
       '-c', 'copy',
       '-y',
       outPath,
     ]);
-    parts.push(outPath);
+    meta.push({ path: outPath, contentStart, contentEnd, overlapSec: ov });
   }
-  return parts;
+  return meta;
 }
 
 function _fmtTime(sec) {
@@ -637,14 +700,14 @@ async function _transcribeSegmentSubsplit(partPath, mimeType, lang, tagId, subSe
     for (let i = 0; i < subParts.length; i += LONG_AUDIO_SUBSPLIT_CONCURRENCY) {
       const batch = subParts.slice(i, i + LONG_AUDIO_SUBSPLIT_CONCURRENCY);
       const br = await Promise.all(batch.map((p, j) =>
-        _transcribeWithRetry(p, mimeType, lang, i + j + 1, subParts.length, `${tagId}#sub`)));
+        _transcribeWithRetry(p.path, mimeType, lang, i + j + 1, subParts.length, `${tagId}#sub`)));
       results.push(...br);
     }
     let texts = results.map(r => r.text);
     try {
       const { stitchSegments } = require('./transcriptStitch');
       const okFlags = results.map(r => r.ok);
-      const st = await stitchSegments(texts, { overlapSec: LONG_AUDIO_OVERLAP_SEC, okFlags }, _llmFindSeamAnchor);
+      const st = await stitchSegments(texts, { overlapSecs: subParts.map(p => p.overlapSec), okFlags }, _llmFindSeamAnchor);
       texts = st.texts;
     } catch (_) { /* stitch 失敗就保留重複,不影響補回內容 */ }
     return {
@@ -695,7 +758,7 @@ async function transcribeLongAudio(filePath, mimeType, lang) {
         const idx = cursor++; // 單執行緒 JS,await 之間原子,不會兩 worker 搶到同段
         if (idx >= parts.length) return;
         const tPart = Date.now();
-        const r = await _transcribeWithRetry(parts[idx], mimeType, lang, idx + 1, parts.length, tagId);
+        const r = await _transcribeWithRetry(parts[idx].path, mimeType, lang, idx + 1, parts.length, tagId);
         if (r.ok) {
           console.log(`[TranscribeLong] ${tagId} part ${idx + 1}/${parts.length} ok in ${Date.now() - tPart}ms text=${r.text.length}chars in=${r.inputTokens} out=${r.outputTokens} attempts=${r.attempts}`);
         } else {
@@ -719,7 +782,7 @@ async function transcribeLongAudio(filePath, mimeType, lang) {
       try {
         const { stitchSegments } = require('./transcriptStitch');
         const okFlags = results.map((r) => r.ok);
-        const st = await stitchSegments(texts, { overlapSec: LONG_AUDIO_OVERLAP_SEC, okFlags }, _llmFindSeamAnchor);
+        const st = await stitchSegments(texts, { overlapSecs: parts.map((p) => p.overlapSec), okFlags }, _llmFindSeamAnchor);
         texts = st.texts;
         stitchInfo = st.info;
       } catch (e) {
@@ -728,14 +791,12 @@ async function transcribeLongAudio(filePath, mimeType, lang) {
     }
 
     const segments = texts.map((txt, idx) => {
-      const startSec = idx * LONG_AUDIO_SEGMENT_SEC;
-      const endSec = totalDuration > 0
-        ? Math.min((idx + 1) * LONG_AUDIO_SEGMENT_SEC, totalDuration)
-        : (idx + 1) * LONG_AUDIO_SEGMENT_SEC;
-      const marker = `[${_fmtTime(startSec)}–${_fmtTime(endSec)}]`;
+      const marker = `[${_fmtTime(parts[idx].contentStart)}–${_fmtTime(parts[idx].contentEnd)}]`;
+      const ov = parts[idx].overlapSec;
       const seam = idx === 0 ? ''
         : stitchInfo[idx]?.cut ? `\n(↑ 已自動接合去重 ${stitchInfo[idx].cutChars} 字)`
-        : `\n(↑ 開頭約 ${LONG_AUDIO_OVERLAP_SEC} 秒與上一段重疊,未去重)`;
+        : ov > 0 ? `\n(↑ 開頭約 ${Math.round(ov)} 秒與上一段重疊,未去重)`
+        : '';  // 靜音切點,乾淨接縫,無重疊
       return `${marker}${seam}\n${txt}`;
     });
     const merged = segments.join('\n\n');

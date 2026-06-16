@@ -100,16 +100,21 @@ function _fuzzyPrefixOverlap(prevTail, curHead, simThreshold = 0.6) {
 async function stitchSegments(texts, opts = {}, llmAnchorFn = null) {
   const {
     overlapSec = 60,
+    overlapSecs = null, // 每段開頭的 overlap 秒數(index 對齊段);提供時逐接縫判定,overlap=0 的接縫直接跳過
     charsPerSec = 6,   // 中文語速估 ~6 字/s(偏高,寧可多看一點窗)
     minMatch = 24,     // 至少相符 N 正規化字才算重疊(避免短語誤剪)
     okFlags = null,
   } = opts;
 
-  const window = Math.max(300, Math.ceil(overlapSec * charsPerSec)) * 2; // 看的字元窗(寬鬆)
   const out = texts.slice();
   const info = texts.map(() => ({ cut: false, cutChars: 0, method: null }));
 
   for (let i = 1; i < texts.length; i++) {
+    // 該接縫(段 i 開頭)實際 overlap:靜音切點=0 → 沒重疊可去,跳過(順便避免巧合重複被誤剪)
+    const seamOverlap = overlapSecs ? (overlapSecs[i] ?? overlapSec) : overlapSec;
+    if (seamOverlap <= 0) continue;
+    const window = Math.max(300, Math.ceil(seamOverlap * charsPerSec)) * 2; // 看的字元窗(寬鬆,逐接縫)
+
     const prev = texts[i - 1];
     const cur = texts[i];
     if (!prev || !cur) continue;
@@ -129,7 +134,7 @@ async function stitchSegments(texts, opts = {}, llmAnchorFn = null) {
 
     // ② 模糊句級(精確法 under-cut 時補):同段被轉成不同字(廢液↔費用)→ exact 對不上,
     //    但句級 LCS 相似度抓得到。expect = overlap 秒數 × ~4 字/秒的下界,精確法低於一半就試 fuzzy。
-    const expectChars = overlapSec * 4;
+    const expectChars = seamOverlap * 4;
     if (origCut < expectChars * 0.5) {
       const fz = _fuzzyPrefixOverlap(prevTail, curHead);
       if (fz > origCut) { origCut = fz; method = 'fuzzy'; }

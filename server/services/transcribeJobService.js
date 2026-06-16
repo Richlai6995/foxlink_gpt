@@ -325,22 +325,17 @@ async function runTranscribeJob(db, jobId) {
       console.log(`[TranscribeJob] ${tagId} split into ${parts.length} parts in ${Date.now() - tSplit}ms`);
       if (parts.length === 0) throw new Error('ffmpeg produced no segments');
 
-      segments = parts.map((partPath, i) => {
-        const startSec = i * LONG_AUDIO_SEGMENT_SEC;
-        const endSec = totalDuration > 0
-          ? Math.min((i + 1) * LONG_AUDIO_SEGMENT_SEC, totalDuration)
-          : (i + 1) * LONG_AUDIO_SEGMENT_SEC;
-        return {
-          idx: i,
-          ok: false,
-          partPath,
-          marker: `${_fmtTime(startSec)}–${_fmtTime(endSec)}`,
-          text: '',
-          inputTokens: 0,
-          outputTokens: 0,
-          attempts: 0,
-        };
-      });
+      segments = parts.map((part, i) => ({
+        idx: i,
+        ok: false,
+        partPath: part.path,
+        marker: `${_fmtTime(part.contentStart)}–${_fmtTime(part.contentEnd)}`,
+        overlapSec: part.overlapSec,   // 給最終 stitch 判斷該接縫要不要去重(0=靜音切點,不去重)
+        text: '',
+        inputTokens: 0,
+        outputTokens: 0,
+        attempts: 0,
+      }));
 
       await db.prepare(`
         UPDATE transcribe_jobs SET
@@ -360,9 +355,12 @@ async function runTranscribeJob(db, jobId) {
         fs.mkdirSync(tmpRoot, { recursive: true });
         console.log(`[TranscribeJob] ${tagId} parts missing, re-split to ${tmpRoot}`);
         const newParts = await _splitAudio(job.audio_path, LONG_AUDIO_SEGMENT_SEC, tmpRoot);
-        // 重新指派 partPath(順序對齊 idx)
+        // 重新指派 partPath(silencedetect 確定性 → 邊界與首切一致,順序對齊 idx)
         segments.forEach((s, i) => {
-          if (!s.ok && newParts[i]) s.partPath = newParts[i];
+          if (!s.ok && newParts[i]) {
+            s.partPath = newParts[i].path;
+            if (s.overlapSec == null) s.overlapSec = newParts[i].overlapSec; // 舊 job resume 補欄
+          }
         });
       } else if (segments.some(s => s.partPath)) {
         // 沿用既有 partPath 的 tmpRoot,從中推回(只為了 finally cleanup)
@@ -463,14 +461,15 @@ async function runTranscribeJob(db, jobId) {
     // 6. Concat → 寫 .txt
     // 切片有 lead-in overlap(每段除第 1 段外開頭約 LONG_AUDIO_OVERLAP_SEC 秒與上一段重疊,
     // 防接縫漏資料)。方案 B:合併時自動接縫去重(字串 + LLM 錨點),剪掉重複的開頭。
-    const overlapSec = LONG_AUDIO_OVERLAP_SEC;
+    // 切點落在靜音處的接縫 overlapSec=0(乾淨,stitch 直接跳過不去重);只有硬切 fallback 接縫才去重。
+    const overlapSecs = segments.map(s => s.overlapSec ?? LONG_AUDIO_OVERLAP_SEC); // 舊 job 沒存 → 沿用全域
     let texts = segments.map(s => s.text);
     let stitchInfo = texts.map(() => ({ cut: false }));
     if (LONG_AUDIO_STITCH) {
       try {
         const { stitchSegments } = require('./transcriptStitch');
         const okFlags = segments.map(s => s.ok);
-        const st = await stitchSegments(texts, { overlapSec, okFlags }, _llmFindSeamAnchor);
+        const st = await stitchSegments(texts, { overlapSecs, okFlags }, _llmFindSeamAnchor);
         texts = st.texts;
         stitchInfo = st.info;
         console.log(`[TranscribeJob] ${tagId} stitch: ${stitchInfo.filter(x => x?.cut).length}/${segments.length - 1} 接縫去重`);
@@ -479,9 +478,11 @@ async function runTranscribeJob(db, jobId) {
       }
     }
     const merged = segments.map((s, i) => {
+      const ov = overlapSecs[i];
       const seam = i === 0 ? ''
         : stitchInfo[i]?.cut ? `\n(↑ 已自動接合去重 ${stitchInfo[i].cutChars} 字)`
-        : `\n(↑ 開頭約 ${overlapSec} 秒與上一段重疊,未去重)`;
+        : ov > 0 ? `\n(↑ 開頭約 ${Math.round(ov)} 秒與上一段重疊,未去重)`
+        : '';  // 靜音切點,乾淨接縫
       return `[${s.marker}]${seam}\n${texts[i]}`;
     }).join('\n\n');
     const generatedDir = path.join(UPLOAD_DIR, 'generated');
@@ -489,7 +490,7 @@ async function runTranscribeJob(db, jobId) {
     const safeBase = job.audio_filename.replace(/\.[^.]+$/, '').replace(/[^\w一-龥\-]/g, '_').slice(0, 50);
     const txtFname = `transcript_${safeBase}_${Date.now()}.txt`;
     const txtPath = path.join(generatedDir, txtFname);
-    const header = `音訊逐字稿\n檔案: ${job.audio_filename}\n時間: ${new Date().toISOString()}\n字數: ${merged.length}\n段數: ${segments.length}\n備註: 段與段間有約 ${overlapSec} 秒重疊(防接縫漏資料),接縫處內容可能重複\n${'='.repeat(60)}\n\n`;
+    const header = `音訊逐字稿\n檔案: ${job.audio_filename}\n時間: ${new Date().toISOString()}\n字數: ${merged.length}\n段數: ${segments.length}\n備註: 切點落在靜音處(不切穿句子、接縫不重複);少數連續講話的接縫有約 ${LONG_AUDIO_OVERLAP_SEC} 秒重疊並自動去重\n${'='.repeat(60)}\n\n`;
     fs.writeFileSync(txtPath, header + merged, 'utf-8');
 
     const allFailed = segments.every(s => !s.ok);
