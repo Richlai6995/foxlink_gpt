@@ -165,7 +165,35 @@ async function stitchSegments(texts, opts = {}, llmAnchorFn = null) {
   return { texts: out, info };
 }
 
-module.exports = { stitchSegments, _suffixPrefixOverlap, _normalizeWithMap };
+// ── Tail-guard 偵測:某段是否「掉了尾」(2026-06-16,B 方案)─────────────────────────
+// mainText = 主段轉錄文字;tailText = 該段「最後 ~2 分音訊」獨立重轉的文字(probe,不進輸出)。
+// 取 tailText 中段附近最長(最 distinctive)的一句當 probe(≈ 距段尾 clip/2 秒,有前文脈絡轉得準),
+// 看它有沒有出現在主段文字結尾窗。沒出現 = 主段在 probe 之前就收尾了 → 掉尾(> 約 clip/2 秒)。
+// ★ 只判斷、不合併 tailText → 沒有「主段 vs probe 措辭發散」的重複風險(B 方案核心)。
+// 保守:tailText 太短 / 中段沒夠長的句子 / probe 命中 → 一律回 false(不誤判掉尾、不亂觸發 sub-split)。
+function tailDropped(mainText, tailText, opts = {}) {
+  const { containThreshold = 0.6, mainTailWindow = 1500, minProbeLen = 8 } = opts;
+  const tailSents = _splitSents(tailText || '');
+  if (tailSents.length < 2) return false; // clip 太短/空 → 無法判斷
+  const mid = Math.floor(tailSents.length / 2);
+  let probe = '';
+  for (let d = -1; d <= 1; d++) {
+    const j = mid + d;
+    if (j < 0 || j >= tailSents.length) continue;
+    const n = _normSent(tailSents[j]);
+    if (n.length >= minProbeLen && n.length > _normSent(probe).length) probe = tailSents[j]; // 取最長=最distinctive
+  }
+  const pn = _normSent(probe);
+  if (pn.length < minProbeLen) return false; // 中段沒有夠長的句子 → 不判斷
+  // containment ratio:probe 有多少比例「依序」出現在主段尾窗(整窗併成一字串、不切句)。
+  // 不用 _sim(分母 max(len)):probe 被併進主段一長 run-on 句時,max(len) 把相似度稀釋到門檻下 → 誤判掉尾
+  // (verbatim Gemini 標點稀疏、常吐長句)。LCS(probe, mainNorm)/probe.len 只看「probe 被包含多少」,不受主段長度影響。
+  const mainNorm = _normSent((mainText || '').slice(-mainTailWindow));
+  const contain = _lcsLen(pn, mainNorm) / pn.length;
+  return contain < containThreshold; // probe 大部分依序出現在主段尾 → 有蓋到;否則 = 掉尾
+}
+
+module.exports = { stitchSegments, tailDropped, _suffixPrefixOverlap, _normalizeWithMap };
 
 // ── self-test:node transcriptStitch.js ───────────────────────────────────────
 if (require.main === module) {

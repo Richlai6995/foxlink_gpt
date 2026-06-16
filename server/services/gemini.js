@@ -365,11 +365,11 @@ async function transcribeAudio(filePath, mimeType, langOrTimeout, timeoutMs = 25
 // 表現為 finishReason=STOP 但 output 只有幾百 token。3.5 小時會議只回 2k token 就是這狀況。
 // 切成 30 分鐘/段、每段獨立用 Pro 轉錄,attention 集中度大幅提升,單段就能吐滿 maxOutputTokens。
 
-// 15 分鐘/段(2026-06-15 從 30 分改):30 分太長,Pro 的 attention 在段尾衰減 → under-production
-// (提早收尾漏整塊)。實證 sub-split recovery 切 10 分小段幾乎都補得回 → 證明 Pro 對 ≤15 分段不偷懶。
-// 把 recovery「事後補」提前成「一開始就切短」根本不漏。代價:段數加倍(2.5hr 6→11 段、跨 concurrency=7
-// 變 2 batch)+ 接縫變多,但 overlap/stitch/recovery 仍在當保險。
-const LONG_AUDIO_SEGMENT_SEC = 15 * 60;
+// 10 分鐘/段(2026-06-16 從 15 分再砍):15 分仍會偶發段尾 under-production(實機 part10 掉 130s,
+// attempts=1 沒 retry、density 偵測也抓不到 ~14% 缺口)。≤10 分是實證可靠區(sub-split 切 10 分幾乎
+// 都補得回),直接一開始就切 10 分把掉尾頻率壓到最低。代價:段數 +50%(2.5hr ~16 段)、API 呼叫變多,
+// 但全是靜音切、零去重,純換可靠度。殘餘掉尾交給 tail-guard(轉尾 2 分偵測 → sub-split 重做)兜底。
+const LONG_AUDIO_SEGMENT_SEC = 10 * 60;
 // concurrency=7:全並發(2026-05-08 切 Vertex 後)。Vertex quota 寬(1500+ RPM)、
 // 沒 Studio Pro 20 分鐘 deadline,可以全段同時送 SDK。
 // 7 段 × 7-8 分鐘 / 7 並發 = 8-12 分鐘 total(對比 sequential ~50 分鐘)。
@@ -717,6 +717,36 @@ async function _transcribeSegmentSubsplit(partPath, mimeType, lang, tagId, subSe
     };
   } finally {
     try { fs.rmSync(subRoot, { recursive: true, force: true }); } catch (_) {}
+  }
+}
+
+// ── Tail-guard:偵測段尾 under-production(2026-06-16,B 方案)─────────────────────
+// density 偵測抓不到「中等程度掉尾」(掉 130s/600s ≈ 22% 稀釋到密度上只差一點,跟「這段語速慢」
+// 區分不開)。tail-guard 改用「直接重轉該段最後 N 秒音訊」當 probe → 比對主段文字結尾有沒有蓋到。
+// ★ 關鍵(B 方案):probe 文字「只判斷、不進輸出」→ 修復走 sub-split 整段重做,不把 probe 接回主段
+//   → 不存在「主段 vs probe 措辭發散合併」的重複風險。偵測用 Pro temp0(跟主段同源、判斷準、少白工)。
+const TAIL_GUARD_CLIP_SEC = 120;       // 轉該段「最後 N 秒」音訊當 probe
+const TAIL_GUARD_SUBSEG_SEC = 5 * 60;  // 偵測到掉尾 → sub-split 用的小段長度(10 分段切 5 分=2 片)
+
+// 轉某段「最後 tailSec 秒」音訊(-sseof 從檔尾 seek),回 { text, inputTokens, outputTokens } 或 null。
+// 文字只供 tail-guard 判斷該段有沒有掉尾,絕不進最終逐字稿(B 方案 → 無合併 → 無發散重複)。
+async function _transcribeTailClip(partPath, mimeType, lang, tailSec, tagId, useProModel = true) {
+  const ext = path.extname(partPath) || '.m4a';
+  const clipPath = path.join(os.tmpdir(), `tailclip_${crypto.randomUUID().slice(0, 8)}${ext}`);
+  try {
+    await _runCmd('ffmpeg', [
+      '-hide_banner', '-loglevel', 'error',
+      '-sseof', String(-Math.abs(tailSec)),   // 從檔尾往回 seek tailSec 秒(input 選項,放 -i 前)
+      '-i', partPath,
+      '-c', 'copy', '-y', clipPath,
+    ]);
+    const r = await transcribeAudio(clipPath, mimeType, lang, 5 * 60 * 1000, { useProModel, verbatim: true });
+    return { text: r.text || '', inputTokens: r.inputTokens || 0, outputTokens: r.outputTokens || 0 };
+  } catch (e) {
+    console.warn(`[TailGuard] ${tagId} tail clip 失敗(${path.basename(partPath)}): ${e.message}`);
+    return null; // 抓不到/轉失敗 → 無法判斷 → caller 視為「不動」(保守不誤殺)
+  } finally {
+    try { fs.unlinkSync(clipPath); } catch (_) {}
   }
 }
 
@@ -1684,4 +1714,5 @@ module.exports = {
   _probeAudioDuration, _splitAudio, _fmtTime, _transcribeWithRetry,
   LONG_AUDIO_SEGMENT_SEC, LONG_AUDIO_CONCURRENCY, LONG_AUDIO_PER_SEG_TIMEOUT_MS, LONG_AUDIO_OVERLAP_SEC,
   LONG_AUDIO_STITCH, _llmFindSeamAnchor, _transcribeSegmentSubsplit,
+  _transcribeTailClip, TAIL_GUARD_CLIP_SEC, TAIL_GUARD_SUBSEG_SEC,
 };

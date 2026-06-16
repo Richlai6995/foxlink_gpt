@@ -37,7 +37,18 @@ const {
   LONG_AUDIO_STITCH,
   _llmFindSeamAnchor,
   _transcribeSegmentSubsplit,
+  _transcribeTailClip,
+  TAIL_GUARD_CLIP_SEC,
+  TAIL_GUARD_SUBSEG_SEC,
 } = require('./gemini');
+const { tailDropped } = require('./transcriptStitch');
+
+// tail-guard:每段轉完後,重轉該段尾 2 分當 probe 偵測有沒有掉尾 → 掉尾的段 sub-split 重做。
+const TAIL_GUARD_ENABLE      = true;
+const TAIL_GUARD_USE_PRO     = true; // 偵測用 Pro temp0(跟主段同源、判斷準、少白工);false=Flash 省成本但多白工
+const TAIL_GUARD_CONCURRENCY = 3;    // 偵測平行度(此時主轉錄已結束,留餘裕給可能觸發的 sub-split)
+const TAIL_GUARD_MAX_FIX     = 4;    // 一個 job 最多 tail-guard 修幾段(限延遲/成本)
+const TAIL_GUARD_MIN_GAIN    = 1.05; // sub-split 重做後字數至少多 5% 才採用(濾掉偵測誤判)
 
 // under-production 偵測:某段字/秒密度 < 中位數 × 此比例 → 疑似模型提早收尾
 const UNDERPRODUCE_RATIO   = 0.5;
@@ -260,6 +271,93 @@ async function _recoverUnderproducedSegments(db, job, segments, totalDuration, t
   }
 }
 
+// Tail-guard(2026-06-16,B 方案):偵測各段是否「掉尾」(段尾 under-production,density 抓不到的)。
+// 對每段重轉「最後 ~2 分音訊」當 probe → tailDropped() 比對主段文字結尾有沒有蓋到 → 掉尾的段
+// sub-split(5 分小段)整段重做。★ probe 文字只判斷、絕不接回主段 → 沒有「主段 vs probe 措辭發散合併」
+// 的重複風險(B 方案核心)。偵測 token 與重做 token 都照計(upsertTokenUsage + 進 in/out_tokens_total)。
+async function _tailGuardSegments(db, job, segments, tagId) {
+  if (!TAIL_GUARD_ENABLE) return;
+  const lang = 'zh-TW';
+
+  const { upsertTokenUsage } = require('./tokenService');
+  // per-batch / per-fix 都 flush + 先計費再 flush:把「crash 後 resume 重計/重做」窗口從整個 job
+  // 縮到一個 batch / 一段(對齊 worker loop 逐段 flush 的「worst case 浪費 1 段」保證)。
+  const flushSegs = async () => {
+    try {
+      const totalChars = segments.filter(s => s.ok).reduce((sum, s) => sum + (s.text?.length || 0), 0);
+      const totalIn = segments.reduce((sum, s) => sum + (s.inputTokens || 0), 0);
+      const totalOut = segments.reduce((sum, s) => sum + (s.outputTokens || 0), 0);
+      await db.prepare(
+        `UPDATE transcribe_jobs SET segments_json=?, transcript_chars=?, in_tokens_total=?, out_tokens_total=?, updated_at=SYSTIMESTAMP WHERE id=?`
+      ).run(JSON.stringify(segments), totalChars, totalIn, totalOut, job.id);
+    } catch (e) { console.warn(`[TranscribeJob] ${tagId} tail-guard flush failed: ${e.message}`); }
+  };
+  const bill = async (inTok, outTok) => {
+    if (!inTok && !outTok) return;
+    try { await upsertTokenUsage(db, job.user_id, new Date().toISOString().slice(0, 10), 'pro', inTok, outTok, 0); } catch (_) {}
+  };
+
+  // 候選:ok、partPath 在、非失敗/截斷占位、非本輪已 sub-split(density recovery 剛重做的尾已乾淨)、
+  //       非已驗過(resume 不重驗、不重計 token)
+  const cands = segments.filter(s =>
+    s.ok && s.partPath && fs.existsSync(s.partPath) && !s.subsplit && !s.tailGuarded &&
+    s.text && !s.text.startsWith('[此段轉錄失敗') && !s.text.includes('已自動截斷'));
+
+  // 階段一:平行偵測(轉各段尾 clip + probe 比對)。每 batch 「先計費、再 flush」→ crash 重計窗口 = 1 batch
+  for (let i = 0; i < cands.length; i += TAIL_GUARD_CONCURRENCY) {
+    const batch = cands.slice(i, i + TAIL_GUARD_CONCURRENCY);
+    let batchIn = 0, batchOut = 0;
+    await Promise.all(batch.map(async (seg) => {
+      const clip = await _transcribeTailClip(
+        seg.partPath, job.audio_mime_type, lang, TAIL_GUARD_CLIP_SEC, tagId, TAIL_GUARD_USE_PRO);
+      if (!clip) return; // 抓不到/轉失敗 → 無法判斷,不標 tailGuarded(留 resume 重驗,不誤殺掉尾)
+      seg.tailGuarded = true;
+      batchIn += clip.inputTokens || 0;
+      batchOut += clip.outputTokens || 0;
+      seg.inputTokens = (seg.inputTokens || 0) + (clip.inputTokens || 0);
+      seg.outputTokens = (seg.outputTokens || 0) + (clip.outputTokens || 0);
+      if (tailDropped(seg.text, clip.text)) seg._tailDropped = true;
+    }));
+    await bill(batchIn, batchOut); // 先計費
+    await flushSegs();             // 再持久化 tailGuarded + _tailDropped + token(crash between = 重計這 1 batch)
+  }
+
+  // toFix 從「全 segments」撈(不只本輪 cands):涵蓋「上輪已偵測掉尾(_tailDropped 已持久化)但 crash
+  // 在 sub-split 前」的段 → resume 仍會補做。partPath 由 resume re-split 已 refresh。
+  const toFix = segments.filter(s =>
+    s._tailDropped && !s.subsplit && s.partPath && fs.existsSync(s.partPath) &&
+    s.text && !s.text.startsWith('[此段轉錄失敗') && !s.text.includes('已自動截斷')
+  ).slice(0, TAIL_GUARD_MAX_FIX);
+  if (toFix.length === 0) {
+    if (cands.length) console.log(`[TranscribeJob] ${tagId} tail-guard: 驗 ${cands.length} 段,皆有蓋到尾`);
+    return;
+  }
+  console.log(`[TranscribeJob] ${tagId} tail-guard: ${toFix.length} 段掉尾 → sub-split 重做: ${toFix.map(s => `#${s.idx + 1}`).join(',')}`);
+  // 階段二:掉尾的段 sub-split(5 分小段)整段重做,用乾淨重轉版整段換掉(不接 probe)。每段做完即 flush。
+  for (const seg of toFix) {
+    const before = seg.text.length;
+    let r = null;
+    try {
+      r = await _transcribeSegmentSubsplit(seg.partPath, job.audio_mime_type, lang, tagId, TAIL_GUARD_SUBSEG_SEC);
+    } catch (e) {
+      console.warn(`[TranscribeJob] ${tagId} #${seg.idx + 1} tail-guard sub-split error: ${e.message}`);
+      continue;
+    }
+    if (r && r.text && r.text.length > before * TAIL_GUARD_MIN_GAIN) {
+      console.log(`[TranscribeJob] ${tagId} #${seg.idx + 1} tail-guard 重做: ${before} → ${r.text.length} chars`);
+      seg.text = r.text;
+      seg.subsplit = true;
+      seg.inputTokens = (seg.inputTokens || 0) + (r.inputTokens || 0);
+      seg.outputTokens = (seg.outputTokens || 0) + (r.outputTokens || 0);
+      await bill(r.inputTokens || 0, r.outputTokens || 0);
+    } else {
+      seg.subsplit = true; // 重做沒改善也標記,避免 resume 又對同段重做(_tailDropped 仍在)
+      console.log(`[TranscribeJob] ${tagId} #${seg.idx + 1} tail-guard 重做無明顯改善(${before} → ${r?.text?.length || 0}),保留原文`);
+    }
+    await flushSegs(); // 每段做完持久化 subsplit + token,crash 重做窗口 = 1 段
+  }
+}
+
 // ─── Main worker ─────────────────────────────────────────────────────────────
 
 async function runTranscribeJob(db, jobId) {
@@ -349,15 +447,18 @@ async function runTranscribeJob(db, jobId) {
     } else {
       // recovery:tmp 目錄可能不在了(pod 換了),重建並重切
       console.log(`[TranscribeJob] ${tagId} resume: ${segments.filter(s => s.ok).length}/${segments.length} done`);
-      const partsExist = segments.every(s => s.ok || (s.partPath && fs.existsSync(s.partPath)));
+      // 注意:不能只看 !s.ok。density recovery / tail-guard 也要用「已 ok 段」的 partPath(重轉尾/sub-split),
+      // 換 pod 後那些 partPath 指向舊 pod 已清的 tmpdir → 不 refresh 的話 tail-guard 候選全失效、靜默 no-op。
+      // 改:任一段的 partPath 不存在就 re-split,並 refresh「所有」段(silencedetect 確定性 → idx 對齊)。
+      const partsExist = segments.every(s => s.partPath && fs.existsSync(s.partPath));
       if (!partsExist) {
         tmpRoot = path.join(os.tmpdir(), `transcribe_job_${jobId.slice(0,8)}_r${job.recovery_count || 0}`);
         fs.mkdirSync(tmpRoot, { recursive: true });
         console.log(`[TranscribeJob] ${tagId} parts missing, re-split to ${tmpRoot}`);
         const newParts = await _splitAudio(job.audio_path, LONG_AUDIO_SEGMENT_SEC, tmpRoot);
-        // 重新指派 partPath(silencedetect 確定性 → 邊界與首切一致,順序對齊 idx)
+        // 重新指派「所有」段的 partPath(不再限 !s.ok;tail-guard/density 補救要 ok 段的 part)
         segments.forEach((s, i) => {
-          if (!s.ok && newParts[i]) {
+          if (newParts[i]) {
             s.partPath = newParts[i].path;
             if (s.overlapSec == null) s.overlapSec = newParts[i].overlapSec; // 舊 job resume 補欄
           }
@@ -456,6 +557,13 @@ async function runTranscribeJob(db, jobId) {
       await _recoverUnderproducedSegments(db, job, segments, totalDuration, tagId);
     } catch (e) {
       console.warn(`[TranscribeJob] ${tagId} underproduce recovery failed: ${e.message}`);
+    }
+
+    // 5c. Tail-guard:偵測各段段尾是否掉尾(轉尾 2 分當 probe,不進輸出)→ 掉尾的段 sub-split 重做
+    try {
+      await _tailGuardSegments(db, job, segments, tagId);
+    } catch (e) {
+      console.warn(`[TranscribeJob] ${tagId} tail-guard failed: ${e.message}`);
     }
 
     // 6. Concat → 寫 .txt
