@@ -1901,6 +1901,42 @@ function ReportsTab({ type }: { type: 'weekly' | 'monthly' }) {
 
   const llm = llmReports[selectedLlmIndex] || null
 
+  // 2026-06-18: 我的週/月報按「週/月」分組篩選,預設選最新一組
+  // 把 as_of_date 對齊到 ISO 週一(weekly)或月初(monthly),group by 那個 anchor
+  const myGroupedByPeriod = useMemo(() => {
+    const groups: Record<string, any[]> = {}
+    for (const r of myReports) {
+      if (!r.as_of_date || typeof r.as_of_date !== 'string') continue
+      let anchor: string
+      if (type === 'weekly') {
+        const d = new Date(r.as_of_date + 'T00:00:00')
+        const day = d.getDay() || 7  // 週日 → 7
+        if (day !== 1) d.setDate(d.getDate() - (day - 1))
+        anchor = d.toISOString().slice(0, 10)
+      } else {
+        anchor = r.as_of_date.slice(0, 7) + '-01'
+      }
+      if (!groups[anchor]) groups[anchor] = []
+      groups[anchor].push(r)
+    }
+    // sort by anchor DESC(最新一組在最前面)
+    return Object.entries(groups).sort(([a], [b]) => b.localeCompare(a))
+  }, [myReports, type])
+
+  // 篩選用 state — '' 表示「最新一組(default)」,'all' 表示「全部」
+  const [myPeriodFilter, setMyPeriodFilter] = useState<string>('')
+  // myReports / type 重載 → 自動指向最新一組,讓「預設本週/本月」生效
+  useEffect(() => {
+    if (myGroupedByPeriod.length > 0) setMyPeriodFilter(myGroupedByPeriod[0][0])
+    else setMyPeriodFilter('')
+  }, [myReports.length, type])
+
+  const visibleMyReports = useMemo(() => {
+    if (myPeriodFilter === 'all' || !myPeriodFilter) return myReports
+    const grp = myGroupedByPeriod.find(([k]) => k === myPeriodFilter)
+    return grp ? grp[1] : []
+  }, [myReports, myGroupedByPeriod, myPeriodFilter])
+
   // ─── 編輯流程 ───────────────────────────────────────────────────────────
   // 預設 as_of_date 智能對齊:週報 = 本週週一 / 月報 = 本月 1 號
   // (user 可在編輯區改成任意日期)
@@ -2106,9 +2142,33 @@ function ReportsTab({ type }: { type: 'weekly' | 'monthly' }) {
           <header className="flex items-center gap-2 px-3 py-2 border-b bg-emerald-50 rounded-t-lg flex-wrap">
             <FileText size={14} className="text-emerald-700" />
             <span className="text-sm font-semibold text-slate-800">我的 {type === 'weekly' ? '週' : '月'}報</span>
-            <span className="text-xs text-slate-500">({myReports.length})</span>
+            <span className="text-xs text-slate-500">
+              ({visibleMyReports.length}{visibleMyReports.length !== myReports.length ? ` / ${myReports.length}` : ''})
+            </span>
             {statusMsg && <span className="text-xs text-slate-700 ml-2">{statusMsg}</span>}
             <div className="ml-auto flex items-center gap-2">
+              {/* 2026-06-18: 週/月別篩選 — 預設選最新一組(本週/本月) */}
+              {myGroupedByPeriod.length > 0 && (
+                <select
+                  value={myPeriodFilter}
+                  onChange={e => setMyPeriodFilter(e.target.value)}
+                  className="px-2 py-0.5 text-xs rounded border border-slate-200 bg-white"
+                  title={type === 'weekly' ? '按週篩選' : '按月篩選'}
+                >
+                  {myGroupedByPeriod.map(([anchor, rows], i) => {
+                    // 顯示文字 — weekly:「2026-06-15 那週」/ monthly:「2026-06」
+                    const label = type === 'weekly'
+                      ? `${anchor} 那週`
+                      : anchor.slice(0, 7)
+                    return (
+                      <option key={anchor} value={anchor}>
+                        {label} ({rows.length}){i === 0 ? ' 最新' : ''}
+                      </option>
+                    )
+                  })}
+                  <option value="all">全部({myReports.length})</option>
+                </select>
+              )}
               <button
                 onClick={startNew}
                 disabled={saving || editingId !== null}
@@ -2198,13 +2258,23 @@ function ReportsTab({ type }: { type: 'weekly' | 'monthly' }) {
               <div className="text-center text-slate-400 py-6 flex items-center justify-center gap-2 text-sm">
                 <Loader2 className="animate-spin" size={14} /> 載入中…
               </div>
-            ) : myReports.length === 0 && editingId === null ? (
+            ) : visibleMyReports.length === 0 && editingId === null ? (
               <div className="text-center text-slate-400 py-6 text-sm">
-                尚未寫任何 {type === 'weekly' ? '週' : '月'}報。
-                <br />
-                <span className="text-xs">可從上方 AI 草稿「複製到我的草稿編輯」,或點右上「自己寫一篇」</span>
+                {myReports.length === 0 ? (
+                  <>
+                    尚未寫任何 {type === 'weekly' ? '週' : '月'}報。
+                    <br />
+                    <span className="text-xs">可從上方 AI 草稿「複製到我的草稿編輯」,或點右上「自己寫一篇」</span>
+                  </>
+                ) : (
+                  <>
+                    這{type === 'weekly' ? '週' : '個月'}沒有報告。
+                    <br />
+                    <span className="text-xs">右上篩選切換到其他{type === 'weekly' ? '週' : '月'}別或「全部」</span>
+                  </>
+                )}
               </div>
-            ) : myReports.map((r: any) => {
+            ) : visibleMyReports.map((r: any) => {
               const isPub = Number(r.is_published) === 1
               return (
                 <div key={r.id} className="px-3 py-2 hover:bg-slate-50">
