@@ -1102,11 +1102,15 @@ router.get('/purchaser-reports', verifyToken, verifyPmUser, async (req, res) => 
     const params = [type];
     if (!includeDrafts) where.push(`is_published = 1`);
 
+    // 2026-06-18: DBMS_LOB.SUBSTR(content, 4000, 1) 第 1 個參數是字元數,但 SQL VARCHAR2 buffer
+    // 上限 4000 bytes 而非字元。中文 UTF-8 每字 3 bytes,4000 字 ≈ 12000 bytes 直接炸
+    // ORA-06502: character string buffer too small。
+    // 降到 1000 字 ≈ 3000 bytes 安全。list 預覽不需要全文,1000 字夠。
     const rows = await db.prepare(`
       SELECT id, report_type,
              TO_CHAR(as_of_date, 'YYYY-MM-DD') AS as_of_date,
              title,
-             DBMS_LOB.SUBSTR(content, 4000, 1) AS preview,
+             DBMS_LOB.SUBSTR(content, 1000, 1) AS preview,
              LENGTH(content) AS content_length,
              source_type, source_llm_report_id,
              created_by, is_published,
