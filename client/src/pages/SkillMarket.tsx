@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, type ChangeEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useTranslation } from 'react-i18next'
-import { Plus, Search, Globe, Lock, GitFork, Send, Pencil, Trash2, Clock, X, ChevronDown, Zap, ArrowLeft, MessageSquare, Code2, Eye, Share2, History, CheckCircle, XCircle, LayoutTemplate } from 'lucide-react'
+import { Plus, Search, Globe, Lock, GitFork, Send, Pencil, Trash2, Clock, X, ChevronDown, Zap, ArrowLeft, MessageSquare, Code2, Eye, Share2, History, CheckCircle, XCircle, LayoutTemplate, Bot } from 'lucide-react'
 import api from '../lib/api'
 import { fmtTW, fmtDateTW } from '../lib/fmtTW'
 import TranslationFields, { type TranslationData } from '../components/common/TranslationFields'
@@ -19,7 +19,7 @@ interface Skill {
     name: string
     description: string
     icon: string
-    type: 'builtin' | 'external' | 'code' | 'workflow'
+    type: 'builtin' | 'external' | 'code' | 'workflow' | 'agent'
     system_prompt?: string
     endpoint_url?: string
     endpoint_secret?: string
@@ -88,7 +88,7 @@ const ICONS = [
 ]
 
 const EMPTY_FORM = {
-    name: '', description: '', icon: '🤖', type: 'builtin' as 'builtin' | 'external' | 'code' | 'workflow',
+    name: '', description: '', icon: '🤖', type: 'builtin' as 'builtin' | 'external' | 'code' | 'workflow' | 'agent',
     system_prompt: '', endpoint_url: '', endpoint_secret: '', endpoint_mode: 'inject' as 'inject' | 'answer' | 'post_answer',
     model_key: '', mcp_tool_mode: 'append' as 'append' | 'exclusive' | 'disable',
     mcp_tool_ids: [] as number[], dify_kb_ids: [] as number[], tags: [] as string[],
@@ -127,14 +127,14 @@ export default function SkillMarket() {
     const typeLabel = (type: string) => {
         const map: Record<string, string> = {
             builtin: t('skills.typeBuiltin'), external: t('skills.typeExternal'),
-            code: t('skills.typeCode'), workflow: t('skills.typeWorkflow'),
+            code: t('skills.typeCode'), workflow: t('skills.typeWorkflow'), agent: t('skills.typeAgent'),
         }
         return map[type] || type
     }
     const typeLabelFull = (type: string) => {
         const map: Record<string, string> = {
             builtin: t('skills.typeBuiltinPrompt'), external: t('skills.typeExternalEndpoint'),
-            code: t('skills.typeCodeRunner'), workflow: t('skills.typeWorkflow'),
+            code: t('skills.typeCodeRunner'), workflow: t('skills.typeWorkflow'), agent: t('skills.typeAgent'),
         }
         return map[type] || type
     }
@@ -159,7 +159,9 @@ export default function SkillMarket() {
     const [pkgInput, setPkgInput] = useState('')
     const [showIconPicker, setShowIconPicker] = useState(false)
 
-    const canCodeSkill = currentUser?.role === 'admin' || (currentUser as any)?.effective_allow_code_skill === true
+    // Code / Agent skill 會執行程式碼,僅限系統管理員(不可委派),避免資安風險。
+    const canCodeSkill = currentUser?.role === 'admin'
+    const canAgentSkill = currentUser?.role === 'admin'
     const canCreateSkill = currentUser?.role === 'admin' || (currentUser as any)?.effective_allow_create_skill === true
     const [viewingSkill, setViewingSkill] = useState<Skill | null>(null)
     const [sharingSkill, setSharingSkill] = useState<Skill | null>(null)
@@ -206,6 +208,25 @@ export default function SkillMarket() {
     useEffect(() => { load() }, [load])
 
     const openCreate = () => { setEditingSkill(null); setForm({ ...EMPTY_FORM }); setTagInput(''); setTrans({}); setEditorTab('basic'); setShowEditor(true); setVersionHistory([]); setOutputTemplate(null) }
+    // ── 匯入 Agent skill 包(zip)→ 建 type='agent' skill + 裝 python 依賴 ──
+    const [importing, setImporting] = useState(false)
+    const handleImportFile = async (e: ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        e.target.value = '' // 允許重選同一檔
+        if (!file) return
+        setImporting(true); setError('')
+        try {
+            const fd = new FormData(); fd.append('package', file)
+            const res = await api.post('/skills/import', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+            const sk = res.data
+            if (sk?.has_requirements && sk?.id) {
+                try { await api.post(`/skills/${sk.id}/install-deps`) } catch { /* 依賴失敗不擋匯入,可稍後重裝 */ }
+            }
+            await load()
+        } catch (err: any) {
+            setError(err.response?.data?.error || t('skills.importFailed'))
+        } finally { setImporting(false) }
+    }
     const openEdit = async (sk: Skill) => {
         setEditingSkill(sk)
         setForm({
@@ -387,6 +408,12 @@ export default function SkillMarket() {
                             <p className="text-xs sm:text-sm text-slate-500 mt-0.5 truncate">{t('skills.subtitle')}</p>
                         </div>
                     </div>
+                    {canAgentSkill && (
+                        <label className={`flex items-center gap-1.5 px-3 sm:px-4 py-2 ${importing ? 'bg-slate-300' : 'bg-indigo-600 hover:bg-indigo-700 cursor-pointer'} text-white rounded-lg text-xs sm:text-sm transition whitespace-nowrap flex-shrink-0`}>
+                            <Bot size={15} /><span className="hidden sm:inline">{importing ? t('skills.importing') : t('skills.importAgent')}</span>
+                            <input type="file" accept=".zip" className="hidden" disabled={importing} onChange={handleImportFile} />
+                        </label>
+                    )}
                     {canCreateSkill && (
                         <button onClick={openCreate} aria-label={t('skills.createSkill')} className="flex items-center gap-1.5 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg text-xs sm:text-sm hover:bg-blue-700 transition whitespace-nowrap flex-shrink-0">
                             <Plus size={15} /><span className="hidden sm:inline">{t('skills.createSkill')}</span>
@@ -408,6 +435,7 @@ export default function SkillMarket() {
                         <option value="external">{t('skills.typeExternal')}</option>
                         <option value="code">{t('skills.typeCode')}</option>
                         <option value="workflow">{t('skills.typeWorkflow')}</option>
+                        <option value="agent">{t('skills.typeAgent')}</option>
                     </select>
                 </div>
 
@@ -561,7 +589,18 @@ export default function SkillMarket() {
                                                     className={`px-4 py-1.5 rounded-lg text-sm border transition ${form.type === 'workflow' ? 'bg-orange-600 text-white border-orange-600' : 'border-slate-200 text-slate-600 hover:border-orange-300'}`}>
                                                     {t('skills.typeWorkflow')}
                                                 </button>
+                                                {canAgentSkill && (
+                                                    <button onClick={() => setForm(p => ({ ...p, type: 'agent' }))}
+                                                        className={`px-4 py-1.5 rounded-lg text-sm border transition flex items-center gap-1 ${form.type === 'agent' ? 'bg-indigo-600 text-white border-indigo-600' : 'border-slate-200 text-slate-600 hover:border-indigo-300'}`}>
+                                                        <Bot size={13} />{t('skills.typeAgent')}
+                                                    </button>
+                                                )}
                                             </div>
+                                            {form.type === 'agent' && (
+                                                <p className="mt-2 text-xs text-slate-500 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
+                                                    {t('skills.agentHint')}
+                                                </p>
+                                            )}
                                         </div>
 
                                         {/* Tags */}
@@ -1220,7 +1259,7 @@ function SkillCard({ skill, onEdit, onDelete, onFork, onRequestPublic, onUse, on
     const typeLabel = (type: string) => {
         const map: Record<string, string> = {
             builtin: t('skills.typeBuiltin'), external: t('skills.typeExternal'),
-            code: t('skills.typeCode'), workflow: t('skills.typeWorkflow'),
+            code: t('skills.typeCode'), workflow: t('skills.typeWorkflow'), agent: t('skills.typeAgent'),
         }
         return map[type] || type
     }
@@ -1244,7 +1283,7 @@ function SkillCard({ skill, onEdit, onDelete, onFork, onRequestPublic, onUse, on
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                         <h3 className="font-semibold text-slate-800 text-sm truncate">{localName(skill)}</h3>
-                        <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded font-medium ${skill.type === 'external' ? 'bg-purple-100 text-purple-700' : skill.type === 'code' ? 'bg-emerald-100 text-emerald-700' : skill.type === 'workflow' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
+                        <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded font-medium ${skill.type === 'external' ? 'bg-purple-100 text-purple-700' : skill.type === 'code' ? 'bg-emerald-100 text-emerald-700' : skill.type === 'workflow' ? 'bg-orange-100 text-orange-700' : skill.type === 'agent' ? 'bg-indigo-100 text-indigo-700' : 'bg-blue-100 text-blue-700'}`}>
                             {typeLabel(skill.type)}
                         </span>
                         {skill.type === 'code' && skill.code_status && (

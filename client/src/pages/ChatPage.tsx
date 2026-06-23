@@ -786,6 +786,8 @@ function ChatPageDesktop() {
         formData.append('dify_kb_ids',    JSON.stringify([...selectedDifyIds]))
         formData.append('self_kb_ids',    JSON.stringify([...selectedKbIds]))
         formData.append('erp_tool_ids',   JSON.stringify([...selectedErpIds]))
+        // 當下選取的技能隨訊息送 → 後端據此保證「選了就用」(不靠 session_skills 是否已寫好)
+        formData.append('skill_ids',      JSON.stringify(sessionSkills.map(s => s.id)))
       }
       // Hidden tools — backend filters these out from auto/explicit mode and from session skills
       formData.append('hidden_mcp_ids',     JSON.stringify([...mcpHidden]))

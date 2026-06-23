@@ -17,6 +17,20 @@ const mcpClient = require('../services/mcpClient');
 const { detectPassthrough } = require('../services/toolResultPassthrough');
 const { classifyUpload, canonicalMimeForKind, TEXT_HARD_CAP_BYTES } = require('../utils/uploadFileTypes');
 
+// skill 的 self_kb_ids/dify_kb_ids/mcp_tool_ids 曾被重複 JSON 編碼(每次存檔 +1 層)→ 單層
+// JSON.parse 會 parse 出字串而非陣列、binding 失效。這層遞迴解開多層編碼,容錯舊髒資料。
+function normIds(val) {
+  let v = val;
+  for (let i = 0; i < 12 && typeof v === 'string'; i++) {
+    const t = v.trim();
+    if (t === '') return [];
+    try { v = JSON.parse(t); } catch { return [t]; }
+  }
+  if (Array.isArray(v)) return v.flat(Infinity).filter(x => x !== null && x !== undefined && x !== '');
+  if (v === null || v === undefined) return [];
+  return [v];
+}
+
 /**
  * ERP 執行 heartbeat wrapper:長任務每 20 秒送一次狀態 + 經過時間,
  * 防止前端 SSE 閒置斷線,也讓使用者知道還在跑。
@@ -1132,6 +1146,12 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
   const hiddenSelfKbIds = parseHiddenIds(req.body.hidden_self_kb_ids); // Set<string of kb.id>
   const hiddenSkillIds  = parseHiddenIds(req.body.hidden_skill_ids);   // Set<string of skill.id>
   const hiddenErpIds    = parseHiddenIds(req.body.hidden_erp_ids);     // Set<string of erp_tool.id>
+  // 使用者當下「選取的技能」隨訊息送來(前端 skill_ids)。用來保證「選了就用」——
+  // 不依賴 session_skills 是否已被前端寫好(新對話 race / state 同步洞會讓 session_skills 是空的)。
+  const bodySkillIds = (() => {
+    try { const a = JSON.parse(req.body.skill_ids || '[]'); return Array.isArray(a) ? a.map(Number).filter(n => Number.isFinite(n)) : []; }
+    catch { return []; }
+  })();
   // 儲存工具選擇到 session（供歷史載入時恢復）— pureMode 不寫,免得清掉使用者既有的工具設定
   if (explicitMode && !pureMode) {
     try {
@@ -1842,8 +1862,52 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
     // PPT detection — rich PPTX is now the default for all PPT requests
     const isFoxlinkBrand = lowerMsg.includes('foxlink') || lowerMsg.includes('正崴') || lowerMsg.includes('福連');
     const isPptRequest = lowerMsg.includes('ppt') || lowerMsg.includes('簡報') || lowerMsg.includes('投影片') || lowerMsg.includes('slide');
+    // ── Agent skill gate:session 掛了 type='agent' skill → 該需求改由 agent 背景產製,
+    //    必須關掉「內建 pptx / 檔案生成」的 user-turn 強指令,否則它會蓋過 agent dispatch
+    //    注入的 system prompt,讓 LLM 還是吐內建 slide-JSON(2026-06-22 bug)。
+    let hasAgentSkill = false;
+    if (!pureMode) {
+      try {
+        // session_skills「或」當下選取(body skill_ids)裡有 agent 型 skill 就算 —— 兩邊都看,
+        // 確保前端 session_skills 還沒寫好時也能正確判斷。
+        const _ids = bodySkillIds.slice(0, 50);
+        const _inClause = _ids.length ? ` OR s.id IN (${_ids.map(() => '?').join(',')})` : '';
+        const _ag = await db.prepare(
+          `SELECT 1 FROM skills s WHERE s.type='agent' AND (
+             s.id IN (SELECT skill_id FROM session_skills WHERE session_id=?)${_inClause}
+           ) FETCH FIRST 1 ROWS ONLY`
+        ).get(sessionId, ..._ids);
+        hasAgentSkill = !!_ag;
+      } catch (_) {}
+    }
+    let agentDispatched = false; // dispatch loop 成功派工後設 true,後處理據此跳過內建檔案生成
+    const deferredAgentSkills = []; // 無附件圖的 agent skill:延到 LLM 產出內容大綱後,用大綱當 agent task 派工(內容保真)
+    let _deferredArmed = false, _deferredFlushed = false;
+    // deferred 派工抽成函式:正常走 post-answer(帶 aiText 真內容);但 handler 有多處早退
+    // res.end()+return(ERP-answer / passthrough / 錯誤)會跳過 post-answer → res.on('finish')
+    // 當 safety net 保證 job 不被靜默吞掉(早退時 res 已關,只建 job 不送 SSE,完成仍鈴鐺通知)。
+    async function flushDeferredAgents(taskText) {
+      if (_deferredFlushed || deferredAgentSkills.length === 0) return;
+      _deferredFlushed = true;
+      const skills = deferredAgentSkills.splice(0);
+      const agentJobService = require('../services/agentJobService');
+      const task = (taskText && String(taskText).trim().length > 10) ? String(taskText).trim() : combinedUserText;
+      for (const sk of skills) {
+        try {
+          const jobId = await agentJobService.createJob(db, { userId: req.user.id, sessionId, skillId: sk.id, task });
+          if (!res.writableEnded) sendEvent({ type: 'status', message: `🤖 已啟動 Agent 技能「${sk.name}」(背景排版產製,完成會通知)` });
+          try {
+            await db.prepare(`INSERT INTO skill_call_logs (skill_id, user_id, session_id, query_preview, response_preview, status, duration_ms) VALUES (?,?,?,?,?,?,?)`)
+              .run(sk.id, req.user.id, sessionId, combinedUserText.slice(0, 200), `dispatched agent job ${jobId} (content ${task.length} chars)`, 'ok', 0);
+          } catch (_) {}
+        } catch (e) {
+          console.error('[Skill] deferred agent dispatch error:', e.message);
+          if (!res.writableEnded) sendEvent({ type: 'status', message: `⚠️ Agent 技能「${sk.name}」背景派工失敗: ${e.message}` });
+        }
+      }
+    }
     // Suppress when user already selected a doc template — template_values path takes priority
-    const wantsRichPpt = !docTemplateId && isPptRequest &&
+    const wantsRichPpt = !docTemplateId && !hasAgentSkill && isPptRequest &&
       (wantsFileGen || isFoxlinkBrand || lowerMsg.includes('foxlink風格') || lowerMsg.includes('公司風格') || lowerMsg.includes('企業風格') || lowerMsg.includes('公司簡報') || lowerMsg.includes('企業簡報'));
 
     if (wantsRichPpt) {
@@ -1897,8 +1961,8 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           '6) 所有文字使用使用者指定語言（預設繁體中文）\n' +
           '7) 必須輸出完整 JSON 代碼區塊',
       });
-    } else if (wantsFileGen && !docTemplateId) {
-      // Only inject file-gen reminder when no doc template is selected
+    } else if (wantsFileGen && !docTemplateId && !hasAgentSkill) {
+      // Only inject file-gen reminder when no doc template / agent skill is active
       console.log(`[Chat] File generation detected, injecting reminder`);
       userParts.push({
         text: '[系統規則強制提醒] 你必須在本次回覆中直接輸出完整的 generate_xxx:filename 代碼區塊（包含所有檔案內容）。只說「已生成」「系統處理」「點擊連結」是無效的，絕對不會產生任何檔案。',
@@ -2226,6 +2290,17 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
     if (pureMode) {
       sessionSkills = [];
       _allAccessibleSkills = [];
+    }
+
+    // ── 把「使用者當下選取(隨訊息送來的 skill_ids)」併入 sessionSkills ───────────────
+    //    保證「選了就用」:不依賴前端有沒有先把 session_skills 寫好(新對話 race / state 同步洞)。
+    //    access 用 _allAccessibleSkills(owner + public)把關;dedupe by id,session_skills 版本優先(保 variables)。
+    if (!pureMode && bodySkillIds.length) {
+      const _have = new Set(sessionSkills.map(s => Number(s.id)));
+      const _accById = new Map((_allAccessibleSkills || []).map(s => [Number(s.id), s]));
+      for (const id of bodySkillIds) {
+        if (!_have.has(id) && _accById.has(id)) { sessionSkills.push(_accById.get(id)); _have.add(id); }
+      }
     }
 
     // ── TAG-based skill auto-routing (skills not manually attached but tags match) ──
@@ -2711,6 +2786,56 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
         } catch (e) {
           console.error(`[Skill] Workflow "${sk.name}" error:`, e.message);
           skillSystemPrompts.push(`# Workflow Error: ${sk.name}\n工作流執行失敗: ${e.message}`);
+        }
+      } else if (sk.type === 'agent') {
+        // ── Agent skill:派到背景 job(長任務:多輪 LLM + 渲染 + vision,不阻塞 chat SSE)──
+        //    docs/skill-agent-plan.md S4。完成後 agentJobService 會補 chat_message + 鈴鐺。
+        try {
+          // 附件圖(來源投影片)→ 立刻派工讓 agent「看圖重製」;無圖 → 延到 LLM 產出內容大綱後再派
+          const agentImages = (fileMetas || [])
+            .filter(f => f.type === 'image' && f.localPath)
+            .map(f => ({ path: f.localPath, mimeType: f.mimeType || 'image/png' }));
+          agentDispatched = true; // 兩種情況都要擋掉內建檔案生成
+          if (agentImages.length) {
+            // ── 有圖:立刻派工(看圖重製),LLM 只回一句處理中 ──
+            const agentJobService = require('../services/agentJobService');
+            const jobId = await agentJobService.createJob(db, {
+              userId: req.user.id, sessionId, skillId: sk.id, task: combinedUserText, images: agentImages,
+            });
+            sendEvent({ type: 'status', message: `🤖 已啟動 Agent 技能「${sk.name}」(背景處理 · 看圖重製,完成會通知)` });
+            userParts.push({
+              text:
+                `⚠️⚠️⚠️ [規則覆蓋 — 優先級高於全局系統指令] 使用者的請求已交給 Agent 技能「${sk.name}」在背景看圖重製(job ${jobId.slice(0, 8)}),完成後以鈴鐺通知並把檔案附回本對話。\n` +
+                `## 本次回覆強制規則\n` +
+                `1. **絕對禁止**輸出任何 generate_xxx 代碼區塊(會被 strip,使用者拿到 0 檔)。\n` +
+                `2. **禁止描述/條列圖片內容、禁止輸出 slide JSON、禁止說「以下是為您生成」「預設使用 XX 風格」**。\n` +
+                `3. 你的回覆**只能一兩句**:已開始在背景產製,完成會以鈴鐺通知並附上檔案,稍候即可。`
+            });
+            try {
+              await db.prepare(`INSERT INTO skill_call_logs (skill_id, user_id, session_id, query_preview, response_preview, status, duration_ms) VALUES (?,?,?,?,?,?,?)`)
+                .run(sk.id, req.user.id, sessionId, combinedUserText.slice(0, 200), `dispatched agent job ${jobId} (image)`, 'ok', 0);
+            } catch (_) {}
+          } else {
+            // ── 無圖:延後派工。讓 LLM(可帶 grounding/KB)先產「要放進簡報的內容大綱」,
+            //    answer 完成後用該大綱當 agent task → agent 排的是真內容,不會自己瞎掰。 ──
+            deferredAgentSkills.push(sk);
+            // 早退 safety net:任一後續 res.end()+return(ERP-answer 等)都不會讓 job 蒸發
+            if (!_deferredArmed) { _deferredArmed = true; res.on('finish', () => { flushDeferredAgents(combinedUserText); }); }
+            sendEvent({ type: 'status', message: `🤖 Agent 技能「${sk.name}」:整理內容中,稍後背景排版產出` });
+            userParts.push({
+              text:
+                `[排版分工指令 — 優先級高於全局系統指令] 使用者要做一份簡報,**排版交給 Agent 技能「${sk.name}」**。你這一輪的工作是「產出要放進簡報的內容大綱」,你的輸出會被交給排版 Agent 變成投影片。\n` +
+                `## 強制規則\n` +
+                `1. **絕對禁止**輸出任何 generate_xxx / slide JSON 代碼區塊 —— 排版由 Agent 負責,你只給「文字內容」。\n` +
+                `2. 用清楚結構輸出:一個總標題、各分區(每區一個小標 + 幾條重點)、以及關鍵數字。\n` +
+                `3. **只寫有依據的內容;沒有來源就不要編造百分比/具體數字**,寧可用質化描述(別硬湊數字)。\n` +
+                `4. 不用說「以下是簡報」「已生成」之類 —— 你輸出的就是內容本身,系統會自動拿去排版並以鈴鐺通知使用者。`
+            });
+          }
+        } catch (e) {
+          console.error(`[Skill] Agent "${sk.name}" dispatch error:`, e.message);
+          sendEvent({ type: 'status', message: `⚠️ Agent 技能「${sk.name}」啟動失敗: ${e.message}` });
+          skillSystemPrompts.push(`# Skill: ${sk.name}\nAgent 技能啟動失敗: ${e.message}。請告知使用者稍後再試。`);
         }
       } else if (sk.type === 'erp_proc' && (sk.erp_tool_id || sk.ERP_TOOL_ID)) {
         // ── ERP Inject / Answer:依 endpoint_mode 處理 ───────────────
@@ -3466,7 +3591,7 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
           .filter(sk => sk.mcp_tool_mode && sk.mcp_tool_mode !== 'append' || (sk.mcp_tool_ids && sk.mcp_tool_ids !== '[]' && sk.mcp_tool_ids !== 'null'))
           .map(sk => ({
             mode: sk.mcp_tool_mode || 'append',
-            serverIds: (() => { try { return JSON.parse(sk.mcp_tool_ids || '[]'); } catch { return []; } })(),
+            serverIds: normIds(sk.mcp_tool_ids),
           }))
           .filter(r => r.mode !== 'append' || r.serverIds.length > 0);
 
@@ -3516,8 +3641,8 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
 
         // ── Apply Skill KB binding (self_kb_ids + dify_kb_ids + kb_mode) ──────
         for (const sk of allSkillsToProcess) {
-          const skSelfKbIds = (() => { try { return JSON.parse(sk.self_kb_ids || '[]'); } catch { return []; } })();
-          const skDifyKbIds = (() => { try { return JSON.parse(sk.dify_kb_ids || '[]'); } catch { return []; } })();
+          const skSelfKbIds = normIds(sk.self_kb_ids);
+          const skDifyKbIds = normIds(sk.dify_kb_ids);
           const kbMode = sk.kb_mode || 'append';
 
           if (kbMode === 'disable') {
@@ -3526,11 +3651,33 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
             selfKbDecls.length = 0;
             console.log(`[Skill] KB mode=disable for "${sk.name}" → all KBs removed`);
           } else if (kbMode === 'exclusive') {
-            // Only keep specified KBs
+            // 「獨佔(只用這些)」:① 把使用者現有 KB 池 filter 成只剩綁定的;
+            //   ② 綁定的若不在池內就 force-add(同 append 的權限把關)→ 保證「正好這些、且一定載到」,
+            //   不依賴使用者有沒有先選到 → 真正達成「技能預掛 KB、使用者免手動勾」。
             const allowedDifyIds = new Set(skDifyKbIds.map(Number));
             const allowedSelfIds = new Set(skSelfKbIds.map(String));
             difyDecls.splice(0, difyDecls.length, ...difyDecls.filter(d => { const kb = km[d.name]; return kb && allowedDifyIds.has(Number(kb.id)); }));
             selfKbDecls.splice(0, selfKbDecls.length, ...selfKbDecls.filter(d => { const kb = skm[d.name]; return kb && allowedSelfIds.has(String(kb.id)); }));
+            // force-add 缺漏的綁定 self KB
+            for (const kbId of skSelfKbIds) {
+              if (selfKbDecls.some(d => String(skm[d.name]?.id) === String(kbId))) continue;
+              const kb = await db.prepare('SELECT * FROM knowledge_bases WHERE id=?').get(kbId);
+              if (!kb) continue;
+              if (Number(kb.is_confidential) === 1) { console.warn(`[Skill] KB exclusive: blocked confidential KB "${kb.name}" (id=${kb.id})`); continue; }
+              const declName = `selfkb_${String(kb.id).replace(/-/g, '_')}`;
+              selfKbDecls.push({ name: declName, description: `自建知識庫查詢「${kb.name}」。適用範疇：${(kb.description || '').slice(0, 200)}`, parameters: { type: 'object', properties: { query: { type: 'string', description: '查詢關鍵字' } }, required: ['query'] } });
+              skm[declName] = kb;
+            }
+            // force-add 缺漏的綁定 dify/api KB
+            for (const kbId of skDifyKbIds) {
+              if (difyDecls.some(d => Number(km[d.name]?.id) === Number(kbId))) continue;
+              const kb = await db.prepare('SELECT * FROM dify_knowledge_bases WHERE id=? AND is_active=1').get(kbId);
+              if (!kb) continue;
+              const { buildFunctionDeclaration } = require('../services/apiConnectorService');
+              const decl = buildFunctionDeclaration(kb);
+              difyDecls.push(decl);
+              km[decl.name] = kb;
+            }
             console.log(`[Skill] KB mode=exclusive for "${sk.name}" → dify=${difyDecls.length} selfkb=${selfKbDecls.length}`);
           } else if (kbMode === 'append') {
             // Force-add specified KBs even if not in user's access list
@@ -3544,7 +3691,7 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
                     console.warn(`[Skill] KB append: blocked confidential KB "${kb.name}" (id=${kb.id}) — skill "${sk.name}" cannot force-add confidential KB`);
                     continue;
                   }
-                  const declName = `selfkb_${kb.id}`;
+                  const declName = `selfkb_${String(kb.id).replace(/-/g, '_')}`;
                   selfKbDecls.push({ name: declName, description: `自建知識庫查詢「${kb.name}」。適用範疇：${(kb.description || '').slice(0, 200)}`, parameters: { type: 'object', properties: { query: { type: 'string', description: '查詢關鍵字' } }, required: ['query'] } });
                   skm[declName] = kb;
                   console.log(`[Skill] KB append: force-added selfkb "${kb.name}"`);
@@ -3573,8 +3720,8 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
         // clear KB pools so TAG routing can't accidentally pull in unrelated KBs.
         if (postAnswerSkills.length > 0 && externalInjectSkills.length === 0) {
           const postAnswerHasKb = postAnswerSkills.some(sk => {
-            const dIds = (() => { try { const v = JSON.parse(sk.dify_kb_ids || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } })();
-            const sIds = (() => { try { const v = JSON.parse(sk.self_kb_ids || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } })();
+            const dIds = normIds(sk.dify_kb_ids);
+            const sIds = normIds(sk.self_kb_ids);
             return dIds.length > 0 || sIds.length > 0;
           });
           if (!postAnswerHasKb) {
@@ -4340,8 +4487,9 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
         imgMatches.slice(0, 5).forEach((m, i) => console.log(`  [img${i}] ${m}`));
       }
 
-      // When a doc template is selected, skip free-form file generation entirely
-      const generatedFiles = docTemplateId ? [] : await processGenerateBlocks(text, sessionId);
+      // When a doc template is selected OR an agent skill was dispatched (background 產製),
+      // skip free-form file generation entirely(避免跟 agent 產出重複 / 內建格式蓋過 agent)。
+      const generatedFiles = (docTemplateId || agentDispatched) ? [] : await processGenerateBlocks(text, sessionId);
       if (generatedFiles.length > 0) {
         const clientFiles = generatedFiles.map(({ type, filename, publicUrl }) => ({ type, filename, publicUrl }));
         sendEvent({ type: 'generated_files', files: clientFiles });
@@ -4523,6 +4671,10 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
         .replace(/\n{3,}/g, '\n\n')
         .trim();
     }
+
+    // ── 無圖 Agent skill:用 LLM 剛產出的「內容大綱」(aiText)當 task 派背景排版工(內容保真)──
+    //    (早退路徑由上方 res.on('finish') safety net 兜底,改用統一的 flushDeferredAgents)
+    await flushDeferredAgents(aiText);
 
     // ── Post-answer skills (run after Gemini, receive AI response as input) ──
     for (const sk of postAnswerSkills) {

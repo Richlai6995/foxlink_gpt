@@ -373,6 +373,8 @@ export default function MobileChatLayout() {
       formData.append('dify_kb_ids',    JSON.stringify([...selectedDifyIds]))
       formData.append('self_kb_ids',    JSON.stringify([...selectedKbIds]))
       formData.append('erp_tool_ids',   JSON.stringify([]))
+      // 當下選取的技能隨訊息送 → 後端保證「選了就用」
+      formData.append('skill_ids',      JSON.stringify([...pickedSkillIds]))
     }
     formData.append('hidden_mcp_ids',     JSON.stringify([]))
     formData.append('hidden_dify_ids',    JSON.stringify([]))

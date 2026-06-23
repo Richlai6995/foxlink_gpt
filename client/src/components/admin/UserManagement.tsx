@@ -205,6 +205,7 @@ interface UserForm {
   allow_create_skill: boolean | null  // null = inherit from role
   allow_external_skill: boolean | null
   allow_code_skill: boolean | null
+  allow_agent_skill: boolean | null
   can_create_kb: boolean | null
   can_deep_research: boolean | null
   can_design_ai_select: boolean | null
@@ -243,6 +244,7 @@ const empty: UserForm = {
   allow_create_skill: null,
   allow_external_skill: null,
   allow_code_skill: null,
+  allow_agent_skill: null,
   can_create_kb: null,
   can_deep_research: null,
   can_design_ai_select: null,
@@ -380,6 +382,7 @@ export default function UserManagement() {
       allow_create_skill: u2.allow_create_skill == null ? null : u2.allow_create_skill === 1,
       allow_external_skill: u2.allow_external_skill == null ? null : u2.allow_external_skill === 1,
       allow_code_skill: u2.allow_code_skill == null ? null : u2.allow_code_skill === 1,
+      allow_agent_skill: u2.allow_agent_skill == null ? null : u2.allow_agent_skill === 1,
       can_create_kb: u2.can_create_kb == null ? null : u2.can_create_kb === 1,
       can_deep_research: u2.can_deep_research == null ? null : u2.can_deep_research === 1,
       can_design_ai_select: u2.can_design_ai_select == null ? null : u2.can_design_ai_select === 1,

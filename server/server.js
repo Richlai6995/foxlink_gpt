@@ -169,6 +169,8 @@ app.get('/api/version', (req, res) => {
     console.log('[Route] /api/share OK');
     app.use('/api/skills', require('./routes/skills'));
     console.log('[Route] /api/skills OK');
+    app.use('/api/agent-jobs', require('./routes/agentJobs'));
+    console.log('[Route] /api/agent-jobs OK');
 
     // Internal endpoints(只給同機 skill child / background job 用,有 IP + secret 雙重驗證)
     // 若 INTERNAL_API_SECRET 沒設,啟動時自動生成一個 UUID 並寫到 process.env,
@@ -506,6 +508,14 @@ app.get('/api/version', (req, res) => {
       } catch (e) {
         console.warn('[Shutdown] excelQueryJobService.gracefullyPauseActiveJobs error:', e.message);
       }
+      // 同上,Agent skill background jobs
+      try {
+        const agentJobService = require('./services/agentJobService');
+        const { db } = require('./database-oracle');
+        await agentJobService.gracefullyPauseActiveJobs(db);
+      } catch (e) {
+        console.warn('[Shutdown] agentJobService.gracefullyPauseActiveJobs error:', e.message);
+      }
       server.close(async () => {
         try {
           const { getPool } = require('./database-oracle');
@@ -578,6 +588,13 @@ app.get('/api/version', (req, res) => {
       excelQueryJobService.recoverStaleJobs(db).catch((e) => console.warn('[ExcelJob] startup recovery:', e.message));
       setInterval(() => {
         excelQueryJobService.recoverStaleJobs(db).catch((e) => console.warn('[ExcelJob] recovery tick:', e.message));
+      }, 5 * 60 * 1000);
+
+      // Agent skill background job recovery(docs/skill-agent-plan.md S3)
+      const agentJobService = require('./services/agentJobService');
+      agentJobService.recoverStaleJobs(db).catch((e) => console.warn('[AgentJob] startup recovery:', e.message));
+      setInterval(() => {
+        agentJobService.recoverStaleJobs(db).catch((e) => console.warn('[AgentJob] recovery tick:', e.message));
       }, 5 * 60 * 1000);
 
       // 大檔路由(2026-06-15):web pod 把過大 excel job 留 pending,scheduler(3Gi、無 SSE)在此撿來跑。

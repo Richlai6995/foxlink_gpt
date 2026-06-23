@@ -310,7 +310,7 @@ router.post('/auth/verify', async (req, res) => {
     let rolePerms = null;
     if (userRow.role_id) {
       rolePerms = await db.prepare(
-        'SELECT allow_create_skill, allow_external_skill, allow_code_skill, can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research, can_design_ai_select, can_use_ai_dashboard, training_permission FROM roles WHERE id=?'
+        'SELECT allow_create_skill, allow_external_skill, allow_code_skill, allow_agent_skill, can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research, can_design_ai_select, can_use_ai_dashboard, training_permission FROM roles WHERE id=?'
       ).get(userRow.role_id);
     }
     const re = (uv, rv) => uv != null ? uv === 1 : rv != null ? rv === 1 : false;
@@ -320,6 +320,7 @@ router.post('/auth/verify', async (req, res) => {
     userResp.effective_allow_create_skill   = isAdmin || re(userRow.allow_create_skill,   rolePerms?.allow_create_skill);
     userResp.effective_allow_external_skill = isAdmin || re(userRow.allow_external_skill, rolePerms?.allow_external_skill);
     userResp.effective_allow_code_skill     = isAdmin || re(userRow.allow_code_skill,     rolePerms?.allow_code_skill);
+    userResp.effective_allow_agent_skill    = isAdmin || re(userRow.allow_agent_skill,    rolePerms?.allow_agent_skill);
     userResp.effective_can_create_kb        = isAdmin || re(userRow.can_create_kb,        rolePerms?.can_create_kb);
     userResp.effective_kb_max_size_mb       = isAdmin ? 99999 : rn(userRow.kb_max_size_mb, rolePerms?.kb_max_size_mb, 500);
     userResp.effective_kb_max_count         = isAdmin ? 99999 : rn(userRow.kb_max_count,   rolePerms?.kb_max_count,   5);

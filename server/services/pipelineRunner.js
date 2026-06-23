@@ -131,6 +131,15 @@ async function execSkill(node, vars, db, context) {
     return data.content || data.system_prompt || '';
   }
 
+  if (skill.type === 'agent') {
+    // Agent skill 是背景 job(長任務),pipeline 不同步等待 → 派工後回註記,完成走鈴鐺。
+    const agentJobService = require('./agentJobService');
+    const jobId = await agentJobService.createJob(db, {
+      userId, sessionId: sessionId || null, skillId: skill.id, task: input || '',
+    });
+    return `(Agent 技能「${skill.name || node.name}」已派背景執行,job ${String(jobId).slice(0, 8)};完成後以鈴鐺通知)`;
+  }
+
   throw new Error(`技能類型 "${skill.type}" 不支援`);
 }
 

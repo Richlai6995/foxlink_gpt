@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Trash2, Edit2, Star, StarOff, Check, FileText, Mic, Image, CalendarClock, Code2, Database, ShieldCheck, Building2, X } from 'lucide-react'
+import { Plus, Trash2, Edit2, Star, StarOff, Check, FileText, Mic, Image, CalendarClock, Database, ShieldCheck, Building2, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import api from '../../lib/api'
 
@@ -37,6 +37,7 @@ interface Role {
   allow_create_skill: number
   allow_external_skill: number
   allow_code_skill: number
+  allow_agent_skill: number
   can_create_kb: number
   kb_max_size_mb: number | null
   kb_max_count: number | null
@@ -63,6 +64,7 @@ const emptyForm = {
   allow_create_skill: false,
   allow_external_skill: false,
   allow_code_skill: false,
+  allow_agent_skill: false,
   can_create_kb: false,
   kb_max_size_mb: 500,
   kb_max_count: 5,
@@ -184,6 +186,7 @@ export default function RoleManagement() {
       allow_create_skill: role.allow_create_skill === 1,
       allow_external_skill: role.allow_external_skill === 1,
       allow_code_skill: role.allow_code_skill === 1,
+      allow_agent_skill: role.allow_agent_skill === 1,
       can_create_kb: role.can_create_kb === 1,
       kb_max_size_mb: role.kb_max_size_mb ?? 500,
       kb_max_count: role.kb_max_count ?? 5,
@@ -348,11 +351,6 @@ export default function RoleManagement() {
                     <CalendarClock size={10} /> {t('roles.permSchedule')}
                   </span>
                 )}
-                {role.allow_code_skill === 1 && (
-                  <span className="flex items-center gap-1 text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full">
-                    <Code2 size={10} /> {t('roles.permCodeSkill')}
-                  </span>
-                )}
               </div>
               {/* Budget summary */}
               {(role.budget_daily != null || role.budget_weekly != null || role.budget_monthly != null) && (
@@ -479,16 +477,7 @@ export default function RoleManagement() {
                     />
                     <span className="text-sm text-slate-700">{t('roles.form.allowExternalSkill')}</span>
                   </label>
-                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={(form as any).allow_code_skill}
-                      onChange={e => setForm({ ...form, allow_code_skill: e.target.checked } as any)}
-                      className="w-4 h-4 rounded border-slate-300 text-blue-600"
-                    />
-                    <Code2 size={13} />
-                    <span className="text-sm text-slate-700">{t('roles.form.allowCodeSkill')}</span>
-                  </label>
+                  {/* Code / Agent skill 會執行程式碼,僅限系統管理員(不可委派),故不提供角色授予開關 */}
                 </div>
               </div>
 

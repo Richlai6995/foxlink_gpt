@@ -80,6 +80,7 @@ cd client && npm run dev    # frontend → localhost:5173 (proxy → 3007)
 | `mobile-support-plan.md` | **手機螢幕支援規劃**：layout 分流(共用 hook + Desktop/Mobile 分檔)+ UA 主判(桌機 0 影響)+ vaul drawer + PWA(Cortex 文字 icon)+ SSE cheap fix。PR-1 基礎 / PR-2 mobile chat / PR-3 收尾 |
 | `scheduled-task-dashboard-integration.md` | **排程 × AI 戰情整合**(2026-05-14 Phase 1+2 ship):新增 `dashboard` pipeline node,排程可呼叫 AI 戰情 design 產 Excel;`runDashboardQueryBuffered` 包 SSE callback、`failed_nodes_json` 收失敗節點、email 主旨/body ⚠️ 標記;Try it 預覽 endpoint。**Phase 2**:`restrict_multi_org` chips(intersection-only) + `merge_excel` node(多 dashboard → 多 sheet xlsx)+ `format='none'`(僅供合併不落檔)。**權限完全等同 task.user 親自手點**(design access + 資料政策 + Multi-Org 全套) |
 | `scheduled-task-share-plan.md` | **排程任務分享**(2026-05-14 ship):`scheduled_task_shares` 表對齊 ai_dashboard_shares,7 種 grantee_type + 兩級權限(use/develop)。**核心保證**:執行身份永遠 = task.user_id(owner),develop 受贈者改了內容也用 owner 權限跑。**整段封禁**:含 db_write/kb_write/alert 節點的任務禁止 develop 分享(避免繞權限寫敏感資料)。delete + 改 shares 只能 admin/owner。**公用 ShareModal**:`components/common/ShareModal.tsx` re-export `dashboard/ShareModal`(增強為自訂 shareTypeOptions / hint / headerTitle) |
+| `skill-agent-plan.md` | **Skill Agent 平台 Phase 1 規劃**:把 Anthropic-style skill 包(SKILL.md + 元件庫)接成第 5 種 `type='agent'` skill。Phase 0 PoC 已驗證([server/services/skillAgent/](server/services/skillAgent/)):通用 runtime 載 SKILL.md 長能力、Gemini 吃得下 Claude skill、**雙層 QA(程式 gate + 收尾 vision)**、**好 brief/黃金藍圖 > vision 反覆推**(精確藍圖第一次 vision 就 95 過 vs 無藍圖卡 85 燒 390k)。切片 S0~S6,MVP 線 S0→S1→S2→S3→S4,沙箱加固 S5 開放外部 skill 前必到位 |
 
 ---
 

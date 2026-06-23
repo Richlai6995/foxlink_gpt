@@ -118,7 +118,7 @@ router.post('/', async (req, res) => {
     budget_daily, budget_weekly, budget_monthly, quota_exceed_action,
     allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
     allow_image_upload, image_max_mb, allow_scheduled_tasks,
-    allow_create_skill, allow_external_skill, allow_code_skill,
+    allow_create_skill, allow_external_skill, allow_code_skill, allow_agent_skill,
     can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research,
     can_design_ai_select, can_use_ai_dashboard } = req.body;
   if (!name) return res.status(400).json({ error: 'name 為必填' });
@@ -132,10 +132,10 @@ router.post('/', async (req, res) => {
                   budget_daily, budget_weekly, budget_monthly, quota_exceed_action,
                   allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
                   allow_image_upload, image_max_mb, allow_scheduled_tasks,
-                  allow_create_skill, allow_external_skill, allow_code_skill,
+                  allow_create_skill, allow_external_skill, allow_code_skill, allow_agent_skill,
                   can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research,
                   can_design_ai_select, can_use_ai_dashboard, training_permission)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(name, description || null, is_default ? 1 : 0,
         parseBudget(budget_daily), parseBudget(budget_weekly), parseBudget(budget_monthly),
         quota_exceed_action === 'warn' ? 'warn' : 'block',
@@ -149,6 +149,7 @@ router.post('/', async (req, res) => {
         allow_create_skill ? 1 : 0,
         allow_external_skill ? 1 : 0,
         allow_code_skill ? 1 : 0,
+        allow_agent_skill ? 1 : 0,
         can_create_kb ? 1 : 0,
         kb_max_size_mb != null ? Number(kb_max_size_mb) : 500,
         kb_max_count   != null ? Number(kb_max_count)   : 5,
@@ -174,7 +175,7 @@ router.put('/:id', async (req, res) => {
     budget_daily, budget_weekly, budget_monthly, quota_exceed_action,
     allow_text_upload, text_max_mb, allow_audio_upload, audio_max_mb,
     allow_image_upload, image_max_mb, allow_scheduled_tasks,
-    allow_create_skill, allow_external_skill, allow_code_skill,
+    allow_create_skill, allow_external_skill, allow_code_skill, allow_agent_skill,
     can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research,
     can_design_ai_select, can_use_ai_dashboard } = req.body;
   if (!name) return res.status(400).json({ error: 'name 為必填' });
@@ -188,7 +189,7 @@ router.put('/:id', async (req, res) => {
          budget_daily=?, budget_weekly=?, budget_monthly=?, quota_exceed_action=?,
          allow_text_upload=?, text_max_mb=?, allow_audio_upload=?, audio_max_mb=?,
          allow_image_upload=?, image_max_mb=?, allow_scheduled_tasks=?,
-         allow_create_skill=?, allow_external_skill=?, allow_code_skill=?,
+         allow_create_skill=?, allow_external_skill=?, allow_code_skill=?, allow_agent_skill=?,
          can_create_kb=?, kb_max_size_mb=?, kb_max_count=?, can_deep_research=?,
          can_design_ai_select=?, can_use_ai_dashboard=?, training_permission=?,
          updated_at=CURRENT_TIMESTAMP
@@ -206,6 +207,7 @@ router.put('/:id', async (req, res) => {
       allow_create_skill ? 1 : 0,
       allow_external_skill ? 1 : 0,
       allow_code_skill ? 1 : 0,
+      allow_agent_skill ? 1 : 0,
       can_create_kb ? 1 : 0,
       kb_max_size_mb != null ? Number(kb_max_size_mb) : 500,
       kb_max_count   != null ? Number(kb_max_count)   : 5,

@@ -23,6 +23,7 @@ CREATE TABLE roles (
   allow_create_skill    NUMBER(1) DEFAULT 0,
   allow_external_skill  NUMBER(1) DEFAULT 0,
   allow_code_skill      NUMBER(1) DEFAULT 0,
+  allow_agent_skill     NUMBER(1) DEFAULT 0,
   -- Knowledge base permissions
   can_create_kb         NUMBER(1) DEFAULT 0,
   kb_max_size_mb        NUMBER DEFAULT 100,
@@ -64,6 +65,7 @@ CREATE TABLE users (
   allow_create_skill    NUMBER(1),
   allow_external_skill  NUMBER(1),
   allow_code_skill      NUMBER(1),
+  allow_agent_skill     NUMBER(1),
   -- KB permission overrides
   can_create_kb         NUMBER(1),
   kb_max_size_mb        NUMBER,
@@ -421,6 +423,10 @@ CREATE TABLE skills (
   code_port         NUMBER,
   code_pid          NUMBER,
   code_error        CLOB,
+  skill_package_path VARCHAR2(1000),
+  env_requirements  CLOB DEFAULT ''[]'',
+  brain_provider    VARCHAR2(50),
+  agent_config      CLOB,
   owner_user_id     NUMBER REFERENCES users(id) ON DELETE SET NULL,
   is_public         NUMBER(1) DEFAULT 0,
   is_admin_approved NUMBER(1) DEFAULT 0,

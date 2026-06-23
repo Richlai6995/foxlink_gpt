@@ -16,6 +16,8 @@ const TYPE_EXCEL_QUERY_DONE      = 'excel_query_done';
 const TYPE_EXCEL_QUERY_FAILED    = 'excel_query_failed';
 const TYPE_PDF_DOCX_JOB_DONE     = 'pdf_docx_job_done';
 const TYPE_PDF_DOCX_JOB_FAILED   = 'pdf_docx_job_failed';
+const TYPE_AGENT_JOB_DONE        = 'agent_job_done';
+const TYPE_AGENT_JOB_FAILED      = 'agent_job_failed';
 
 /**
  * 建一條通知給某 user。
@@ -128,4 +130,6 @@ module.exports = {
   TYPE_EXCEL_QUERY_FAILED,
   TYPE_PDF_DOCX_JOB_DONE,
   TYPE_PDF_DOCX_JOB_FAILED,
+  TYPE_AGENT_JOB_DONE,
+  TYPE_AGENT_JOB_FAILED,
 };

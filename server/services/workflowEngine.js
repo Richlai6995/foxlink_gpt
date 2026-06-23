@@ -124,6 +124,7 @@ async function executeSkillByRow(db, skill, input, context = {}) {
     return data.content || data.system_prompt || '';
   }
 
+  if (skill.type === 'agent') return `(Agent 技能「${skill.name || ''}」需在對話中喚起以背景執行,不支援在工作流節點直接呼叫)`;
   return `[技能類型 "${skill.type}" 不支援直接呼叫]`;
 }
 

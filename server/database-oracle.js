@@ -1554,6 +1554,41 @@ async function runMigrations(db) {
     if (!e.message?.includes('ORA-01430')) console.warn('[Migration] extra_files_json add:', e.message);
   }
 
+  // ── Agent Jobs(type='agent' skill 背景執行)— docs/skill-agent-plan.md S3 ──────
+  await createTable('AGENT_JOBS', `CREATE TABLE agent_jobs (
+    id                VARCHAR2(36)   PRIMARY KEY,
+    user_id           NUMBER         NOT NULL,
+    session_id        VARCHAR2(36),                            -- chat session(可空)
+    skill_id          NUMBER         NOT NULL,                 -- type='agent' skill id
+    task              CLOB,                                    -- 輸入任務/內容
+    status            VARCHAR2(20)   DEFAULT 'pending',        -- pending/running/done/failed
+    progress_label    VARCHAR2(500),                           -- agent loop 進度文字
+    progress_step     NUMBER         DEFAULT 0,
+    progress_total    NUMBER,
+    result_file_path  VARCHAR2(1000),                          -- 產出檔(generated/ 下)
+    result_files_json CLOB,
+    vision_score      NUMBER,                                  -- 收尾 vision 評分
+    tokens_json       CLOB,                                    -- {in,out,total}
+    error_msg         VARCHAR2(2000),
+    is_notified       NUMBER(1)      DEFAULT 0,
+    recovery_count    NUMBER         DEFAULT 0,                 -- 中斷 resume 次數,>=2 標 failed
+    lock_token        VARCHAR2(64),                            -- pod 識別,防多 pod 搶
+    heartbeat_at      TIMESTAMP,
+    created_at        TIMESTAMP      DEFAULT SYSTIMESTAMP,
+    updated_at        TIMESTAMP      DEFAULT SYSTIMESTAMP,
+    input_images_json CLOB,                                  -- 來源投影片圖(看圖重製用)[{path,mimeType}]
+    started_at        TIMESTAMP,
+    completed_at      TIMESTAMP
+  )`);
+  await safeAddColumn('AGENT_JOBS', 'INPUT_IMAGES_JSON', 'CLOB'); // 既有表補欄(看圖重製)
+  const safeCreateAgentJobIdx = async (name, ddl) => {
+    try { await db.prepare(ddl).run(); } catch (e) {
+      if (!e.message?.includes('ORA-00955')) console.warn(`[Migration] index ${name}: ${e.message}`);
+    }
+  };
+  await safeCreateAgentJobIdx('IDX_AGENTJOBS_USER_STATUS', 'CREATE INDEX idx_agentjobs_user_status ON agent_jobs(user_id, status)');
+  await safeCreateAgentJobIdx('IDX_AGENTJOBS_RECOVERY',    'CREATE INDEX idx_agentjobs_recovery ON agent_jobs(status, heartbeat_at)');
+
   // ── Phase 1 一次性 migration:Excel skill 改走 jobService 後,自動把 skill_runner
   //    上的 child process 停掉(不再需要)。autoRestoreRunners 看到 code_status='stopped'
   //    就不會再 spawn,4 個 pod 共省 4 個無用 child process + 40100-40999 port。
@@ -2524,6 +2559,14 @@ async function runMigrations(db) {
   await safeAddColumn('SKILLS', 'WORKFLOW_JSON',        'CLOB');
   // 文件範本輸出（skill 使用範本產出檔案）
   await safeAddColumn('SKILLS', 'OUTPUT_TEMPLATE_ID',   'VARCHAR2(64)');
+  // ── type='agent'：Skill Agent（Anthropic-style skill 包）— docs/skill-agent-plan.md ──
+  await safeAddColumn('SKILLS', 'SKILL_PACKAGE_PATH', 'VARCHAR2(1000)'); // skill 包 NFS 目錄(含 SKILL.md)
+  await safeAddColumn('SKILLS', 'ENV_REQUIREMENTS',   "CLOB DEFAULT '[]'"); // python/系統依賴宣告(JSON)
+  await safeAddColumn('SKILLS', 'BRAIN_PROVIDER',     'VARCHAR2(50)');     // gemini(預設)/claude/aoai
+  await safeAddColumn('SKILLS', 'AGENT_CONFIG',       'CLOB');             // vision 開關 / step·token 上限 / entry task
+  // allow_agent_skill 權限(roles+users)— 既有 3 個 skill 權限欄無 migration,新欄位顯式補上(避免重蹈 latent gap)
+  await safeAddColumn('ROLES', 'ALLOW_AGENT_SKILL', 'NUMBER(1) DEFAULT 0');
+  await safeAddColumn('USERS', 'ALLOW_AGENT_SKILL', 'NUMBER(1)');
 
   // ── code skill 預設 mcp_tool_mode/kb_mode → disable(2026-05-01)──────────────
   // 配合「skill 推薦 → UI 自動勾」設計:user 只看到、只給 LLM 自己/UI 勾的東西,
@@ -2540,6 +2583,40 @@ async function runMigrations(db) {
     const cnt = r?.rowsAffected ?? r?.changes ?? 0;
     if (cnt > 0) console.log(`[Migration] code skills mcp_tool_mode + kb_mode → disable for ${cnt} row(s)`);
   } catch (e) { console.warn('[Migration] code skill mode reset:', e.message); }
+
+  // ── 修復 skills 的多重 JSON 編碼欄位(2026-06-23)────────────────────────────
+  // 根因:self_kb_ids/dify_kb_ids/mcp_tool_ids/tags/code_packages 曾因「對已是字串的值再
+  // JSON.stringify」被重複編碼(每次編輯 +1 層)→ JSON.parse 出字串而非陣列、KB/MCP binding
+  // 失效(skill 綁 1 個 KB 卻不限制、user 選的全載)。把所有 row 收斂回單層乾淨陣列。idempotent。
+  try {
+    const _norm = (val) => {
+      let v = val;
+      for (let i = 0; i < 12 && typeof v === 'string'; i++) {
+        const t = v.trim(); if (t === '') return [];
+        try { v = JSON.parse(t); } catch { return [t]; }
+      }
+      if (Array.isArray(v)) return v.flat(Infinity).filter(x => x !== null && x !== undefined && x !== '');
+      return (v === null || v === undefined) ? [] : [v];
+    };
+    const COLS = ['mcp_tool_ids', 'dify_kb_ids', 'self_kb_ids', 'tags', 'code_packages'];
+    const rows = await db.prepare(`SELECT id, ${COLS.join(', ')} FROM skills`).all();
+    let fixed = 0;
+    for (const row of rows) {
+      const sets = [], vals = [];
+      for (const c of COLS) {
+        const raw = row[c] ?? row[c.toUpperCase()];
+        const clean = JSON.stringify(_norm(raw));
+        // 只在「原值 ≠ 乾淨單層值」時才寫(避免無謂 UPDATE)
+        if ((raw ?? '[]') !== clean) { sets.push(`${c}=?`); vals.push(clean); }
+      }
+      if (sets.length) {
+        vals.push(row.id ?? row.ID);
+        await db.prepare(`UPDATE skills SET ${sets.join(', ')} WHERE id=?`).run(...vals);
+        fixed++;
+      }
+    }
+    if (fixed > 0) console.log(`[Migration] normalized multi-encoded skill id-array columns for ${fixed} row(s)`);
+  } catch (e) { console.warn('[Migration] skill id-array normalize:', e.message); }
 
   // session_skills 變數
   await safeAddColumn('SESSION_SKILLS', 'VARIABLES_JSON', "CLOB DEFAULT '{}'");

@@ -559,7 +559,7 @@ router.get('/sso/user', async (req, res) => {
     let rolePerms = null;
     if (user.role_id) {
       rolePerms = await db.prepare(
-        'SELECT allow_create_skill, allow_external_skill, allow_code_skill, can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research, can_design_ai_select, can_use_ai_dashboard, training_permission FROM roles WHERE id=?'
+        'SELECT allow_create_skill, allow_external_skill, allow_code_skill, allow_agent_skill, can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research, can_design_ai_select, can_use_ai_dashboard, training_permission FROM roles WHERE id=?'
       ).get(user.role_id);
     }
     const resolveEff = (uv, rv) => {
@@ -575,6 +575,7 @@ router.get('/sso/user', async (req, res) => {
     u.effective_allow_create_skill   = user.role === 'admin' || resolveEff(user.allow_create_skill,   rolePerms?.allow_create_skill);
     u.effective_allow_external_skill = user.role === 'admin' || resolveEff(user.allow_external_skill, rolePerms?.allow_external_skill);
     u.effective_allow_code_skill     = user.role === 'admin' || resolveEff(user.allow_code_skill,     rolePerms?.allow_code_skill);
+    u.effective_allow_agent_skill    = user.role === 'admin' || resolveEff(user.allow_agent_skill,    rolePerms?.allow_agent_skill);
     u.effective_can_create_kb        = user.role === 'admin' || resolveEff(user.can_create_kb,        rolePerms?.can_create_kb);
     u.effective_kb_max_size_mb       = user.role === 'admin' ? 99999 : resolveNum(user.kb_max_size_mb, rolePerms?.kb_max_size_mb, 500);
     u.effective_kb_max_count         = user.role === 'admin' ? 99999 : resolveNum(user.kb_max_count,   rolePerms?.kb_max_count,   5);
@@ -988,7 +989,7 @@ const createSession = async (res, user) => {
   let rolePerms = null;
   if (user.role_id) {
     rolePerms = await db.prepare(
-      'SELECT allow_create_skill, allow_external_skill, allow_code_skill, can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research, can_design_ai_select, can_use_ai_dashboard, training_permission FROM roles WHERE id=?'
+      'SELECT allow_create_skill, allow_external_skill, allow_code_skill, allow_agent_skill, can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research, can_design_ai_select, can_use_ai_dashboard, training_permission FROM roles WHERE id=?'
     ).get(user.role_id);
   }
   const resolveEffective = (userVal, roleVal) => {
@@ -1004,6 +1005,7 @@ const createSession = async (res, user) => {
   userWithoutPassword.effective_allow_create_skill   = user.role === 'admin' || resolveEffective(user.allow_create_skill,   rolePerms?.allow_create_skill);
   userWithoutPassword.effective_allow_external_skill = user.role === 'admin' || resolveEffective(user.allow_external_skill, rolePerms?.allow_external_skill);
   userWithoutPassword.effective_allow_code_skill     = user.role === 'admin' || resolveEffective(user.allow_code_skill,     rolePerms?.allow_code_skill);
+  userWithoutPassword.effective_allow_agent_skill    = user.role === 'admin' || resolveEffective(user.allow_agent_skill,    rolePerms?.allow_agent_skill);
   userWithoutPassword.effective_can_create_kb        = user.role === 'admin' || resolveEffective(user.can_create_kb,        rolePerms?.can_create_kb);
   userWithoutPassword.effective_kb_max_size_mb       = user.role === 'admin' ? 99999 : resolveNum(user.kb_max_size_mb, rolePerms?.kb_max_size_mb, 500);
   userWithoutPassword.effective_kb_max_count         = user.role === 'admin' ? 99999 : resolveNum(user.kb_max_count,   rolePerms?.kb_max_count,   5);
@@ -1431,7 +1433,7 @@ router.get('/me', async (req, res) => {
     let rolePerms = null;
     if (user.role_id) {
       rolePerms = await db.prepare(
-        'SELECT allow_create_skill, allow_external_skill, allow_code_skill, can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research, can_design_ai_select, can_use_ai_dashboard, training_permission FROM roles WHERE id=?'
+        'SELECT allow_create_skill, allow_external_skill, allow_code_skill, allow_agent_skill, can_create_kb, kb_max_size_mb, kb_max_count, can_deep_research, can_design_ai_select, can_use_ai_dashboard, training_permission FROM roles WHERE id=?'
       ).get(user.role_id);
     }
     const resolveEff = (uv, rv) => {
@@ -1447,6 +1449,7 @@ router.get('/me', async (req, res) => {
     userWithoutPassword.effective_allow_create_skill    = user.role === 'admin' || resolveEff(user.allow_create_skill,    rolePerms?.allow_create_skill);
     userWithoutPassword.effective_allow_external_skill  = user.role === 'admin' || resolveEff(user.allow_external_skill,  rolePerms?.allow_external_skill);
     userWithoutPassword.effective_allow_code_skill      = user.role === 'admin' || resolveEff(user.allow_code_skill,      rolePerms?.allow_code_skill);
+    userWithoutPassword.effective_allow_agent_skill     = user.role === 'admin' || resolveEff(user.allow_agent_skill,     rolePerms?.allow_agent_skill);
     userWithoutPassword.effective_can_create_kb         = user.role === 'admin' || resolveEff(user.can_create_kb,         rolePerms?.can_create_kb);
     userWithoutPassword.effective_kb_max_size_mb        = user.role === 'admin' ? 99999 : resolveNum(user.kb_max_size_mb,  rolePerms?.kb_max_size_mb, 500);
     userWithoutPassword.effective_kb_max_count          = user.role === 'admin' ? 99999 : resolveNum(user.kb_max_count,    rolePerms?.kb_max_count,   5);

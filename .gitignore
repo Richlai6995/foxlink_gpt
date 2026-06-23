@@ -99,3 +99,10 @@ docs/*.key
 # ─── GCP Service Account JSON (Vertex AI auth) ────────────────────────────────
 server/certs/*.json
 server/certs/*-sa.json
+
+# ─── Skill Agent runtime artifacts(渲染產物/測試輸入/匯入包,勿 commit）───
+server/services/skillAgent/_runs/
+server/services/skillAgent/_task_*.txt
+server/services/skillAgent/_run.txt
+server/skill_packages/
+Noto_Sans_TC/

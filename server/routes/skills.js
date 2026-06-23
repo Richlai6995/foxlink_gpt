@@ -5,6 +5,11 @@ const router  = express.Router();
 const { verifyToken } = require('./auth');
 const { translateFields } = require('../services/translationService');
 const { resolveGranteeNamesInRows, getLangFromReq } = require('../services/granteeNameResolver');
+const multer = require('multer');
+const JSZip = require('jszip');
+const packageStore = require('../services/skillAgent/packageStore');
+// type='agent' skill 包上傳(zip,記憶體暫存,上限 50MB)
+const agentUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 // ── Service key middleware（供外部 skill handler 呼叫，不走 user token）──────
 function verifyServiceKey(req, res, next) {
@@ -280,17 +285,35 @@ function parseJsonField(val, fallback = []) {
     try { return JSON.parse(val) || fallback; } catch { return fallback; }
 }
 
+// 把任意形式(陣列 / JSON 字串 / 多重 JSON 編碼字串)正規化成扁平 id 陣列。
+// 修根因:self_kb_ids/dify_kb_ids/mcp_tool_ids 等欄位曾因「對已是字串的值再 JSON.stringify」
+// 被重複編碼(每次編輯 +1 層)→ JSON.parse 出字串而非陣列 → for...of 跑字元、binding 失效。
+// 寫入/讀出都過這層 → idempotent + 每次存檔自我修復(把舊髒值收斂回乾淨陣列)。
+function normalizeIdArray(val) {
+    let v = val;
+    for (let i = 0; i < 12 && typeof v === 'string'; i++) {
+        const t = v.trim();
+        if (t === '') return [];
+        try { v = JSON.parse(t); } catch { return [t]; } // 不是 JSON 的純字串 → 當單一 id
+    }
+    if (Array.isArray(v)) return v.flat(Infinity).filter(x => x !== null && x !== undefined && x !== '');
+    if (v === null || v === undefined) return [];
+    return [v];
+}
+
 function serializeSkill(s, maskSecret = true) {
     return {
         ...s,
-        mcp_tool_ids: parseJsonField(s.mcp_tool_ids),
-        dify_kb_ids: parseJsonField(s.dify_kb_ids),
-        self_kb_ids: parseJsonField(s.self_kb_ids),
-        tags: parseJsonField(s.tags),
-        code_packages: parseJsonField(s.code_packages),
+        mcp_tool_ids: normalizeIdArray(s.mcp_tool_ids),
+        dify_kb_ids: normalizeIdArray(s.dify_kb_ids),
+        self_kb_ids: normalizeIdArray(s.self_kb_ids),
+        tags: normalizeIdArray(s.tags),
+        code_packages: normalizeIdArray(s.code_packages),
         tool_schema: parseJsonField(s.tool_schema, null),
         output_schema: parseJsonField(s.output_schema, null),
         workflow_json: parseJsonField(s.workflow_json, null),
+        env_requirements: parseJsonField(s.env_requirements),       // type='agent'
+        agent_config: parseJsonField(s.agent_config, null),         // type='agent'
         endpoint_secret: maskSecret ? (s.endpoint_secret ? '****' : '') : s.endpoint_secret,
     };
 }
@@ -502,13 +525,17 @@ router.post('/', async (req, res) => {
             code_snippet, code_packages,
             self_kb_ids, kb_mode, tool_schema, output_schema, output_template_id,
             rate_limit_per_user, rate_limit_global, rate_limit_window,
-            prompt_version, published_prompt, draft_prompt, workflow_json } = req.body;
+            prompt_version, published_prompt, draft_prompt, workflow_json,
+            skill_package_path, env_requirements, brain_provider, agent_config } = req.body;
         if (!name) return res.status(400).json({ error: 'name 必填' });
         if (type === 'external' && !await hasSkillPerm(db, req.user.id, 'allow_external_skill') && req.user.role !== 'admin') {
             return res.status(403).json({ error: '無建立外部 Skill 的權限' });
         }
-        if (type === 'code' && !await hasSkillPerm(db, req.user.id, 'allow_code_skill') && req.user.role !== 'admin') {
-            return res.status(403).json({ error: '無建立內部程式 Skill 的權限' });
+        if (type === 'code' && req.user.role !== 'admin') {
+            return res.status(403).json({ error: '只有系統管理員可建立/編輯內部程式 (Code) Skill' });
+        }
+        if (type === 'agent' && req.user.role !== 'admin') {
+            return res.status(403).json({ error: '只有系統管理員可建立/編輯 Agent Skill' });
         }
         const { name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi } = req.body;
         const result = await db.prepare(`
@@ -517,8 +544,9 @@ router.post('/', async (req, res) => {
         code_snippet, code_packages,
         self_kb_ids, kb_mode, tool_schema, output_schema, output_template_id,
         rate_limit_per_user, rate_limit_global, rate_limit_window,
-        prompt_version, published_prompt, draft_prompt, workflow_json)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        prompt_version, published_prompt, draft_prompt, workflow_json,
+        skill_package_path, env_requirements, brain_provider, agent_config)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
             name, description || null, icon || '🤖',
             type || 'builtin', system_prompt || null,
@@ -528,13 +556,13 @@ router.post('/', async (req, res) => {
             // 不再走 append 全載(浪費 token + 嚇使用者)。建議勾哪幾個
             // 由 frontend 讀 mcp_tool_ids / dify_kb_ids / self_kb_ids 決定。
             mcp_tool_mode || (type === 'code' ? 'disable' : 'append'),
-            JSON.stringify(mcp_tool_ids || []),
-            JSON.stringify(dify_kb_ids || []),
-            JSON.stringify(tags || []),
+            JSON.stringify(normalizeIdArray(mcp_tool_ids)),
+            JSON.stringify(normalizeIdArray(dify_kb_ids)),
+            JSON.stringify(normalizeIdArray(tags)),
             req.user.id,
             code_snippet || null,
-            JSON.stringify(code_packages || []),
-            JSON.stringify(self_kb_ids || []),
+            JSON.stringify(normalizeIdArray(code_packages)),
+            JSON.stringify(normalizeIdArray(self_kb_ids)),
             kb_mode || (type === 'code' ? 'disable' : 'append'),
             tool_schema ? JSON.stringify(tool_schema) : null,
             output_schema ? JSON.stringify(output_schema) : null,
@@ -545,7 +573,11 @@ router.post('/', async (req, res) => {
             prompt_version != null ? Number(prompt_version) : 1,
             published_prompt || null,
             draft_prompt || null,
-            workflow_json ? JSON.stringify(workflow_json) : null
+            workflow_json ? JSON.stringify(workflow_json) : null,
+            skill_package_path || null,
+            JSON.stringify(env_requirements || []),
+            brain_provider || null,
+            agent_config ? JSON.stringify(agent_config) : null
         );
         const newId = result.lastInsertRowid;
         // ── tool-artifact-passthrough 欄位(獨立 UPDATE 避免動主 INSERT)──
@@ -622,16 +654,20 @@ router.put('/:id', async (req, res) => {
             self_kb_ids, kb_mode, tool_schema, output_schema, output_template_id,
             rate_limit_per_user, rate_limit_global, rate_limit_window,
             prompt_version, published_prompt, draft_prompt, workflow_json,
+            skill_package_path, env_requirements, brain_provider, agent_config,
             name_zh, name_en, name_vi, desc_zh, desc_en, desc_vi } = req.body;
         if (type === 'external' && !await hasSkillPerm(db, req.user.id, 'allow_external_skill') && req.user.role !== 'admin') {
             return res.status(403).json({ error: '無建立外部 Skill 的權限' });
         }
-        if (type === 'code' && !await hasSkillPerm(db, req.user.id, 'allow_code_skill') && req.user.role !== 'admin') {
-            return res.status(403).json({ error: '無建立內部程式 Skill 的權限' });
+        if (type === 'code' && req.user.role !== 'admin') {
+            return res.status(403).json({ error: '只有系統管理員可建立/編輯內部程式 (Code) Skill' });
+        }
+        if (type === 'agent' && req.user.role !== 'admin') {
+            return res.status(403).json({ error: '只有系統管理員可建立/編輯 Agent Skill' });
         }
         // Keep old secret if masked value passed
         const newSecret = (endpoint_secret && endpoint_secret !== '****') ? endpoint_secret : s.endpoint_secret;
-        const tagsJson = JSON.stringify(tags ?? parseJsonField(s.tags));
+        const tagsJson = JSON.stringify(normalizeIdArray(tags ?? s.tags));
         console.log(`[Skill PUT] id=${req.params.id} tags_received=${JSON.stringify(tags)} tags_json=${tagsJson}`);
         // Determine final name/desc for translation reference
         const finalName = name ?? s.name;
@@ -644,6 +680,7 @@ router.put('/:id', async (req, res) => {
         self_kb_ids=?, kb_mode=?, tool_schema=?, output_schema=?, output_template_id=?,
         rate_limit_per_user=?, rate_limit_global=?, rate_limit_window=?,
         prompt_version=?, published_prompt=?, draft_prompt=?, workflow_json=?,
+        skill_package_path=?, env_requirements=?, brain_provider=?, agent_config=?,
         updated_at=CURRENT_TIMESTAMP
       WHERE id=?
     `).run(
@@ -652,12 +689,12 @@ router.put('/:id', async (req, res) => {
             endpoint_url ?? s.endpoint_url, newSecret,
             endpoint_mode ?? s.endpoint_mode, model_key ?? s.model_key,
             mcp_tool_mode ?? s.mcp_tool_mode,
-            JSON.stringify(mcp_tool_ids ?? parseJsonField(s.mcp_tool_ids)),
-            JSON.stringify(dify_kb_ids ?? parseJsonField(s.dify_kb_ids)),
+            JSON.stringify(normalizeIdArray(mcp_tool_ids ?? s.mcp_tool_ids)),
+            JSON.stringify(normalizeIdArray(dify_kb_ids ?? s.dify_kb_ids)),
             tagsJson,
             code_snippet !== undefined ? (code_snippet || null) : s.code_snippet,
-            JSON.stringify(code_packages ?? parseJsonField(s.code_packages)),
-            JSON.stringify(self_kb_ids ?? parseJsonField(s.self_kb_ids)),
+            JSON.stringify(normalizeIdArray(code_packages ?? s.code_packages)),
+            JSON.stringify(normalizeIdArray(self_kb_ids ?? s.self_kb_ids)),
             kb_mode ?? s.kb_mode ?? 'append',
             tool_schema !== undefined ? (tool_schema ? JSON.stringify(tool_schema) : null) : s.tool_schema,
             output_schema !== undefined ? (output_schema ? JSON.stringify(output_schema) : null) : s.output_schema,
@@ -669,6 +706,10 @@ router.put('/:id', async (req, res) => {
             published_prompt !== undefined ? (published_prompt || null) : s.published_prompt,
             draft_prompt !== undefined ? (draft_prompt || null) : s.draft_prompt,
             workflow_json !== undefined ? (workflow_json ? JSON.stringify(workflow_json) : null) : s.workflow_json,
+            skill_package_path !== undefined ? (skill_package_path || null) : s.skill_package_path,
+            env_requirements !== undefined ? JSON.stringify(env_requirements || []) : (s.env_requirements ?? '[]'),
+            brain_provider !== undefined ? (brain_provider || null) : s.brain_provider,
+            agent_config !== undefined ? (agent_config ? JSON.stringify(agent_config) : null) : s.agent_config,
             req.params.id
         );
         console.log(`[Skill PUT] UPDATE rowsAffected=${updateResult?.changes}`);
@@ -749,6 +790,10 @@ router.post('/:id/fork', async (req, res) => {
         }
         const s = await db.prepare('SELECT * FROM skills WHERE id=?').get(req.params.id);
         if (!s) return res.status(404).json({ error: '找不到 skill' });
+        // Code / Agent skill 會執行程式碼 → Fork(會產生同類型副本)也僅限系統管理員
+        if ((s.type === 'code' || s.type === 'agent') && req.user.role !== 'admin') {
+            return res.status(403).json({ error: '只有系統管理員可 Fork 內部程式 (Code) / Agent Skill' });
+        }
         const isOwner = s.owner_user_id === req.user.id;
         const isAdmin = req.user.role === 'admin';
         if (!isOwner && !isAdmin) {
@@ -765,21 +810,117 @@ router.post('/:id/fork', async (req, res) => {
         is_public, is_admin_approved, pending_approval,
         self_kb_ids, kb_mode, tool_schema, output_schema,
         rate_limit_per_user, rate_limit_global, rate_limit_window,
-        prompt_version, published_prompt, draft_prompt, workflow_json)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,0,?,?,?,?,?,?,?,?,?,?,?)
+        prompt_version, published_prompt, draft_prompt, workflow_json,
+        skill_package_path, env_requirements, brain_provider, agent_config)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,0,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
             `${s.name} (複本)`, s.description, s.icon, s.type, s.system_prompt,
             s.endpoint_url, s.endpoint_secret, s.endpoint_mode, s.model_key,
-            s.mcp_tool_mode, s.mcp_tool_ids, s.dify_kb_ids, s.tags, req.user.id,
-            s.self_kb_ids, s.kb_mode || 'append',
+            s.mcp_tool_mode,
+            JSON.stringify(normalizeIdArray(s.mcp_tool_ids)),
+            JSON.stringify(normalizeIdArray(s.dify_kb_ids)),
+            JSON.stringify(normalizeIdArray(s.tags)),
+            req.user.id,
+            JSON.stringify(normalizeIdArray(s.self_kb_ids)), s.kb_mode || 'append',
             s.tool_schema, s.output_schema,
             s.rate_limit_per_user, s.rate_limit_global, s.rate_limit_window || 'hour',
-            1, s.published_prompt, s.draft_prompt, s.workflow_json
+            1, s.published_prompt, s.draft_prompt, s.workflow_json,
+            s.skill_package_path, s.env_requirements ?? '[]', s.brain_provider, s.agent_config
         );
         const forked = await db.prepare('SELECT * FROM skills WHERE id=?').get(result.lastInsertRowid);
         res.json(serializeSkill(forked, false));
     } catch (e) {
         res.status(500).json({ error: e.message });
+    }
+});
+
+// ── POST /api/skills/import — 上傳 skill 包 zip → 建立 type='agent' skill ──────
+router.post('/import', agentUpload.single('package'), async (req, res) => {
+    try {
+        const db = require('../database-oracle').db;
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ error: '只有系統管理員可匯入 Agent Skill' });
+        }
+        if (!req.file) return res.status(400).json({ error: '請上傳 skill 包 zip(欄位名 package)' });
+        // 1) 解壓(保結構)
+        const zip = await JSZip.loadAsync(req.file.buffer);
+        const entries = [];
+        const tasks = [];
+        zip.forEach((relPath, entry) => {
+            if (entry.dir) return;
+            tasks.push(entry.async('nodebuffer').then(buf => entries.push({ path: relPath.replace(/\\/g, '/'), content: buf })));
+        });
+        await Promise.all(tasks);
+        if (!entries.length) return res.status(400).json({ error: 'zip 是空的' });
+        // 2) 找 SKILL.md(取最淺一個),以其所在目錄為包根 re-root(吃掉外層包夾)
+        const skillMd = entries
+            .filter(e => /(^|\/)SKILL\.md$/i.test(e.path))
+            .sort((a, b) => a.path.split('/').length - b.path.split('/').length)[0];
+        if (!skillMd) return res.status(400).json({ error: 'zip 內找不到 SKILL.md' });
+        const prefix = skillMd.path.includes('/') ? skillMd.path.slice(0, skillMd.path.lastIndexOf('/') + 1) : '';
+        const files = entries
+            .filter(e => e.path.startsWith(prefix))
+            .map(e => ({ path: e.path.slice(prefix.length), content: e.content }))
+            .filter(e => e.path && !e.path.split('/').includes('..')
+                && !e.path.startsWith('.venv/') && !e.path.split('/').includes('__pycache__')
+                && !e.path.endsWith('.pyc') && !e.path.startsWith('.git/'));
+        // 3) 解析 frontmatter
+        const meta = packageStore.parseSkillMd(skillMd.content.toString('utf8'));
+        const name = String(req.body.name || meta.name || req.file.originalname.replace(/\.zip$/i, '')).slice(0, 200);
+        const description = req.body.description || meta.description || '';
+        // requirements.txt → env_requirements(顯示用;實際安裝走 /install-deps)
+        const reqEntry = files.find(f => f.path === 'requirements.txt');
+        const envReqs = reqEntry
+            ? reqEntry.content.toString('utf8').split('\n').map(s => s.trim()).filter(s => s && !s.startsWith('#'))
+            : [];
+        // 4) 建 skill row(type='agent';mcp/kb 預設 disable,不自動掛工具)
+        const result = await db.prepare(`
+            INSERT INTO skills (name, description, icon, type, owner_user_id,
+                env_requirements, brain_provider, mcp_tool_mode, kb_mode)
+            VALUES (?,?,?,?,?,?,?,?,?)
+        `).run(name, description, '🤖', 'agent', req.user.id,
+            JSON.stringify(envReqs), (req.body.brain_provider || 'gemini'), 'disable', 'disable');
+        const newId = result.lastInsertRowid;
+        // 5) 落檔 + 回寫包路徑
+        const dir = packageStore.writePackage(newId, files);
+        await db.prepare('UPDATE skills SET skill_package_path=? WHERE id=?').run(dir, newId);
+        // 6) 翻譯 name/desc
+        try {
+            const trans = await translateFields({ name, description });
+            if (trans.name_zh !== undefined) {
+                await db.prepare('UPDATE skills SET name_zh=?,name_en=?,name_vi=?,desc_zh=?,desc_en=?,desc_vi=? WHERE id=?')
+                    .run(trans.name_zh, trans.name_en, trans.name_vi, trans.desc_zh, trans.desc_en, trans.desc_vi, newId);
+            }
+        } catch (_) { /* 翻譯失敗不擋匯入 */ }
+        const skill = await db.prepare('SELECT * FROM skills WHERE id=?').get(newId);
+        res.json({ ...serializeSkill(skill, false), license: meta.license, file_count: files.length, has_requirements: !!reqEntry });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── POST /api/skills/:id/install-deps — SSE 串 pip 安裝 skill 包依賴 ───────────
+router.post('/:id/install-deps', async (req, res) => {
+    try {
+        const db = require('../database-oracle').db;
+        const s = await db.prepare('SELECT owner_user_id FROM skills WHERE id=?').get(req.params.id);
+        if (!s) return res.status(404).json({ error: '找不到 skill' });
+        if (s.owner_user_id !== req.user.id && req.user.role !== 'admin') {
+            return res.status(403).json({ error: '只有建立者或管理員可安裝依賴' });
+        }
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        try {
+            const r = await packageStore.installPythonPackages(req.params.id, (line) => send('log', { line }));
+            send('done', r);
+        } catch (e) {
+            send('error', { error: e.message });
+        }
+        res.end();
+    } catch (e) {
+        if (!res.headersSent) res.status(500).json({ error: e.message });
     }
 });
 
