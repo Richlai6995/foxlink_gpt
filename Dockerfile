@@ -88,6 +88,15 @@ RUN if ls fonts/*.ttf fonts/*.otf fonts/*.ttc 2>/dev/null | head -1 | grep -q .;
              || echo "[Docker] WARNING: CJK font setup failed, PDF may show garbled Chinese" ); \
     fi
 
+# 把 /app/fonts 內的字型註冊進 fontconfig — pdfkit 是用「檔案路徑」載字型不受影響,
+# 但 Skill Agent 的 vision QA 在 pod 內用 soffice 把 pptx→pdf 渲染、再 PyMuPDF→png,
+# soffice 走 fontconfig「按字型名」找字(blue_style 的 BLUE_STYLE_EA_FONT="Noto Sans TC")。
+# fontconfig 不掃 /app/fonts → 不註冊就找不到 CJK 字型 → render 出 tofu → vision 判低分鬼打牆。
+RUN mkdir -p /usr/share/fonts/truetype/app \
+    && (cp fonts/*.ttf fonts/*.otf fonts/*.ttc /usr/share/fonts/truetype/app/ 2>/dev/null || true) \
+    && fc-cache -f \
+    && (fc-list | grep -i "noto sans" | head -3 || echo "[Docker] WARNING: no Noto font registered for soffice")
+
 # Default env
 ENV PORT=3007
 ENV NODE_ENV=production

@@ -87,6 +87,10 @@ spec:
               value: "production"
             - name: UPLOAD_DIR
               value: "/app/uploads"
+            # Skill Agent(type='agent')匯入的技能包目錄 — 必須放 NFS PVC(/app/uploads 已掛 NFS),
+            # 否則匯入只落單一 pod、別的 pod 跑 agent job 找不到包。輸出 pptx 也走 UPLOAD_DIR/generated(NFS)。
+            - name: AGENT_PACKAGES_DIR
+              value: "/app/uploads/skill_packages"
             - name: REDIS_URL
               value: "redis://redis:6379"
             - name: NODE_OPTIONS

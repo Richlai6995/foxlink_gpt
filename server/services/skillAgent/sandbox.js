@@ -65,16 +65,24 @@ function runInWorkspace(cmd, ws, { timeout = DEFAULT_TIMEOUT_MS, fullEnv = false
   // fullEnv=true:可信步驟(如我們自己的 soffice 渲染)用完整 env;
   // 預設 false:跑「不可信 skill 程式碼」用鎖死的最小 env。
   // 註:soffice 需要 APPDATA/LOCALAPPDATA 找 user profile,鎖死 env 會讓它靜默失敗。
+  //
+  // PDF_VENV 的 bin 放進 PATH 最前 → agent 自己 bash 跑的 `python deck.py` / `python3 ...`
+  // 解析到帶 python-pptx + PyMuPDF 的 venv(K8s,PDF_PYTHON=/opt/pdf-venv/bin/python3)。
+  // 不做這件事:Debian 沒有 `python` 指令、且系統 python3 沒 python-pptx → agent 第一步就炸。
+  // dev 未設 PDF_PYTHON 時不動 PATH,沿用系統 python(dev 已自帶 python-pptx)。
+  const _pyBin = (process.env.PDF_PYTHON && fs.existsSync(process.env.PDF_PYTHON))
+    ? path.dirname(process.env.PDF_PYTHON) : null;
+  const _path = _pyBin ? `${_pyBin}${path.delimiter}${process.env.PATH || ''}` : (process.env.PATH || '');
   const env = fullEnv
-    ? { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' }
+    ? { ...process.env, PATH: _path, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' }
     : {
-        PATH: process.env.PATH,
+        PATH: _path,
         SystemRoot: process.env.SystemRoot, // Windows python 需要
         TEMP: ws, TMP: ws,
         HOME: ws, USERPROFILE: ws,
         PYTHONIOENCODING: 'utf-8',
         PYTHONUTF8: '1',
-        // blue_style 字型:預設 Noto(dev 已裝 + Linux prod 內建)
+        // blue_style 字型:預設 Noto(dev 已裝 + Linux prod 由 Dockerfile 註冊進 fontconfig)
         BLUE_STYLE_EA_FONT: process.env.BLUE_STYLE_EA_FONT || 'Noto Sans TC',
       };
   return new Promise((resolve) => {
