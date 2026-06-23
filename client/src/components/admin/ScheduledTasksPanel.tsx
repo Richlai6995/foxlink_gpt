@@ -3,7 +3,7 @@ import {
   CalendarClock, Plus, Play, Pause, Trash2, Edit2, History,
   RefreshCw, CheckCircle, XCircle, ChevronDown, ChevronUp,
   Clock, Mail, FileText, X, Save, TriangleAlert, Settings2,
-  Zap, BookOpen, Wrench, GitBranch, LayoutTemplate, Search, Share2,
+  Zap, BookOpen, Wrench, GitBranch, LayoutTemplate, Search, Share2, Plug,
 } from 'lucide-react'
 import ShareModal from '../common/ShareModal'
 import { useTranslation } from 'react-i18next'
@@ -20,6 +20,10 @@ const FILE_TYPES = ['xlsx', 'docx', 'pdf', 'pptx', 'foxlink_pptx', 'txt', 'mp3']
 interface ToolCatalog {
   skills: { id: number; name: string; icon: string; type: string; description?: string }[]
   kbs: { id: number; name: string; description?: string }[]
+  connectors?: {
+    id: number; name: string; description?: string; connector_type?: string;
+    params?: { name: string; label?: string; source?: string; required?: boolean }[];
+  }[]
   dashboards?: {
     design_id: number; name: string; description?: string;
     topic_name?: string; topic_id?: number; sample_questions?: string[];
@@ -257,7 +261,7 @@ function TaskFormModal({
   const [outputTemplate, setOutputTemplate] = useState<DocTemplate | null>(null)
   const [showTemplatePicker, setShowTemplatePicker] = useState(false)
   const [recipientInput, setRecipientInput] = useState('')
-  const [catalog, setCatalog] = useState<ToolCatalog>({ skills: [], kbs: [], dashboards: [] })
+  const [catalog, setCatalog] = useState<ToolCatalog>({ skills: [], kbs: [], connectors: [], dashboards: [] })
   const promptRef = useRef<HTMLTextAreaElement>(null)
   const [ac, setAc] = useState<{ show: boolean; trigger: string; query: string; idx: number }>(
     { show: false, trigger: '', query: '', idx: 0 }
@@ -870,6 +874,41 @@ function TaskFormModal({
                 )}
               </div>
 
+              {/* API 連接器（DIFY / REST）*/}
+              <div>
+                <label className="label flex items-center gap-1.5">
+                  <Plug size={13} className="text-sky-500" /> {t('scheduledTask.tools.availableConnectors')}
+                </label>
+                {(catalog.connectors || []).length === 0 ? (
+                  <p className="text-xs text-slate-400">{t('scheduledTask.tools.noConnectors')}</p>
+                ) : (
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {(catalog.connectors || []).map((c) => (
+                      <div key={c.id} className="flex items-center gap-2 px-3 py-2 bg-white border border-slate-200 rounded-lg hover:border-sky-300 transition">
+                        <span className="text-base">{c.connector_type === 'dify' ? '🤖' : '🔌'}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-slate-700 truncate">{c.name}</p>
+                          {c.description && <p className="text-xs text-slate-400 truncate">{c.description}</p>}
+                        </div>
+                        <button
+                          onClick={() => insertToolRef(`{{dify:${c.name}}}`)}
+                          className="shrink-0 text-xs px-2 py-1 bg-sky-50 text-sky-700 border border-sky-200 rounded hover:bg-sky-100 transition"
+                        >
+                          {t('scheduledTask.tools.insert')}
+                        </button>
+                        <button
+                          onClick={() => insertToolRef(`{{dify:${c.name} query=""}}`)}
+                          className="shrink-0 text-xs px-2 py-1 bg-slate-50 text-slate-600 border border-slate-200 rounded hover:bg-slate-100 transition"
+                          title={t('scheduledTask.tools.withQuery')}
+                        >
+                          {t('scheduledTask.tools.withQuery')}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* Syntax Reference */}
               <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
                 <p className="text-xs font-medium text-slate-600 mb-2 flex items-center gap-1">
@@ -1075,6 +1114,7 @@ function RunDetailModal({ run, onClose }: { run: TaskRun; onClose: () => void })
                     : n.type === 'parallel' ? '⫽'
                     : n.type === 'skill' ? '🛠'
                     : n.type === 'mcp' ? '🔌'
+                    : n.type === 'connector' ? '🔗'
                     : n.type === 'kb' ? '📖'
                     : n.type === 'ai' ? '🤖'
                     : '•'

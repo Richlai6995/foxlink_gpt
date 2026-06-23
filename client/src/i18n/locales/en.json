@@ -1618,6 +1618,8 @@
       "noSkills": "No skills available",
       "availableKbs": "Available Knowledge Bases",
       "noKbs": "No KBs available",
+      "availableConnectors": "Available API Connectors (DIFY / REST)",
+      "noConnectors": "No connectors available",
       "insert": "Insert",
       "withParams": "With Params",
       "withQuery": "With Query",
@@ -1664,6 +1666,7 @@
         "skill": "Skill",
         "mcp": "MCP Tool",
         "kb": "Knowledge Base",
+        "connector": "API Connector",
         "ai": "AI Follow-up",
         "generate_file": "Generate File",
         "condition": "Condition",
@@ -1745,6 +1748,14 @@
         "label": "Knowledge Base",
         "selectKb": "Select KB…",
         "query": "Query"
+      },
+      "connectorNode": {
+        "label": "API Connector (DIFY / REST)",
+        "selectConnector": "Select connector…",
+        "query": "Query",
+        "queryHint": "Defaults to upstream output {{ao}}; passed as DIFY query.",
+        "params": "Fixed parameters",
+        "paramPlaceholder": "Fixed value; variables like {{ai_output}} / {{date}} allowed"
       },
       "aiNode": {
         "prompt": "Prompt",

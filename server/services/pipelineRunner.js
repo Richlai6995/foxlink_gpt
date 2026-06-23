@@ -7,6 +7,7 @@
  * Node types:
  *   skill        — call a skill with input text
  *   mcp          — call an MCP tool with arg interpolation
+ *   connector    — call an API/DIFY connector (dify_knowledge_bases) with query + params
  *   kb           — search a knowledge base
  *   ai           — additional AI call (chain)
  *   generate_file — generate pdf/xlsx/docx/mp3/etc from text
@@ -166,6 +167,87 @@ async function execKb(node, vars, db) {
 
   const chunks = await searchKbChunks(db, kb.id, query.slice(0, 500));
   return chunks.length > 0 ? chunks.join('\n---\n').slice(0, 6000) : '（知識庫無相關內容）';
+}
+
+// ── connector：呼叫 DIFY / REST API 連接器(dify_knowledge_bases)──────────────
+//   node.name      — connector 名稱
+//   node.query     — 主查詢(預設接上游 {{ai_output}});DIFY 走 aiArgs.query
+//   node.params    — { paramName: value } 手填固定參數(可含 {{var}} 內插)
+//   權限對齊 chat:owner 不適用(無 owner 欄位)→ is_public+approved 或 dify_access(以 task.user 身份)
+async function execConnector(node, vars, db, context) {
+  const { executeConnector } = require('./apiConnectorService');
+  const { userId } = context;
+  const u = await db.prepare(
+    `SELECT role, role_id, email, name, employee_id, dept_code, profit_center, org_section, org_group_name, factory_code
+     FROM users WHERE id=?`
+  ).get(userId ?? 0) || {};
+  const isAdmin = u.role === 'admin';
+
+  // dify_access 用「新」grantee 命名:role/department/cost_center/division/factory/org_group
+  // admin 無條件可用(對齊 chat:admin 傳 userCtx=null 撈全部),否則走 is_public+approved 或 dify_access
+  const conn = isAdmin
+    ? await db.prepare(
+        `SELECT * FROM dify_knowledge_bases WHERE UPPER(name)=UPPER(?) AND is_active=1 FETCH FIRST 1 ROWS ONLY`
+      ).get(node.name)
+    : await db.prepare(
+        `SELECT * FROM dify_knowledge_bases d
+         WHERE UPPER(d.name)=UPPER(?) AND d.is_active=1 AND (
+           (d.is_public=1 AND d.public_approved=1)
+           OR EXISTS (
+             SELECT 1 FROM dify_access a WHERE a.dify_kb_id=d.id AND (
+               (a.grantee_type='user'        AND a.grantee_id=TO_CHAR(?))
+               OR (a.grantee_type='role'        AND a.grantee_id=TO_CHAR(?) AND ? IS NOT NULL)
+               OR (a.grantee_type='department'  AND a.grantee_id=? AND ? IS NOT NULL)
+               OR (a.grantee_type='cost_center' AND a.grantee_id=? AND ? IS NOT NULL)
+               OR (a.grantee_type='division'    AND a.grantee_id=? AND ? IS NOT NULL)
+               OR (a.grantee_type='factory'     AND a.grantee_id=? AND ? IS NOT NULL)
+               OR (a.grantee_type='org_group'   AND a.grantee_id=? AND ? IS NOT NULL)
+             )
+           )
+         )
+         FETCH FIRST 1 ROWS ONLY`
+      ).get(
+        node.name,
+        userId ?? 0,
+        u.role_id ?? 0, u.role_id ?? null,
+        u.dept_code || null, u.dept_code || null,
+        u.profit_center || null, u.profit_center || null,
+        u.org_section || null, u.org_section || null,
+        u.factory_code || null, u.factory_code || null,
+        u.org_group_name || null, u.org_group_name || null,
+      );
+  if (!conn) throw new Error(`API 連接器「${node.name}」不存在或無權限`);
+
+  // query 預設接上游輸出;手填參數逐一內插
+  const query = interpolate(node.query || '{{ai_output}}', vars);
+  const aiArgs = { query };
+  if (node.params && typeof node.params === 'object') {
+    for (const [k, v] of Object.entries(node.params)) {
+      aiArgs[k] = typeof v === 'string' ? interpolate(v, vars) : v;
+    }
+  }
+  // userCtx 對齊 chat.apiUserCtx,供 connector 的 system_user_* 參數解析
+  const userCtx = {
+    id: userId,
+    email: u.email || '', name: u.name || '',
+    employee_id: u.employee_id || '', dept_code: u.dept_code || '',
+  };
+  const answer = await executeConnector(conn, aiArgs, userCtx, { db, userId });
+  const text = typeof answer === 'string' ? answer : JSON.stringify(answer);
+  // executeConnector 對「缺參數 / HTTP 失敗」不拋錯,改回 `[name: 缺少必要參數…]` /
+  // `[name: 查詢失敗…]` 字串當 answer。pipeline 需把這類失敗標成 node error(否則排程會
+  // 「假成功」往下游送錯資料)。「無相關回應」是成功但空結果,放行不擋。
+  const failMsg = detectConnectorFailure(conn.name, text);
+  if (failMsg) throw new Error(failMsg);
+  return text;
+}
+
+// executeConnector 失敗時回 `[name: 缺少必要參數…]` / `[name: 查詢失敗…]` 字串(不拋錯)。
+// 偵測這兩種前綴並回 unwrap 後的訊息;非失敗回 null。pipelineRunner / promptResolver 共用。
+function detectConnectorFailure(connName, text) {
+  if (typeof text !== 'string') return null;
+  const re = new RegExp(`^\\[${connName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*(缺少必要參數|查詢失敗)`);
+  return re.test(text) ? text.replace(/^\[|\]$/g, '') : null;
 }
 
 // ── 共用落檔 helper：把一段文字寫成 pdf/docx/xlsx/pptx/txt(走 fileGenerator)或
@@ -613,6 +695,7 @@ async function runNode(node, vars, db, context, log) {
       }
       case 'mcp':           output = await execMcp(node, vars, db, context); break;
       case 'kb':            output = await execKb(node, vars, db); break;
+      case 'connector':     output = await execConnector(node, vars, db, context); break;
       case 'ai': {
         const r = await execAi(node, vars, db, context);
         output = r.text; file = r.file;

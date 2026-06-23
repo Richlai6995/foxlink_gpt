@@ -3,7 +3,7 @@ import {
   Plus, Trash2, ChevronDown, ChevronUp, GitBranch,
   Zap, Wrench, BookOpen, Bot, FileOutput, GitMerge, X,
   GripVertical, AlertCircle, CheckCircle2, LayoutTemplate,
-  Database, Shield, PlayCircle, BarChart3, Loader2,
+  Database, Shield, PlayCircle, BarChart3, Loader2, Plug,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import TemplatePickerPopover from '../templates/TemplatePickerPopover'
@@ -29,7 +29,7 @@ export interface DashboardOutput {
 
 export interface PipelineNode {
   id: string
-  type: 'skill' | 'mcp' | 'kb' | 'ai' | 'generate_file' | 'condition' | 'parallel' | 'db_write' | 'kb_write' | 'alert' | 'dashboard' | 'merge_excel'
+  type: 'skill' | 'mcp' | 'kb' | 'ai' | 'generate_file' | 'condition' | 'parallel' | 'db_write' | 'kb_write' | 'alert' | 'dashboard' | 'merge_excel' | 'connector'
   // skill
   name?: string
   input?: string
@@ -41,8 +41,10 @@ export interface PipelineNode {
   server?: string
   tool?: string
   args?: Record<string, string>
-  // kb
+  // kb / connector
   query?: string
+  // connector (DIFY / REST API)：node.name = 連接器名稱、query = 主查詢、params = 手填固定參數
+  params?: Record<string, string>
   // ai
   prompt?: string
   model?: string
@@ -128,9 +130,23 @@ interface WritableTableDetail extends WritableTable {
   column_metadata: Array<{ name: string; type: string; nullable: boolean }>
 }
 
+interface ConnectorParam {
+  name: string
+  label?: string
+  source?: string
+  required?: boolean
+  param_location?: string
+}
 interface ToolCatalog {
   skills: { id: number; name: string; icon: string; type: string }[]
   kbs: { id: number; name: string }[]
+  connectors?: {
+    id: number
+    name: string
+    description?: string
+    connector_type?: string
+    params?: ConnectorParam[]
+  }[]
   dashboards?: {
     design_id: number
     name: string
@@ -164,6 +180,7 @@ const NODE_TYPES = [
   { type: 'skill',         icon: Zap,        labelKey: 'scheduledTask.pipeline.nodeType.skill',          color: 'text-amber-500',  bg: 'bg-amber-50  border-amber-200', adminOnly: false },
   { type: 'mcp',           icon: Wrench,      labelKey: 'scheduledTask.pipeline.nodeType.mcp',            color: 'text-purple-500', bg: 'bg-purple-50 border-purple-200', adminOnly: false },
   { type: 'kb',            icon: BookOpen,    labelKey: 'scheduledTask.pipeline.nodeType.kb',             color: 'text-green-500',  bg: 'bg-green-50  border-green-200',  adminOnly: false },
+  { type: 'connector',     icon: Plug,        labelKey: 'scheduledTask.pipeline.nodeType.connector',      color: 'text-sky-500',    bg: 'bg-sky-50    border-sky-200',    adminOnly: false },
   { type: 'ai',            icon: Bot,         labelKey: 'scheduledTask.pipeline.nodeType.ai',             color: 'text-blue-500',   bg: 'bg-blue-50   border-blue-200',   adminOnly: false },
   { type: 'generate_file', icon: FileOutput,  labelKey: 'scheduledTask.pipeline.nodeType.generate_file',  color: 'text-indigo-500', bg: 'bg-indigo-50 border-indigo-200', adminOnly: false },
   { type: 'condition',     icon: GitBranch,   labelKey: 'scheduledTask.pipeline.nodeType.condition',      color: 'text-rose-500',   bg: 'bg-rose-50   border-rose-200',   adminOnly: false },
@@ -1710,6 +1727,58 @@ function NodeForm({
     </div>
   )
 
+  if (node.type === 'connector') {
+    const conn = (catalog.connectors || []).find((c) => c.name === node.name)
+    const params = conn?.params || []
+    return (
+      <div className="space-y-3">
+        <div>
+          <label className="label text-xs">{t('scheduledTask.pipeline.connectorNode.label')}</label>
+          <select
+            className="input w-full text-xs"
+            value={node.name || ''}
+            onChange={(e) => {
+              // 換不同連接器時清掉舊參數(舊 connector 的 param key 與新的不同,殘留會混進 pipeline_json)
+              const changed = e.target.value !== node.name
+              onChange(changed ? { name: e.target.value, params: {} } : { name: e.target.value })
+            }}
+          >
+            <option value="">{t('scheduledTask.pipeline.connectorNode.selectConnector')}</option>
+            {(catalog.connectors || []).map((c) => (
+              <option key={c.id} value={c.name}>{`${c.connector_type === 'dify' ? '🤖' : '🔌'} ${c.name}`}</option>
+            ))}
+          </select>
+        </div>
+        {conn?.description && <p className="text-[11px] text-slate-400 -mt-1">{conn.description}</p>}
+        <div>
+          <label className="label text-xs">{t('scheduledTask.pipeline.connectorNode.query')}</label>
+          <VarInput value={node.query || '{{ai_output}}'} onChange={(v) => onChange({ query: v })} placeholder="{{ai_output}}" allNodeIds={otherIds} />
+          <p className="text-[11px] text-slate-400 mt-0.5">{t('scheduledTask.pipeline.connectorNode.queryHint', { ao: '{{ai_output}}' })}</p>
+        </div>
+        {params.length > 0 && (
+          <div className="space-y-2">
+            <label className="label text-xs">{t('scheduledTask.pipeline.connectorNode.params')}</label>
+            {params.map((p) => (
+              <div key={p.name}>
+                <label className="text-[11px] text-slate-500 flex items-center gap-1">
+                  {p.label || p.name}
+                  {p.required && <span className="text-rose-500">*</span>}
+                  <code className="text-slate-400">({p.name})</code>
+                </label>
+                <VarInput
+                  value={node.params?.[p.name] || ''}
+                  onChange={(v) => onChange({ params: { ...(node.params || {}), [p.name]: v } })}
+                  placeholder={t('scheduledTask.pipeline.connectorNode.paramPlaceholder')}
+                  allNodeIds={otherIds}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   if (node.type === 'ai') return (
     <div className="space-y-3">
       <div>
@@ -1960,6 +2029,7 @@ function NodeCard({
     if (node.type === 'skill') return node.name || t('scheduledTask.pipeline.summary.noSkill')
     if (node.type === 'mcp') return node.server ? `${node.server} → ${node.tool || '?'}` : t('scheduledTask.pipeline.summary.notSet')
     if (node.type === 'kb') return node.name || t('scheduledTask.pipeline.summary.noKb')
+    if (node.type === 'connector') return node.name || t('scheduledTask.pipeline.summary.notSet')
     if (node.type === 'ai') return node.prompt ? node.prompt.slice(0, 40) + '…' : t('scheduledTask.pipeline.summary.noPrompt')
     if (node.type === 'generate_file') return node.template_id
       ? t('scheduledTask.pipeline.summary.template', { name: node.template_name || node.template_id })

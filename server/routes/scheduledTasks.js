@@ -521,9 +521,75 @@ router.get('/tools-catalog', async (req, res) => {
       }).filter(Boolean);
     };
 
+    // ── API 連接器(DIFY / REST)─ pipeline connector node + {{dify:name}} 用 ──
+    // 權限對齊 chat / pipelineRunner.execConnector:admin 全撈,否則 is_public+approved 或 dify_access
+    let connectors = [];
+    try {
+      const connCols = `d.id, d.name, d.description, d.connector_type, d.input_params,
+        d.name_zh, d.name_en, d.name_vi, d.desc_zh, d.desc_en, d.desc_vi`;
+      if (dashUser.role === 'admin') {
+        connectors = await db.prepare(
+          `SELECT ${connCols} FROM dify_knowledge_bases d WHERE d.is_active=1 ORDER BY d.sort_order ASC`
+        ).all();
+      } else {
+        connectors = await db.prepare(
+          `SELECT DISTINCT ${connCols}
+           FROM dify_knowledge_bases d
+           WHERE d.is_active=1 AND (
+             (d.is_public=1 AND d.public_approved=1)
+             OR EXISTS (
+               SELECT 1 FROM dify_access a WHERE a.dify_kb_id=d.id AND (
+                 (a.grantee_type='user'        AND a.grantee_id=TO_CHAR(?))
+                 OR (a.grantee_type='role'        AND a.grantee_id=TO_CHAR(?) AND ? IS NOT NULL)
+                 OR (a.grantee_type='department'  AND a.grantee_id=? AND ? IS NOT NULL)
+                 OR (a.grantee_type='cost_center' AND a.grantee_id=? AND ? IS NOT NULL)
+                 OR (a.grantee_type='division'    AND a.grantee_id=? AND ? IS NOT NULL)
+                 OR (a.grantee_type='factory'     AND a.grantee_id=? AND ? IS NOT NULL)
+                 OR (a.grantee_type='org_group'   AND a.grantee_id=? AND ? IS NOT NULL)
+               )
+             )
+           )
+           ORDER BY d.sort_order ASC`
+        ).all(
+          req.user.id,
+          dashUser.role_id ?? 0, dashUser.role_id ?? null,
+          dashUser.dept_code || null,    dashUser.dept_code || null,
+          dashUser.profit_center || null, dashUser.profit_center || null,
+          dashUser.org_section || null,   dashUser.org_section || null,
+          dashUser.factory_code || null,  dashUser.factory_code || null,
+          dashUser.org_group_name || null, dashUser.org_group_name || null,
+        );
+      }
+    } catch (e) {
+      console.warn('[tools-catalog] connectors query failed:', e.message);
+      connectors = [];
+    }
+    // input_params(CLOB JSON)→ 只回 UI 需要的欄位,供 connector node 手填參數
+    const parseParams = (raw) => {
+      if (!raw) return [];
+      let arr;
+      try { arr = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (_) { return []; }
+      if (!Array.isArray(arr)) return [];
+      return arr.map(p => ({
+        name: p.name,
+        label: p.label || p.name,
+        source: p.source || 'user_input',
+        required: !!p.required,
+        param_location: p.param_location || 'query',
+      })).filter(p => p.name);
+    };
+
     res.json({
       skills: skills.map(localize),
       kbs: kbs.map(localize),
+      connectors: connectors.map(c => ({
+        id: c.id,
+        name: c[`name_${suffix}`] || c.name,
+        description: c[`desc_${suffix}`] || c.description || '',
+        connector_type: c.connector_type || 'dify',
+        // 只列「使用者需手填」的參數(source=user_input);system 參數排程執行時自動帶
+        params: parseParams(c.input_params).filter(p => p.source === 'user_input'),
+      })),
       dashboards: dashboards.map(d => ({
         design_id: d.id,
         name: d[`name_${suffix}`] || d.name,

@@ -1618,6 +1618,8 @@
       "noSkills": "Chưa có kỹ năng nào",
       "availableKbs": "Kho tri thức có sẵn",
       "noKbs": "Chưa có KB nào",
+      "availableConnectors": "Trình kết nối API có sẵn (DIFY / REST)",
+      "noConnectors": "Chưa có trình kết nối nào",
       "insert": "Chèn",
       "withParams": "Có tham số",
       "withQuery": "Có truy vấn",
@@ -1664,6 +1666,7 @@
         "skill": "Kỹ năng",
         "mcp": "Công cụ MCP",
         "kb": "Kho tri thức",
+        "connector": "Trình kết nối API",
         "ai": "AI bổ sung",
         "generate_file": "Tạo tệp",
         "condition": "Điều kiện",
@@ -1745,6 +1748,14 @@
         "label": "Kho tri thức",
         "selectKb": "Chọn KB…",
         "query": "Nội dung truy vấn"
+      },
+      "connectorNode": {
+        "label": "Trình kết nối API (DIFY / REST)",
+        "selectConnector": "Chọn trình kết nối…",
+        "query": "Nội dung truy vấn (query)",
+        "queryHint": "Mặc định lấy đầu ra node trước {{ao}}; truyền vào trường query của DIFY.",
+        "params": "Tham số cố định",
+        "paramPlaceholder": "Giá trị cố định; cho phép biến như {{ai_output}} / {{date}}"
       },
       "aiNode": {
         "prompt": "Prompt",

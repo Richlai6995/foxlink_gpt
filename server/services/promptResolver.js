@@ -8,7 +8,8 @@
  *   {{kb:知識庫名稱}}                         - search KB with task context
  *   {{kb:知識庫名稱 query="specific query"}}  - explicit query override
  *   {{mcp:toolName}}                         - future placeholder (returns note)
- *   {{dify:名稱}}                             - future placeholder (returns note)
+ *   {{dify:名稱}}                             - call DIFY / REST API connector, inject result
+ *   {{dify:名稱 query="specific query"}}      - explicit query override
  *
  * Returns: { resolvedText, toolsUsed }
  *   toolsUsed = { skills: [{id,name}], kbs: [{id,name,query}], mcp_tools: [], dify_kbs: [] }
@@ -100,6 +101,64 @@ async function executeSkillByRow(db, skill, input, context = {}) {
   }
 
   return `[技能類型 "${skill.type}" 不支援直接呼叫]`;
+}
+
+// ── DIFY / REST API connector helper(權限對齊 pipelineRunner.execConnector)───
+async function executeConnectorByName(db, name, query, { userId } = {}) {
+  const { executeConnector } = require('./apiConnectorService');
+  const u = await db.prepare(
+    `SELECT role, role_id, email, name, employee_id, dept_code, profit_center, org_section, org_group_name, factory_code
+     FROM users WHERE id=?`
+  ).get(userId ?? 0) || {};
+  const isAdmin = u.role === 'admin';
+
+  const conn = isAdmin
+    ? await db.prepare(
+        `SELECT * FROM dify_knowledge_bases WHERE UPPER(name)=UPPER(?) AND is_active=1 FETCH FIRST 1 ROWS ONLY`
+      ).get(name)
+    : await db.prepare(
+        `SELECT * FROM dify_knowledge_bases d
+         WHERE UPPER(d.name)=UPPER(?) AND d.is_active=1 AND (
+           (d.is_public=1 AND d.public_approved=1)
+           OR EXISTS (
+             SELECT 1 FROM dify_access a WHERE a.dify_kb_id=d.id AND (
+               (a.grantee_type='user'        AND a.grantee_id=TO_CHAR(?))
+               OR (a.grantee_type='role'        AND a.grantee_id=TO_CHAR(?) AND ? IS NOT NULL)
+               OR (a.grantee_type='department'  AND a.grantee_id=? AND ? IS NOT NULL)
+               OR (a.grantee_type='cost_center' AND a.grantee_id=? AND ? IS NOT NULL)
+               OR (a.grantee_type='division'    AND a.grantee_id=? AND ? IS NOT NULL)
+               OR (a.grantee_type='factory'     AND a.grantee_id=? AND ? IS NOT NULL)
+               OR (a.grantee_type='org_group'   AND a.grantee_id=? AND ? IS NOT NULL)
+             )
+           )
+         )
+         FETCH FIRST 1 ROWS ONLY`
+      ).get(
+        name,
+        userId ?? 0,
+        u.role_id ?? 0, u.role_id ?? null,
+        u.dept_code || null, u.dept_code || null,
+        u.profit_center || null, u.profit_center || null,
+        u.org_section || null, u.org_section || null,
+        u.factory_code || null, u.factory_code || null,
+        u.org_group_name || null, u.org_group_name || null,
+      );
+  if (!conn) throw new Error(`連接器「${name}」不存在或無權限`);
+
+  const userCtx = {
+    id: userId,
+    email: u.email || '', name: u.name || '',
+    employee_id: u.employee_id || '', dept_code: u.dept_code || '',
+  };
+  const answer = await executeConnector(conn, { query }, userCtx, { db, userId });
+  const text = typeof answer === 'string' ? answer : JSON.stringify(answer);
+  // executeConnector 對「缺參數 / HTTP 失敗」不拋錯,改回 `[name: 缺少必要參數…]` /
+  // `[name: 查詢失敗…]` 字串。偵測並 throw,讓上層 try/catch 標成查詢失敗(與 pipelineRunner 對齊)。
+  const escName = conn.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (new RegExp(`^\\[${escName}:\\s*(缺少必要參數|查詢失敗)`).test(text)) {
+    throw new Error(text.replace(/^\[|\]$/g, ''));
+  }
+  return text;
 }
 
 // ── Main resolver ─────────────────────────────────────────────────────────────
@@ -203,12 +262,20 @@ async function resolveToolRefs(text, db, opts = {}) {
     toolsUsed.mcp_tools.push(toolName);
   }
 
-  // ── {{dify:name}} — future ─────────────────────────────────────────────────
-  const difyPattern = /\{\{dify:([^}]+)\}\}/g;
+  // ── {{dify:name}} / {{dify:name query="..."}} — 呼叫 DIFY / REST API 連接器 ───
+  const difyPattern = /\{\{dify:([^}"]+?)(?:\s+query="([^"]*)")?\}\}/g;
   for (const m of [...result.matchAll(difyPattern)]) {
     const name = m[1].trim();
-    result = result.replace(m[0], `[API 連接器「${name}」（尚未支援，敬請期待）]`);
-    toolsUsed.dify_kbs.push(name);
+    const query = (m[2] || taskName || name).trim();
+    const placeholder = m[0];
+    try {
+      const content = await executeConnectorByName(db, name, query, { userId });
+      result = result.replace(placeholder, `\n【API 連接器「${name}」回應】\n${content}\n`);
+      toolsUsed.dify_kbs.push(name);
+    } catch (e) {
+      console.error(`[PromptResolver] DIFY "${name}" error:`, e.message);
+      result = result.replace(placeholder, `[API 連接器查詢失敗: ${e.message}]`);
+    }
   }
 
   const hasTools = toolsUsed.skills.length + toolsUsed.kbs.length +

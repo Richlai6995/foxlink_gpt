@@ -1618,6 +1618,8 @@
       "noSkills": "尚無可用技能",
       "availableKbs": "可用知識庫",
       "noKbs": "尚無可用知識庫",
+      "availableConnectors": "可用 API 連接器（DIFY / REST）",
+      "noConnectors": "尚無可用連接器",
       "insert": "插入",
       "withParams": "帶參數",
       "withQuery": "帶查詢",
@@ -1664,6 +1666,7 @@
         "skill": "技能",
         "mcp": "MCP 工具",
         "kb": "知識庫",
+        "connector": "API 連接器",
         "ai": "AI 追加",
         "generate_file": "生成檔案",
         "condition": "條件判斷",
@@ -1745,6 +1748,14 @@
         "label": "知識庫",
         "selectKb": "選擇知識庫…",
         "query": "查詢內容"
+      },
+      "connectorNode": {
+        "label": "API 連接器（DIFY / REST）",
+        "selectConnector": "選擇連接器…",
+        "query": "查詢內容（query）",
+        "queryHint": "預設帶上一節點輸出 {{ao}};DIFY 走 query 欄位。",
+        "params": "固定參數",
+        "paramPlaceholder": "固定值，可用 {{ai_output}} / {{date}} 等變數"
       },
       "aiNode": {
         "prompt": "Prompt",
