@@ -740,23 +740,36 @@ function verifyUserToken(token) {
  * @returns {string} 可能為空字串
  */
 function buildMcpSystemInstructions(serverMap, usedToolNames, serverInstructionsMap) {
-  if (!serverInstructionsMap || Object.keys(serverInstructionsMap).length === 0) return '';
   const usedServerIds = new Set();
   for (const tn of usedToolNames) {
     const entry = serverMap?.[tn];
     if (entry?.server?.id != null) usedServerIds.add(entry.server.id);
   }
+  // 沒有任何 MCP tool 進 LLM → 不需要任何 MCP 指示
   if (usedServerIds.size === 0) return '';
 
-  const blocks = [];
-  for (const sid of usedServerIds) {
-    const entry = serverInstructionsMap[sid];
-    if (!entry) continue;
-    // 截長保護:單一 server 指示 > 4000 字顯然是配錯,截到 4000
-    const body = entry.instructions.length > 4000
-      ? entry.instructions.slice(0, 4000) + '…(truncated)'
-      : entry.instructions;
-    blocks.push(`【${entry.name} 使用規則】\n${body}`);
+  // 全域無狀態契約:壓制工具描述裡「server 會記住上一輪參數」這類誤導,
+  // 確保多輪 workflow 每輪都由我方(client)帶齊已知參數。只要有 MCP tool 進來就注入,
+  // 不依賴 server 是否自宣告 instructions(NPI 那種規則全寫在 tool description 的也吃得到)。
+  const STATELESS_RULE =
+    '【MCP 工具呼叫通則 — 必須遵守,優先於各工具自身描述】\n' +
+    '這些 MCP 工具為無狀態服務,server 不會記得你前幾輪傳過的參數。\n' +
+    '呼叫任一工具時,務必把「整段對話到目前為止已確定的所有參數」一次帶齊;\n' +
+    '即使某參數是前面幾輪才取得,本輪也要重新一併帶上。\n' +
+    '不可只送本輪新增欄位,也不可相信工具描述中「remembered / 使用記住的 / use remembered」之類說法。\n' +
+    '例:第一輪使用者給機台「118」、第二輪才給「折線圖」,本輪呼叫必須同時帶 tester_name="118" 與 chart_type="line"。';
+
+  const blocks = [STATELESS_RULE];
+  if (serverInstructionsMap) {
+    for (const sid of usedServerIds) {
+      const entry = serverInstructionsMap[sid];
+      if (!entry) continue;
+      // 截長保護:單一 server 指示 > 4000 字顯然是配錯,截到 4000
+      const body = entry.instructions.length > 4000
+        ? entry.instructions.slice(0, 4000) + '…(truncated)'
+        : entry.instructions;
+      blocks.push(`【${entry.name} 使用規則】\n${body}`);
+    }
   }
   return blocks.join('\n\n---\n\n');
 }
