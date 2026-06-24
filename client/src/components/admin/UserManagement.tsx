@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Edit, Trash2, Save, X, Check, Download, UserCog, FileText, Mic, Image, CalendarClock, RefreshCw, Building2, Search, ShieldCheck, Clock, ChevronDown, ChevronUp, AlertTriangle, LogOut, ScanSearch, Ban } from 'lucide-react'
+import { Plus, Edit, Trash2, Save, X, Check, Download, UserCog, FileText, Mic, Image, CalendarClock, RefreshCw, Building2, Search, ShieldCheck, Clock, ChevronDown, ChevronUp, AlertTriangle, LogOut, ScanSearch, Ban, Wallet } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { User } from '../../types'
 import api from '../../lib/api'
@@ -280,6 +280,10 @@ export default function UserManagement() {
   const [syncMsg, setSyncMsg] = useState('')
   const [search, setSearch] = useState('')
   const [quickFilter, setQuickFilter] = useState<'mixed_name' | 'en_name' | 'no_eid' | 'no_email' | 'exempt' | ''>('')
+  // 使用金額限制篩選（每月調額用）：週期(預設月) + 比較運算 + 金額
+  const [budgetPeriod, setBudgetPeriod] = useState<'monthly' | 'weekly' | 'daily'>('monthly')
+  const [budgetOp, setBudgetOp] = useState<'eq' | 'lte' | 'gte'>('eq')
+  const [budgetAmount, setBudgetAmount] = useState('')
   const [view, setView] = useState<'list' | 'empMatch'>('list')
 
   const load = async () => {
@@ -305,6 +309,22 @@ export default function UserManagement() {
   const hasEnChar = (s: string) => /[a-zA-Z]/.test(s)
   const hasCjk = (s: string) => /[\u4e00-\u9fff\u3400-\u4dbf]/.test(s)
 
+  const getRoleBudget = (u: User) => {
+    const rid = (u as any).role_id
+    if (!rid) return null
+    return roles.find(r => r.id === rid) || null
+  }
+
+  const effectiveBudget = (u: User, field: 'budget_daily' | 'budget_weekly' | 'budget_monthly') => {
+    const userVal = (u as any)[field]
+    if (userVal != null) return userVal
+    const role = getRoleBudget(u)
+    return role ? (role as any)[field] : null
+  }
+
+  const budgetAmountNum = budgetAmount.trim() === '' ? null : Number(budgetAmount)
+  const budgetFilterActive = budgetAmountNum != null && !Number.isNaN(budgetAmountNum)
+
   const filtered = users.filter((u) => {
     const u2 = u as any
     // keyword search
@@ -321,13 +341,22 @@ export default function UserManagement() {
         (u2.org_group_name || '').toLowerCase().includes(q)
       if (!match) return false
     }
-    // quick filters
+    // quick filters\uff08\u53ef\u8207\u91d1\u984d\u689d\u4ef6\u4e26\u5b58\uff0c\u9010\u689d AND\uff09
     const name = u.name || ''
-    if (quickFilter === 'mixed_name') return hasCjk(name) && hasEnChar(name)
-    if (quickFilter === 'en_name') return hasEnChar(name)
-    if (quickFilter === 'no_eid') return !u.employee_id
-    if (quickFilter === 'no_email') return !u.email
-    if (quickFilter === 'exempt') return u2.emp_match_exempt === 1
+    if (quickFilter === 'mixed_name' && !(hasCjk(name) && hasEnChar(name))) return false
+    if (quickFilter === 'en_name' && !hasEnChar(name)) return false
+    if (quickFilter === 'no_eid' && u.employee_id) return false
+    if (quickFilter === 'no_email' && u.email) return false
+    if (quickFilter === 'exempt' && u2.emp_match_exempt !== 1) return false
+    // \u4f7f\u7528\u91d1\u984d\u9650\u5236\u689d\u4ef6\uff1a\u4f9d\u9031\u671f\u53d6\u751f\u6548\u984d\u5ea6\uff08\u500b\u4eba\u8986\u84cb > \u89d2\u8272\uff09\uff0c\u8207\u91d1\u984d\u6bd4\u8f03
+    if (budgetFilterActive) {
+      const field = budgetPeriod === 'monthly' ? 'budget_monthly' : budgetPeriod === 'weekly' ? 'budget_weekly' : 'budget_daily'
+      const eff = effectiveBudget(u, field)
+      if (eff == null) return false // \u7121\u9650\u5236\u8005\u6392\u9664\uff08\u6c92\u984d\u5ea6\u5c31\u4e0d\u5728\u8abf\u984d\u540d\u55ae\uff09
+      if (budgetOp === 'eq' && eff !== budgetAmountNum) return false
+      if (budgetOp === 'lte' && !(eff <= budgetAmountNum!)) return false
+      if (budgetOp === 'gte' && !(eff >= budgetAmountNum!)) return false
+    }
     return true
   })
 
@@ -512,19 +541,6 @@ export default function UserManagement() {
       setForm((p) => ({ ...p, [key]: e.target.value })),
   })
 
-  const getRoleBudget = (u: User) => {
-    const rid = (u as any).role_id
-    if (!rid) return null
-    return roles.find(r => r.id === rid) || null
-  }
-
-  const effectiveBudget = (u: User, field: 'budget_daily' | 'budget_weekly' | 'budget_monthly') => {
-    const userVal = (u as any)[field]
-    if (userVal != null) return userVal
-    const role = getRoleBudget(u)
-    return role ? (role as any)[field] : null
-  }
-
   if (view === 'empMatch') {
     return <EmpMatchPanel onBack={() => setView('list')} onChanged={load} />
   }
@@ -601,7 +617,43 @@ export default function UserManagement() {
             <X size={12} /> {t('common.clear', '清除')}
           </button>
         )}
-        {(search || quickFilter) && (
+        <span className="w-px h-5 bg-slate-300 mx-1 shrink-0" />
+        {/* 使用金額限制篩選：週期(預設月) + 比較 + 金額 */}
+        <span className="text-xs text-slate-500 shrink-0 flex items-center gap-1" title={t('users.filter.budgetTip', '依生效額度（個人覆蓋優先、否則沿用角色）篩選；無限制者不列入')}>
+          <Wallet size={13} className="text-slate-400" />
+          {t('users.filter.budgetLabel', '使用金額限制')}
+        </span>
+        <select
+          value={budgetPeriod}
+          onChange={e => setBudgetPeriod(e.target.value as 'monthly' | 'weekly' | 'daily')}
+          className="text-xs border border-slate-300 rounded-md px-1.5 py-1 bg-white text-slate-700 outline-none focus:border-blue-400"
+        >
+          <option value="monthly">{t('users.filter.budgetMonthly', '月')}</option>
+          <option value="weekly">{t('users.filter.budgetWeekly', '週')}</option>
+          <option value="daily">{t('users.filter.budgetDaily', '日')}</option>
+        </select>
+        <select
+          value={budgetOp}
+          onChange={e => setBudgetOp(e.target.value as 'eq' | 'lte' | 'gte')}
+          className="text-xs border border-slate-300 rounded-md px-1.5 py-1 bg-white text-slate-700 outline-none focus:border-blue-400"
+        >
+          <option value="eq">=</option>
+          <option value="lte">≤</option>
+          <option value="gte">≥</option>
+        </select>
+        <input
+          type="number"
+          value={budgetAmount}
+          onChange={e => setBudgetAmount(e.target.value)}
+          placeholder="$"
+          className="w-20 text-xs border border-slate-300 rounded-md px-2 py-1 bg-white text-slate-700 outline-none focus:border-blue-400"
+        />
+        {budgetAmount !== '' && (
+          <button onClick={() => setBudgetAmount('')} className="text-slate-400 hover:text-slate-600" title={t('common.clear', '清除')}>
+            <X size={14} />
+          </button>
+        )}
+        {(search || quickFilter || budgetFilterActive) && (
           <span className="text-xs text-slate-500 shrink-0 ml-auto">{filtered.length} / {users.length}</span>
         )}
       </div>

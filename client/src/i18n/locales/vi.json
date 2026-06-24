@@ -472,7 +472,12 @@
       "noEid": "Không có mã NV",
       "noEmail": "Không có Email",
       "exempt": "Đã miễn",
-      "exemptTip": "Miễn đối chiếu ({{reason}}) — bấm để hủy"
+      "exemptTip": "Miễn đối chiếu ({{reason}}) — bấm để hủy",
+      "budgetLabel": "Hạn mức chi tiêu",
+      "budgetTip": "Lọc theo hạn mức hiệu lực (ưu tiên ghi đè cá nhân, nếu không thì theo vai trò); người không có hạn mức bị loại",
+      "budgetMonthly": "Tháng",
+      "budgetWeekly": "Tuần",
+      "budgetDaily": "Ngày"
     },
     "cols": {
       "username": "Tài khoản",

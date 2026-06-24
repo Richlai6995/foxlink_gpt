@@ -472,7 +472,12 @@
       "noEid": "No Employee ID",
       "noEmail": "No Email",
       "exempt": "Exempted",
-      "exemptTip": "Exempt from matching ({{reason}}) — click to undo"
+      "exemptTip": "Exempt from matching ({{reason}}) — click to undo",
+      "budgetLabel": "Spend limit",
+      "budgetTip": "Filters by effective limit (user override first, otherwise role); users with no limit are excluded",
+      "budgetMonthly": "Monthly",
+      "budgetWeekly": "Weekly",
+      "budgetDaily": "Daily"
     },
     "cols": {
       "username": "Account",

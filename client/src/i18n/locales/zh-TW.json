@@ -472,7 +472,12 @@
       "noEid": "無工號",
       "noEmail": "無 Email",
       "exempt": "已豁免",
-      "exemptTip": "免比對（{{reason}}）— 點擊取消"
+      "exemptTip": "免比對（{{reason}}）— 點擊取消",
+      "budgetLabel": "使用金額限制",
+      "budgetTip": "依生效額度（個人覆蓋優先、否則沿用角色）篩選；無限制者不列入",
+      "budgetMonthly": "月",
+      "budgetWeekly": "週",
+      "budgetDaily": "日"
     },
     "cols": {
       "username": "帳號",
