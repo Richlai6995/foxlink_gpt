@@ -603,7 +603,7 @@ B. **JSON 落地段**(供 db_write 解析,放在 markdown 末尾的 \`\`\`json �
   "title": "金屬市場日報 — {{date}}",
   "summary": "200-300 字摘要,給人快速掃過用",
   "full_content": "完整報告全文(把上方 A 段複製進來)",
-  "key_findings": "用換行分隔的 3-7 條重點",
+  "key_findings": "**純字串**,3-7 條重點用 \\n 換行分隔,絕對不要輸出 JSON array",
   "sentiment_overall": "negative" | "neutral" | "positive",
   "model_used": "{{model_used}}",
 
@@ -679,7 +679,7 @@ B. **JSON 落地段**(供 db_write 解析,放在 markdown 末尾的 \`\`\`json �
         { jsonpath: '$.title',             column: 'title',             transform: '' },
         { jsonpath: '$.summary',           column: 'summary',           transform: '' },
         { jsonpath: '$.full_content',      column: 'full_content',      transform: '' },
-        { jsonpath: '$.key_findings',      column: 'key_findings',      transform: '' },
+        { jsonpath: '$.key_findings',      column: 'key_findings',      transform: 'join_lines' },
         { jsonpath: '$.sentiment_overall', column: 'sentiment_overall', transform: '' },
         { jsonpath: '$.model_used',        column: 'model_used',        transform: '' },
       ],
@@ -816,7 +816,7 @@ function buildWeeklyReportTask(kbMap, models = {}) {
   "title": "金屬市場週報 — {{date}}",
   "summary": "300 字內週報摘要(獨立可讀,給 dashboard 條列卡片用)",
   "full_content": "完整週報全文 markdown(必須含全部 5 個段落,可直接 render 不需參考其他來源)",
-  "key_findings": "本週 3-5 條核心發現,換行分隔",
+  "key_findings": "本週 3-5 條核心發現,**純字串用 \\n 換行分隔**,絕對不要輸出 JSON array",
   "sentiment_overall": "negative" | "neutral" | "positive",
   "model_used": "{{model_used}}"
 }
@@ -839,7 +839,7 @@ function buildWeeklyReportTask(kbMap, models = {}) {
         { jsonpath: '$.title',             column: 'title',             transform: '' },
         { jsonpath: '$.summary',           column: 'summary',           transform: '' },
         { jsonpath: '$.full_content',      column: 'full_content',      transform: '' },
-        { jsonpath: '$.key_findings',      column: 'key_findings',      transform: '' },
+        { jsonpath: '$.key_findings',      column: 'key_findings',      transform: 'join_lines' },
         { jsonpath: '$.sentiment_overall', column: 'sentiment_overall', transform: '' },
         { jsonpath: '$.model_used',        column: 'model_used',        transform: '' },
       ],
@@ -977,7 +977,7 @@ function buildMonthlyReportTask(kbMap, models = {}) {
   "title": "金屬市場月報 — {{date}}",
   "summary": "400 字內月報摘要(獨立可讀,給 dashboard 條列卡片用)",
   "full_content": "完整月報全文 markdown(必須含全部 5 個段落,可直接 render 不需參考其他來源)",
-  "key_findings": "本月 5-8 條核心發現",
+  "key_findings": "本月 5-8 條核心發現,**純字串用 \\n 換行分隔**,絕對不要輸出 JSON array",
   "sentiment_overall": "negative" | "neutral" | "positive",
   "model_used": "{{model_used}}"
 }
@@ -1000,7 +1000,7 @@ function buildMonthlyReportTask(kbMap, models = {}) {
         { jsonpath: '$.title',             column: 'title',             transform: '' },
         { jsonpath: '$.summary',           column: 'summary',           transform: '' },
         { jsonpath: '$.full_content',      column: 'full_content',      transform: '' },
-        { jsonpath: '$.key_findings',      column: 'key_findings',      transform: '' },
+        { jsonpath: '$.key_findings',      column: 'key_findings',      transform: 'join_lines' },
         { jsonpath: '$.sentiment_overall', column: 'sentiment_overall', transform: '' },
         { jsonpath: '$.model_used',        column: 'model_used',        transform: '' },
       ],

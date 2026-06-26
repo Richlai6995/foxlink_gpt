@@ -75,6 +75,12 @@ const TRANSFORMS = Object.freeze({
   },
   strip_comma:  (v) => (v == null ? v : String(v).replace(/,/g, '')),
   null_if_dash: (v) => (v === '—' || v === '-' || v === '' || v == null ? null : v),
+  // 2026-06-25: LLM 自由發揮把 array/object 寫進原本預期 string 的欄位(key_findings
+  // 寫成 ["a","b"] 而非「a\nb」)會撞 ORA-01484。提供兩個 transform 應對:
+  //   join_lines      — array 用 \n 接成字串(對齊「換行分隔」prompt 意圖);primitive 不動
+  //   json_stringify  — array/object 轉 JSON string 存進去(資料原樣保留,適合做後續解析)
+  join_lines:   (v) => (Array.isArray(v) ? v.filter(x => x != null).map(x => String(x)).join('\n') : v),
+  json_stringify: (v) => (v == null || typeof v === 'string' ? v : JSON.stringify(v)),
   sha256:       (v) => {
     // URL hash 之類用途。null/空 → null;非字串 → JSON 序列化後 hash。
     if (v == null || v === '') return null;

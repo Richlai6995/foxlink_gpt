@@ -76,6 +76,17 @@ class OracleStatementWrapper {
     const bp = params.length === 1 && Array.isArray(params[0]) ? params[0] : params;
     return bp.map((p) => {
       if (p === undefined) return null;
+      // 2026-06-25: 攔截 array — Oracle scalar bind 位置收到 JS array 會 ORA-01484
+      //   "arrays can only be bound to PL/SQL statements"。事件:6/25 LLM 把
+      //   key_findings 回成 ["finding1","finding2"] 而非字串 → 整筆 db_write 炸。
+      //   防守 layer:array 一律 JSON.stringify(>32KB 走 CLOB)。object 不動,
+      //   避免誤殺 oracledb bind type 物件 ({ val, type })。
+      if (Array.isArray(p)) {
+        const s = JSON.stringify(p);
+        return Buffer.byteLength(s, 'utf8') > 32000
+          ? { val: s, type: oracledb.DB_TYPE_CLOB }
+          : s;
+      }
       // Strings > 32000 bytes must be bound as CLOB; otherwise Oracle raises ORA-01461.
       // This applies to content / parent_content / any large text column.
       if (typeof p === 'string' && Buffer.byteLength(p, 'utf8') > 32000) {
