@@ -136,6 +136,21 @@ async function runMigrations(db) {
     await require('./migrations/009_kb_sediment')(db);
     await require('./migrations/010_comm_rooms')(db);
     await require('./migrations/011_approvals')(db);
+
+    // 🆕 Cortex BOM/RBAC rollout S0 — 全 gate 在 ENABLE_CORTEX_BOM 後(dark-launch)
+    //    flag 未開 → 完全不執行 = schema 與 commit 前一致 = 對現有使用者零影響(可證明)
+    //    flag 開 → 建 4 RBAC 表 + 46 BOM 表(全加性 · 冪等 · 不動既有表資料)
+    if (process.env.ENABLE_CORTEX_BOM === 'true') {
+      await require('./migrations/012_rbac')(db);                   // 三軸 RBAC 軸① 地基
+      await require('./migrations/013a_bom_masters')(db);           // BOM superset Layer 1/2 master
+      await require('./migrations/013b_bom_collection')(db);        // BOM superset Layer 3 結構鏈(FK projects)
+      await require('./migrations/013c_cleansheet')(db);            // BOM superset 案級 cleansheet 計算鏈
+      await require('./migrations/013d_factory_matrix_audit')(db);  // BOM superset Factory Matrix + audit
+      console.log('[projects-platform] Cortex BOM/RBAC migrations (S0) ✓');
+    } else {
+      console.log('[projects-platform] Cortex BOM/RBAC migrations skipped (ENABLE_CORTEX_BOM != true)');
+    }
+
     console.log('[projects-platform] migrations ✓');
   } catch (e) {
     console.error('[projects-platform] migrations failed:', e.message, e.stack);
