@@ -22,12 +22,13 @@ const firstVal = (row) => (row ? Object.values(row)[0] : undefined);
   console.log('\n=== Migration 013c · BOM superset 案級 cleansheet 計算鏈 驗證 ===\n');
 
   const TABLES = [
-    'BOM_CS_CASE_FACTORY', 'BOM_CS_CASE_PROCESS', 'BOM_CS_CASE_IDL_ALLOC', 'BOM_CS_CASE_EQUIP_CATEGORY',
+    'BOM_CS_CASE_FACTORY', 'BOM_CS_CASE_PROCESS', 'BOM_CS_CASE_IDL_ALLOC',
     'BOM_CS_CASE_CONSUMABLE', 'BOM_CS_CASE_QTY_SCENARIO', 'BOM_CS_CASE_PKG', 'BOM_CS_CASE_PKG_ITEM',
     'BOM_CS_CASE_PKG_MODULE_INCLUDE', 'BOM_CS_CASE_MACRO_PROCESS', 'BOM_CS_CASE_SMT_POINT',
     'BOM_CS_RUN', 'BOM_CS_RUN_CELL', 'BOM_CS_RUN_RESULT',
+    // ⚠️ S1d 移除:BOM_CS_CASE_EQUIP_CATEGORY(→ bom_cs_case_equip_area · 013h DROP)
   ];
-  console.log('[1] 14 表存在');
+  console.log('[1] 13 表存在');
   for (const t of TABLES) {
     const c = await cnt(`SELECT COUNT(*) AS C FROM user_tables WHERE table_name = UPPER(?)`, t);
     console.log(`    ${mark(c > 0)}  ${t}`);

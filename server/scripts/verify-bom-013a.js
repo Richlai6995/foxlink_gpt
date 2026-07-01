@@ -22,13 +22,14 @@ const firstVal = (row) => (row ? Object.values(row)[0] : undefined);
   console.log('\n=== Migration 013a · BOM superset Layer 1/2 master 驗證 ===\n');
 
   const TABLES = [
-    'BOM_FACTORY', 'BOM_PROCESS_CATALOG', 'BOM_CS_COMPONENT', 'BOM_EQUIP_CATEGORY_CATALOG',
+    'BOM_FACTORY', 'BOM_PROCESS_CATALOG', 'BOM_CS_COMPONENT',
     'BOM_FACTORY_BASELINE', 'BOM_FACTORY_IDL_ROLE', 'BOM_FACTORY_IDL_LINEDEP_WAGE',
-    'BOM_FACTORY_DEP_YEARS', 'BOM_FACTORY_EQUIP_CATEGORY_PRICE', 'BOM_FACTORY_CONSUMABLE',
+    'BOM_FACTORY_CONSUMABLE',
     'BOM_FACTORY_SMT_POINT_RULE', 'BOM_PROCESS_TEMPLATE', 'BOM_PROCESS_TEMPLATE_STEP',
     'BOM_CATEGORY_DICT', 'BOM_CATEGORY_MARKUP_DEFAULT',
+    // ⚠️ S1d 移除:BOM_EQUIP_CATEGORY_CATALOG / BOM_FACTORY_DEP_YEARS / BOM_FACTORY_EQUIP_CATEGORY_PRICE(013h DROP)
   ];
-  console.log(`[1] 15 表存在`);
+  console.log(`[1] 12 表存在`);
   for (const t of TABLES) {
     const c = await cnt(`SELECT COUNT(*) AS C FROM user_tables WHERE table_name = UPPER(?)`, t);
     console.log(`    ${mark(c > 0)}  ${t}`);

@@ -8,12 +8,12 @@
  * 全加性新建 · 無 FK 指向 Cortex 主站表 · unified §3 統一參數直接併入欄位(不 ALTER)
  * 計算引擎(S1/S4)讀此層決定 costing_model / per-component mask / base_ref / 廠級 baseline。
  *
- * 13a 內容(15 表 + 集中 seed):
- *   master:bom_factory / bom_process_catalog / bom_cs_component / bom_equip_category_catalog
- *   廠級 baseline(SCD2):bom_factory_baseline + 子表 idl_role / idl_linedep_wage / dep_years
- *                       / equip_category_price / consumable / smt_point_rule
+ * 13a 內容(12 表 + 集中 seed):
+ *   master:bom_factory / bom_process_catalog / bom_cs_component
+ *   廠級 baseline(SCD2):bom_factory_baseline + 子表 idl_role / idl_linedep_wage / consumable / smt_point_rule
  *   模板:bom_process_template(+step) · 字典:bom_category_dict / bom_category_markup_default
  *   seed:CN/VN/TW 三廠 · 9 製程 · 20 component(含 model_applicability+fallback)· 3 模板 · 字典/markup
+ *   ⚠️ S1d 作廢移除:bom_equip_category_catalog / bom_factory_dep_years / bom_factory_equip_category_price(→ 013h DROP)
  *
  * 後續:013b(BOM 結構鏈 FK projects)· 013c(cleansheet 案級 FK case_factory)· 013d(factory_matrix+audit)
  */
@@ -89,26 +89,8 @@ module.exports = async function migrate013a(db) {
       is_active           NUMBER(1) DEFAULT 1
     )`);
 
-  // ========================================================================
-  // 設備類別 catalog(unified §8.2 #1 · 類別制取代個別機)
-  // ========================================================================
-  await createTable('BOM_EQUIP_CATEGORY_CATALOG', `
-    CREATE TABLE bom_equip_category_catalog (
-      category_code        VARCHAR2(40) PRIMARY KEY,
-      name_zh_tw           VARCHAR2(120),
-      name_en              VARCHAR2(120),
-      equip_group          VARCHAR2(40),
-      bg_code              VARCHAR2(40),
-      rep_cost_usd         NUMBER(15,4),
-      useful_life_yrs      NUMBER(4,1),
-      mro_pct              NUMBER(6,4),
-      wearable_only        NUMBER(1) DEFAULT 0,
-      default_process_code VARCHAR2(40),
-      is_active            NUMBER(1) DEFAULT 1,
-      created_at           TIMESTAMP DEFAULT SYSTIMESTAMP,
-      CONSTRAINT fk_eqcat_proc FOREIGN KEY (default_process_code) REFERENCES bom_process_catalog(process_code)
-    )`);
-  await _idx(`CREATE INDEX idx_eqcat_bg ON bom_equip_category_catalog(bg_code, wearable_only)`, 'idx_eqcat_bg');
+  // ⚠️ bom_equip_category_catalog(舊設備類別 master · rep_cost/useful_life/mro_pct)已於 S1d 作廢 → 013h DROP。
+  //    設備成本改讀個體設備清單模型(bom_cs_case_equip_area · 013f)。
 
   // ========================================================================
   // Layer 2 — 廠級資產基線(SCD2)+ unified §3 參數化引擎核心
@@ -177,27 +159,8 @@ module.exports = async function migrate013a(db) {
       CONSTRAINT fk_fidldep_bl FOREIGN KEY (baseline_id) REFERENCES bom_factory_baseline(baseline_id) ON DELETE CASCADE
     )`);
 
-  await createTable('BOM_FACTORY_DEP_YEARS', `
-    CREATE TABLE bom_factory_dep_years (
-      baseline_id NUMBER NOT NULL,
-      category    VARCHAR2(40) NOT NULL,
-      years       NUMBER(4,1),
-      CONSTRAINT pk_fdepyr PRIMARY KEY (baseline_id, category),
-      CONSTRAINT fk_fdepyr_bl FOREIGN KEY (baseline_id) REFERENCES bom_factory_baseline(baseline_id) ON DELETE CASCADE
-    )`);
-
-  await createTable('BOM_FACTORY_EQUIP_CATEGORY_PRICE', `
-    CREATE TABLE bom_factory_equip_category_price (
-      baseline_id          NUMBER NOT NULL,
-      category_code        VARCHAR2(40) NOT NULL,
-      factory_code         VARCHAR2(20),
-      acquisition_cost_usd NUMBER(15,4),
-      useful_life_yrs      NUMBER(4,1),
-      mro_pct_override     NUMBER(6,4),
-      CONSTRAINT pk_feqprice PRIMARY KEY (baseline_id, category_code),
-      CONSTRAINT fk_feqprice_bl FOREIGN KEY (baseline_id) REFERENCES bom_factory_baseline(baseline_id) ON DELETE CASCADE,
-      CONSTRAINT fk_feqprice_cat FOREIGN KEY (category_code) REFERENCES bom_equip_category_catalog(category_code)
-    )`);
+  // ⚠️ bom_factory_dep_years / bom_factory_equip_category_price(舊設備類別折舊/定價模型)已於 S1d 作廢
+  //    → 013h DROP。設備成本改讀 bom_cs_case_equip_area(013f · Equipment List 每台 ext/life 真模型)。
 
   await createTable('BOM_FACTORY_CONSUMABLE', `
     CREATE TABLE bom_factory_consumable (

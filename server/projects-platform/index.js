@@ -146,6 +146,11 @@ async function runMigrations(db) {
       await require('./migrations/013b_bom_collection')(db);        // BOM superset Layer 3 結構鏈(FK projects)
       await require('./migrations/013c_cleansheet')(db);            // BOM superset 案級 cleansheet 計算鏈
       await require('./migrations/013d_factory_matrix_audit')(db);  // BOM superset Factory Matrix + audit
+      await require('./migrations/013e_process_group')(db);         // process_group(DL 分組)+ 對齊真 Cleansheet 製程(S1)
+      await require('./migrations/013f_equip_area_facility')(db);   // 案級設備(area/bucket/util)+ 廠房(sqft/util)新表(S1d)
+      await require('./migrations/013g_process_output_override')(db);// case_process.weekly_output_override(品檢/支援製程承線速率 · S1d)
+      await require('./migrations/013h_drop_legacy_equip')(db);      // DROP 設備舊模型 4 表(S1d 作廢 · 排最後)
+      await require('./migrations/013i_simplified_line')(db);        // 案級 SIMPLIFIED 成本 line 輸入表(WHOOP · S1c)
       console.log('[projects-platform] Cortex BOM/RBAC migrations (S0) ✓');
     } else {
       console.log('[projects-platform] Cortex BOM/RBAC migrations skipped (ENABLE_CORTEX_BOM != true)');

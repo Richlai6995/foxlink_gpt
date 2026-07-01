@@ -108,23 +108,8 @@ module.exports = async function migrate013c(db) {
       CONSTRAINT fk_csidl_proc FOREIGN KEY (process_code) REFERENCES bom_process_catalog(process_code)
     )`);
 
-  // ========================================================================
-  // bom_cs_case_equip_category — 案級設備類別配置(類別制)
-  // ========================================================================
-  await createTable('BOM_CS_CASE_EQUIP_CATEGORY', `
-    CREATE TABLE bom_cs_case_equip_category (
-      case_factory_id              NUMBER NOT NULL,
-      category_code                VARCHAR2(40) NOT NULL,
-      process_code                 VARCHAR2(40),
-      qty                          NUMBER(10,2),
-      line_qty                     NUMBER(10,2),
-      qty_per_line                 NUMBER(10,2),
-      useful_life_override_yrs     NUMBER(4,1),
-      acquisition_cost_override_usd NUMBER(15,4),
-      CONSTRAINT pk_cseqcat PRIMARY KEY (case_factory_id, category_code),
-      CONSTRAINT fk_cseqcat_cf FOREIGN KEY (case_factory_id) REFERENCES bom_cs_case_factory(case_factory_id) ON DELETE CASCADE,
-      CONSTRAINT fk_cseqcat_cat FOREIGN KEY (category_code) REFERENCES bom_equip_category_catalog(category_code)
-    )`);
+  // ⚠️ bom_cs_case_equip_category(舊 category-price+mroPct 模型)已於 S1d 作廢 → 013h DROP。
+  //    設備成本改讀 bom_cs_case_equip_area(013f · Equipment List 真模型)。
 
   // ========================================================================
   // bom_cs_case_consumable — 案級耗材配置
