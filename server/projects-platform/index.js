@@ -54,6 +54,12 @@ function buildRouter() {
   // /me 路由不需 requireVisible(client 要拿 visibility info 判定 sidebar)
   router.use('/me', require('./routes/me'));
 
+  // 🆕 Cortex BOM dev-test route(admin-only · 只在 ENABLE_CORTEX_BOM 掛 = dark-launch)
+  //    放 requireVisible 前(用自身 requireAdminMode · 不需 BOM sidebar 設定)
+  if (process.env.ENABLE_CORTEX_BOM === 'true') {
+    router.use('/bom', require('./routes/bom'));
+  }
+
   // Health check(不限 admin,給外層 monitor 用)
   router.get('/_health', (req, res) => {
     res.json({
