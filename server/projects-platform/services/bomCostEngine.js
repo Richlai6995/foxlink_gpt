@@ -326,7 +326,7 @@ async function persistRun(db, { caseFactoryId, factoryCode, costingModel, cells,
  * S1b:FULL_MVA 全鏈(移植 demo)· SIMPLIFIED 仍 stub(S1c)· persist 留 S1c。
  */
 async function computeCase(db, opts = {}) {
-  const { caseFactoryId, qtyScenarioCode, motherboardCostUsd, persist = true } = opts;
+  const { caseFactoryId, qtyScenarioCode, motherboardCostUsd, bomInstanceId, persist = true } = opts;
   if (!caseFactoryId) throw new Error('bomCostEngine.computeCase: caseFactoryId required');
 
   const inputs = await loadCaseInputs(db, caseFactoryId);
@@ -335,8 +335,15 @@ async function computeCase(db, opts = {}) {
     || pick(baseline, 'costing_model') || 'FULL_MVA';
   const plan = await buildComponentPlan(db, costingModel);
 
-  // motherboard:S1 先參數帶入(BOM propagate 屬後續)· fallback baseline.motherboard_cost_ref
-  const motherboard = motherboardCostUsd != null ? num(motherboardCostUsd) : num(pick(baseline, 'motherboard_cost_ref'));
+  // material(FULL 的 motherboard)優先序:BOM rollup(bomInstanceId · B-2)> 參數 > baseline.motherboard_cost_ref
+  //   rollup 是獨立 service(解耦)· 現 EE、匯入 ME/PKG 後自動含全材料(對 Unit Cost Material Cost)
+  let materialFromBom = null;
+  if (bomInstanceId) {
+    const { materialUsd } = await require('./bomMaterialRollup').rollupMaterial(db, bomInstanceId);
+    materialFromBom = num(materialUsd);
+  }
+  const motherboard = materialFromBom != null ? materialFromBom
+    : (motherboardCostUsd != null ? num(motherboardCostUsd) : num(pick(baseline, 'motherboard_cost_ref')));
   const annualDemand = (() => {
     if (qtyScenarioCode) {
       const sc = inputs.qtyScenarios.find((s) => pick(s, 'scenario_code') === qtyScenarioCode);

@@ -115,7 +115,10 @@ Rival3 Gen2 BOM Excel  →  parse  →  bom_instance + bom_item(正規化 · 三
 |---|---|---|
 | ~~**B-0 探勘**~~ ✅ 2026-07-01 | 013b schema 確認 + EE BOM 佈局(header r3 · S×E 映射)+ golden 源=Unit Cost(非 Build Cost)+ 解掉 #3(material=EE+ME+PKG)| golden `tmp/rival3_gen2_bom_golden.json` ✓ · 見 §2.5 |
 | ~~**B-1 parse+normalize**~~ ✅ 2026-07-01 | `bomImportService.importEeBom`(Node 直讀 xlsx)抽 EE BOM → bom_instance/section/category/item + price_snapshot/tier + mfg(類別取 G 欄 · 有價列=item · 無價 K/L=替代供應商)| **通過**:item 70 · mfg 137 · cat 10 · rollup 6.0168 對 EE_black 6.0174 Δ0.0006<0.01 · 冪等 ✓ · test-bom-import.js |
-| **B-2 rollup 接引擎** | `bomMaterialRollup` service → material_true → `computeCase` FULL 路徑用它 | rollup 值 = Excel 材料小計;computeCase total 對 Build Cost ε<0.01 |
+| ~~**B-2a rollup 接引擎(EE-only)**~~ ✅ 2026-07-01 | `bomMaterialRollup.rollupMaterial`(獨立 service · 解耦)+ `computeCase({bomInstanceId})` FULL material 改由 BOM rollup | **通過**:run_result.material_true=6.0168=rollup · MVA 隨材料重算 · total(EE-only)9.12 · test-bom-import.js [4] |
+| ~~**B-2b 全材料**~~ ✅ 2026-07-02 | config-driven importer(EE/ME/PKG 各 colMap · 匯進同 instance)+ rollupMaterial byCategory | **通過**:EE 6.017+ME 1.671+PKG 0.828=**8.5162 對 Unit Cost Material 8.51683 Δ0.0007<0.01** · material_true 進引擎 · sheet 鎖 Black+China(EE 0227/ME 0618_Black/PKG 20241023_Amber)· test-bom-import.js [5] |
+
+**⚠️ B-2b 發現 · SG&A+Profit 慣例分歧(待拍板)**:引擎(Cleansheet)算 `SG&A+Profit=(MVA+MB)×0.16`(%-based · Rival3 CN → 1.686),但 Unit Cost sheet(客戶報價)用 **flat 0.75**。兩者 total 因此不同(引擎 12.03 vs Unit Cost 11.12)。這**不是 bug**——Cleansheet 是「true cost 詳細建構」、Unit Cost 是「客戶報價(談定的 flat markup)」。**符合 schema 已有的 true/quote 雙價**:引擎 %-based = true 側,flat 0.75 = quote 側 markup。**決策**:平台最終報價走哪個?建議 run_result 的 mva/sga/profit 也做 true/quote 雙軌(quote 側可設 flat markup),或 baseline 加 `sga_profit_mode = pct|flat`。留待 B-3 或專門 slice。
 | **B-3 檢視入口** | 極簡 read route/CLI:列 bom_instance / bom_item / 觸發算 / 看 run_result | 能點/查看到匯入的 BOM + 算出的報價 |
 | **B-4 擴充** | ME/PKG 料別、三廠、Option A/B/C、多版本挑選 | 各廠/Option 對 Unit Cost sheet |
 
