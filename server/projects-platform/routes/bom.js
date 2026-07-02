@@ -24,7 +24,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { asyncHandler } = require('../middleware/errorBoundary');
-const { requireAdminMode } = require('../middleware/sidebarPermissionMiddleware');
+const { requireVisible } = require('../middleware/sidebarPermissionMiddleware');
 const importSvc = require('../services/bomImportService');
 const rollupSvc = require('../services/bomMaterialRollup');
 const templateSvc = require('../services/bomTemplateService');
@@ -35,7 +35,8 @@ function getDb() { return require('../../database-oracle').db; }
 // 數字參數防呆:非數字 → 400(避免 Number("<id>")=NaN 打進 Oracle 噴 NJS-105 500)
 function reqId(v, res, name = 'id') { const n = Number(v); if (!Number.isFinite(n)) { res.status(400).json({ error: `invalid ${name}: ${v}` }); return null; } return n; }
 
-router.use(requireAdminMode);   // dev-test:admin only
+// 專案成員(含 RD)皆可用(平台可見即可)· 細粒度 RD×資料範圍×欄位機密 = S2 三軸 RBAC
+router.use(requireVisible);
 
 // 上傳暫存:UPLOAD_ROOT/projects/bom/{userId}
 const UPLOAD_ROOT = process.env.UPLOAD_ROOT || process.env.UPLOAD_DIR || './uploads';
@@ -69,12 +70,16 @@ router.get('/template', asyncHandler(async (req, res) => {
   res.send(buf);
 }));
 
-// GET /cases — 列 case_factory + project
+// GET /cases[?projectId=] — 列 case_factory + project(可篩單一 project · 專案內用)
 router.get('/cases', asyncHandler(async (req, res) => {
+  const pid = req.query.projectId ? Number(req.query.projectId) : null;
+  if (pid != null && !Number.isFinite(pid)) return res.status(400).json({ error: `invalid projectId: ${req.query.projectId}` });
   const rows = await getDb().prepare(
     `SELECT cf.case_factory_id, cf.case_id AS project_id, cf.factory_code, cf.costing_model, cf.status, p.project_code
        FROM bom_cs_case_factory cf JOIN projects p ON p.id = cf.case_id
+      ${pid != null ? 'WHERE cf.case_id = ?' : ''}
       ORDER BY cf.case_factory_id DESC`,
+    ...(pid != null ? [pid] : []),
   ).all().catch(() => []);
   res.json({ cases: rows });
 }));

@@ -21,7 +21,7 @@ import {
   Briefcase, CheckCircle2, LayoutGrid, BookOpen, Sparkles,
   DollarSign, Server, GraduationCap,
   FileText, ListTodo, ShieldCheck, Bell, Plug, Settings,
-  ShieldAlert, HeartPulse, Shield, MessageSquareText, FileCheck, Package,
+  ShieldAlert, HeartPulse, Shield, MessageSquareText, FileCheck,
 } from 'lucide-react'
 import { useProjectsPlatformVisibility } from '../../../hooks/useProjectsPlatformVisibility'
 import { usePlatform } from './PlatformContext'
@@ -132,7 +132,6 @@ export default function Sidebar() {
 
         {v.mode === 'admin' && (
           <Section label="內部 Admin">
-            <NavItem to="/projects-platform/bom" icon={Package} label={<>BOM 匯入 <span className="ml-1 text-[9px] text-cortex-teal font-bold">Cortex</span></>} />
             <NavItem to="/projects-platform/admin/role-grants" icon={Shield} label={<>角色授予 <span className="ml-1 text-[9px] text-cortex-cyan font-bold">13</span></>} />
             <NavItem to="/projects-platform/internal-admin/overview" icon={ShieldAlert} label="Internal Admin" />
             <NavItem to="/projects-platform/internal-admin/system-health" icon={HeartPulse} label="System Health" />

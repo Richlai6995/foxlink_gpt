@@ -24,9 +24,11 @@ import PackagingSection from './PackagingSection'
 import FactoryMatrixSection from './FactoryMatrixSection'
 import CustomerSection from './CustomerSection'
 import AiToolbarSection from './AiToolbarSection'
+import BomSection from './BomSection'
 
 type SectionId =
   | 'customer'
+  | 'bom'
   | 'variant'
   | 'nre'
   | 'packaging'
@@ -44,6 +46,7 @@ type SectionDef = {
 
 const SECTIONS: SectionDef[] = [
   { id: 'customer',  label: '客戶資料', icon: '👥', visible: () => true },
+  { id: 'bom',       label: 'BOM / 材料', icon: '📦', isNew: true, visible: () => true },
   { id: 'variant',   label: 'CMF 變體', icon: '🎨', isNew: true,
     visible: (p) => !!(p.data_payload as any)?.variants?.items?.length,
     badge:   (p) => `${(p.data_payload as any)?.variants?.items?.length || 0} variant` },
@@ -108,6 +111,7 @@ export default function FormPanel({ project }: { project: ProjectDetail }) {
       {/* Active section content(右) */}
       <main className="overflow-y-auto p-5 bg-white">
         {activeSection === 'customer'  && <CustomerSection  project={project} />}
+        {activeSection === 'bom'       && <BomSection       project={project} />}
         {activeSection === 'variant'   && <VariantSection   project={project} />}
         {activeSection === 'packaging' && <PackagingSection project={project} />}
         {activeSection === 'nre'       && <NreSection       project={project} />}
