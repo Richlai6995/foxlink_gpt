@@ -168,7 +168,129 @@ async function importEeBom(db, opts = {}) {
   return { bomInstanceId: r.bomInstanceId, sectionId: null, itemCount: r.itemCount, mfgCount: r.mfgCount, categoryCount: r.categoryCount };
 }
 
+// ── 標準範本匯入(使用者下載 bomTemplateService 範本填好上傳 · header-based)──────
+const TPL_MODULES = ['EE', 'ME', 'PKG'];
+// header 名(小寫 contains)→ 欄位
+function resolveTplHeader(rawHeaders) {
+  const map = {};
+  rawHeaders.forEach((h, i) => {
+    const s = String(h == null ? '' : h).trim().toLowerCase();
+    if (!s) return;
+    if (s === 'category' || s.includes('類別')) map.category = i;
+    else if (s.includes('item no') || s.includes('item#') || s === 'item') map.itemNo = i;
+    else if (s.includes('description') || s.includes('描述')) map.desc = i;
+    else if (s.includes('foxlink') || s.includes('flk p/n') || s.includes('foxlink p/n')) map.fpn = i;
+    else if (s === 'qty' || s.includes('數量') || s.includes("qt'y")) map.qty = i;
+    else if (s.includes('unit price') || s.includes('u/p') || s.includes('單價')) map.price = i;
+    else if (s.includes('mfg p/n') || s.includes('mfg part') || s.includes('廠商料號')) map.mfgPn = i;
+    else if (s === 'vendor' || s.includes('供應商') || s.includes('廠商')) map.vendor = i;
+    else if (s.includes('remark') || s.includes('備註')) map.remark = i;
+  });
+  return map;
+}
+
+/**
+ * importBomTemplate — 解析標準範本(EE/ME/PKG 三分頁 · header-based)→ 正規化。
+ * idempotent 同 importBom。回 { bomInstanceId, itemCount, mfgCount, categoryCount, sections }。
+ */
+async function importBomTemplate(db, opts = {}) {
+  const { filePath, projectId, variantKey = null, versionNo = 1 } = opts;
+  if (!filePath) throw new Error('bomImportService: filePath required');
+  if (!projectId) throw new Error('bomImportService: projectId required');
+
+  const run = (sql, ...a) => db.prepare(sql).run(...a);
+  const get = (sql, ...a) => db.prepare(sql).get(...a);
+  const wb = XLSX.readFile(filePath);
+
+  const old = await get(
+    `SELECT id FROM bom_instance WHERE project_id=? AND version_no=? AND ${variantKey == null ? 'variant_key IS NULL' : 'variant_key=?'}`,
+    ...(variantKey == null ? [projectId, versionNo] : [projectId, versionNo, variantKey]),
+  );
+  if (old) await run(`DELETE FROM bom_instance WHERE id=?`, Number(pick(old, 'id')));
+
+  const inst = await run(
+    `INSERT INTO bom_instance (project_id, version_no, variant_scope, variant_key, state, price_period_months, price_strategy)
+     VALUES (?, ?, ?, ?, 'DRAFT', 12, 'AVG')`,
+    projectId, versionNo, variantKey ? 'per_variant' : 'shared', variantKey,
+  );
+  const bomInstanceId = Number(inst.lastInsertRowid);
+
+  let itemCount = 0, mfgCount = 0, categoryCount = 0;
+  const sections = [];
+
+  for (let si = 0; si < TPL_MODULES.length; si++) {
+    const mod = TPL_MODULES[si];
+    const ws = wb.Sheets[mod];
+    if (!ws) continue;
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+    if (!rows.length) continue;
+    const H = resolveTplHeader(rows[0] || []);
+    if (H.qty == null || H.price == null) { log.warn(`importBomTemplate: sheet ${mod} 缺 Qty/Unit Price 標題,跳過`); continue; }
+
+    const sec = await run(
+      `INSERT INTO bom_section (bom_instance_id, module_code, module_category, display_order, name) VALUES (?, ?, ?, ?, ?)`,
+      bomInstanceId, mod, mod, si * 10 + 10, `${mod} BOM`,
+    );
+    const sectionId = Number(sec.lastInsertRowid);
+    const catCache = {};
+    let seq = 0, secItems = 0;
+    const ensureCategory = async (name) => {
+      const key = name || mod;
+      if (catCache[key]) return catCache[key];
+      const c = await run(`INSERT INTO bom_category (bom_section_id, display_order, name, process_type) VALUES (?, ?, ?, NULL)`,
+        sectionId, Object.keys(catCache).length * 10 + 10, key);
+      catCache[key] = Number(c.lastInsertRowid);
+      return catCache[key];
+    };
+
+    for (let r = 1; r < rows.length; r++) {
+      const row = rows[r];
+      if (!row) continue;
+      const qty = row[H.qty], price = row[H.price];
+      if (!isNum(qty) || !isNum(price)) continue;   // 只收有數量+單價的料列
+      const catId = await ensureCategory(H.category != null ? str(row[H.category]) : null);
+      const B = H.itemNo != null ? row[H.itemNo] : null;
+      const desc = H.desc != null ? str(row[H.desc]) : null;
+      const fpn = H.fpn != null ? str(row[H.fpn]) : null;
+      const remark = H.remark != null ? str(row[H.remark]) : null;
+      seq += 1;
+      const it = await run(
+        `INSERT INTO bom_item (bom_category_id, item_sequence, qty, description, reference, customer_item, fpn, variant_key)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        catId, seq, num(qty), desc, remark, fpn, fpn, variantKey,
+      );
+      const itemId = Number(it.lastInsertRowid);
+      itemCount += 1; secItems += 1;
+      const snap = await run(
+        `INSERT INTO bom_item_price_snapshot (bom_item_id, period_months, strategy_used, price_avg_usd, applied_price_usd, po_line_count, vendor_count)
+         VALUES (?, 0, 'TEMPLATE', ?, ?, 0, 0)`,
+        itemId, num(price), num(price),
+      );
+      const snapId = Number(snap.lastInsertRowid);
+      await run(
+        `INSERT INTO bom_item_price_tier (snapshot_id, tier_seq, source_currency, true_cost_source, fx_rate, quote_price_usd, is_chosen)
+         VALUES (?, 1, 'USD', ?, 1, ?, 1)`,
+        snapId, num(price), num(price),
+      );
+      const vendor = H.vendor != null ? str(row[H.vendor]) : null;
+      const mfgPn = H.mfgPn != null ? str(row[H.mfgPn]) : null;
+      if (vendor || mfgPn) {
+        await run(
+          `INSERT INTO bom_item_mfg (bom_item_id, display_order, manufacturer_name, mfg_part_number, source, is_preferred) VALUES (?, 10, ?, ?, 'TEMPLATE', 1)`,
+          itemId, vendor, mfgPn,
+        );
+        mfgCount += 1;
+      }
+    }
+    categoryCount += Object.keys(catCache).length;
+    sections.push({ category: mod, itemCount: secItems });
+  }
+
+  log.log(`importBomTemplate: instance=${bomInstanceId} items=${itemCount} mfg=${mfgCount} sections=${sections.map((s) => `${s.category}:${s.itemCount}`).join(',')}`);
+  return { bomInstanceId, itemCount, mfgCount, categoryCount, sections };
+}
+
 // rollupMaterial 已移至獨立 service(引擎解耦)· 此處 re-export 維持 API 相容
 const { rollupMaterial } = require('./bomMaterialRollup');
 
-module.exports = { importBom, importEeBom, rollupMaterial, SHEET_CONFIGS };
+module.exports = { importBom, importEeBom, importBomTemplate, rollupMaterial, SHEET_CONFIGS };

@@ -27,6 +27,7 @@ const { asyncHandler } = require('../middleware/errorBoundary');
 const { requireAdminMode } = require('../middleware/sidebarPermissionMiddleware');
 const importSvc = require('../services/bomImportService');
 const rollupSvc = require('../services/bomMaterialRollup');
+const templateSvc = require('../services/bomTemplateService');
 const engine = require('../services/bomCostEngine');
 
 const router = express.Router();
@@ -60,6 +61,14 @@ const upload = multer({
   },
 });
 
+// GET /template — 下載標準 BOM 匯入範本(EE/ME/PKG 三分頁 + 說明)
+router.get('/template', asyncHandler(async (req, res) => {
+  const buf = templateSvc.buildTemplateBuffer();
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="cortex-bom-template.xlsx"');
+  res.send(buf);
+}));
+
 // GET /cases — 列 case_factory + project
 router.get('/cases', asyncHandler(async (req, res) => {
   const rows = await getDb().prepare(
@@ -75,13 +84,20 @@ router.post('/import', upload.single('file'), asyncHandler(async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'file required (multipart field: file)' });
   const projectId = Number(req.body.projectId);
   if (!projectId) return res.status(400).json({ error: 'projectId required' });
-  const sheetKeys = String(req.body.sheetKeys || 'EE,ME,PKG').split(',').map((s) => s.trim()).filter(Boolean);
   const variantKey = req.body.variantKey || null;
   const versionNo = Number(req.body.versionNo) || 1;
+  // format:'template'(預設 · 使用者填標準範本)| 'rival3'(dev fixture · 硬解 Rival3 Gen2 原始 BOM)
+  const format = String(req.body.format || 'template');
   try {
-    const r = await importSvc.importBom(getDb(), { filePath: req.file.path, projectId, sheetKeys, variantKey, versionNo });
+    let r;
+    if (format === 'rival3') {
+      const sheetKeys = String(req.body.sheetKeys || 'EE,ME,PKG').split(',').map((s) => s.trim()).filter(Boolean);
+      r = await importSvc.importBom(getDb(), { filePath: req.file.path, projectId, sheetKeys, variantKey, versionNo });
+    } else {
+      r = await importSvc.importBomTemplate(getDb(), { filePath: req.file.path, projectId, variantKey, versionNo });
+    }
     const roll = await rollupSvc.rollupMaterial(getDb(), r.bomInstanceId);
-    res.json({ ok: true, ...r, rollup: roll });
+    res.json({ ok: true, format, ...r, rollup: roll });
   } finally {
     try { fs.unlinkSync(req.file.path); } catch (_) {}
   }

@@ -33,6 +33,7 @@ import MessagesPage from './Messages/MessagesPage'
 import ApprovalsPage from './Approvals/ApprovalsPage'
 import InternalAdminOverview from './InternalAdmin/Overview'
 import SystemHealthPage from './InternalAdmin/SystemHealth'
+import BomImport from './Bom/BomImport'
 
 export default function ProjectsPlatformPage() {
   const v = useProjectsPlatformVisibility()
@@ -117,6 +118,7 @@ export default function ProjectsPlatformPage() {
           <Route path="admin/connections" element={<Connections />} />
           <Route path="admin/confidential-policies" element={<ConfidentialPolicies />} />
           <Route path="admin/role-grants" element={<AdminGuard mode={v.mode}><RoleGrants /></AdminGuard>} />
+          <Route path="bom" element={<AdminGuard mode={v.mode}><BomImport /></AdminGuard>} />
           <Route path="internal-admin/overview" element={<AdminGuard mode={v.mode}><InternalAdminOverview /></AdminGuard>} />
           <Route path="internal-admin/system-health" element={<AdminGuard mode={v.mode}><SystemHealthPage /></AdminGuard>} />
           <Route path="*" element={<Navigate to="" replace />} />
