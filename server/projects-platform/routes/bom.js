@@ -74,13 +74,13 @@ router.get('/template', asyncHandler(async (req, res) => {
 router.get('/cases', asyncHandler(async (req, res) => {
   const pid = req.query.projectId ? Number(req.query.projectId) : null;
   if (pid != null && !Number.isFinite(pid)) return res.status(400).json({ error: `invalid projectId: ${req.query.projectId}` });
+  // bind 必須綁在 .all() 上(wrapper prepare(sql) 只吃 sql · 見 database-oracle.js:183/213)
   const rows = await getDb().prepare(
     `SELECT cf.case_factory_id, cf.case_id AS project_id, cf.factory_code, cf.costing_model, cf.status, p.project_code
        FROM bom_cs_case_factory cf JOIN projects p ON p.id = cf.case_id
       ${pid != null ? 'WHERE cf.case_id = ?' : ''}
       ORDER BY cf.case_factory_id DESC`,
-    ...(pid != null ? [pid] : []),
-  ).all().catch(() => []);
+  ).all(...(pid != null ? [pid] : [])).catch(() => []);
   res.json({ cases: rows });
 }));
 
