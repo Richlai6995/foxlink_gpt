@@ -15,7 +15,7 @@ import { useEffect, useState } from 'react'
 import type { ProjectDetail } from '../../api'
 import { api, ApiError } from '../../api'
 import { useAuth } from '../../../../context/AuthContext'
-import { Download, Upload, Calculator, Loader2, CheckCircle2, AlertCircle, Info } from 'lucide-react'
+import { Download, Upload, Calculator, Loader2, CheckCircle2, AlertCircle, Info, Settings } from 'lucide-react'
 import BomItemsPanel from './BomItemsPanel'
 
 type CaseRow = { case_factory_id: number; project_id: number; factory_code: string; costing_model: string; status: string; project_code: string }
@@ -32,6 +32,9 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
   const [importResult, setImportResult] = useState<any>(null)
   const [runResult, setRunResult] = useState<any>(null)
   const [pendingGate, setPendingGate] = useState<{ pendingCount: number } | null>(null)
+  const [templates, setTemplates] = useState<any[]>([])
+  const [tplId, setTplId] = useState<number | ''>('')
+  const [provisioning, setProvisioning] = useState(false)
   const [err, setErr] = useState('')
 
   useEffect(() => {
@@ -42,6 +45,7 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
         if (r.cases?.length) setCaseFactoryId(r.cases[0].case_factory_id)
       })
       .catch((e) => setErr(e.message))
+    api.get<{ templates: any[] }>(token, `/bom/provision/templates`).then((r) => setTemplates(r.templates || [])).catch(() => {})
   }, [token, projectId])
 
   const hasCase = cases.length > 0
@@ -98,6 +102,18 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
     } catch { /* noop */ }
   }
 
+  // §9.4:此專案無 case_factory 時,從範本 clone 建立成本模型(製程/設備/人力/廠房)
+  async function doProvision() {
+    if (!tplId) { setErr('請選擇成本模型範本'); return }
+    setProvisioning(true); setErr('')
+    try {
+      await api.post(token, '/bom/provision-case', { projectId, sourceCaseFactoryId: tplId })
+      const r = await api.get<{ cases: CaseRow[] }>(token, `/bom/cases?projectId=${projectId}`)
+      setCases(r.cases || [])
+      if (r.cases?.length) setCaseFactoryId(r.cases[0].case_factory_id)
+    } catch (e: any) { setErr(e.message) } finally { setProvisioning(false) }
+  }
+
   const money = (v: any) => (typeof v === 'number' ? `$${v.toFixed(4)}` : '—')
 
   return (
@@ -113,6 +129,24 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
       {err && (
         <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 rounded p-2.5 text-[12px]">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /><span className="break-all">{err}</span>
+        </div>
+      )}
+
+      {/* §9.4 無 case_factory → 從範本建立成本模型 */}
+      {!hasCase && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
+          <div className="text-[12px] font-semibold text-amber-800 flex items-center gap-1.5"><Settings className="w-4 h-4" /> 此專案尚未設定成本模型</div>
+          <div className="text-[11px] text-amber-700">選一個廠別範本建立成本模型(製程/設備/人力/廠房),之後可依產品調整。建立後才能算成本;未建立仍可先匯入材料看 rollup。</div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <select value={tplId} onChange={(e) => setTplId(e.target.value ? Number(e.target.value) : '')} className="border border-cortex-line rounded px-2 py-1 text-[12px]">
+              <option value="">選擇範本…</option>
+              {templates.map((t) => <option key={t.caseFactoryId} value={t.caseFactoryId}>{t.factoryCode} · {t.costingModel} ({t.projectCode})</option>)}
+            </select>
+            <button onClick={doProvision} disabled={provisioning || !tplId}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 text-white text-[12px] rounded hover:opacity-90 disabled:opacity-40 shrink-0">
+              {provisioning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Settings className="w-3.5 h-3.5" />} 建立成本模型
+            </button>
+          </div>
         </div>
       )}
 

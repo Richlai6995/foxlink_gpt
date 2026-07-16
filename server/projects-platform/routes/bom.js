@@ -29,6 +29,7 @@ const importSvc = require('../services/bomImportService');
 const rollupSvc = require('../services/bomMaterialRollup');
 const templateSvc = require('../services/bomTemplateService');
 const enrichSvc = require('../services/bomEnrichService');
+const provisionSvc = require('../services/bomCaseProvisionService');
 const engine = require('../services/bomCostEngine');
 
 const router = express.Router();
@@ -83,6 +84,22 @@ router.get('/cases', asyncHandler(async (req, res) => {
       ORDER BY cf.case_factory_id DESC`,
   ).all(...(pid != null ? [pid] : [])).catch(() => []);
   res.json({ cases: rows });
+}));
+
+// ── §9.4 開案自動建 case_factory(從範本 clone)──────────────────────────────
+// GET /provision/templates — 列可選成本模型範本(廠 / model)
+router.get('/provision/templates', asyncHandler(async (req, res) => {
+  res.json({ templates: await provisionSvc.listTemplates(getDb()) });
+}));
+
+// POST /provision-case — 為專案建 case_factory(body: projectId, sourceCaseFactoryId, variantKey?)
+router.post('/provision-case', asyncHandler(async (req, res) => {
+  const projectId = Number(req.body.projectId);
+  const sourceCaseFactoryId = Number(req.body.sourceCaseFactoryId);
+  if (!projectId) return res.status(400).json({ error: 'projectId required' });
+  if (!sourceCaseFactoryId) return res.status(400).json({ error: 'sourceCaseFactoryId required' });
+  const out = await provisionSvc.provisionCase(getDb(), { projectId, sourceCaseFactoryId, variantKey: req.body.variantKey || null });
+  res.json({ ok: true, ...out });
 }));
 
 // POST /import — 上傳 BOM Excel → 正規化
