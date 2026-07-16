@@ -215,7 +215,7 @@ async function importBomTemplate(db, opts = {}) {
   );
   const bomInstanceId = Number(inst.lastInsertRowid);
 
-  let itemCount = 0, mfgCount = 0, categoryCount = 0;
+  let itemCount = 0, mfgCount = 0, categoryCount = 0, pricedCount = 0, pendingCount = 0;
   const sections = [];
 
   for (let si = 0; si < TPL_MODULES.length; si++) {
@@ -225,7 +225,7 @@ async function importBomTemplate(db, opts = {}) {
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
     if (!rows.length) continue;
     const H = resolveTplHeader(rows[0] || []);
-    if (H.qty == null || H.price == null) { log.warn(`importBomTemplate: sheet ${mod} 缺 Qty/Unit Price 標題,跳過`); continue; }
+    if (H.qty == null) { log.warn(`importBomTemplate: sheet ${mod} 缺 Qty 標題,跳過`); continue; }  // price 可空(B-5a 兩階段)
 
     const sec = await run(
       `INSERT INTO bom_section (bom_instance_id, module_code, module_category, display_order, name) VALUES (?, ?, ?, ?, ?)`,
@@ -246,13 +246,16 @@ async function importBomTemplate(db, opts = {}) {
     for (let r = 1; r < rows.length; r++) {
       const row = rows[r];
       if (!row) continue;
-      const qty = row[H.qty], price = row[H.price];
-      if (!isNum(qty) || !isNum(price)) continue;   // 只收有數量+單價的料列
+      const qty = row[H.qty];
+      if (!isNum(qty)) continue;                       // qty 必填;price 可空(B-5a 兩階段:RD 先無價)
+      const price = H.price != null ? row[H.price] : null;
+      const hasPrice = isNum(price);
       const catId = await ensureCategory(H.category != null ? str(row[H.category]) : null);
-      const B = H.itemNo != null ? row[H.itemNo] : null;
       const desc = H.desc != null ? str(row[H.desc]) : null;
       const fpn = H.fpn != null ? str(row[H.fpn]) : null;
       const remark = H.remark != null ? str(row[H.remark]) : null;
+      const vendor = H.vendor != null ? str(row[H.vendor]) : null;
+      const mfgPn = H.mfgPn != null ? str(row[H.mfgPn]) : null;
       seq += 1;
       const it = await run(
         `INSERT INTO bom_item (bom_category_id, item_sequence, qty, description, reference, customer_item, fpn, variant_key)
@@ -261,33 +264,54 @@ async function importBomTemplate(db, opts = {}) {
       );
       const itemId = Number(it.lastInsertRowid);
       itemCount += 1; secItems += 1;
-      const snap = await run(
-        `INSERT INTO bom_item_price_snapshot (bom_item_id, period_months, strategy_used, price_avg_usd, applied_price_usd, po_line_count, vendor_count)
-         VALUES (?, 0, 'TEMPLATE', ?, ?, 0, 0)`,
-        itemId, num(price), num(price),
-      );
-      const snapId = Number(snap.lastInsertRowid);
-      await run(
-        `INSERT INTO bom_item_price_tier (snapshot_id, tier_seq, source_currency, true_cost_source, fx_rate, quote_price_usd, is_chosen)
-         VALUES (?, 1, 'USD', ?, 1, ?, 1)`,
-        snapId, num(price), num(price),
-      );
-      const vendor = H.vendor != null ? str(row[H.vendor]) : null;
-      const mfgPn = H.mfgPn != null ? str(row[H.mfgPn]) : null;
+
+      // RD 填了 Foxlink P/N → 建 flk 候選(RD_MANUAL)+ 設 final;mfg 掛此 flk 下(對齊 SD §2.2.5/2.2.6)
+      let flkId = null;
+      if (fpn) {
+        const flk = await run(
+          `INSERT INTO bom_item_flk (bom_item_id, display_order, flk_part_number, source) VALUES (?, 100, ?, 'RD_MANUAL')`,
+          itemId, fpn,
+        );
+        flkId = Number(flk.lastInsertRowid);
+        await run(`UPDATE bom_item SET final_flk_id=? WHERE id=?`, flkId, itemId);
+      }
       if (vendor || mfgPn) {
         await run(
-          `INSERT INTO bom_item_mfg (bom_item_id, display_order, manufacturer_name, mfg_part_number, source, is_preferred) VALUES (?, 10, ?, ?, 'TEMPLATE', 1)`,
-          itemId, vendor, mfgPn,
+          `INSERT INTO bom_item_mfg (bom_item_id, bom_item_flk_id, display_order, manufacturer_name, mfg_part_number, source, is_preferred) VALUES (?, ?, 10, ?, ?, 'TEMPLATE', 1)`,
+          itemId, flkId, vendor, mfgPn,
         );
         mfgCount += 1;
+      }
+
+      // 兩階段價:有價 → TEMPLATE snapshot + tier(is_chosen);無價 → PENDING snapshot(待採購詢價 · 無 tier)
+      if (hasPrice) {
+        const snap = await run(
+          `INSERT INTO bom_item_price_snapshot (bom_item_id, bom_item_flk_id, period_months, strategy_used, price_avg_usd, applied_price_usd, po_line_count, vendor_count)
+           VALUES (?, ?, 0, 'TEMPLATE', ?, ?, 0, 0)`,
+          itemId, flkId, num(price), num(price),
+        );
+        const snapId = Number(snap.lastInsertRowid);
+        await run(
+          `INSERT INTO bom_item_price_tier (snapshot_id, tier_seq, source_currency, true_cost_source, fx_rate, quote_price_usd, is_chosen)
+           VALUES (?, 1, 'USD', ?, 1, ?, 1)`,
+          snapId, num(price), num(price),
+        );
+        pricedCount += 1;
+      } else {
+        await run(
+          `INSERT INTO bom_item_price_snapshot (bom_item_id, bom_item_flk_id, period_months, strategy_used, applied_price_usd, po_line_count, vendor_count)
+           VALUES (?, ?, 0, 'PENDING', NULL, 0, 0)`,
+          itemId, flkId,
+        );
+        pendingCount += 1;
       }
     }
     categoryCount += Object.keys(catCache).length;
     sections.push({ category: mod, itemCount: secItems });
   }
 
-  log.log(`importBomTemplate: instance=${bomInstanceId} items=${itemCount} mfg=${mfgCount} sections=${sections.map((s) => `${s.category}:${s.itemCount}`).join(',')}`);
-  return { bomInstanceId, itemCount, mfgCount, categoryCount, sections };
+  log.log(`importBomTemplate: instance=${bomInstanceId} items=${itemCount} priced=${pricedCount} pending=${pendingCount} mfg=${mfgCount} sections=${sections.map((s) => `${s.category}:${s.itemCount}`).join(',')}`);
+  return { bomInstanceId, itemCount, mfgCount, categoryCount, pricedCount, pendingCount, sections };
 }
 
 // rollupMaterial 已移至獨立 service(引擎解耦)· 此處 re-export 維持 API 相容

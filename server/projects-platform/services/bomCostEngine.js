@@ -339,8 +339,15 @@ async function computeCase(db, opts = {}) {
   //   rollup 是獨立 service(解耦)· 現 EE、匯入 ME/PKG 後自動含全材料(對 Unit Cost Material Cost)
   let materialFromBom = null;
   if (bomInstanceId) {
-    const { materialUsd } = await require('./bomMaterialRollup').rollupMaterial(db, bomInstanceId);
-    materialFromBom = num(materialUsd);
+    const roll = await require('./bomMaterialRollup').rollupMaterial(db, bomInstanceId);
+    // B-5a 兩階段:有未詢價(PENDING)料件 → 材料不完整,擋算成本;帶 opts.allowPending 才放行
+    if (num(roll.pendingCount) > 0 && !opts.allowPending) {
+      const e = new Error(`BOM_HAS_PENDING_PRICES: ${roll.pendingCount} 筆料件尚未詢價(材料不完整)`);
+      e.code = 'BOM_HAS_PENDING_PRICES';
+      e.pendingCount = num(roll.pendingCount);
+      throw e;
+    }
+    materialFromBom = num(roll.materialUsd);
   }
   const motherboard = materialFromBom != null ? materialFromBom
     : (motherboardCostUsd != null ? num(motherboardCostUsd) : num(pick(baseline, 'motherboard_cost_ref')));

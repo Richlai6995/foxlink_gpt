@@ -147,15 +147,23 @@ router.get('/instances/:id/items', asyncHandler(async (req, res) => {
   res.json({ count: rows.length, items: rows });
 }));
 
-// POST /compute — computeCase(persist)
+// POST /compute — computeCase(persist)· B-5a:有未詢價料件回 409(帶 force=true 才放行)
 router.post('/compute', asyncHandler(async (req, res) => {
   const caseFactoryId = Number(req.body.caseFactoryId);
   if (!caseFactoryId) return res.status(400).json({ error: 'caseFactoryId required' });
   const opts = { caseFactoryId, persist: true, computedBy: req.user?.id || null };
   if (req.body.bomInstanceId) opts.bomInstanceId = Number(req.body.bomInstanceId);
   if (req.body.qtyScenarioCode) opts.qtyScenarioCode = req.body.qtyScenarioCode;
-  const out = await engine.computeCase(getDb(), opts);
-  res.json({ ok: true, runId: out.runId, costingModel: out.costingModel, costBreakdown: out.costBreakdown });
+  if (req.body.force === true || req.body.force === 'true' || req.body.allowPending) opts.allowPending = true;
+  try {
+    const out = await engine.computeCase(getDb(), opts);
+    res.json({ ok: true, runId: out.runId, costingModel: out.costingModel, costBreakdown: out.costBreakdown });
+  } catch (e) {
+    if (e.code === 'BOM_HAS_PENDING_PRICES') {
+      return res.status(409).json({ error: e.message, code: e.code, pendingCount: e.pendingCount });
+    }
+    throw e;
+  }
 }));
 
 // GET /runs?caseFactoryId= — 列 run

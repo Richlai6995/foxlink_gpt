@@ -13,7 +13,7 @@
 
 import { useEffect, useState } from 'react'
 import type { ProjectDetail } from '../../api'
-import { api } from '../../api'
+import { api, ApiError } from '../../api'
 import { useAuth } from '../../../../context/AuthContext'
 import { Download, Upload, Calculator, Loader2, CheckCircle2, AlertCircle, Info } from 'lucide-react'
 
@@ -30,6 +30,7 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
   const [computing, setComputing] = useState(false)
   const [importResult, setImportResult] = useState<any>(null)
   const [runResult, setRunResult] = useState<any>(null)
+  const [pendingGate, setPendingGate] = useState<{ pendingCount: number } | null>(null)
   const [err, setErr] = useState('')
 
   useEffect(() => {
@@ -59,7 +60,7 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
 
   async function doImport() {
     if (!file) { setErr('請選擇填好的 BOM 範本檔'); return }
-    setImporting(true); setErr(''); setImportResult(null); setRunResult(null)
+    setImporting(true); setErr(''); setImportResult(null); setRunResult(null); setPendingGate(null)
     try {
       const fd = new FormData()
       fd.append('file', file)
@@ -72,13 +73,18 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
     } catch (e: any) { setErr(e.message) } finally { setImporting(false) }
   }
 
-  async function doCompute() {
+  async function doCompute(force = false) {
     if (!caseFactoryId || !importResult?.bomInstanceId) { setErr('需先匯入 + 本專案有成本模型(case_factory)'); return }
     setComputing(true); setErr('')
     try {
-      const r = await api.post(token, '/bom/compute', { caseFactoryId, bomInstanceId: importResult.bomInstanceId })
-      setRunResult(r)
-    } catch (e: any) { setErr(e.message) } finally { setComputing(false) }
+      const r = await api.post(token, '/bom/compute', { caseFactoryId, bomInstanceId: importResult.bomInstanceId, ...(force ? { force: true } : {}) })
+      setRunResult(r); setPendingGate(null)
+    } catch (e: any) {
+      // B-5a:有未詢價料件 → 409,提示可「強制試算」只算已詢價材料
+      if (e instanceof ApiError && e.status === 409 && e.body?.code === 'BOM_HAS_PENDING_PRICES') {
+        setPendingGate({ pendingCount: e.body.pendingCount || 0 })
+      } else { setErr(e.message) }
+    } finally { setComputing(false) }
   }
 
   const money = (v: any) => (typeof v === 'number' ? `$${v.toFixed(4)}` : '—')
@@ -147,21 +153,36 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
             <div className="flex justify-between border-t border-cortex-line mt-1 pt-1 font-semibold">
               <span>全材料</span><span className="font-mono">{money(importResult.rollup?.materialUsd)}</span>
             </div>
+            {importResult.rollup?.pendingCount > 0 && (
+              <div className="mt-1 text-[11px] text-amber-700">⚠️ {importResult.rollup.pendingCount} 筆待詢價(採購後補價)· 材料僅計 {importResult.rollup.pricedCount} 筆已詢價</div>
+            )}
           </div>
 
           {/* ④ 算成本 */}
           {hasCase ? (
-            <div className="flex items-center gap-2 flex-wrap">
-              {cases.length > 1 && (
-                <select value={caseFactoryId} onChange={(e) => setCaseFactoryId(Number(e.target.value))}
-                  className="border border-cortex-line rounded px-2 py-1 text-[12px]">
-                  {cases.map((c) => <option key={c.case_factory_id} value={c.case_factory_id}>#{c.case_factory_id} · {c.factory_code} · {c.costing_model}</option>)}
-                </select>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                {cases.length > 1 && (
+                  <select value={caseFactoryId} onChange={(e) => setCaseFactoryId(Number(e.target.value))}
+                    className="border border-cortex-line rounded px-2 py-1 text-[12px]">
+                    {cases.map((c) => <option key={c.case_factory_id} value={c.case_factory_id}>#{c.case_factory_id} · {c.factory_code} · {c.costing_model}</option>)}
+                  </select>
+                )}
+                <button onClick={() => doCompute()} disabled={computing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-cortex-navy text-white text-[12px] rounded hover:opacity-90 disabled:opacity-40">
+                  {computing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Calculator className="w-3.5 h-3.5" />} ④ 算成本
+                </button>
+              </div>
+              {pendingGate && (
+                <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-800 rounded p-2.5 text-[11px]">
+                  <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <div className="flex-1">
+                    有 <b>{pendingGate.pendingCount}</b> 筆料件尚未詢價,成本不完整(採購補價後再重算)。可先只算已詢價材料 →
+                    <button onClick={() => doCompute(true)} disabled={computing}
+                      className="ml-2 px-2 py-0.5 bg-amber-600 text-white rounded hover:opacity-90 disabled:opacity-40">強制試算</button>
+                  </div>
+                </div>
               )}
-              <button onClick={doCompute} disabled={computing}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-cortex-navy text-white text-[12px] rounded hover:opacity-90 disabled:opacity-40">
-                {computing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Calculator className="w-3.5 h-3.5" />} ④ 算成本
-              </button>
             </div>
           ) : (
             <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-800 rounded p-2.5 text-[11px]">
