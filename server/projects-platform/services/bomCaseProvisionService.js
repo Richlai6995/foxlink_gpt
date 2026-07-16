@@ -66,13 +66,14 @@ async function listTemplates(db) {
  * 為 projectId 建 case_factory(clone 自 sourceCaseFactoryId 範本)。
  * 冪等:同 (project, factory, variant) 已存在 → 回傳既有(reused）。
  */
-async function provisionCase(db, { projectId, sourceCaseFactoryId, variantKey = null }) {
+async function provisionCase(db, { projectId, sourceCaseFactoryId, variantKey = null, factoryCode: factoryOverride = null, baselineId: baselineOverride = null }) {
   if (!projectId) throw new Error('projectId required');
   if (!sourceCaseFactoryId) throw new Error('sourceCaseFactoryId required');
   const tpl = await db.prepare(`SELECT * FROM bom_cs_case_factory WHERE case_factory_id = ?`).get(sourceCaseFactoryId);
   if (!tpl) throw new Error('template case_factory not found');
-  const factoryCode = pick(tpl, 'factory_code');
-  const baselineId = pick(tpl, 'baseline_id');
+  // override:clone 來源的 case 結構,但可綁別的廠別/baseline(多廠差異化用)
+  const factoryCode = factoryOverride || pick(tpl, 'factory_code');
+  const baselineId = baselineOverride || pick(tpl, 'baseline_id');
   const model = pick(tpl, 'costing_model');
 
   const findSql = `SELECT case_factory_id FROM bom_cs_case_factory WHERE case_id=? AND factory_code=? AND ${variantKey == null ? 'variant_key IS NULL' : 'variant_key=?'}`;

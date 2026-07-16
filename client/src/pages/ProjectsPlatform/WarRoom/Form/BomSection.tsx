@@ -17,6 +17,7 @@ import { api, ApiError } from '../../api'
 import { useAuth } from '../../../../context/AuthContext'
 import { Download, Upload, Calculator, Loader2, CheckCircle2, AlertCircle, Info, Settings } from 'lucide-react'
 import BomItemsPanel from './BomItemsPanel'
+import BomFactoryCompare from './BomFactoryCompare'
 
 type CaseRow = { case_factory_id: number; project_id: number; factory_code: string; costing_model: string; status: string; project_code: string }
 
@@ -277,6 +278,24 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* FM 多廠成本比較(≥2 廠才顯)+ 新增廠別 */}
+      {hasCase && (
+        <div className="space-y-2">
+          <BomFactoryCompare projectId={projectId} bomInstanceId={importResult?.bomInstanceId} factoryCount={cases.length} />
+          <div className="flex items-center gap-2 flex-wrap text-[11px]">
+            <span className="text-cortex-muted">已設廠別:{cases.map((c) => c.factory_code).join(' / ') || '—'}</span>
+            <span className="text-cortex-muted">·</span>
+            <select value={tplId} onChange={(e) => setTplId(e.target.value ? Number(e.target.value) : '')} className="border border-cortex-line rounded px-1.5 py-0.5 text-[11px]">
+              <option value="">＋新增廠別範本…</option>
+              {templates.map((t) => <option key={t.caseFactoryId} value={t.caseFactoryId}>{t.factoryCode} · {t.costingModel}</option>)}
+            </select>
+            <button onClick={doProvision} disabled={provisioning || !tplId} className="px-2 py-0.5 border border-cortex-line rounded hover:bg-cortex-bg disabled:opacity-40">
+              {provisioning ? '建立中…' : '建立'}
+            </button>
+          </div>
         </div>
       )}
     </div>

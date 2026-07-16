@@ -30,6 +30,7 @@ const rollupSvc = require('../services/bomMaterialRollup');
 const templateSvc = require('../services/bomTemplateService');
 const enrichSvc = require('../services/bomEnrichService');
 const provisionSvc = require('../services/bomCaseProvisionService');
+const compareSvc = require('../services/bomFactoryCompareService');
 const engine = require('../services/bomCostEngine');
 
 const router = express.Router();
@@ -100,6 +101,17 @@ router.post('/provision-case', asyncHandler(async (req, res) => {
   if (!sourceCaseFactoryId) return res.status(400).json({ error: 'sourceCaseFactoryId required' });
   const out = await provisionSvc.provisionCase(getDb(), { projectId, sourceCaseFactoryId, variantKey: req.body.variantKey || null });
   res.json({ ok: true, ...out });
+}));
+
+// POST /compare — 多廠對比(算專案所有 case_factory 的同一 BOM · 標最便宜)(body: projectId, bomInstanceId?, qtyScenarioCode?, force?)
+router.post('/compare', asyncHandler(async (req, res) => {
+  const projectId = Number(req.body.projectId);
+  if (!projectId) return res.status(400).json({ error: 'projectId required' });
+  const opts = { projectId, computedBy: req.user?.id || null };
+  if (req.body.bomInstanceId) opts.bomInstanceId = Number(req.body.bomInstanceId);
+  if (req.body.qtyScenarioCode) opts.qtyScenarioCode = req.body.qtyScenarioCode;
+  if (req.body.force === true || req.body.force === 'true' || req.body.allowPending) opts.allowPending = true;
+  res.json(await compareSvc.compareFactories(getDb(), opts));
 }));
 
 // POST /import — 上傳 BOM Excel → 正規化
