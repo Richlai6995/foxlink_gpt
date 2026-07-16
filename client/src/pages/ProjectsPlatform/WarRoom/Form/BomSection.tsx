@@ -16,6 +16,7 @@ import type { ProjectDetail } from '../../api'
 import { api, ApiError } from '../../api'
 import { useAuth } from '../../../../context/AuthContext'
 import { Download, Upload, Calculator, Loader2, CheckCircle2, AlertCircle, Info } from 'lucide-react'
+import BomItemsPanel from './BomItemsPanel'
 
 type CaseRow = { case_factory_id: number; project_id: number; factory_code: string; costing_model: string; status: string; project_code: string }
 
@@ -85,6 +86,16 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
         setPendingGate({ pendingCount: e.body.pendingCount || 0 })
       } else { setErr(e.message) }
     } finally { setComputing(false) }
+  }
+
+  // B-5b:採購 enrich(加價/選 vendor)後重抓 rollup,更新材料 + 待詢價數 + 清 gate
+  async function refreshRollup() {
+    if (!importResult?.bomInstanceId) return
+    try {
+      const roll = await api.get(token, `/bom/instances/${importResult.bomInstanceId}/rollup`)
+      setImportResult((prev: any) => (prev ? { ...prev, rollup: roll } : prev))
+      setPendingGate(null)
+    } catch { /* noop */ }
   }
 
   const money = (v: any) => (typeof v === 'number' ? `$${v.toFixed(4)}` : '—')
@@ -157,6 +168,9 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
               <div className="mt-1 text-[11px] text-amber-700">⚠️ {importResult.rollup.pendingCount} 筆待詢價(採購後補價)· 材料僅計 {importResult.rollup.pricedCount} 筆已詢價</div>
             )}
           </div>
+
+          {/* B-5b 採購 enrich:料件明細 + 逐料多 vendor 多 tier 報價 */}
+          <BomItemsPanel bomInstanceId={importResult.bomInstanceId} onChanged={refreshRollup} />
 
           {/* ④ 算成本 */}
           {hasCase ? (

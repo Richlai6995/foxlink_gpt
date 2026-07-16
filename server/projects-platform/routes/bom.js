@@ -28,6 +28,7 @@ const { requireVisible } = require('../middleware/sidebarPermissionMiddleware');
 const importSvc = require('../services/bomImportService');
 const rollupSvc = require('../services/bomMaterialRollup');
 const templateSvc = require('../services/bomTemplateService');
+const enrichSvc = require('../services/bomEnrichService');
 const engine = require('../services/bomCostEngine');
 
 const router = express.Router();
@@ -130,21 +131,60 @@ router.get('/instances/:id/rollup', asyncHandler(async (req, res) => {
   res.json(await rollupSvc.rollupMaterial(getDb(), id));
 }));
 
-// GET /instances/:id/items — item 明細(limit)
+// GET /instances/:id/items — item 明細(chosen snapshot 取價 + 狀態 + vendor 數 · B-5b)
 router.get('/instances/:id/items', asyncHandler(async (req, res) => {
   const id = reqId(req.params.id, res); if (id === null) return;
-  const limit = Math.min(Number(req.query.limit) || 200, 1000);
+  const limit = Math.min(Number(req.query.limit) || 500, 2000);
   const rows = await getDb().prepare(
     `SELECT sec.module_category, c.name AS category, i.id, i.item_sequence, i.qty, i.fpn, i.description,
-            s.applied_price_usd, (i.qty * s.applied_price_usd) AS extended
+            ch.applied_price_usd AS applied_price,
+            (i.qty * ch.applied_price_usd) AS extended,
+            CASE WHEN ch.applied_price_usd IS NULL THEN 'pending' ELSE 'priced' END AS status,
+            (SELECT COUNT(*) FROM bom_item_mfg m WHERE m.bom_item_id = i.id) AS vendor_count
        FROM bom_item i
        JOIN bom_category c ON c.id = i.bom_category_id
        JOIN bom_section sec ON sec.id = c.bom_section_id
-       LEFT JOIN bom_item_price_snapshot s ON s.bom_item_id = i.id
+       LEFT JOIN (
+         SELECT bom_item_id, MAX(applied_price_usd) AS applied_price_usd
+           FROM bom_item_price_snapshot WHERE is_chosen = 1 GROUP BY bom_item_id
+       ) ch ON ch.bom_item_id = i.id
       WHERE sec.bom_instance_id = ?
       ORDER BY sec.id, i.item_sequence FETCH FIRST ${limit} ROWS ONLY`,
   ).all(id).catch(() => []);
   res.json({ count: rows.length, items: rows });
+}));
+
+// ── B-5b 採購 enrich(per-vendor 報價)──────────────────────────────────────
+// GET /items/:itemId/detail — 料件明細(vendors + 每 vendor snapshot 含 tiers + 狀態)
+router.get('/items/:itemId/detail', asyncHandler(async (req, res) => {
+  const id = reqId(req.params.itemId, res, 'itemId'); if (id === null) return;
+  const d = await enrichSvc.getItemDetail(getDb(), id);
+  if (!d) return res.status(404).json({ error: 'item not found' });
+  res.json(d);
+}));
+
+// POST /items/:itemId/vendor — 加替代供應商(body: vendor, mfgPn)
+router.post('/items/:itemId/vendor', asyncHandler(async (req, res) => {
+  const id = reqId(req.params.itemId, res, 'itemId'); if (id === null) return;
+  const out = await enrichSvc.addVendor(getDb(), id, { vendor: req.body.vendor, mfgPn: req.body.mfgPn });
+  res.json({ ok: true, ...out });
+}));
+
+// POST /items/:itemId/price — 加報價(body: mfgId?, sourceCurrency?, tiers[{qtyMin,qtyMax,label,sourceCurrency,trueCostSource,fxRate,quotePrice,isChosen}])
+router.post('/items/:itemId/price', asyncHandler(async (req, res) => {
+  const id = reqId(req.params.itemId, res, 'itemId'); if (id === null) return;
+  if (!Array.isArray(req.body.tiers) || !req.body.tiers.length) return res.status(400).json({ error: 'tiers required (>=1)' });
+  const out = await enrichSvc.addPrice(getDb(), id, { mfgId: req.body.mfgId || null, sourceCurrency: req.body.sourceCurrency || 'USD', tiers: req.body.tiers });
+  res.json({ ok: true, ...out });
+}));
+
+// PUT /items/:itemId/choose — 選定某 vendor snapshot 為此料件的價(body: snapshotId)
+router.put('/items/:itemId/choose', asyncHandler(async (req, res) => {
+  const id = reqId(req.params.itemId, res, 'itemId'); if (id === null) return;
+  const snapshotId = Number(req.body.snapshotId);
+  if (!snapshotId) return res.status(400).json({ error: 'snapshotId required' });
+  const out = await enrichSvc.chooseSnapshot(getDb(), id, snapshotId);
+  res.json({ ok: true, ...out });
 }));
 
 // POST /compute — computeCase(persist)· B-5a:有未詢價料件回 409(帶 force=true 才放行)

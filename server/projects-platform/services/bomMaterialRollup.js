@@ -23,20 +23,23 @@ async function rollupMaterial(db, bomInstanceId, opts = {}) {
   const all = (sql, ...a) => db.prepare(sql).all(...a).catch(() => []);
   if (!bomInstanceId) return { materialUsd: 0, itemCount: 0, pricedCount: 0, pendingCount: 0, byCategory: {} };
 
-  // B-5a 兩階段:PENDING snapshot 的 applied_price_usd 為 NULL → SUM 自動排除(材料只算已詢價)
-  //   pending_n = 待採購詢價料件數;priced_n = 已有價料件數
-  // 註(B-5b 待處理):目前 import 每 item 恰 1 snapshot;之後採購 enrich 若加第 2 筆 snapshot,
-  //   rollup 需改成「取 chosen/latest snapshot」避免重複計數。B-5a 階段 1:1 成立。
+  // B-5b per-vendor:一料件可有多筆 snapshot(每 vendor 一筆),只取 is_chosen=1 那筆的 applied_price。
+  //   chosen 但 applied=NULL(PENDING placeholder)→ 待詢價;無任何 snapshot 也算 pending(LEFT JOIN)。
+  //   pending_n = 待詢價料件數;priced_n = 已有價料件數;materialUsd 只算已詢價。
   const rows = await all(
     `SELECT sec.module_category AS cat,
-            NVL(SUM(i.qty * s.applied_price_usd),0) AS mat,
+            NVL(SUM(i.qty * ch.applied_price_usd),0) AS mat,
             COUNT(*) AS n,
-            COUNT(s.applied_price_usd) AS priced_n,
-            COUNT(CASE WHEN s.applied_price_usd IS NULL THEN 1 END) AS pending_n
+            COUNT(ch.applied_price_usd) AS priced_n,
+            COUNT(CASE WHEN ch.applied_price_usd IS NULL THEN 1 END) AS pending_n
        FROM bom_item i
        JOIN bom_category c   ON c.id = i.bom_category_id
        JOIN bom_section  sec ON sec.id = c.bom_section_id
-       JOIN bom_item_price_snapshot s ON s.bom_item_id = i.id
+       LEFT JOIN (
+         SELECT bom_item_id, MAX(applied_price_usd) AS applied_price_usd
+           FROM bom_item_price_snapshot WHERE is_chosen = 1
+          GROUP BY bom_item_id
+       ) ch ON ch.bom_item_id = i.id
       WHERE sec.bom_instance_id = ?
       ${opts.sectionCategory ? 'AND sec.module_category = ?' : ''}
       GROUP BY sec.module_category`,

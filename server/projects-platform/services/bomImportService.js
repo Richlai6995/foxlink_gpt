@@ -286,8 +286,8 @@ async function importBomTemplate(db, opts = {}) {
       // 兩階段價:有價 → TEMPLATE snapshot + tier(is_chosen);無價 → PENDING snapshot(待採購詢價 · 無 tier)
       if (hasPrice) {
         const snap = await run(
-          `INSERT INTO bom_item_price_snapshot (bom_item_id, bom_item_flk_id, period_months, strategy_used, price_avg_usd, applied_price_usd, po_line_count, vendor_count)
-           VALUES (?, ?, 0, 'TEMPLATE', ?, ?, 0, 0)`,
+          `INSERT INTO bom_item_price_snapshot (bom_item_id, bom_item_flk_id, period_months, strategy_used, price_avg_usd, applied_price_usd, po_line_count, vendor_count, is_chosen)
+           VALUES (?, ?, 0, 'TEMPLATE', ?, ?, 0, 0, 1)`,
           itemId, flkId, num(price), num(price),
         );
         const snapId = Number(snap.lastInsertRowid);
@@ -299,8 +299,8 @@ async function importBomTemplate(db, opts = {}) {
         pricedCount += 1;
       } else {
         await run(
-          `INSERT INTO bom_item_price_snapshot (bom_item_id, bom_item_flk_id, period_months, strategy_used, applied_price_usd, po_line_count, vendor_count)
-           VALUES (?, ?, 0, 'PENDING', NULL, 0, 0)`,
+          `INSERT INTO bom_item_price_snapshot (bom_item_id, bom_item_flk_id, period_months, strategy_used, applied_price_usd, po_line_count, vendor_count, is_chosen)
+           VALUES (?, ?, 0, 'PENDING', NULL, 0, 0, 1)`,
           itemId, flkId,
         );
         pendingCount += 1;

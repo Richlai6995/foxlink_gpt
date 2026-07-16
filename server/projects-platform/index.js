@@ -157,6 +157,7 @@ async function runMigrations(db) {
       await require('./migrations/013g_process_output_override')(db);// case_process.weekly_output_override(品檢/支援製程承線速率 · S1d)
       await require('./migrations/013h_drop_legacy_equip')(db);      // DROP 設備舊模型 4 表(S1d 作廢 · 排最後)
       await require('./migrations/013i_simplified_line')(db);        // 案級 SIMPLIFIED 成本 line 輸入表(WHOOP · S1c)
+      await require('./migrations/013j_price_vendor_link')(db);      // snapshot 加 bom_item_mfg_id + is_chosen(per-vendor 報價 · B-5b)
       console.log('[projects-platform] Cortex BOM/RBAC migrations (S0) ✓');
     } else {
       console.log('[projects-platform] Cortex BOM/RBAC migrations skipped (ENABLE_CORTEX_BOM != true)');
