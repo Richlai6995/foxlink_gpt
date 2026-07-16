@@ -26,19 +26,27 @@ async function rollupMaterial(db, bomInstanceId, opts = {}) {
   // B-5b per-vendor:一料件可有多筆 snapshot(每 vendor 一筆),只取 is_chosen=1 那筆的 applied_price。
   //   chosen 但 applied=NULL(PENDING placeholder)→ 待詢價;無任何 snapshot 也算 pending(LEFT JOIN)。
   //   pending_n = 待詢價料件數;priced_n = 已有價料件數;materialUsd 只算已詢價。
+  // chosen snapshot 的 quote(applied_price)+ chosen tier 的 true_cost(無 tier → fallback quote)
+  //   materialUsd = Σ qty×quote(對客報價材料)· materialTrueUsd = Σ qty×true(內部真實成本材料)
+  //   兩者差 = 料件層 markup(SD §19:利潤主要藏這)· B-5a template 料 true=quote(無 markup)
   const rows = await all(
     `SELECT sec.module_category AS cat,
-            NVL(SUM(i.qty * ch.applied_price_usd),0) AS mat,
+            NVL(SUM(i.qty * ch.quote_price),0) AS mat,
+            NVL(SUM(i.qty * ch.true_cost),0)   AS mat_true,
             COUNT(*) AS n,
-            COUNT(ch.applied_price_usd) AS priced_n,
-            COUNT(CASE WHEN ch.applied_price_usd IS NULL THEN 1 END) AS pending_n
+            COUNT(ch.quote_price) AS priced_n,
+            COUNT(CASE WHEN ch.quote_price IS NULL THEN 1 END) AS pending_n
        FROM bom_item i
        JOIN bom_category c   ON c.id = i.bom_category_id
        JOIN bom_section  sec ON sec.id = c.bom_section_id
        LEFT JOIN (
-         SELECT bom_item_id, MAX(applied_price_usd) AS applied_price_usd
-           FROM bom_item_price_snapshot WHERE is_chosen = 1
-          GROUP BY bom_item_id
+         SELECT s.bom_item_id,
+                s.applied_price_usd AS quote_price,
+                NVL(MAX(t.true_cost_usd), s.applied_price_usd) AS true_cost
+           FROM bom_item_price_snapshot s
+           LEFT JOIN bom_item_price_tier t ON t.snapshot_id = s.id AND t.is_chosen = 1
+          WHERE s.is_chosen = 1
+          GROUP BY s.bom_item_id, s.applied_price_usd
        ) ch ON ch.bom_item_id = i.id
       WHERE sec.bom_instance_id = ?
       ${opts.sectionCategory ? 'AND sec.module_category = ?' : ''}
@@ -47,17 +55,18 @@ async function rollupMaterial(db, bomInstanceId, opts = {}) {
   );
 
   const byCategory = {};
-  let materialUsd = 0, itemCount = 0, pricedCount = 0, pendingCount = 0;
+  let materialUsd = 0, materialTrueUsd = 0, itemCount = 0, pricedCount = 0, pendingCount = 0;
   for (const r of rows) {
     const cat = pick(r, 'cat') || 'UNKNOWN';
     const mat = num(pick(r, 'mat'));
     byCategory[cat] = mat;
     materialUsd += mat;
+    materialTrueUsd += num(pick(r, 'mat_true'));
     itemCount += num(pick(r, 'n'));
     pricedCount += num(pick(r, 'priced_n'));
     pendingCount += num(pick(r, 'pending_n'));
   }
-  return { materialUsd, itemCount, pricedCount, pendingCount, byCategory };
+  return { materialUsd, materialTrueUsd, itemCount, pricedCount, pendingCount, byCategory };
 }
 
 module.exports = { rollupMaterial };

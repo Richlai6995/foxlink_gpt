@@ -299,13 +299,14 @@ async function persistRun(db, { caseFactoryId, factoryCode, costingModel, cells,
     );
   }
 
-  // 4. run_result(1 fact · quote=true)
+  // 4. run_result(1 fact · true/quote 雙軌:material_true=內部真實成本、material_quote=對客報價)
   const mat = num(costBreakdown.material), pkg = num(costBreakdown.pkg);
+  const matTrue = costBreakdown.materialTrue != null ? num(costBreakdown.materialTrue) : mat;
   await run(
     `INSERT INTO bom_cs_run_result
       (run_id, factory_code, qty_scenario_code, material_true_usd, pkg_true_usd, mva_usd, sga_usd, profit_amount_usd, material_quote_usd, pkg_quote_usd)
      VALUES (?,?,?,?,?,?,?,?,?,?)`,
-    runId, factoryCode || null, scenario, mat, pkg, num(costBreakdown.mva), num(costBreakdown.sga), num(costBreakdown.profit), mat, pkg,
+    runId, factoryCode || null, scenario, matTrue, pkg, num(costBreakdown.mva), num(costBreakdown.sga), num(costBreakdown.profit), mat, pkg,
   );
 
   // 5. audit(不擋主流程)
@@ -337,7 +338,7 @@ async function computeCase(db, opts = {}) {
 
   // material(FULL 的 motherboard)優先序:BOM rollup(bomInstanceId · B-2)> 參數 > baseline.motherboard_cost_ref
   //   rollup 是獨立 service(解耦)· 現 EE、匯入 ME/PKG 後自動含全材料(對 Unit Cost Material Cost)
-  let materialFromBom = null;
+  let materialFromBom = null, materialTrueFromBom = null;
   if (bomInstanceId) {
     const roll = await require('./bomMaterialRollup').rollupMaterial(db, bomInstanceId);
     // B-5a 兩階段:有未詢價(PENDING)料件 → 材料不完整,擋算成本;帶 opts.allowPending 才放行
@@ -348,6 +349,7 @@ async function computeCase(db, opts = {}) {
       throw e;
     }
     materialFromBom = num(roll.materialUsd);
+    materialTrueFromBom = roll.materialTrueUsd != null ? num(roll.materialTrueUsd) : null;  // true/quote 雙軌
   }
   const motherboard = materialFromBom != null ? materialFromBom
     : (motherboardCostUsd != null ? num(motherboardCostUsd) : num(pick(baseline, 'motherboard_cost_ref')));
@@ -383,8 +385,10 @@ async function computeCase(db, opts = {}) {
   const mva = isSimplified ? computeSimplifiedMva(inputs, ctx) : computeFullMva(inputs, ctx);
 
   // material_true / base:FULL=motherboard · SIMPLIFIED=subtotal(材料+製程 line 總和)
-  const materialUsd = isSimplified ? num(mva.subtotal) : motherboard;
+  const materialUsd = isSimplified ? num(mva.subtotal) : motherboard;   // quote 側(對客報價材料)
   const bomSubtotal = isSimplified ? num(mva.subtotal) : motherboard;
+  // true 側(內部真實成本材料):FULL 用 BOM chosen tier true_cost(無 BOM → = quote);SIMPLIFIED 無料件層 markup → = quote
+  const materialTrue = isSimplified ? materialUsd : (materialTrueFromBom != null ? materialTrueFromBom : materialUsd);
 
   // SGA / Profit / TC(兩 model 共用 · base_ref 參數化)
   const mvaTotal = mva.mvaTotal;
@@ -392,9 +396,12 @@ async function computeCase(db, opts = {}) {
   const profitBase = resolveBaseRef(baseline, 'profit', { motherboard, mva: mvaTotal, bomSubtotal });
   const sga = sgaBase * num(pick(baseline, 'sga_pct'));
   const profit = profitBase * num(pick(baseline, 'profit_pct'));
-  const total = materialUsd + mvaTotal + sga + profit;
+  const total = materialUsd + mvaTotal + sga + profit;               // 對客報價 total
+  const totalTrue = materialTrue + mvaTotal + sga + profit;          // 內部真實成本 total(MVA/SGA/Profit 兩側同)
+  const marginUsd = total - totalTrue;                               // = 料件 true→quote markup
+  const marginPct = total > 0 ? marginUsd / total : 0;
 
-  const costBreakdown = { material: materialUsd, pkg: 0, mva: mvaTotal, sga, profit, total, subtotal: isSimplified ? num(mva.subtotal) : null };
+  const costBreakdown = { material: materialUsd, materialTrue, pkg: 0, mva: mvaTotal, sga, profit, total, totalTrue, marginUsd, marginPct, subtotal: isSimplified ? num(mva.subtotal) : null };
 
   let runId = null;
   if (persist) {

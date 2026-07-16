@@ -115,6 +115,7 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
   }
 
   const money = (v: any) => (typeof v === 'number' ? `$${v.toFixed(4)}` : '—')
+  const pctFmt = (v: any) => (typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : '—')
 
   return (
     <div className="space-y-4">
@@ -250,7 +251,7 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
           <table className="w-full text-[12px]">
             <tbody>
               {[
-                ['材料 (material_true)', runResult.costBreakdown?.material],
+                ['材料 (對客報價)', runResult.costBreakdown?.material],
                 ['MVA', runResult.costBreakdown?.mva],
                 ['SG&A', runResult.costBreakdown?.sga],
                 ['Profit', runResult.costBreakdown?.profit],
@@ -259,9 +260,21 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
                   <td className="py-1 text-cortex-muted">{k as string}</td><td className="py-1 text-right font-mono">{money(v)}</td>
                 </tr>
               ))}
-              <tr className="font-bold text-cortex-ink">
-                <td className="py-1.5">Total / unit</td><td className="py-1.5 text-right font-mono">{money(runResult.costBreakdown?.total)}</td>
+              <tr className="font-bold text-cortex-ink border-b border-cortex-line">
+                <td className="py-1.5">報價 Total / unit</td><td className="py-1.5 text-right font-mono">{money(runResult.costBreakdown?.total)}</td>
               </tr>
+              {/* true/quote 雙軌:內部真實成本 + margin(採購 true/quote 價差) */}
+              {typeof runResult.costBreakdown?.totalTrue === 'number' && (
+                <>
+                  <tr className="text-cortex-muted">
+                    <td className="py-1">內部真實成本 (true)</td><td className="py-1 text-right font-mono">{money(runResult.costBreakdown?.totalTrue)}</td>
+                  </tr>
+                  <tr className="font-semibold text-cortex-teal">
+                    <td className="py-1">Margin (報價 − 真實)</td>
+                    <td className="py-1 text-right font-mono">{money(runResult.costBreakdown?.marginUsd)} · {pctFmt(runResult.costBreakdown?.marginPct)}</td>
+                  </tr>
+                </>
+              )}
             </tbody>
           </table>
         </div>
