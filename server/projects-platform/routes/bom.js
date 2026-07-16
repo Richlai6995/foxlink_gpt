@@ -87,6 +87,28 @@ router.get('/cases', asyncHandler(async (req, res) => {
   res.json({ cases: rows });
 }));
 
+// GET /summary?projectId= — 成本核算 headline:各 case_factory 最新 run 的 result(唯讀 · 不重算)
+router.get('/summary', asyncHandler(async (req, res) => {
+  const pid = Number(req.query.projectId);
+  if (!pid) return res.status(400).json({ error: 'projectId required' });
+  const rows = await getDb().prepare(
+    `SELECT cf.case_factory_id, cf.factory_code, cf.costing_model, cf.status AS case_status,
+            r.run_id, r.computed_at,
+            rr.material_true_usd, rr.material_quote_usd, rr.mva_usd, rr.sga_usd, rr.profit_amount_usd,
+            rr.total_true_usd, rr.total_quote_usd, rr.margin_amount_usd, rr.gross_margin_pct
+       FROM bom_cs_case_factory cf
+       LEFT JOIN bom_cs_run r ON r.run_id = (SELECT MAX(run_id) FROM bom_cs_run WHERE case_factory_id = cf.case_factory_id)
+       LEFT JOIN bom_cs_run_result rr ON rr.run_id = r.run_id
+      WHERE cf.case_id = ?
+      ORDER BY cf.case_factory_id`,
+  ).all(pid).catch(() => []);
+  // 標最便宜(依 total_quote · 只比有算的)· wrapper 回小寫 key
+  const totals = rows.map((r) => Number(r.total_quote_usd)).filter((n) => Number.isFinite(n) && n > 0);
+  const minTotal = totals.length ? Math.min(...totals) : null;
+  const factories = rows.map((r) => ({ ...r, isCheapest: minTotal != null && Number(r.total_quote_usd) === minTotal }));
+  res.json({ projectId: pid, factories });
+}));
+
 // ── §9.4 開案自動建 case_factory(從範本 clone)──────────────────────────────
 // GET /provision/templates — 列可選成本模型範本(廠 / model)
 router.get('/provision/templates', asyncHandler(async (req, res) => {

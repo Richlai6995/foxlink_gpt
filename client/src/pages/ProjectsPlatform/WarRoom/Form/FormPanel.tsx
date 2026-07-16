@@ -25,6 +25,7 @@ import FactoryMatrixSection from './FactoryMatrixSection'
 import CustomerSection from './CustomerSection'
 import AiToolbarSection from './AiToolbarSection'
 import BomSection from './BomSection'
+import CostSummarySection from './CostSummarySection'
 
 type SectionId =
   | 'customer'
@@ -130,29 +131,8 @@ function CostSection({ project }: { project: ProjectDetail }) {
     <div className="space-y-4">
       {hasMatrix && <FactoryMatrixSection project={project} />}
 
-      {/* Cost breakdown stub(若無 matrix · 顯示舊版機密 mask 提示)*/}
-      {!hasMatrix && (
-        <div className="bg-cortex-bg/40 border border-cortex-line rounded-lg p-4">
-          <div className="text-[13px] font-bold text-cortex-ink mb-2">📊 成本核算</div>
-          <div className="text-[11px] text-cortex-muted">
-            此專案未啟用 Multi-Factory Matrix(spec §11.3.8)。預設成本以單廠表示。
-          </div>
-          <div className="mt-3 grid grid-cols-3 gap-2 text-[12px]">
-            <div className="bg-white border border-cortex-line rounded p-2">
-              <div className="text-[10px] text-cortex-muted">amount</div>
-              <div className="font-mono font-bold text-cortex-ink">{dp?.amount ?? '—'}</div>
-            </div>
-            <div className="bg-white border border-cortex-line rounded p-2">
-              <div className="text-[10px] text-cortex-muted">margin</div>
-              <div className="font-mono font-bold text-cortex-ink">{dp?.margin ?? '—'}</div>
-            </div>
-            <div className="bg-white border border-cortex-line rounded p-2">
-              <div className="text-[10px] text-cortex-muted">cost_breakdown</div>
-              <div className="font-mono font-bold text-cortex-ink">{dp?.cost_breakdown ?? '—'}</div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* §9.3:無 demo matrix → 接真 run_result 多廠彙總(取代舊 stub)*/}
+      {!hasMatrix && <CostSummarySection project={project} />}
     </div>
   )
 }
