@@ -32,6 +32,7 @@ const enrichSvc = require('../services/bomEnrichService');
 const provisionSvc = require('../services/bomCaseProvisionService');
 const compareSvc = require('../services/bomFactoryCompareService');
 const nreSvc = require('../services/bomNreService');
+const quoteSvc = require('../services/bomQuoteService');
 const engine = require('../services/bomCostEngine');
 
 const router = express.Router();
@@ -177,6 +178,42 @@ router.put('/nre/config', asyncHandler(async (req, res) => {
   const pid = Number(req.body.projectId);
   if (!pid) return res.status(400).json({ error: 'projectId required' });
   res.json({ ok: true, config: await nreSvc.setConfig(getDb(), pid, req.body) });
+}));
+
+// ── 報價定版 / 送審(流程終點)──────────────────────────────────────────────
+// GET /quote?projectId= — 版本歷史 + 當前官方(APPROVED)
+router.get('/quote', asyncHandler(async (req, res) => {
+  const pid = Number(req.query.projectId);
+  if (!pid) return res.status(400).json({ error: 'projectId required' });
+  res.json(await quoteSvc.listQuotes(getDb(), pid));
+}));
+
+// POST /quote/submit — 送審(快照某廠最新 run)(body: projectId, caseFactoryId, note)
+router.post('/quote/submit', asyncHandler(async (req, res) => {
+  const projectId = Number(req.body.projectId), caseFactoryId = Number(req.body.caseFactoryId);
+  if (!projectId || !caseFactoryId) return res.status(400).json({ error: 'projectId + caseFactoryId required' });
+  try {
+    res.json({ ok: true, ...(await quoteSvc.submitQuote(getDb(), { projectId, caseFactoryId, note: req.body.note || null, userId: req.user?.id || null })) });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+}));
+
+// POST /quote/approve — 核准(= 官方 · 鎖 case)(body: versionId)· 擋自我核准(SoD)
+router.post('/quote/approve', asyncHandler(async (req, res) => {
+  const versionId = Number(req.body.versionId);
+  if (!versionId) return res.status(400).json({ error: 'versionId required' });
+  try {
+    res.json({ ok: true, ...(await quoteSvc.approveQuote(getDb(), { versionId, userId: req.user?.id || null, isAdmin: req.user?.role === 'admin' })) });
+  } catch (e) {
+    if (e.code === 'SELF_APPROVAL_BLOCKED') return res.status(403).json({ error: e.message, code: e.code });
+    throw e;
+  }
+}));
+
+// POST /quote/supersede — 作廢版本(admin 解鎖)(body: versionId)
+router.post('/quote/supersede', asyncHandler(async (req, res) => {
+  const versionId = Number(req.body.versionId);
+  if (!versionId) return res.status(400).json({ error: 'versionId required' });
+  res.json({ ok: true, ...(await quoteSvc.supersedeQuote(getDb(), versionId)) });
 }));
 
 // POST /import — 上傳 BOM Excel → 正規化

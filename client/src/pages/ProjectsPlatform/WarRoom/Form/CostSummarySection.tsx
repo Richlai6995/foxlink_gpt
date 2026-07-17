@@ -19,18 +19,33 @@ export default function CostSummarySection({ project }: { project: ProjectDetail
   const { token } = useAuth() as any
   const projectId = project.id
   const [factories, setFactories] = useState<any[] | null>(null)
+  const [quote, setQuote] = useState<any>(null)
+  const [submitCf, setSubmitCf] = useState<number | ''>('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
   async function load() {
-    try { const r = await api.get<{ factories: any[] }>(token, `/bom/summary?projectId=${projectId}`); setFactories(r.factories || []) }
-    catch (e: any) { setErr(e.message); setFactories([]) }
+    try {
+      const r = await api.get<{ factories: any[] }>(token, `/bom/summary?projectId=${projectId}`); setFactories(r.factories || [])
+      const q = await api.get<any>(token, `/bom/quote?projectId=${projectId}`); setQuote(q)
+    } catch (e: any) { setErr(e.message); setFactories((f) => f ?? []) }
   }
   useEffect(() => { if (token) load() }, [token, projectId])
 
   async function recompute() {
     setBusy(true); setErr('')
     try { await api.post(token, '/bom/compare', { projectId, force: true }); await load() }
+    catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
+  async function doSubmit() {
+    if (!submitCf) return
+    setBusy(true); setErr('')
+    try { await api.post(token, '/bom/quote/submit', { projectId, caseFactoryId: submitCf }); setSubmitCf(''); await load() }
+    catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
+  async function doApprove(versionId: number) {
+    setBusy(true); setErr('')
+    try { await api.post(token, '/bom/quote/approve', { versionId }); await load() }
     catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
 
@@ -85,6 +100,54 @@ export default function CostSummarySection({ project }: { project: ProjectDetail
           ))}
         </tbody>
       </table>
+      {/* 報價定版 / 送審(流程終點) */}
+      {anyRun && (
+        <div className="border-t border-cortex-line pt-2 space-y-2">
+          <div className="text-[12px] font-bold text-cortex-ink">報價定版 / 送審</div>
+          {quote?.official && (
+            <div className="bg-cortex-cyan-bg/50 border border-cortex-teal rounded p-2 text-[12px] flex items-center gap-2 flex-wrap">
+              <span className="text-base">🏆</span>
+              <span className="font-bold">官方報價 v{quote.official.version_no}</span>
+              <span>· {quote.official.factory_code}</span>
+              <span className="font-mono font-bold text-cortex-teal">{money(quote.official.unit_quote_usd)}/台</span>
+              <span className="text-[10px] text-cortex-muted">已核准</span>
+            </div>
+          )}
+          <div className="flex items-center gap-2 flex-wrap text-[11px]">
+            <span className="text-cortex-muted">送審廠別:</span>
+            <select value={submitCf} onChange={(e) => setSubmitCf(e.target.value ? Number(e.target.value) : '')} className="border border-cortex-line rounded px-1.5 py-0.5 text-[11px]">
+              <option value="">選一廠…</option>
+              {factories.filter((f) => f.run_id).map((f) => <option key={f.case_factory_id} value={f.case_factory_id}>{f.factory_code} · {money(f.total_quote_with_nre ?? f.total_quote_usd)}</option>)}
+            </select>
+            <button onClick={doSubmit} disabled={busy || !submitCf} className="px-2 py-0.5 bg-cortex-navy text-white rounded hover:opacity-90 disabled:opacity-40">送審</button>
+          </div>
+          {quote?.versions?.length > 0 && (
+            <table className="w-full text-[11px]">
+              <thead className="text-cortex-muted border-b border-cortex-line"><tr>
+                <th className="text-left px-2 py-1">版本</th><th className="text-left px-2 py-1">廠</th>
+                <th className="text-right px-2 py-1">單價</th><th className="text-center px-2 py-1">狀態</th>
+                <th className="text-left px-2 py-1">送審者</th><th className="text-left px-2 py-1">核准者</th><th className="w-14"></th>
+              </tr></thead>
+              <tbody>
+                {quote.versions.map((v: any) => (
+                  <tr key={v.id} className="border-b border-cortex-line/40">
+                    <td className="px-2 py-1">v{v.version_no}</td>
+                    <td className="px-2 py-1">{v.factory_code}</td>
+                    <td className="px-2 py-1 text-right font-mono">{money(v.unit_quote_usd)}</td>
+                    <td className="px-2 py-1 text-center">
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded ${v.status === 'APPROVED' ? 'bg-green-100 text-green-700' : v.status === 'SUBMITTED' ? 'bg-amber-100 text-amber-700' : 'bg-cortex-line text-cortex-muted'}`}>{v.status}</span>
+                    </td>
+                    <td className="px-2 py-1 text-cortex-muted">{v.submitted_by_name || v.submitted_by || '—'}</td>
+                    <td className="px-2 py-1 text-cortex-muted">{v.approved_by_name || (v.status === 'SUBMITTED' ? '待核准' : '—')}</td>
+                    <td className="px-2 py-1 text-center">{v.status === 'SUBMITTED' && <button onClick={() => doApprove(v.id)} disabled={busy} className="text-[10px] text-cortex-teal hover:underline font-semibold">核准</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
       {!anyRun && <div className="text-[11px] text-cortex-muted">尚無計算結果 —— 至「BOM/材料」匯入並算成本,或按「重新計算所有廠」。</div>}
       {factories.some((f) => Number(f.nre_per_unit_quote_usd) > 0) && (
         <div className="text-[10px] text-cortex-teal">報價 Total 已含 NRE 每台攤提(AMORTIZED · 見「🔧 NRE 成本」tab)。</div>
