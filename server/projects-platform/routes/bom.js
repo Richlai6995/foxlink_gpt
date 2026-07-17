@@ -31,6 +31,7 @@ const templateSvc = require('../services/bomTemplateService');
 const enrichSvc = require('../services/bomEnrichService');
 const provisionSvc = require('../services/bomCaseProvisionService');
 const compareSvc = require('../services/bomFactoryCompareService');
+const nreSvc = require('../services/bomNreService');
 const engine = require('../services/bomCostEngine');
 
 const router = express.Router();
@@ -95,17 +96,28 @@ router.get('/summary', asyncHandler(async (req, res) => {
     `SELECT cf.case_factory_id, cf.factory_code, cf.costing_model, cf.status AS case_status,
             r.run_id, r.computed_at,
             rr.material_true_usd, rr.material_quote_usd, rr.mva_usd, rr.sga_usd, rr.profit_amount_usd,
-            rr.total_true_usd, rr.total_quote_usd, rr.margin_amount_usd, rr.gross_margin_pct
+            rr.total_true_usd, rr.total_quote_usd, rr.margin_amount_usd, rr.gross_margin_pct,
+            rr.nre_per_unit_quote_usd, rr.nre_per_unit_true_usd
        FROM bom_cs_case_factory cf
        LEFT JOIN bom_cs_run r ON r.run_id = (SELECT MAX(run_id) FROM bom_cs_run WHERE case_factory_id = cf.case_factory_id)
        LEFT JOIN bom_cs_run_result rr ON rr.run_id = r.run_id
       WHERE cf.case_id = ?
       ORDER BY cf.case_factory_id`,
   ).all(pid).catch(() => []);
-  // 標最便宜(依 total_quote · 只比有算的)· wrapper 回小寫 key
-  const totals = rows.map((r) => Number(r.total_quote_usd)).filter((n) => Number.isFinite(n) && n > 0);
+  // 含 NRE 攤提的 total(product total + nre_per_unit)· wrapper 回小寫 key
+  const factories = rows.map((r) => {
+    const tq = Number(r.total_quote_usd), tt = Number(r.total_true_usd);
+    const nreQ = Number(r.nre_per_unit_quote_usd) || 0, nreT = Number(r.nre_per_unit_true_usd) || 0;
+    return {
+      ...r,
+      total_quote_with_nre: Number.isFinite(tq) ? tq + nreQ : null,
+      total_true_with_nre: Number.isFinite(tt) ? tt + nreT : null,
+    };
+  });
+  // 標最便宜(依含 NRE 的對客 total)
+  const totals = factories.map((f) => f.total_quote_with_nre).filter((n) => Number.isFinite(n) && n > 0);
   const minTotal = totals.length ? Math.min(...totals) : null;
-  const factories = rows.map((r) => ({ ...r, isCheapest: minTotal != null && Number(r.total_quote_usd) === minTotal }));
+  factories.forEach((f) => { f.isCheapest = minTotal != null && f.total_quote_with_nre === minTotal; });
   res.json({ projectId: pid, factories });
 }));
 
@@ -134,6 +146,37 @@ router.post('/compare', asyncHandler(async (req, res) => {
   if (req.body.qtyScenarioCode) opts.qtyScenarioCode = req.body.qtyScenarioCode;
   if (req.body.force === true || req.body.force === 'true' || req.body.allowPending) opts.allowPending = true;
   res.json(await compareSvc.compareFactories(getDb(), opts));
+}));
+
+// ── Track N NRE(一次性工程費 · project 層)──────────────────────────────────
+// GET /nre?projectId= — NRE 明細 + 彙總(雙價)+ 模式 + 攤提每台
+router.get('/nre', asyncHandler(async (req, res) => {
+  const pid = Number(req.query.projectId);
+  if (!pid) return res.status(400).json({ error: 'projectId required' });
+  const [rollup, config, amortized] = await Promise.all([
+    nreSvc.rollupNre(getDb(), pid), nreSvc.getConfig(getDb(), pid), nreSvc.amortizedPerUnit(getDb(), pid),
+  ]);
+  res.json({ projectId: pid, rollup, config, amortized });
+}));
+
+// POST /nre/item — 新增 NRE 項(body: projectId, category, description, qty, unitPriceTrue, unitPriceQuote, factoryCode, remark)
+router.post('/nre/item', asyncHandler(async (req, res) => {
+  const pid = Number(req.body.projectId);
+  if (!pid) return res.status(400).json({ error: 'projectId required' });
+  res.json({ ok: true, ...(await nreSvc.addItem(getDb(), pid, req.body)) });
+}));
+
+// DELETE /nre/item/:id
+router.delete('/nre/item/:id', asyncHandler(async (req, res) => {
+  const id = reqId(req.params.id, res); if (id === null) return;
+  res.json({ ok: true, ...(await nreSvc.deleteItem(getDb(), id)) });
+}));
+
+// PUT /nre/config — 設模式(body: projectId, nreMode SEPARATE|AMORTIZED, nreAmortizeQty, amortizeSide quote|true)
+router.put('/nre/config', asyncHandler(async (req, res) => {
+  const pid = Number(req.body.projectId);
+  if (!pid) return res.status(400).json({ error: 'projectId required' });
+  res.json({ ok: true, config: await nreSvc.setConfig(getDb(), pid, req.body) });
 }));
 
 // POST /import — 上傳 BOM Excel → 正規化

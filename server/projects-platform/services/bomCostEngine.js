@@ -299,14 +299,15 @@ async function persistRun(db, { caseFactoryId, factoryCode, costingModel, cells,
     );
   }
 
-  // 4. run_result(1 fact · true/quote 雙軌:material_true=內部真實成本、material_quote=對客報價)
+  // 4. run_result(1 fact · true/quote 雙軌 + NRE 攤提)· VIRTUAL total 為產品成本,NRE 攤提另存兩欄
   const mat = num(costBreakdown.material), pkg = num(costBreakdown.pkg);
   const matTrue = costBreakdown.materialTrue != null ? num(costBreakdown.materialTrue) : mat;
+  const nreQ = num(costBreakdown.nreAmort), nreT = num(costBreakdown.nreAmortTrue);
   await run(
     `INSERT INTO bom_cs_run_result
-      (run_id, factory_code, qty_scenario_code, material_true_usd, pkg_true_usd, mva_usd, sga_usd, profit_amount_usd, material_quote_usd, pkg_quote_usd)
-     VALUES (?,?,?,?,?,?,?,?,?,?)`,
-    runId, factoryCode || null, scenario, matTrue, pkg, num(costBreakdown.mva), num(costBreakdown.sga), num(costBreakdown.profit), mat, pkg,
+      (run_id, factory_code, qty_scenario_code, material_true_usd, pkg_true_usd, mva_usd, sga_usd, profit_amount_usd, material_quote_usd, pkg_quote_usd, nre_per_unit_quote_usd, nre_per_unit_true_usd)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+    runId, factoryCode || null, scenario, matTrue, pkg, num(costBreakdown.mva), num(costBreakdown.sga), num(costBreakdown.profit), mat, pkg, nreQ, nreT,
   );
 
   // 5. audit(不擋主流程)
@@ -396,12 +397,22 @@ async function computeCase(db, opts = {}) {
   const profitBase = resolveBaseRef(baseline, 'profit', { motherboard, mva: mvaTotal, bomSubtotal });
   const sga = sgaBase * num(pick(baseline, 'sga_pct'));
   const profit = profitBase * num(pick(baseline, 'profit_pct'));
-  const total = materialUsd + mvaTotal + sga + profit;               // 對客報價 total
-  const totalTrue = materialTrue + mvaTotal + sga + profit;          // 內部真實成本 total(MVA/SGA/Profit 兩側同)
-  const marginUsd = total - totalTrue;                               // = 料件 true→quote markup
+  const productTotal = materialUsd + mvaTotal + sga + profit;        // 產品 unit cost(不含 NRE)
+  const productTotalTrue = materialTrue + mvaTotal + sga + profit;
+
+  // Track N:AMORTIZED → NRE 每台攤提折進 total(SEPARATE / 無 NRE → 0 · 不影響)
+  const caseId = num(pick(inputs.caseFactory, 'case_id'));
+  const nre = caseId ? await require('./bomNreService').amortizedPerUnit(db, caseId) : { nrePerUnitQuote: 0, nrePerUnitTrue: 0, mode: 'SEPARATE' };
+  const nreQuote = num(nre.nrePerUnitQuote), nreTrue = num(nre.nrePerUnitTrue);
+
+  const total = productTotal + nreQuote;                             // 對客報價 total(含 NRE 攤提)
+  const totalTrue = productTotalTrue + nreTrue;                      // 內部真實成本 total(含 NRE)
+  const marginUsd = total - totalTrue;
   const marginPct = total > 0 ? marginUsd / total : 0;
 
-  const costBreakdown = { material: materialUsd, materialTrue, pkg: 0, mva: mvaTotal, sga, profit, total, totalTrue, marginUsd, marginPct, subtotal: isSimplified ? num(mva.subtotal) : null };
+  const costBreakdown = { material: materialUsd, materialTrue, pkg: 0, mva: mvaTotal, sga, profit,
+    nreAmort: nreQuote, nreAmortTrue: nreTrue, nreMode: nre.mode, productTotal, productTotalTrue,
+    total, totalTrue, marginUsd, marginPct, subtotal: isSimplified ? num(mva.subtotal) : null };
 
   let runId = null;
   if (persist) {

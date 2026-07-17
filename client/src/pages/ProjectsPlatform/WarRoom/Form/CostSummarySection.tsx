@@ -73,8 +73,8 @@ export default function CostSummarySection({ project }: { project: ProjectDetail
               </td>
               {f.run_id ? (
                 <>
-                  <td className="px-2 py-1.5 text-right font-mono">{money(f.total_quote_usd)}</td>
-                  <td className="px-2 py-1.5 text-right font-mono text-cortex-muted">{money(f.total_true_usd)}</td>
+                  <td className="px-2 py-1.5 text-right font-mono">{money(f.total_quote_with_nre ?? f.total_quote_usd)}</td>
+                  <td className="px-2 py-1.5 text-right font-mono text-cortex-muted">{money(f.total_true_with_nre ?? f.total_true_usd)}</td>
                   <td className="px-2 py-1.5 text-right font-mono text-cortex-muted">{money(f.mva_usd)}</td>
                   <td className="px-2 py-1.5 text-right font-mono">{money(f.margin_amount_usd)} · {pct(f.gross_margin_pct)}</td>
                 </>
@@ -86,6 +86,9 @@ export default function CostSummarySection({ project }: { project: ProjectDetail
         </tbody>
       </table>
       {!anyRun && <div className="text-[11px] text-cortex-muted">尚無計算結果 —— 至「BOM/材料」匯入並算成本,或按「重新計算所有廠」。</div>}
+      {factories.some((f) => Number(f.nre_per_unit_quote_usd) > 0) && (
+        <div className="text-[10px] text-cortex-teal">報價 Total 已含 NRE 每台攤提(AMORTIZED · 見「🔧 NRE 成本」tab)。</div>
+      )}
       <div className="text-[10px] text-cortex-muted">真實成本 / margin 之後依角色機密遮罩(S2 view_true_cost)。</div>
     </div>
   )

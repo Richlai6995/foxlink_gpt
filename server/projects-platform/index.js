@@ -158,6 +158,8 @@ async function runMigrations(db) {
       await require('./migrations/013h_drop_legacy_equip')(db);      // DROP 設備舊模型 4 表(S1d 作廢 · 排最後)
       await require('./migrations/013i_simplified_line')(db);        // 案級 SIMPLIFIED 成本 line 輸入表(WHOOP · S1c)
       await require('./migrations/013j_price_vendor_link')(db);      // snapshot 加 bom_item_mfg_id + is_chosen(per-vendor 報價 · B-5b)
+      await require('./migrations/013k_nre')(db);                    // NRE 一次性工程費(Track N · bom_nre_item + config)
+      await require('./migrations/013l_run_nre_cols')(db);           // run_result 加 nre_per_unit(AMORTIZED 折進 total · Track N)
       console.log('[projects-platform] Cortex BOM/RBAC migrations (S0) ✓');
     } else {
       console.log('[projects-platform] Cortex BOM/RBAC migrations skipped (ENABLE_CORTEX_BOM != true)');

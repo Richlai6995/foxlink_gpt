@@ -19,7 +19,7 @@
 import { useState } from 'react'
 import type { ProjectDetail } from '../../api'
 import VariantSection from './VariantSection'
-import NreSection from './NreSection'
+import NreRealSection from './NreRealSection'
 import PackagingSection from './PackagingSection'
 import FactoryMatrixSection from './FactoryMatrixSection'
 import CustomerSection from './CustomerSection'
@@ -54,9 +54,7 @@ const SECTIONS: SectionDef[] = [
   { id: 'packaging', label: 'Packaging', icon: '📦', isNew: true,
     visible: (p) => !!(p.data_payload as any)?.packaging?.items?.length,
     badge:   (p) => `${(p.data_payload as any)?.packaging?.items?.length || 0} 項` },
-  { id: 'nre',       label: 'NRE 成本',  icon: '🔧', isNew: true,
-    visible: (p) => !!(p.data_payload as any)?.nre?.items?.length,
-    badge:   (p) => `${(p.data_payload as any)?.nre?.items_done || 0}/${(p.data_payload as any)?.nre?.items_count || 0}` },
+  { id: 'nre',       label: 'NRE 成本',  icon: '🔧', isNew: true, visible: () => true },
   { id: 'cost',      label: '成本核算',  icon: '📊',
     visible: () => true,
     badge:   (p) => (p.data_payload as any)?.factory_matrix ? '3 廠對比 v0.5' : null },
@@ -115,7 +113,7 @@ export default function FormPanel({ project }: { project: ProjectDetail }) {
         {activeSection === 'bom'       && <BomSection       project={project} />}
         {activeSection === 'variant'   && <VariantSection   project={project} />}
         {activeSection === 'packaging' && <PackagingSection project={project} />}
-        {activeSection === 'nre'       && <NreSection       project={project} />}
+        {activeSection === 'nre'       && <NreRealSection   project={project} />}
         {activeSection === 'cost'      && <CostSection      project={project} />}
         {activeSection === 'ai'        && <AiToolbarSection project={project} />}
       </main>

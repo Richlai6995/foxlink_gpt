@@ -261,6 +261,11 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
                   <td className="py-1 text-cortex-muted">{k as string}</td><td className="py-1 text-right font-mono">{money(v)}</td>
                 </tr>
               ))}
+              {runResult.costBreakdown?.nreAmort > 0 && (
+                <tr className="border-b border-cortex-line/50 text-amber-700">
+                  <td className="py-1">NRE 攤提 (AMORTIZED)</td><td className="py-1 text-right font-mono">+{money(runResult.costBreakdown?.nreAmort)}</td>
+                </tr>
+              )}
               <tr className="font-bold text-cortex-ink border-b border-cortex-line">
                 <td className="py-1.5">報價 Total / unit</td><td className="py-1.5 text-right font-mono">{money(runResult.costBreakdown?.total)}</td>
               </tr>
