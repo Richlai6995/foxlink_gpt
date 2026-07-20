@@ -26,6 +26,7 @@ const fs = require('fs');
 const { asyncHandler } = require('../middleware/errorBoundary');
 const { requireVisible } = require('../middleware/sidebarPermissionMiddleware');
 const importSvc = require('../services/bomImportService');
+const profileSvc = require('../services/bomImportProfileService');
 const rollupSvc = require('../services/bomMaterialRollup');
 const templateSvc = require('../services/bomTemplateService');
 const enrichSvc = require('../services/bomEnrichService');
@@ -223,21 +224,86 @@ router.post('/import', upload.single('file'), asyncHandler(async (req, res) => {
   if (!projectId) return res.status(400).json({ error: 'projectId required' });
   const variantKey = req.body.variantKey || null;
   const versionNo = Number(req.body.versionNo) || 1;
-  // format:'template'(預設 · 使用者填標準範本)| 'rival3'(dev fixture · 硬解 Rival3 Gen2 原始 BOM)
+  // 統一格式:profileCode(CANONICAL/WHOOP-GEN4/…)→ importCanonicalBom;無則回退 legacy format(過渡)
+  const profileCode = req.body.profileCode || null;
   const format = String(req.body.format || 'template');
   try {
     let r;
-    if (format === 'rival3') {
+    if (profileCode) {
+      r = await importSvc.importCanonicalBom(getDb(), { filePath: req.file.path, projectId, profileCode, variantKey, versionNo });
+    } else if (format === 'rival3') {
       const sheetKeys = String(req.body.sheetKeys || 'EE,ME,PKG').split(',').map((s) => s.trim()).filter(Boolean);
       r = await importSvc.importBom(getDb(), { filePath: req.file.path, projectId, sheetKeys, variantKey, versionNo });
+    } else if (format === 'multiboard') {
+      r = await importSvc.importMultiBoardBom(getDb(), { filePath: req.file.path, projectId, variantKey, versionNo });
     } else {
       r = await importSvc.importBomTemplate(getDb(), { filePath: req.file.path, projectId, variantKey, versionNo });
     }
     const roll = await rollupSvc.rollupMaterial(getDb(), r.bomInstanceId);
-    res.json({ ok: true, format, ...r, rollup: roll });
+    res.json({ ok: true, format, profileCode, ...r, rollup: roll });
   } finally {
     try { fs.unlinkSync(req.file.path); } catch (_) {}
   }
+}));
+
+// ── 匯入設定檔(統一格式 · 各專案差異 = profile 設定)──────────────────────
+// GET /profiles — 列 profile(CANONICAL/WHOOP-GEN4/RIVAL3-GEN2/自訂)
+router.get('/profiles', asyncHandler(async (req, res) => {
+  res.json({ profiles: await profileSvc.listProfiles(getDb()) });
+}));
+// GET /profiles/:code — 單一(含 config_json · 給 admin 編輯)
+router.get('/profiles/:code', asyncHandler(async (req, res) => {
+  const p = await profileSvc.getProfile(getDb(), req.params.code);
+  if (!p) return res.status(404).json({ error: 'profile not found' });
+  res.json(p);
+}));
+// POST /profiles — 新增/更新(body: profileCode, name, description, sourceKind, config)
+router.post('/profiles', asyncHandler(async (req, res) => {
+  if (!req.body.profileCode) return res.status(400).json({ error: 'profileCode required' });
+  res.json({ ok: true, profile: await profileSvc.saveProfile(getDb(), req.body, req.user?.id || null) });
+}));
+// DELETE /profiles/:code(內建不可刪)
+router.delete('/profiles/:code', asyncHandler(async (req, res) => {
+  try { res.json({ ok: true, ...(await profileSvc.deleteProfile(getDb(), req.params.code)) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+}));
+
+// GET /project/:projectId/latest-instance — 撈此專案最新 bom_instance(還原 import 結果 · 重整不消失)
+// 回傳 shape 對齊 /import 回應:{ bomInstanceId, itemCount, mfgCount, pricedCount, pendingCount, sections[], rollup }
+router.get('/project/:projectId/latest-instance', asyncHandler(async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (!projectId) return res.status(400).json({ error: 'projectId required' });
+  const db = getDb();
+  const inst = await db.prepare(
+    `SELECT id FROM bom_instance WHERE project_id = ? ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`,   // 最近建立(re-import 必增 id)
+  ).get(projectId).catch(() => null);
+  if (!inst) return res.json({ bomInstanceId: null });
+  const instId = Number(inst.id);
+  const roll = await rollupSvc.rollupMaterial(db, instId).catch(() => ({}));
+  const secRows = await db.prepare(
+    `SELECT sec.name AS name, sec.module_category AS module_category, COUNT(i.id) AS cnt
+       FROM bom_section sec
+       LEFT JOIN bom_category c ON c.bom_section_id = sec.id
+       LEFT JOIN bom_item i ON i.bom_category_id = c.id
+      WHERE sec.bom_instance_id = ?
+      GROUP BY sec.id, sec.name, sec.module_category, sec.display_order
+      ORDER BY sec.display_order`,
+  ).all(instId).catch(() => []);
+  const sections = secRows.map((r) => ({ section: r.name, category: r.module_category, itemCount: Number(r.cnt) }));
+  const mfgRow = await db.prepare(
+    `SELECT COUNT(*) AS cnt FROM bom_item_mfg m
+       JOIN bom_item i ON i.id = m.bom_item_id
+       JOIN bom_category c ON c.id = i.bom_category_id
+       JOIN bom_section sec ON sec.id = c.bom_section_id
+      WHERE sec.bom_instance_id = ?`,
+  ).get(instId).catch(() => ({ cnt: 0 }));
+  const pricedCount = roll.pricedCount || 0, pendingCount = roll.pendingCount || 0;
+  res.json({
+    bomInstanceId: instId,
+    itemCount: pricedCount + pendingCount,
+    mfgCount: Number(mfgRow?.cnt || 0),
+    pricedCount, pendingCount, sections, rollup: roll,
+  });
 }));
 
 // GET /instances/:id — instance + sections
@@ -267,7 +333,8 @@ router.get('/instances/:id/items', asyncHandler(async (req, res) => {
   const id = reqId(req.params.id, res); if (id === null) return;
   const limit = Math.min(Number(req.query.limit) || 500, 2000);
   const rows = await getDb().prepare(
-    `SELECT sec.module_category, c.name AS category, i.id, i.item_sequence, i.qty, i.fpn, i.description,
+    `SELECT sec.module_category, sec.name AS sub_assembly, c.name AS category, i.id, i.item_sequence,
+            i.customer_item AS item_no, i.qty, i.fpn, i.description, i.reference AS remark,
             ch.applied_price_usd AS applied_price,
             (i.qty * ch.applied_price_usd) AS extended,
             CASE WHEN ch.applied_price_usd IS NULL THEN 'pending' ELSE 'priced' END AS status,
@@ -280,9 +347,32 @@ router.get('/instances/:id/items', asyncHandler(async (req, res) => {
            FROM bom_item_price_snapshot WHERE is_chosen = 1 GROUP BY bom_item_id
        ) ch ON ch.bom_item_id = i.id
       WHERE sec.bom_instance_id = ?
-      ORDER BY sec.id, i.item_sequence FETCH FIRST ${limit} ROWS ONLY`,
+      ORDER BY sec.display_order, sec.module_category, i.item_sequence FETCH FIRST ${limit} ROWS ONLY`,
   ).all(id).catch(() => []);
   res.json({ count: rows.length, items: rows });
+}));
+
+// PUT /items/batch — 批次存回主列欄位(Item No/描述/料號/Qty/Remark)· 前端「存檔」按鈕
+// body: { items:[{ id, itemNo?, description?, fpn?, qty?, remark? }] } · 只更新有帶的欄位
+router.put('/items/batch', asyncHandler(async (req, res) => {
+  const items = Array.isArray(req.body.items) ? req.body.items : [];
+  if (!items.length) return res.status(400).json({ error: 'items required' });
+  const db = getDb();
+  let updated = 0;
+  for (const it of items) {
+    const id = Number(it.id); if (!id) continue;
+    const sets = [], binds = [];
+    if ('itemNo' in it) { sets.push('customer_item = ?'); binds.push(it.itemNo == null || it.itemNo === '' ? null : String(it.itemNo)); }
+    if ('description' in it) { sets.push('description = ?'); binds.push(it.description == null ? null : String(it.description)); }
+    if ('fpn' in it) { sets.push('fpn = ?'); binds.push(it.fpn == null || it.fpn === '' ? null : String(it.fpn)); }
+    if ('qty' in it) { const q = Number(it.qty); if (Number.isFinite(q)) { sets.push('qty = ?'); binds.push(q); } }
+    if ('remark' in it) { sets.push('reference = ?'); binds.push(it.remark == null || it.remark === '' ? null : String(it.remark)); }
+    if (!sets.length) continue;
+    binds.push(id);
+    await db.prepare(`UPDATE bom_item SET ${sets.join(', ')} WHERE id = ?`).run(...binds).catch(() => {});
+    updated += 1;
+  }
+  res.json({ ok: true, updated });
 }));
 
 // ── B-5b 採購 enrich(per-vendor 報價)──────────────────────────────────────

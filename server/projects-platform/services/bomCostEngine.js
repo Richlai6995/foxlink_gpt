@@ -239,14 +239,18 @@ function computeSimplifiedMva(inputs, ctx) {
     cells.push({ qty_scenario_code: ctx.qtyScenarioCode || null, process_code, component_code,
       cost_per_unit_usd: num(v), in_mva: inMva === true, intermediate: trace || null });
 
+  // W1b:有 BOM(ctx.bomMaterial 非 null)→ 材料 line 改用 BOM rollup,跳過常數 MATERIAL line;PROCESS/LOSS 仍用 line
+  const bomMat = ctx.bomMaterial;
   let subtotal = 0;
   for (const ln of (inputs.simplifiedLines || [])) {
     const v = num(pick(ln, 'cost_per_unit_usd'));
     const grp = pick(ln, 'line_group') || 'MATERIAL';
+    if (bomMat != null && grp === 'MATERIAL') continue;   // 有 BOM → 材料改 rollup,不用常數材料 line
     if (num(pick(ln, 'in_subtotal'))) subtotal += v;
     // 明細 cell(不進 mva · 屬 material_true 的組成)
     add(grp, pick(ln, 'component_code') || 'MATERIAL', v, false, { line_code: pick(ln, 'line_code') });
   }
+  if (bomMat != null) { subtotal += num(bomMat); add('MATERIAL', 'MATERIAL', num(bomMat), false, { source: 'bom_rollup' }); }
 
   const oh = subtotal * num(ctx.ohPct);
   const transport = num(ctx.transportPerUnit);
@@ -369,6 +373,7 @@ async function computeCase(db, opts = {}) {
 
   const ctx = {
     qtyScenarioCode, motherboard, annualDemand, procGroup,
+    bomMaterial: materialFromBom,   // W1b:SIMPLIFIED 有 BOM 時材料改用 rollup(null=無 BOM 用常數 line)
     dlWage: num(pick(baseline, 'dl_wage_per_hr_usd')),
     baselineVat: num(pick(baseline, 'vat_rate_pct')),
     baselineLoss: num(pick(baseline, 'loss_factor_pct')),

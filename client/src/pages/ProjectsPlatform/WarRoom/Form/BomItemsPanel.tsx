@@ -1,41 +1,69 @@
 /**
- * BomItemsPanel — B-5b 採購 enrich UI(item 明細 + 逐料多 vendor 多 tier 報價 · 選 chosen)
+ * BomItemsPanel — 料件明細(主列可編輯 + 採購 enrich)
  *
- * 對應 docs/cortex-bom-import-plan.md §10 B-5b。scoped 到一個 bom_instance。
- * 展開一筆料件 → 加 vendor / 加報價(true/quote 雙價)/ 選定 vendor → PENDING 轉已詢價。
- * enrich 後 onChanged() 通知父層(BomSection)重抓 rollup。
- * 註:true cost 欄位遮罩留 S2(view_true_cost);i18n 待補。
+ * 主列(可編輯 · 存檔存回 DB):Item No / Description / Foxlink P/N / Qty / Remark
+ *   排序 半成品 Sub-Assembly → 模組 Module → Item No(後端 ORDER BY)。
+ * 半成品 / 模組 / 採用價 / 狀態 / 供應商:唯讀。
+ * 下一階(展開一筆):多 vendor 多 tier 報價(true/quote 雙價)→ 一料號可對多單價/多供應商(B-5b)。
+ * 存檔:改過的列 → PUT /bom/items/batch。enrich 後 onChanged() 通知父層重抓 rollup。
+ * 效能:ItemRowComp = React.memo + stable callback → 編輯只重繪該列。
+ * 註:true cost 遮罩留 S2;i18n 待補。
  */
 
-import { useEffect, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
 import { useAuth } from '../../../../context/AuthContext'
-import { ChevronRight, ChevronDown, Plus, Check, Loader2 } from 'lucide-react'
+import { ChevronRight, ChevronDown, Plus, Check, Loader2, Save } from 'lucide-react'
 
 type ItemRow = {
-  module_category: string; category: string; id: number; item_sequence: number
-  qty: number; fpn: string | null; description: string | null
+  module_category: string; sub_assembly?: string; category: string; id: number; item_sequence: number
+  item_no: string | null; qty: number | string; fpn: string | null; description: string | null; remark: string | null
   applied_price: number | null; extended: number | null; status: string; vendor_count: number
 }
+type EditField = 'item_no' | 'description' | 'fpn' | 'qty' | 'remark'
 
-const money = (v: any) => (typeof v === 'number' ? `$${v.toFixed(4)}` : '—')
+const money = (v: any) => (typeof v === 'number' ? `$${v.toFixed(6)}` : '—')   // 單價到小數 6 位(#1)
 const pct = (v: any) => (typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : '—')
 
 export default function BomItemsPanel({ bomInstanceId, onChanged }: { bomInstanceId: number; onChanged?: () => void }) {
   const { token } = useAuth() as any
   const [items, setItems] = useState<ItemRow[]>([])
   const [expanded, setExpanded] = useState<number | null>(null)
+  const [dirty, setDirty] = useState<Set<number>>(new Set())
   const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
 
   async function loadItems() {
     setLoading(true); setErr('')
-    try { const r = await api.get<{ items: ItemRow[] }>(token, `/bom/instances/${bomInstanceId}/items`); setItems(r.items || []) }
-    catch (e: any) { setErr(e.message) } finally { setLoading(false) }
+    try {
+      const r = await api.get<{ items: ItemRow[] }>(token, `/bom/instances/${bomInstanceId}/items`)
+      setItems(r.items || []); setDirty(new Set())
+    } catch (e: any) { setErr(e.message) } finally { setLoading(false) }
   }
   useEffect(() => { if (token && bomInstanceId) loadItems() }, [token, bomInstanceId])
 
-  const pendingN = items.filter((i) => i.status === 'pending').length
+  const onToggle = useCallback((id: number) => setExpanded((cur) => (cur === id ? null : id)), [])
+  const onEdit = useCallback((id: number, field: EditField, val: string) => {
+    setItems((prev) => prev.map((x) => (x.id === id ? { ...x, [field]: val } : x)))
+    setDirty((prev) => { const n = new Set(prev); n.add(id); return n })
+  }, [])
+  const onChangedRow = useCallback(() => { loadItems(); onChanged?.() }, [bomInstanceId, token]) // eslint-disable-line
+
+  async function saveAll() {
+    const payload = items.filter((x) => dirty.has(x.id)).map((x) => ({
+      id: x.id, itemNo: x.item_no, description: x.description, fpn: x.fpn, qty: x.qty, remark: x.remark,
+    }))
+    if (!payload.length) return
+    setSaving(true); setErr('')
+    try {
+      await api.put<{ updated: number }>(token, '/bom/items/batch', { items: payload })
+      await loadItems()          // 重載(qty 改動 → extended 重算 · dirty 清空)
+      onChanged?.()              // 通知父層重抓 rollup(qty 影響材料成本)
+    } catch (e: any) { setErr(e.message) } finally { setSaving(false) }
+  }
+
+  const pendingN = useMemo(() => items.filter((i) => i.status === 'pending').length, [items])
 
   return (
     <div className="border border-cortex-line rounded-lg overflow-hidden">
@@ -44,60 +72,87 @@ export default function BomItemsPanel({ bomInstanceId, onChanged }: { bomInstanc
           料件明細 · 採購詢價
           <span className="text-cortex-muted font-normal"> ({items.length} 筆{pendingN > 0 ? ` · ${pendingN} 待詢價` : ' · 全已詢價'})</span>
         </div>
-        <button onClick={loadItems} className="text-[11px] text-cortex-teal hover:underline">重新整理</button>
+        <div className="flex items-center gap-3">
+          <button onClick={saveAll} disabled={saving || dirty.size === 0}
+            className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded ${dirty.size > 0 ? 'bg-cortex-teal text-white hover:opacity-90' : 'bg-cortex-bg text-cortex-muted'} disabled:opacity-50`}>
+            {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+            存檔{dirty.size > 0 ? ` (${dirty.size})` : ''}
+          </button>
+          <button onClick={loadItems} className="text-[11px] text-cortex-teal hover:underline">重新整理</button>
+        </div>
       </div>
       {err && <div className="px-3 py-2 text-[11px] text-red-600">{err}</div>}
-      <table className="w-full text-[11px]">
-        <thead className="text-cortex-muted bg-white border-b border-cortex-line">
-          <tr>
-            <th className="w-6 px-2 py-1"></th>
-            <th className="text-left px-2 py-1">料件</th>
-            <th className="text-right px-2 py-1">Qty</th>
-            <th className="text-right px-2 py-1">採用價</th>
-            <th className="text-center px-2 py-1">狀態</th>
-            <th className="text-center px-2 py-1">供應商</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((it) => (
-            <ItemRowComp key={it.id} it={it} expanded={expanded === it.id}
-              onToggle={() => setExpanded(expanded === it.id ? null : it.id)}
-              token={token} onChanged={() => { loadItems(); onChanged?.() }} />
-          ))}
-        </tbody>
-      </table>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[11px] min-w-[820px]">
+          <thead className="text-cortex-muted bg-white border-b border-cortex-line">
+            <tr>
+              <th className="w-6 px-2 py-1"></th>
+              <th className="text-left px-2 py-1">半成品</th>
+              <th className="text-left px-2 py-1">模組</th>
+              <th className="text-left px-2 py-1 w-16">Item No</th>
+              <th className="text-left px-2 py-1">Description</th>
+              <th className="text-left px-2 py-1 w-32">Foxlink P/N</th>
+              <th className="text-right px-2 py-1 w-14">Qty</th>
+              <th className="text-left px-2 py-1 w-28">Remark</th>
+              <th className="text-right px-2 py-1">採用價</th>
+              <th className="text-center px-2 py-1">狀態</th>
+              <th className="text-center px-2 py-1">供</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((it) => (
+              <ItemRowComp key={it.id} it={it} expanded={expanded === it.id} dirty={dirty.has(it.id)}
+                onToggle={onToggle} onEdit={onEdit} token={token} onChanged={onChangedRow} />
+            ))}
+          </tbody>
+        </table>
+      </div>
       {loading && <div className="px-3 py-2 text-[11px] text-cortex-muted"><Loader2 className="w-3 h-3 inline animate-spin" /> 載入中…</div>}
     </div>
   )
 }
 
-function ItemRowComp({ it, expanded, onToggle, token, onChanged }: {
-  it: ItemRow; expanded: boolean; onToggle: () => void; token: string; onChanged: () => void
+const cellInput = 'w-full bg-transparent border border-transparent hover:border-cortex-line focus:border-cortex-teal focus:bg-white rounded px-1 py-0.5 text-[11px] outline-none'
+
+// React.memo：只有本列的 it / expanded / dirty 變才重繪(避免 212 列全重繪 · onToggle/onEdit 為 stable callback)
+const ItemRowComp = memo(function ItemRowComp({ it, expanded, dirty, onToggle, onEdit, token, onChanged }: {
+  it: ItemRow; expanded: boolean; dirty: boolean
+  onToggle: (id: number) => void; onEdit: (id: number, f: EditField, v: string) => void
+  token: string; onChanged: () => void
 }) {
   return (
     <>
-      <tr className={`border-b border-cortex-line/40 cursor-pointer hover:bg-cortex-bg/40 ${it.status === 'pending' ? 'bg-amber-50/50' : ''}`} onClick={onToggle}>
-        <td className="px-2 py-1 text-cortex-muted">{expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}</td>
-        <td className="px-2 py-1"><span className="text-cortex-muted">{it.module_category}</span> · {it.description || it.fpn || `#${it.id}`}</td>
-        <td className="px-2 py-1 text-right font-mono">{it.qty}</td>
+      <tr className={`border-b border-cortex-line/40 ${it.status === 'pending' ? 'bg-amber-50/50' : ''} ${dirty ? 'ring-1 ring-inset ring-cortex-teal/30' : ''}`}>
+        <td className="px-2 py-1 text-cortex-muted cursor-pointer hover:text-cortex-teal" onClick={() => onToggle(it.id)}>
+          {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+        </td>
+        <td className="px-2 py-1">
+          {it.sub_assembly && <span className="text-[9px] bg-cortex-cyan-bg text-cortex-teal px-1 py-0.5 rounded whitespace-nowrap">{it.sub_assembly}</span>}
+        </td>
+        <td className="px-2 py-1 text-cortex-muted">{it.module_category}</td>
+        <td className="px-2 py-1"><input value={it.item_no ?? ''} onChange={(e) => onEdit(it.id, 'item_no', e.target.value)} className={cellInput} /></td>
+        <td className="px-2 py-1"><input value={it.description ?? ''} onChange={(e) => onEdit(it.id, 'description', e.target.value)} className={cellInput} /></td>
+        <td className="px-2 py-1"><input value={it.fpn ?? ''} onChange={(e) => onEdit(it.id, 'fpn', e.target.value)} className={`${cellInput} font-mono`} /></td>
+        <td className="px-2 py-1"><input value={String(it.qty ?? '')} onChange={(e) => onEdit(it.id, 'qty', e.target.value)} className={`${cellInput} text-right font-mono`} /></td>
+        <td className="px-2 py-1"><input value={it.remark ?? ''} onChange={(e) => onEdit(it.id, 'remark', e.target.value)} placeholder="—" className={cellInput} /></td>
         <td className="px-2 py-1 text-right font-mono">{money(it.applied_price)}</td>
         <td className="px-2 py-1 text-center">
           {it.status === 'priced'
-            ? <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded">已詢價</span>
-            : <span className="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">待詢價</span>}
+            ? <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded whitespace-nowrap">已詢價</span>
+            : <span className="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded whitespace-nowrap">待詢價</span>}
         </td>
         <td className="px-2 py-1 text-center font-mono">{it.vendor_count}</td>
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={6} className="px-3 py-2 bg-cortex-bg/30 border-b border-cortex-line">
+          <td colSpan={11} className="px-3 py-2 bg-cortex-bg/30 border-b border-cortex-line">
             <ItemEnrich itemId={it.id} token={token} onChanged={onChanged} />
           </td>
         </tr>
       )}
     </>
   )
-}
+})
 
 function ItemEnrich({ itemId, token, onChanged }: { itemId: number; token: string; onChanged: () => void }) {
   const [detail, setDetail] = useState<any>(null)
@@ -139,6 +194,7 @@ function ItemEnrich({ itemId, token, onChanged }: { itemId: number; token: strin
   return (
     <div className="space-y-2">
       {err && <div className="text-[11px] text-red-600">{err}</div>}
+      <div className="text-[10px] text-cortex-muted">一料號可對多供應商 / 多單價 · 選一為採用價(進 rollup)</div>
 
       {/* 供應商報價(選一為採用價) */}
       <div>

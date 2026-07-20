@@ -28,6 +28,8 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
   const [caseFactoryId, setCaseFactoryId] = useState<number | ''>('')
   const [variantKey, setVariantKey] = useState('')
   const [file, setFile] = useState<File | null>(null)
+  const [profiles, setProfiles] = useState<any[]>([])
+  const [profileCode, setProfileCode] = useState('CANONICAL')
   const [importing, setImporting] = useState(false)
   const [computing, setComputing] = useState(false)
   const [importResult, setImportResult] = useState<any>(null)
@@ -47,6 +49,9 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
       })
       .catch((e) => setErr(e.message))
     api.get<{ templates: any[] }>(token, `/bom/provision/templates`).then((r) => setTemplates(r.templates || [])).catch(() => {})
+    api.get<{ profiles: any[] }>(token, `/bom/profiles`).then((r) => { setProfiles(r.profiles || []); if (r.profiles?.length) setProfileCode(r.profiles[0].profile_code) }).catch(() => {})
+    // 還原:此專案已有匯入的 bom_instance → 重整不消失(#2 修)
+    api.get<any>(token, `/bom/project/${projectId}/latest-instance`).then((r) => { if (r?.bomInstanceId) setImportResult(r) }).catch(() => {})
   }, [token, projectId])
 
   const hasCase = cases.length > 0
@@ -71,6 +76,7 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
       const fd = new FormData()
       fd.append('file', file)
       fd.append('projectId', String(projectId))
+      fd.append('profileCode', profileCode)
       if (variantKey) fd.append('variantKey', variantKey)
       const res = await fetch('/api/projects/bom/import', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd })
       const data = await res.json()
@@ -170,6 +176,10 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
         <div className="flex items-center gap-2 flex-wrap">
           <input type="file" accept=".xlsx,.xls" onChange={(e) => setFile(e.target.files?.[0] || null)}
             className="text-[12px] text-cortex-text file:mr-2 file:px-2.5 file:py-1 file:border-0 file:rounded file:bg-white file:text-cortex-ink file:cursor-pointer file:text-[12px]" />
+          <select value={profileCode} onChange={(e) => setProfileCode(e.target.value)} title="匯入設定檔(統一格式 · 各專案用設定轉)"
+            className="border border-cortex-line rounded px-2 py-1 text-[12px]">
+            {profiles.map((p) => <option key={p.profile_code} value={p.profile_code}>{p.name || p.profile_code}</option>)}
+          </select>
           <input value={variantKey} onChange={(e) => setVariantKey(e.target.value)} placeholder="variant(選填 black/white)"
             className="border border-cortex-line rounded px-2 py-1 text-[12px] w-44" />
           <button onClick={doImport} disabled={importing || !file}

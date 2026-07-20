@@ -161,6 +161,7 @@ async function runMigrations(db) {
       await require('./migrations/013k_nre')(db);                    // NRE 一次性工程費(Track N · bom_nre_item + config)
       await require('./migrations/013l_run_nre_cols')(db);           // run_result 加 nre_per_unit(AMORTIZED 折進 total · Track N)
       await require('./migrations/013m_quote_version')(db);          // 報價定版/送審(bom_quote_version · 流程終點)
+      await require('./migrations/013n_import_profile')(db);         // BOM 匯入設定檔(統一 canonical + mapping profile)
       console.log('[projects-platform] Cortex BOM/RBAC migrations (S0) ✓');
     } else {
       console.log('[projects-platform] Cortex BOM/RBAC migrations skipped (ENABLE_CORTEX_BOM != true)');

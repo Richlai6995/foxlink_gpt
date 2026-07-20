@@ -190,6 +190,45 @@ function resolveTplHeader(rawHeaders) {
 }
 
 /**
+ * _insertBomRow — 建一筆料件(item + flk RD_MANUAL + mfg + snapshot 兩階段)· 供 template / multiboard 共用
+ * f: { qty, price, desc, fpn, remark, vendor, mfgPn } · 回 { itemId, priced, mfg }
+ */
+async function _insertBomRow(db, catId, seq, f, variantKey) {
+  const run = (sql, ...a) => db.prepare(sql).run(...a);
+  const it = await run(
+    `INSERT INTO bom_item (bom_category_id, item_sequence, qty, description, reference, customer_item, fpn, variant_key)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    catId, seq, num(f.qty), f.desc, f.remark, f.itemNo || null, f.fpn, variantKey,   // customer_item = 原始 Item No
+  );
+  const itemId = Number(it.lastInsertRowid);
+  let flkId = null;
+  if (f.fpn) {
+    const flk = await run(`INSERT INTO bom_item_flk (bom_item_id, display_order, flk_part_number, source) VALUES (?, 100, ?, 'RD_MANUAL')`, itemId, f.fpn);
+    flkId = Number(flk.lastInsertRowid);
+    await run(`UPDATE bom_item SET final_flk_id=? WHERE id=?`, flkId, itemId);
+  }
+  let mfg = false;
+  if (f.vendor || f.mfgPn) {
+    await run(`INSERT INTO bom_item_mfg (bom_item_id, bom_item_flk_id, display_order, manufacturer_name, mfg_part_number, source, is_preferred) VALUES (?, ?, 10, ?, ?, 'TEMPLATE', 1)`, itemId, flkId, f.vendor, f.mfgPn);
+    mfg = true;
+  }
+  const hasPrice = isNum(f.price);
+  if (hasPrice) {
+    const snap = await run(
+      `INSERT INTO bom_item_price_snapshot (bom_item_id, bom_item_flk_id, period_months, strategy_used, price_avg_usd, applied_price_usd, po_line_count, vendor_count, is_chosen)
+       VALUES (?, ?, 0, 'TEMPLATE', ?, ?, 0, 0, 1)`, itemId, flkId, num(f.price), num(f.price));
+    await run(
+      `INSERT INTO bom_item_price_tier (snapshot_id, tier_seq, source_currency, true_cost_source, fx_rate, quote_price_usd, is_chosen)
+       VALUES (?, 1, 'USD', ?, 1, ?, 1)`, Number(snap.lastInsertRowid), num(f.price), num(f.price));
+  } else {
+    await run(
+      `INSERT INTO bom_item_price_snapshot (bom_item_id, bom_item_flk_id, period_months, strategy_used, applied_price_usd, po_line_count, vendor_count, is_chosen)
+       VALUES (?, ?, 0, 'PENDING', NULL, 0, 0, 1)`, itemId, flkId);
+  }
+  return { itemId, priced: hasPrice, mfg };
+}
+
+/**
  * importBomTemplate — 解析標準範本(EE/ME/PKG 三分頁 · header-based)→ 正規化。
  * idempotent 同 importBom。回 { bomInstanceId, itemCount, mfgCount, categoryCount, sections }。
  */
@@ -251,60 +290,17 @@ async function importBomTemplate(db, opts = {}) {
       const price = H.price != null ? row[H.price] : null;
       const hasPrice = isNum(price);
       const catId = await ensureCategory(H.category != null ? str(row[H.category]) : null);
+      const itemNo = H.itemNo != null ? str(row[H.itemNo]) : null;
       const desc = H.desc != null ? str(row[H.desc]) : null;
       const fpn = H.fpn != null ? str(row[H.fpn]) : null;
       const remark = H.remark != null ? str(row[H.remark]) : null;
       const vendor = H.vendor != null ? str(row[H.vendor]) : null;
       const mfgPn = H.mfgPn != null ? str(row[H.mfgPn]) : null;
       seq += 1;
-      const it = await run(
-        `INSERT INTO bom_item (bom_category_id, item_sequence, qty, description, reference, customer_item, fpn, variant_key)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        catId, seq, num(qty), desc, remark, fpn, fpn, variantKey,
-      );
-      const itemId = Number(it.lastInsertRowid);
+      const res = await _insertBomRow(db, catId, seq, { qty, price, desc, fpn, remark, vendor, mfgPn, itemNo }, variantKey);
       itemCount += 1; secItems += 1;
-
-      // RD 填了 Foxlink P/N → 建 flk 候選(RD_MANUAL)+ 設 final;mfg 掛此 flk 下(對齊 SD §2.2.5/2.2.6)
-      let flkId = null;
-      if (fpn) {
-        const flk = await run(
-          `INSERT INTO bom_item_flk (bom_item_id, display_order, flk_part_number, source) VALUES (?, 100, ?, 'RD_MANUAL')`,
-          itemId, fpn,
-        );
-        flkId = Number(flk.lastInsertRowid);
-        await run(`UPDATE bom_item SET final_flk_id=? WHERE id=?`, flkId, itemId);
-      }
-      if (vendor || mfgPn) {
-        await run(
-          `INSERT INTO bom_item_mfg (bom_item_id, bom_item_flk_id, display_order, manufacturer_name, mfg_part_number, source, is_preferred) VALUES (?, ?, 10, ?, ?, 'TEMPLATE', 1)`,
-          itemId, flkId, vendor, mfgPn,
-        );
-        mfgCount += 1;
-      }
-
-      // 兩階段價:有價 → TEMPLATE snapshot + tier(is_chosen);無價 → PENDING snapshot(待採購詢價 · 無 tier)
-      if (hasPrice) {
-        const snap = await run(
-          `INSERT INTO bom_item_price_snapshot (bom_item_id, bom_item_flk_id, period_months, strategy_used, price_avg_usd, applied_price_usd, po_line_count, vendor_count, is_chosen)
-           VALUES (?, ?, 0, 'TEMPLATE', ?, ?, 0, 0, 1)`,
-          itemId, flkId, num(price), num(price),
-        );
-        const snapId = Number(snap.lastInsertRowid);
-        await run(
-          `INSERT INTO bom_item_price_tier (snapshot_id, tier_seq, source_currency, true_cost_source, fx_rate, quote_price_usd, is_chosen)
-           VALUES (?, 1, 'USD', ?, 1, ?, 1)`,
-          snapId, num(price), num(price),
-        );
-        pricedCount += 1;
-      } else {
-        await run(
-          `INSERT INTO bom_item_price_snapshot (bom_item_id, bom_item_flk_id, period_months, strategy_used, applied_price_usd, po_line_count, vendor_count, is_chosen)
-           VALUES (?, ?, 0, 'PENDING', NULL, 0, 0, 1)`,
-          itemId, flkId,
-        );
-        pendingCount += 1;
-      }
+      if (res.priced) pricedCount += 1; else pendingCount += 1;
+      if (res.mfg) mfgCount += 1;
     }
     categoryCount += Object.keys(catCache).length;
     sections.push({ category: mod, itemCount: secItems });
@@ -314,7 +310,122 @@ async function importBomTemplate(db, opts = {}) {
   return { bomInstanceId, itemCount, mfgCount, categoryCount, pricedCount, pendingCount, sections };
 }
 
+/**
+ * importMultiBoardBom — 多板 BOM(每分頁一個 section · Category 欄=EE/ME/PKG)· W1a(WHOOP 等多片板)
+ * 讀所有分頁(排除說明/空頁),每頁一 section(module_code=分頁名,module_category=Category 欄),
+ * 一 section 一 bom_category 掛全料。兩階段同 template(price 可空 → PENDING)。
+ */
+async function importMultiBoardBom(db, opts = {}) {
+  const { filePath, projectId, variantKey = null, versionNo = 1 } = opts;
+  if (!filePath) throw new Error('bomImportService: filePath required');
+  if (!projectId) throw new Error('bomImportService: projectId required');
+  const run = (sql, ...a) => db.prepare(sql).run(...a);
+  const get = (sql, ...a) => db.prepare(sql).get(...a);
+  const wb = XLSX.readFile(filePath);
+
+  const old = await get(
+    `SELECT id FROM bom_instance WHERE project_id=? AND version_no=? AND ${variantKey == null ? 'variant_key IS NULL' : 'variant_key=?'}`,
+    ...(variantKey == null ? [projectId, versionNo] : [projectId, versionNo, variantKey]),
+  );
+  if (old) await run(`DELETE FROM bom_instance WHERE id=?`, Number(pick(old, 'id')));
+  const inst = await run(
+    `INSERT INTO bom_instance (project_id, version_no, variant_scope, variant_key, state, price_period_months, price_strategy)
+     VALUES (?, ?, ?, ?, 'DRAFT', 12, 'AVG')`,
+    projectId, versionNo, variantKey ? 'per_variant' : 'shared', variantKey,
+  );
+  const bomInstanceId = Number(inst.lastInsertRowid);
+
+  let itemCount = 0, mfgCount = 0, pricedCount = 0, pendingCount = 0, seq = 0, si = 0;
+  const sections = [];
+  const sheetNames = wb.SheetNames.filter((n) => !/說明|instruction|readme|工作表|^sheet\d/i.test(n));
+  for (const sheetName of sheetNames) {
+    const ws = wb.Sheets[sheetName]; if (!ws) continue;
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+    if (!rows.length) continue;
+    const H = resolveTplHeader(rows[0] || []);
+    if (H.qty == null) { log.warn(`importMultiBoardBom: sheet ${sheetName} 缺 Qty 標題,跳過`); continue; }
+    // module_category = Category 欄(首個 EE/ME/PKG 值 · 全板同)· 預設 EE
+    let moduleCat = 'EE';
+    if (H.category != null) {
+      for (let r = 1; r < rows.length; r++) { const c = rows[r] && str(rows[r][H.category]); if (c && /^(EE|ME|PKG)$/i.test(c)) { moduleCat = c.toUpperCase(); break; } }
+    }
+    si += 1;
+    const sec = await run(
+      `INSERT INTO bom_section (bom_instance_id, module_code, module_category, display_order, name) VALUES (?, ?, ?, ?, ?)`,
+      bomInstanceId, sheetName.slice(0, 40), moduleCat, si * 10, sheetName.slice(0, 120),
+    );
+    const catId = Number((await run(`INSERT INTO bom_category (bom_section_id, display_order, name, process_type) VALUES (?, 10, ?, NULL)`, Number(sec.lastInsertRowid), sheetName.slice(0, 60))).lastInsertRowid);
+    let secItems = 0;
+    for (let r = 1; r < rows.length; r++) {
+      const row = rows[r]; if (!row) continue;
+      const qty = row[H.qty]; if (!isNum(qty)) continue;
+      seq += 1; secItems += 1;
+      const f = {
+        qty, price: H.price != null ? row[H.price] : null,
+        itemNo: H.itemNo != null ? str(row[H.itemNo]) : null,
+        desc: H.desc != null ? str(row[H.desc]) : null, fpn: H.fpn != null ? str(row[H.fpn]) : null,
+        remark: H.remark != null ? str(row[H.remark]) : null,
+        vendor: H.vendor != null ? str(row[H.vendor]) : null, mfgPn: H.mfgPn != null ? str(row[H.mfgPn]) : null,
+      };
+      const res = await _insertBomRow(db, catId, seq, f, variantKey);
+      itemCount += 1; if (res.priced) pricedCount += 1; else pendingCount += 1; if (res.mfg) mfgCount += 1;
+    }
+    sections.push({ section: sheetName, category: moduleCat, itemCount: secItems });
+  }
+  log.log(`importMultiBoardBom: instance=${bomInstanceId} sections=${sections.length} items=${itemCount} priced=${pricedCount} pending=${pendingCount}`);
+  return { bomInstanceId, itemCount, mfgCount, pricedCount, pendingCount, sections };
+}
+
+/**
+ * importCanonicalBom — 統一匯入器(U1):profile 轉 canonical rows → 按半成品(subAssembly)建 section。
+ * 系統唯一匯入路徑 · 各專案差異全在 profile(CANONICAL 直讀 / MAPPED 用設定轉)。
+ */
+async function importCanonicalBom(db, opts = {}) {
+  const { filePath, projectId, profileCode = 'CANONICAL', variantKey = null, versionNo = 1 } = opts;
+  if (!filePath) throw new Error('bomImportService: filePath required');
+  if (!projectId) throw new Error('bomImportService: projectId required');
+  const run = (sql, ...a) => db.prepare(sql).run(...a);
+  const get = (sql, ...a) => db.prepare(sql).get(...a);
+  const profileSvc = require('./bomImportProfileService');
+  const profile = await profileSvc.getProfile(db, profileCode);
+  if (!profile) throw new Error(`import profile not found: ${profileCode}`);
+  const wb = XLSX.readFile(filePath);
+  const rows = profileSvc.transformToCanonical(wb, profile);
+  if (!rows.length) throw new Error(`no BOM rows parsed (profile=${profileCode} · 檢查格式/對映)`);
+
+  const old = await get(
+    `SELECT id FROM bom_instance WHERE project_id=? AND version_no=? AND ${variantKey == null ? 'variant_key IS NULL' : 'variant_key=?'}`,
+    ...(variantKey == null ? [projectId, versionNo] : [projectId, versionNo, variantKey]),
+  );
+  if (old) await run(`DELETE FROM bom_instance WHERE id=?`, Number(pick(old, 'id')));
+  const inst = await run(
+    `INSERT INTO bom_instance (project_id, version_no, variant_scope, variant_key, state, price_period_months, price_strategy)
+     VALUES (?, ?, ?, ?, 'DRAFT', 12, 'AVG')`,
+    projectId, versionNo, variantKey ? 'per_variant' : 'shared', variantKey,
+  );
+  const bomInstanceId = Number(inst.lastInsertRowid);
+
+  const secMap = {};   // subAssembly → { catId, module, items }
+  let itemCount = 0, mfgCount = 0, pricedCount = 0, pendingCount = 0, seq = 0, si = 0;
+  for (const cr of rows) {
+    let sec = secMap[cr.subAssembly];
+    if (!sec) {
+      si += 1;
+      const s = await run(`INSERT INTO bom_section (bom_instance_id, module_code, module_category, display_order, name) VALUES (?, ?, ?, ?, ?)`,
+        bomInstanceId, cr.subAssembly.slice(0, 40), cr.module, si * 10, cr.subAssembly.slice(0, 120));
+      const catId = Number((await run(`INSERT INTO bom_category (bom_section_id, display_order, name, process_type) VALUES (?, 10, ?, NULL)`, Number(s.lastInsertRowid), cr.subAssembly.slice(0, 60))).lastInsertRowid);
+      sec = secMap[cr.subAssembly] = { catId, module: cr.module, items: 0 };
+    }
+    seq += 1; sec.items += 1;
+    const res = await _insertBomRow(db, sec.catId, seq, { qty: cr.qty, price: cr.unitPrice, itemNo: cr.itemNo, desc: cr.desc, fpn: cr.fpn, remark: cr.remark, vendor: cr.vendor, mfgPn: cr.mfgPn }, variantKey);
+    itemCount += 1; if (res.priced) pricedCount += 1; else pendingCount += 1; if (res.mfg) mfgCount += 1;
+  }
+  const sections = Object.entries(secMap).map(([k, v]) => ({ section: k, category: v.module, itemCount: v.items }));
+  log.log(`importCanonicalBom[${profileCode}]: instance=${bomInstanceId} sections=${sections.length} items=${itemCount} priced=${pricedCount} pending=${pendingCount}`);
+  return { bomInstanceId, itemCount, mfgCount, pricedCount, pendingCount, sections, profileCode };
+}
+
 // rollupMaterial 已移至獨立 service(引擎解耦)· 此處 re-export 維持 API 相容
 const { rollupMaterial } = require('./bomMaterialRollup');
 
-module.exports = { importBom, importEeBom, importBomTemplate, rollupMaterial, SHEET_CONFIGS };
+module.exports = { importBom, importEeBom, importBomTemplate, importMultiBoardBom, importCanonicalBom, rollupMaterial, SHEET_CONFIGS };
