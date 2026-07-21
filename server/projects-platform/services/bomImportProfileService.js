@@ -33,8 +33,27 @@ function resolveCanonicalHeader(hdr) {
     else if (s.includes('mfg p/n') || s.includes('mfg part') || s.includes('廠商料號')) m.mfgPn = i;
     else if (s === 'vendor' || s.includes('供應商') || s.includes('廠商')) m.vendor = i;
     else if (s.includes('remark') || s.includes('備註')) m.remark = i;
+    else if (s.includes('適用') || s.includes('applicab') || s.includes('effectivit') || s.includes('variant')) m.effectivity = i;
   });
   return m;
+}
+
+// "顏色=Black;包裝=Retail" → [{dimCode,valueCode}]（canonical「適用」欄用)
+function parseEffectivity(cell) {
+  const s = str(cell); if (!s) return [];
+  return s.split(/[;,、]/).map((p) => p.split(/[=:：]/)).filter((a) => a.length === 2)
+    .map(([d, v]) => ({ dimCode: str(d), valueCode: str(v) })).filter((e) => e.dimCode && e.valueCode);
+}
+
+// MAPPED sheet 的 effectivity spec { 顏色:'Black', 包裝:{fromCol:13} } → [{dimCode,valueCode}]
+function resolveEffectivity(spec, row) {
+  if (!spec || typeof spec !== 'object') return [];
+  const out = [];
+  for (const [dimCode, v] of Object.entries(spec)) {
+    const valueCode = (v && typeof v === 'object' && v.fromCol != null) ? str(row[v.fromCol]) : str(v);
+    if (valueCode) out.push({ dimCode, valueCode });
+  }
+  return out;
 }
 
 // 依 match(exact 或 prefix* )找實際 sheet 名
@@ -62,7 +81,7 @@ function transformToCanonical(wb, profile) {
           if (!isNum(qty)) continue;
           const subAssembly = sc.subAssembly && sc.subAssembly.fromCol != null ? str(row[sc.subAssembly.fromCol]) : (sc.subAssembly || sheetName);
           const module = sc.module && sc.module.fromCol != null ? str(row[sc.module.fromCol]) : (sc.module || 'EE');
-          rows.push(canonRow(subAssembly, module, row, c));
+          rows.push(canonRow(subAssembly, module, row, c, resolveEffectivity(sc.effectivity, row)));
         }
       }
     }
@@ -82,13 +101,14 @@ function transformToCanonical(wb, profile) {
       if (!isNum(row[H.qty])) continue;
       const subAssembly = (H.subAssembly != null && str(row[H.subAssembly])) || sheetName;
       const module = (H.module != null && str(row[H.module])) || 'EE';
-      rows.push(canonRow(subAssembly, module, row, H));
+      const eff = H.effectivity != null ? parseEffectivity(row[H.effectivity]) : [];
+      rows.push(canonRow(subAssembly, module, row, H, eff));
     }
   }
   return rows;
 }
 
-function canonRow(subAssembly, module, row, c) {
+function canonRow(subAssembly, module, row, c, effectivity = []) {
   const g = (k) => (c[k] != null ? row[c[k]] : null);
   const mod = String(module || 'EE').toUpperCase();
   return {
@@ -97,6 +117,7 @@ function canonRow(subAssembly, module, row, c) {
     itemNo: str(g('itemNo')), desc: str(g('desc')), fpn: str(g('fpn')),
     qty: num(g('qty')), unitPrice: isNum(g('unitPrice')) ? num(g('unitPrice')) : null,
     vendor: str(g('vendor')), mfgPn: str(g('mfgPn')), remark: str(g('remark')),
+    effectivity: Array.isArray(effectivity) ? effectivity : [],
   };
 }
 
@@ -150,8 +171,10 @@ const BUILTIN = [
   {
     profileCode: 'RIVAL3-GEN2', name: 'Rival3 Gen2 uni BOM', description: 'SteelSeries Rival3 EE/ME/PKG raw Excel → canonical 對映', sourceKind: 'MAPPED',
     config: { sheets: [
+      // EE = 共用(無 effectivity → 恆含)· ME = 分色(effectivity 顏色) · PKG = 共用(單包裝)
       { match: 'EE bom 0227', subAssembly: 'EE BOM', module: 'EE', startRow: 4, cols: { itemNo: 1, fpn: 5, desc: 8, qty: 4, unitPrice: 18, vendor: 10, mfgPn: 11 } },
-      { match: 'ME bom 0618_Black', subAssembly: 'ME BOM', module: 'ME', startRow: 7, cols: { itemNo: 0, fpn: 6, desc: 5, qty: 8, unitPrice: 20, vendor: 15 } },
+      { match: 'ME bom 0618_Black', subAssembly: 'ME BOM', module: 'ME', startRow: 7, cols: { itemNo: 0, fpn: 6, desc: 5, qty: 8, unitPrice: 20, vendor: 15 }, effectivity: { '顏色': 'Black' } },
+      { match: 'ME bom 0618_White', subAssembly: 'ME BOM', module: 'ME', startRow: 7, cols: { itemNo: 0, fpn: 6, desc: 5, qty: 8, unitPrice: 20, vendor: 15 }, effectivity: { '顏色': 'White' } },
       { match: 'PKG BOM 20241023_Amber', subAssembly: 'Packaging', module: 'PKG', startRow: 4, cols: { itemNo: 0, fpn: 2, desc: 8, qty: 10, unitPrice: 11 } },
     ] },
   },

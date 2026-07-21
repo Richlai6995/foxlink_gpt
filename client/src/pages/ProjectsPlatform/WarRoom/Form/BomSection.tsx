@@ -15,7 +15,7 @@ import { useEffect, useState } from 'react'
 import type { ProjectDetail } from '../../api'
 import { api, ApiError } from '../../api'
 import { useAuth } from '../../../../context/AuthContext'
-import { Download, Upload, Calculator, Loader2, CheckCircle2, AlertCircle, Info, Settings, Factory } from 'lucide-react'
+import { Download, Upload, Calculator, Loader2, CheckCircle2, AlertCircle, Info, Settings, Factory, Layers } from 'lucide-react'
 import BomItemsPanel from './BomItemsPanel'
 import BomFactoryCompare from './BomFactoryCompare'
 
@@ -29,6 +29,9 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
   const [variantKey, setVariantKey] = useState('')
   const [variants, setVariants] = useState<string[]>([])
   const [customVariant, setCustomVariant] = useState(false)
+  // B-2 super-BOM:結構變異維度(顏色/包裝)+ 當前 config
+  const [dimensions, setDimensions] = useState<any[]>([])
+  const [config, setConfig] = useState<Record<string, number>>({})
   const [file, setFile] = useState<File | null>(null)
   const [profiles, setProfiles] = useState<any[]>([])
   const [profileCode, setProfileCode] = useState('CANONICAL')
@@ -56,7 +59,25 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
     api.get<any>(token, `/bom/project/${projectId}/latest-instance`).then((r) => { if (r?.bomInstanceId) setImportResult(r) }).catch(() => {})
     // 顏色/variant 下拉來源(此專案已存在的)
     api.get<{ variants: string[] }>(token, `/bom/project/${projectId}/variants`).then((r) => setVariants(r.variants || [])).catch(() => {})
+    // B-2:結構變異維度(顏色/包裝)+ 預設 config(每維度第一個值)
+    api.get<{ dimensions: any[] }>(token, `/bom/project/${projectId}/dimensions`).then((r) => {
+      const dims = r.dimensions || []; setDimensions(dims)
+      const init: Record<string, number> = {}
+      dims.forEach((d) => { if (d.values?.length) init[d.dimCode] = d.values[0].id })
+      setConfig(init)
+    }).catch(() => {})
   }, [token, projectId])
+
+  const configValueIds = Object.values(config).filter(Boolean)
+
+  // config(顏色/包裝)變 → 重抓該 config 的 rollup(EE 共用不變、ME/PKG 隨 config)
+  useEffect(() => {
+    if (!token || !importResult?.bomInstanceId) return
+    const q = configValueIds.length ? `?valueIds=${configValueIds.join(',')}` : ''
+    api.get<any>(token, `/bom/instances/${importResult.bomInstanceId}/rollup${q}`)
+      .then((roll) => setImportResult((prev: any) => (prev ? { ...prev, rollup: roll } : prev)))
+      .catch(() => {})
+  }, [token, importResult?.bomInstanceId, JSON.stringify(config)])   // eslint-disable-line
 
   // 試算廠別 ↔ 成本結果 耦合:切廠別 → 撈該廠最近一次 run(無則清空 ⑤,提示尚未試算)
   useEffect(() => {
@@ -104,7 +125,7 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
     if (!caseFactoryId || !importResult?.bomInstanceId) { setErr('需先匯入 + 本專案有成本模型(case_factory)'); return }
     setComputing(true); setErr('')
     try {
-      const r = await api.post(token, '/bom/compute', { caseFactoryId, bomInstanceId: importResult.bomInstanceId, ...(force ? { force: true } : {}) })
+      const r = await api.post(token, '/bom/compute', { caseFactoryId, bomInstanceId: importResult.bomInstanceId, valueIds: configValueIds, ...(force ? { force: true } : {}) })
       setRunResult(r); setPendingGate(null)
     } catch (e: any) {
       // B-5a:有未詢價料件 → 409,提示可「強制試算」只算已詢價材料
@@ -118,7 +139,8 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
   async function refreshRollup() {
     if (!importResult?.bomInstanceId) return
     try {
-      const roll = await api.get(token, `/bom/instances/${importResult.bomInstanceId}/rollup`)
+      const q = configValueIds.length ? `?valueIds=${configValueIds.join(',')}` : ''
+      const roll = await api.get(token, `/bom/instances/${importResult.bomInstanceId}/rollup${q}`)
       setImportResult((prev: any) => (prev ? { ...prev, rollup: roll } : prev))
       setPendingGate(null)
     } catch { /* noop */ }
@@ -184,6 +206,23 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
           <span className="text-[10px] text-cortex-muted flex-1 min-w-[200px]">
             料表結構 / 材料 rollup <b className="text-cortex-ink">全廠共用</b>;切廠別 → 換加工成本模型(人力 / 設備 / OH / SGA),按下方「算成本」重算此廠 total。
           </span>
+        </div>
+      )}
+
+      {/* B-2: 產品配置(結構變異維度 · 顏色/包裝)· 切配置 → rollup/算成本用 resolve 後的料 */}
+      {dimensions.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap bg-cortex-cyan-bg/40 border border-cortex-teal/30 rounded-lg p-2.5">
+          <span className="text-[12px] font-semibold text-cortex-ink flex items-center gap-1.5"><Layers className="w-4 h-4 text-cortex-teal" /> 產品配置</span>
+          {dimensions.map((d) => (
+            <label key={d.id} className="text-[11px] text-cortex-muted flex items-center gap-1">
+              {d.dimName || d.dimCode}
+              <select value={config[d.dimCode] || ''} onChange={(e) => setConfig({ ...config, [d.dimCode]: Number(e.target.value) })}
+                className="border border-cortex-line rounded px-2 py-1 text-[12px] font-medium text-cortex-ink">
+                {d.values.map((v: any) => <option key={v.id} value={v.id}>{v.valueName || v.valueCode}</option>)}
+              </select>
+            </label>
+          ))}
+          <span className="text-[10px] text-cortex-muted flex-1 min-w-[180px]">同一份 super-BOM;切配置 → 共用料(EE)不變、變異料(ME/PKG)換該配置 → rollup / 算成本用此配置</span>
         </div>
       )}
 

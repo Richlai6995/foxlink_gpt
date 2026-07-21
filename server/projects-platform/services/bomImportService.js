@@ -406,7 +406,7 @@ async function importCanonicalBom(db, opts = {}) {
   const bomInstanceId = Number(inst.lastInsertRowid);
 
   const secMap = {};   // subAssembly → { catId, module, items }
-  let itemCount = 0, mfgCount = 0, pricedCount = 0, pendingCount = 0, seq = 0, si = 0;
+  let itemCount = 0, mfgCount = 0, pricedCount = 0, pendingCount = 0, seq = 0, si = 0, effTagged = 0;
   for (const cr of rows) {
     let sec = secMap[cr.subAssembly];
     if (!sec) {
@@ -419,10 +419,12 @@ async function importCanonicalBom(db, opts = {}) {
     seq += 1; sec.items += 1;
     const res = await _insertBomRow(db, sec.catId, seq, { qty: cr.qty, price: cr.unitPrice, itemNo: cr.itemNo, desc: cr.desc, fpn: cr.fpn, remark: cr.remark, vendor: cr.vendor, mfgPn: cr.mfgPn }, variantKey);
     itemCount += 1; if (res.priced) pricedCount += 1; else pendingCount += 1; if (res.mfg) mfgCount += 1;
+    // B-1:super-BOM effectivity(顏色/包裝 tag · 無 tag=共用)
+    if (cr.effectivity && cr.effectivity.length) { try { effTagged += await require('./bomVariantService').applyEffectivity(db, projectId, res.itemId, cr.effectivity); } catch (e) { log.warn('applyEffectivity:', e.message); } }
   }
   const sections = Object.entries(secMap).map(([k, v]) => ({ section: k, category: v.module, itemCount: v.items }));
-  log.log(`importCanonicalBom[${profileCode}]: instance=${bomInstanceId} sections=${sections.length} items=${itemCount} priced=${pricedCount} pending=${pendingCount}`);
-  return { bomInstanceId, itemCount, mfgCount, pricedCount, pendingCount, sections, profileCode };
+  log.log(`importCanonicalBom[${profileCode}]: instance=${bomInstanceId} sections=${sections.length} items=${itemCount} priced=${pricedCount} pending=${pendingCount} effTagged=${effTagged}`);
+  return { bomInstanceId, itemCount, mfgCount, pricedCount, pendingCount, sections, profileCode, effTagged };
 }
 
 // rollupMaterial 已移至獨立 service(引擎解耦)· 此處 re-export 維持 API 相容

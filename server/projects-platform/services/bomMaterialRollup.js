@@ -29,6 +29,11 @@ async function rollupMaterial(db, bomInstanceId, opts = {}) {
   // chosen snapshot 的 quote(applied_price)+ chosen tier 的 true_cost(無 tier → fallback quote)
   //   materialUsd = Σ qty×quote(對客報價材料)· materialTrueUsd = Σ qty×true(內部真實成本材料)
   //   兩者差 = 料件層 markup(SD §19:利潤主要藏這)· B-5a template 料 true=quote(無 markup)
+  // B-2 super-BOM:opts.valueIds(config 選中的值)→ 只 rollup resolve 後的料(無 tag 恆含 · 空=全含)
+  const ef = require('./bomVariantService').effectivityFilter(opts.valueIds, 'i');
+  const binds = [bomInstanceId];
+  if (opts.sectionCategory) binds.push(opts.sectionCategory);
+  binds.push(...ef.binds);
   const rows = await all(
     `SELECT sec.module_category AS cat,
             NVL(SUM(i.qty * ch.quote_price),0) AS mat,
@@ -49,9 +54,9 @@ async function rollupMaterial(db, bomInstanceId, opts = {}) {
           GROUP BY s.bom_item_id, s.applied_price_usd
        ) ch ON ch.bom_item_id = i.id
       WHERE sec.bom_instance_id = ?
-      ${opts.sectionCategory ? 'AND sec.module_category = ?' : ''}
+      ${opts.sectionCategory ? 'AND sec.module_category = ?' : ''}${ef.clause}
       GROUP BY sec.module_category`,
-    ...(opts.sectionCategory ? [bomInstanceId, opts.sectionCategory] : [bomInstanceId]),
+    ...binds,
   );
 
   const byCategory = {};

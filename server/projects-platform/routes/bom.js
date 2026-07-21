@@ -35,6 +35,7 @@ const compareSvc = require('../services/bomFactoryCompareService');
 const nreSvc = require('../services/bomNreService');
 const quoteSvc = require('../services/bomQuoteService');
 const engine = require('../services/bomCostEngine');
+const variantSvc = require('../services/bomVariantService');
 
 const router = express.Router();
 function getDb() { return require('../../database-oracle').db; }
@@ -337,10 +338,18 @@ router.get('/instances/:id', asyncHandler(async (req, res) => {
   res.json({ instance: inst, sections: secs });
 }));
 
-// GET /instances/:id/rollup — material rollup byCategory
+// GET /instances/:id/rollup — material rollup byCategory(?valueIds=1,2 → config resolve · B-2)
 router.get('/instances/:id/rollup', asyncHandler(async (req, res) => {
   const id = reqId(req.params.id, res); if (id === null) return;
-  res.json(await rollupSvc.rollupMaterial(getDb(), id));
+  const valueIds = String(req.query.valueIds || '').split(',').map(Number).filter(Boolean);
+  res.json(await rollupSvc.rollupMaterial(getDb(), id, { valueIds }));
+}));
+
+// GET /project/:projectId/dimensions — 變異維度 + 值(config 選擇器來源 · B-2)
+router.get('/project/:projectId/dimensions', asyncHandler(async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (!projectId) return res.status(400).json({ error: 'projectId required' });
+  res.json({ dimensions: await variantSvc.listDimensions(getDb(), projectId) });
 }));
 
 // GET /instances/:id/items — item 明細(chosen snapshot 取價 + 狀態 + vendor 數 · B-5b)
@@ -364,7 +373,10 @@ router.get('/instances/:id/items', asyncHandler(async (req, res) => {
       WHERE sec.bom_instance_id = ?
       ORDER BY sec.display_order, sec.module_category, i.item_sequence FETCH FIRST ${limit} ROWS ONLY`,
   ).all(id).catch(() => []);
-  res.json({ count: rows.length, items: rows });
+  // B-1:附 effectivity tags(明細徽章 · 共用 vs 顏色/包裝)
+  const effMap = await variantSvc.effectivityByInstance(getDb(), id).catch(() => ({}));
+  const items = rows.map((r) => ({ ...r, effectivity: effMap[Number(r.id)] || [] }));
+  res.json({ count: items.length, items });
 }));
 
 // PUT /items/batch — 批次存回主列欄位(Item No/描述/料號/Qty/Remark)· 前端「存檔」按鈕
@@ -448,6 +460,7 @@ router.post('/compute', asyncHandler(async (req, res) => {
   const opts = { caseFactoryId, persist: true, computedBy: req.user?.id || null };
   if (req.body.bomInstanceId) opts.bomInstanceId = Number(req.body.bomInstanceId);
   if (req.body.qtyScenarioCode) opts.qtyScenarioCode = req.body.qtyScenarioCode;
+  if (Array.isArray(req.body.valueIds) && req.body.valueIds.length) opts.valueIds = req.body.valueIds.map(Number).filter(Boolean);  // B-2 config resolve
   if (req.body.force === true || req.body.force === 'true' || req.body.allowPending) opts.allowPending = true;
   try {
     const out = await engine.computeCase(getDb(), opts);

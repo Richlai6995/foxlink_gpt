@@ -332,7 +332,7 @@ async function persistRun(db, { caseFactoryId, factoryCode, costingModel, cells,
  * S1b:FULL_MVA 全鏈(移植 demo)· SIMPLIFIED 仍 stub(S1c)· persist 留 S1c。
  */
 async function computeCase(db, opts = {}) {
-  const { caseFactoryId, qtyScenarioCode, motherboardCostUsd, bomInstanceId, persist = true } = opts;
+  const { caseFactoryId, qtyScenarioCode, motherboardCostUsd, bomInstanceId, valueIds, persist = true } = opts;
   if (!caseFactoryId) throw new Error('bomCostEngine.computeCase: caseFactoryId required');
 
   const inputs = await loadCaseInputs(db, caseFactoryId);
@@ -345,7 +345,7 @@ async function computeCase(db, opts = {}) {
   //   rollup 是獨立 service(解耦)· 現 EE、匯入 ME/PKG 後自動含全材料(對 Unit Cost Material Cost)
   let materialFromBom = null, materialTrueFromBom = null;
   if (bomInstanceId) {
-    const roll = await require('./bomMaterialRollup').rollupMaterial(db, bomInstanceId);
+    const roll = await require('./bomMaterialRollup').rollupMaterial(db, bomInstanceId, { valueIds });   // B-2 config resolve
     // B-5a 兩階段:有未詢價(PENDING)料件 → 材料不完整,擋算成本;帶 opts.allowPending 才放行
     if (num(roll.pendingCount) > 0 && !opts.allowPending) {
       const e = new Error(`BOM_HAS_PENDING_PRICES: ${roll.pendingCount} 筆料件尚未詢價(材料不完整)`);

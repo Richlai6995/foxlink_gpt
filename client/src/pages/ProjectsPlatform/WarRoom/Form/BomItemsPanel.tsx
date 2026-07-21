@@ -19,6 +19,7 @@ type ItemRow = {
   module_category: string; sub_assembly?: string; category: string; id: number; item_sequence: number
   item_no: string | null; qty: number | string; fpn: string | null; description: string | null; remark: string | null
   applied_price: number | null; extended: number | null; status: string; vendor_count: number
+  effectivity?: { dim: string; value: string }[]
 }
 type EditField = 'item_no' | 'description' | 'fpn' | 'qty' | 'remark'
 
@@ -126,8 +127,11 @@ const ItemRowComp = memo(function ItemRowComp({ it, expanded, dirty, onToggle, o
         <td className="px-2 py-1 text-cortex-muted cursor-pointer hover:text-cortex-teal" onClick={() => onToggle(it.id)}>
           {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
         </td>
-        <td className="px-2 py-1">
-          {it.sub_assembly && <span className="text-[9px] bg-cortex-cyan-bg text-cortex-teal px-1 py-0.5 rounded whitespace-nowrap">{it.sub_assembly}</span>}
+        <td className="px-2 py-1 whitespace-nowrap">
+          {it.sub_assembly && <span className="text-[9px] bg-cortex-cyan-bg text-cortex-teal px-1 py-0.5 rounded">{it.sub_assembly}</span>}
+          {it.effectivity && it.effectivity.length > 0
+            ? it.effectivity.map((e, i) => <span key={i} className="ml-1 text-[9px] bg-purple-100 text-purple-700 px-1 py-0.5 rounded">{e.dim}:{e.value}</span>)
+            : <span className="ml-1 text-[9px] text-cortex-muted/70">共用</span>}
         </td>
         <td className="px-2 py-1 text-cortex-muted">{it.module_category}</td>
         <td className="px-2 py-1"><input value={it.item_no ?? ''} onChange={(e) => onEdit(it.id, 'item_no', e.target.value)} className={cellInput} /></td>
