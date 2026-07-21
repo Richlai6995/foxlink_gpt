@@ -79,13 +79,15 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
       .catch(() => {})
   }, [token, importResult?.bomInstanceId, JSON.stringify(config)])   // eslint-disable-line
 
-  // 試算廠別 ↔ 成本結果 耦合:切廠別 → 撈該廠最近一次 run(無則清空 ⑤,提示尚未試算)
+  // 試算廠別 + 產品配置 ↔ 成本結果 雙耦合:切廠別/切配置 → 撈該 (廠別,config) 最近 run(無則清空 ⑤)
   useEffect(() => {
     if (!token || !caseFactoryId) { setRunResult(null); return }
-    api.get<any>(token, `/bom/case/${caseFactoryId}/latest-run`)
+    const vids = Object.values(config).filter(Boolean)
+    const q = vids.length ? `?valueIds=${vids.join(',')}` : ''
+    api.get<any>(token, `/bom/case/${caseFactoryId}/latest-run${q}`)
       .then((r) => setRunResult(r?.runId ? r : null))
       .catch(() => setRunResult(null))
-  }, [token, caseFactoryId])
+  }, [token, caseFactoryId, JSON.stringify(config)])   // eslint-disable-line
 
   const hasCase = cases.length > 0
   const activeFactory = cases.find((c) => c.case_factory_id === caseFactoryId)

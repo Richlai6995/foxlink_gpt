@@ -495,13 +495,15 @@ router.get('/runs/:runId', asyncHandler(async (req, res) => {
   res.json({ run, result, cells });
 }));
 
-// GET /case/:caseFactoryId/latest-run — 某廠別最近一次 compute 結果(試算廠別 ↔ 成本結果 耦合)
+// GET /case/:caseFactoryId/latest-run?valueIds=1,2 — 某(廠別, config)最近一次 compute 結果
+//   試算廠別 ↔ 成本結果 + 產品配置 ↔ 成本結果 雙耦合(切廠別/切配置都會換 ⑤)
 router.get('/case/:caseFactoryId/latest-run', asyncHandler(async (req, res) => {
   const cf = Number(req.params.caseFactoryId);
   if (!cf) return res.status(400).json({ error: 'caseFactoryId required' });
+  const sig = String(req.query.valueIds || '').split(',').map(Number).filter(Boolean).sort((a, b) => a - b).join(',');
   const row = await getDb().prepare(
-    `SELECT run_id FROM bom_cs_run WHERE case_factory_id = ? ORDER BY run_id DESC FETCH FIRST 1 ROWS ONLY`,
-  ).get(cf).catch(() => null);
+    `SELECT run_id FROM bom_cs_run WHERE case_factory_id = ? AND NVL(variant_value_ids,'_NONE_') = ? ORDER BY run_id DESC FETCH FIRST 1 ROWS ONLY`,   // Oracle ''=NULL → sentinel
+  ).get(cf, sig || '_NONE_').catch(() => null);
   if (!row) return res.json({ runId: null });
   const out = await engine.loadPersistedRun(getDb(), Number(row.run_id));
   if (!out) return res.json({ runId: null });

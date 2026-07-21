@@ -270,21 +270,25 @@ function computeSimplifiedMva(inputs, ctx) {
  *   run_result:1 fact 列(quote 側 = true 側 · open #1 預設)。VIRTUAL total/margin 不塞。
  * @returns runId
  */
-async function persistRun(db, { caseFactoryId, factoryCode, costingModel, cells, costBreakdown, qtyScenarioCode, computedBy, rawInputs }) {
+async function persistRun(db, { caseFactoryId, factoryCode, costingModel, cells, costBreakdown, qtyScenarioCode, computedBy, rawInputs, variantValueIds }) {
   const run = (sql, ...a) => db.prepare(sql).run(...a);
   const get = (sql, ...a) => db.prepare(sql).get(...a);
   const val = (r) => (r ? Object.values(r)[0] : undefined);
   const scenario = qtyScenarioCode || 'BASE';
+  // B-2:config 簽章(sorted valueIds CSV · 空=無 config)· run 依 (廠別, config) 各自一筆 ready
+  //   Oracle ''=NULL 雷 → 比對一律用 sentinel(sigBind 永遠非空),欄位存 NULL(no-config)/CSV
+  const sig = (variantValueIds || []).map(Number).filter(Boolean).sort((a, b) => a - b).join(',');
+  const sigBind = sig || '_NONE_';
 
-  // 1. 冪等:archive 舊 ready run
-  await run(`UPDATE bom_cs_run SET status='archived' WHERE case_factory_id=? AND status='ready'`, caseFactoryId);
+  // 1. 冪等:archive 舊 ready run(同廠別 + 同 config 才 archive → 不同 config 各留一筆)
+  await run(`UPDATE bom_cs_run SET status='archived' WHERE case_factory_id=? AND NVL(variant_value_ids,'_NONE_')=? AND status='ready'`, caseFactoryId, sigBind);
 
   // 2. run header(wrapper RETURNING 只認 'id' 欄 → run_id 拿不到 → MAX 回讀 · compute 非高並發)
   await run(
-    `INSERT INTO bom_cs_run (case_factory_id, status, compute_engine, raw_inputs_json, computed_by) VALUES (?, 'ready', ?, ?, ?)`,
-    caseFactoryId, 'bomCostEngine@S1', rawInputs ? JSON.stringify(rawInputs) : null, computedBy || null,
+    `INSERT INTO bom_cs_run (case_factory_id, status, compute_engine, raw_inputs_json, computed_by, variant_value_ids) VALUES (?, 'ready', ?, ?, ?, ?)`,
+    caseFactoryId, 'bomCostEngine@S1', rawInputs ? JSON.stringify(rawInputs) : null, computedBy || null, sig || null,
   );
-  const runId = Number(val(await get(`SELECT MAX(run_id) AS id FROM bom_cs_run WHERE case_factory_id=?`, caseFactoryId)));
+  const runId = Number(val(await get(`SELECT MAX(run_id) AS id FROM bom_cs_run WHERE case_factory_id=? AND NVL(variant_value_ids,'_NONE_')=?`, caseFactoryId, sigBind)));
 
   // 3. run_cell:先按 (scenario, process, component) 聚合(SIMPLIFIED 多 line → 同 component 免撞 PK)
   const agg = new Map();
@@ -424,7 +428,7 @@ async function computeCase(db, opts = {}) {
     runId = await persistRun(db, {
       caseFactoryId, factoryCode: pick(inputs.caseFactory, 'factory_code'), costingModel,
       cells: mva.cells, costBreakdown, qtyScenarioCode: ctx.qtyScenarioCode,
-      computedBy: opts.computedBy || null,
+      computedBy: opts.computedBy || null, variantValueIds: valueIds,   // B-2 config 簽章
       rawInputs: { costingModel, motherboard, annualDemand, cellCount: mva.cells.length },
     });
   }
