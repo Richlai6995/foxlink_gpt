@@ -40,15 +40,67 @@ async function tagItem(db, itemId, dimensionId, valueId) {
   await db.prepare(`INSERT INTO bom_item_effectivity (bom_item_id, dimension_id, value_id) VALUES (?, ?, ?)`).run(itemId, dimensionId, valueId);
 }
 
-/** 匯入 helper:effectivity=[{dimCode,valueCode}] → upsert + tag 該料 */
+/** lookup(不建)· 回 {dimensionId,valueId} 或 null(B-3a:值必須先定義) */
+async function resolveDimensionValue(db, projectId, dimCode, valueCode) {
+  const dc = str(dimCode), vc = str(valueCode);
+  if (!dc || !vc) return null;
+  const r = await db.prepare(
+    `SELECT d.id AS dimension_id, v.id AS value_id
+       FROM bom_variant_dimension d JOIN bom_variant_value v ON v.dimension_id = d.id
+      WHERE d.project_id=? AND d.dim_code=? AND v.value_code=?`,
+  ).get(projectId, dc, vc).catch(() => null);
+  return r ? { dimensionId: Number(pick(r, 'dimension_id')), valueId: Number(pick(r, 'value_id')) } : null;
+}
+
+/** 掃 canonical rows 的 effectivity → 回未定義的 [{dimCode,valueCode}](import 前置驗證 · 硬擋) */
+async function collectUndefinedValues(db, projectId, rows) {
+  const seen = new Set(), undef = [];
+  for (const r of rows || []) {
+    for (const e of (r.effectivity || [])) {
+      const dc = str(e.dimCode || e.dim), vc = str(e.valueCode || e.value);
+      if (!dc || !vc) continue;
+      const key = `${dc}=${vc}`; if (seen.has(key)) continue; seen.add(key);
+      if (!(await resolveDimensionValue(db, projectId, dc, vc))) undef.push({ dimCode: dc, valueCode: vc });
+    }
+  }
+  return undef;
+}
+
+/** 匯入 helper:effectivity=[{dimCode,valueCode}] → lookup(不建)+ tag(未定義跳過 · import 已前置驗證擋下) */
 async function applyEffectivity(db, projectId, itemId, effectivity) {
   if (!Array.isArray(effectivity) || !effectivity.length) return 0;
   let n = 0;
   for (const e of effectivity) {
-    const dv = await ensureDimensionValue(db, projectId, e.dimCode || e.dim, e.valueCode || e.value);
+    const dv = await resolveDimensionValue(db, projectId, e.dimCode || e.dim, e.valueCode || e.value);
     if (dv) { await tagItem(db, itemId, dv.dimensionId, dv.valueId); n += 1; }
   }
   return n;
+}
+
+// ── 變異軸設定 CRUD(B-3a:先定義,非臨時 LOV)──────────────────────────────
+async function createDimension(db, projectId, { dimCode, dimName, sortOrder } = {}) {
+  const code = str(dimCode); if (!code) throw new Error('dimCode required');
+  const ex = await db.prepare(`SELECT id FROM bom_variant_dimension WHERE project_id=? AND dim_code=?`).get(projectId, code).catch(() => null);
+  if (ex) { if (dimName) await db.prepare(`UPDATE bom_variant_dimension SET dim_name=? WHERE id=?`).run(str(dimName), Number(pick(ex, 'id'))); return Number(pick(ex, 'id')); }
+  const r = await db.prepare(`INSERT INTO bom_variant_dimension (project_id, dim_code, dim_name, sort_order) VALUES (?,?,?,?)`).run(projectId, code, str(dimName) || code, Number(sortOrder) || 10);
+  return Number(r.lastInsertRowid);
+}
+async function addValue(db, dimensionId, { valueCode, valueName, sortOrder } = {}) {
+  const code = str(valueCode); if (!code) throw new Error('valueCode required');
+  const ex = await db.prepare(`SELECT id FROM bom_variant_value WHERE dimension_id=? AND value_code=?`).get(dimensionId, code).catch(() => null);
+  if (ex) { if (valueName) await db.prepare(`UPDATE bom_variant_value SET value_name=? WHERE id=?`).run(str(valueName), Number(pick(ex, 'id'))); return Number(pick(ex, 'id')); }
+  const r = await db.prepare(`INSERT INTO bom_variant_value (dimension_id, value_code, value_name, sort_order) VALUES (?,?,?,?)`).run(dimensionId, code, str(valueName) || code, Number(sortOrder) || 10);
+  return Number(r.lastInsertRowid);
+}
+async function _valueInUse(db, valueId) { return Number(pick(await db.prepare(`SELECT COUNT(*) AS c FROM bom_item_effectivity WHERE value_id=?`).get(valueId).catch(() => ({})), 'c')) || 0; }
+async function deleteValue(db, valueId) {
+  if (await _valueInUse(db, valueId)) throw new Error('此值已被料件使用,不可刪(先重匯或清 tag)');
+  await db.prepare(`DELETE FROM bom_variant_value WHERE id=?`).run(valueId); return { deleted: valueId };
+}
+async function deleteDimension(db, projectId, dimensionId) {
+  const inUse = Number(pick(await db.prepare(`SELECT COUNT(*) AS c FROM bom_item_effectivity WHERE dimension_id=?`).get(dimensionId).catch(() => ({})), 'c')) || 0;
+  if (inUse) throw new Error('此維度已被料件使用,不可刪(先重匯或清 tag)');
+  await db.prepare(`DELETE FROM bom_variant_dimension WHERE id=? AND project_id=?`).run(dimensionId, projectId); return { deleted: dimensionId };
 }
 
 /** 專案的維度 + 值(config 選擇器來源) */
@@ -117,5 +169,7 @@ async function effectivityByInstance(db, instanceId) {
 
 module.exports = {
   ensureDimension, ensureValue, ensureDimensionValue, tagItem, applyEffectivity,
+  resolveDimensionValue, collectUndefinedValues,
+  createDimension, addValue, deleteDimension, deleteValue,
   listDimensions, effectivityFilter, configToValueIds, effectivityByInstance,
 };

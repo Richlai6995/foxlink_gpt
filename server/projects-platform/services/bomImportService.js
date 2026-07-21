@@ -393,6 +393,14 @@ async function importCanonicalBom(db, opts = {}) {
   const rows = profileSvc.transformToCanonical(wb, profile);
   if (!rows.length) throw new Error(`no BOM rows parsed (profile=${profileCode} · 檢查格式/對映)`);
 
+  // B-3a:變異值必須先定義(硬擋)· import 前置驗證,未定義 → 中止(不半匯入)
+  const undef = await require('./bomVariantService').collectUndefinedValues(db, projectId, rows);
+  if (undef.length) {
+    const e = new Error(`BOM_UNDEFINED_VARIANT_VALUES: ${undef.map((u) => `${u.dimCode}=${u.valueCode}`).join(', ')} 未定義,請先在「變異軸設定」新增`);
+    e.code = 'BOM_UNDEFINED_VARIANT_VALUES'; e.undefinedValues = undef;
+    throw e;
+  }
+
   const old = await get(
     `SELECT id FROM bom_instance WHERE project_id=? AND version_no=? AND ${variantKey == null ? 'variant_key IS NULL' : 'variant_key=?'}`,
     ...(variantKey == null ? [projectId, versionNo] : [projectId, versionNo, variantKey]),

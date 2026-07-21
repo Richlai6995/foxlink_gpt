@@ -247,6 +247,12 @@ router.post('/import', upload.single('file'), asyncHandler(async (req, res) => {
     }
     const roll = await rollupSvc.rollupMaterial(getDb(), r.bomInstanceId);
     res.json({ ok: true, format, profileCode, ...r, rollup: roll });
+  } catch (e) {
+    // B-3a:未定義變異值 → 409 + 清單(前端引導去設定)
+    if (e.code === 'BOM_UNDEFINED_VARIANT_VALUES') {
+      return res.status(409).json({ error: e.message, code: e.code, undefinedValues: e.undefinedValues || [] });
+    }
+    throw e;
   } finally {
     try { fs.unlinkSync(req.file.path); } catch (_) {}
   }
@@ -345,11 +351,39 @@ router.get('/instances/:id/rollup', asyncHandler(async (req, res) => {
   res.json(await rollupSvc.rollupMaterial(getDb(), id, { valueIds }));
 }));
 
-// GET /project/:projectId/dimensions — 變異維度 + 值(config 選擇器來源 · B-2)
+// GET /project/:projectId/dimensions — 變異維度 + 值(config 選擇器 + 設定畫面來源 · B-2/B-3a)
 router.get('/project/:projectId/dimensions', asyncHandler(async (req, res) => {
   const projectId = Number(req.params.projectId);
   if (!projectId) return res.status(400).json({ error: 'projectId required' });
   res.json({ dimensions: await variantSvc.listDimensions(getDb(), projectId) });
+}));
+
+// ── 變異軸設定 CRUD(B-3a:先定義,非臨時 LOV)──────────────────────────────
+// POST /project/:projectId/dimensions — 新增維度(body: dimCode, dimName)
+router.post('/project/:projectId/dimensions', asyncHandler(async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (!projectId) return res.status(400).json({ error: 'projectId required' });
+  try { res.json({ ok: true, dimensionId: await variantSvc.createDimension(getDb(), projectId, req.body || {}) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+}));
+// POST /project/:projectId/dimensions/:dimId/values — 新增值(body: valueCode, valueName)
+router.post('/project/:projectId/dimensions/:dimId/values', asyncHandler(async (req, res) => {
+  const dimId = Number(req.params.dimId);
+  if (!dimId) return res.status(400).json({ error: 'dimId required' });
+  try { res.json({ ok: true, valueId: await variantSvc.addValue(getDb(), dimId, req.body || {}) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+}));
+// DELETE /project/:projectId/dimensions/:dimId — 刪維度(被料件用到 → 擋)
+router.delete('/project/:projectId/dimensions/:dimId', asyncHandler(async (req, res) => {
+  const projectId = Number(req.params.projectId), dimId = Number(req.params.dimId);
+  try { res.json({ ok: true, ...(await variantSvc.deleteDimension(getDb(), projectId, dimId)) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+}));
+// DELETE /project/:projectId/values/:valueId — 刪值(被料件用到 → 擋)
+router.delete('/project/:projectId/values/:valueId', asyncHandler(async (req, res) => {
+  const valueId = Number(req.params.valueId);
+  try { res.json({ ok: true, ...(await variantSvc.deleteValue(getDb(), valueId)) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 }));
 
 // GET /instances/:id/items — item 明細(chosen snapshot 取價 + 狀態 + vendor 數 · B-5b)

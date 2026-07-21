@@ -15,9 +15,10 @@ import { useEffect, useState } from 'react'
 import type { ProjectDetail } from '../../api'
 import { api, ApiError } from '../../api'
 import { useAuth } from '../../../../context/AuthContext'
-import { Download, Upload, Calculator, Loader2, CheckCircle2, AlertCircle, Info, Settings, Factory, Layers } from 'lucide-react'
+import { Download, Upload, Calculator, Loader2, CheckCircle2, AlertCircle, Info, Settings, Factory, Layers, ChevronDown, ChevronUp } from 'lucide-react'
 import BomItemsPanel from './BomItemsPanel'
 import BomFactoryCompare from './BomFactoryCompare'
+import BomVariantSetup from './BomVariantSetup'
 
 type CaseRow = { case_factory_id: number; project_id: number; factory_code: string; costing_model: string; status: string; project_code: string }
 
@@ -32,6 +33,8 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
   // B-2 super-BOM:結構變異維度(顏色/包裝)+ 當前 config
   const [dimensions, setDimensions] = useState<any[]>([])
   const [config, setConfig] = useState<Record<string, number>>({})
+  const [showSetup, setShowSetup] = useState(false)
+  const [undefVals, setUndefVals] = useState<{ dimCode: string; valueCode: string }[]>([])
   const [file, setFile] = useState<File | null>(null)
   const [profiles, setProfiles] = useState<any[]>([])
   const [profileCode, setProfileCode] = useState('CANONICAL')
@@ -60,13 +63,16 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
     // 顏色/variant 下拉來源(此專案已存在的)
     api.get<{ variants: string[] }>(token, `/bom/project/${projectId}/variants`).then((r) => setVariants(r.variants || [])).catch(() => {})
     // B-2:結構變異維度(顏色/包裝)+ 預設 config(每維度第一個值)
+    reloadDimensions()
+  }, [token, projectId])   // eslint-disable-line
+
+  // 變異軸設定變更 / mount → 重載維度 + 補預設 config(保留已選)
+  function reloadDimensions() {
     api.get<{ dimensions: any[] }>(token, `/bom/project/${projectId}/dimensions`).then((r) => {
       const dims = r.dimensions || []; setDimensions(dims)
-      const init: Record<string, number> = {}
-      dims.forEach((d) => { if (d.values?.length) init[d.dimCode] = d.values[0].id })
-      setConfig(init)
+      setConfig((prev) => { const c = { ...prev }; dims.forEach((d) => { if (d.values?.length && !c[d.dimCode]) c[d.dimCode] = d.values[0].id }); return c })
     }).catch(() => {})
-  }, [token, projectId])
+  }
 
   const configValueIds = Object.values(config).filter(Boolean)
 
@@ -116,8 +122,14 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
       if (variantKey) fd.append('variantKey', variantKey)
       const res = await fetch('/api/projects/bom/import', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd })
       const data = await res.json()
+      // B-3a:未定義變異值 → 開設定 + 標示要補的值(硬擋)
+      if (res.status === 409 && data.code === 'BOM_UNDEFINED_VARIANT_VALUES') {
+        setUndefVals(data.undefinedValues || []); setShowSetup(true)
+        setErr(`匯入含未定義的變異值:${(data.undefinedValues || []).map((u: any) => `${u.dimCode}=${u.valueCode}`).join('、')} —— 請先在下方「變異軸設定」新增後再匯入`)
+        return
+      }
       if (!res.ok) throw new Error(data.error || `匯入失敗 (HTTP ${res.status})`)
-      setImportResult(data)
+      setImportResult(data); setUndefVals([])
       // 新顏色 → 刷新下拉
       api.get<{ variants: string[] }>(token, `/bom/project/${projectId}/variants`).then((r) => setVariants(r.variants || [])).catch(() => {})
     } catch (e: any) { setErr(e.message) } finally { setImporting(false) }
@@ -210,6 +222,19 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
           </span>
         </div>
       )}
+
+      {/* B-3a: 變異軸設定(折疊)· 先定義顏色/包裝值,import 才放行 */}
+      <div className={`border rounded-lg ${undefVals.length ? 'border-red-300 bg-red-50/40' : 'border-cortex-line bg-cortex-bg/40'}`}>
+        <button onClick={() => setShowSetup((s) => !s)} className="w-full flex items-center justify-between px-3 py-2 text-[12px] font-semibold text-cortex-ink">
+          <span className="flex items-center gap-1.5">
+            <Settings className="w-4 h-4" /> 變異軸設定
+            {dimensions.length > 0 && <span className="text-cortex-muted font-normal">({dimensions.map((d) => d.dimName || d.dimCode).join(' / ')})</span>}
+            {undefVals.length > 0 && <span className="text-[10px] text-red-600 font-normal">· 需補 {undefVals.length} 值</span>}
+          </span>
+          {showSetup ? <ChevronUp className="w-4 h-4 text-cortex-muted" /> : <ChevronDown className="w-4 h-4 text-cortex-muted" />}
+        </button>
+        {showSetup && <div className="px-3 pb-3 border-t border-cortex-line pt-2"><BomVariantSetup projectId={projectId} onChanged={() => { reloadDimensions(); setUndefVals([]) }} /></div>}
+      </div>
 
       {/* B-2: 產品配置(結構變異維度 · 顏色/包裝)· 切配置 → rollup/算成本用 resolve 後的料 */}
       {dimensions.length > 0 && (
