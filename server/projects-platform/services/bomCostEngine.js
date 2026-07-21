@@ -432,8 +432,37 @@ async function computeCase(db, opts = {}) {
   return { runId, costingModel, plan, costBreakdown, cells: mva.cells, results: [] };
 }
 
+/**
+ * loadPersistedRun — 從已落庫的 run_result 反推 costBreakdown(還原 ⑤ 成本結果 · 重整不消失)
+ * 回傳 shape 對齊 computeCase:{ runId, costingModel, costBreakdown }。total 由組件重算(VIRTUAL 不落庫)。
+ */
+async function loadPersistedRun(db, runId) {
+  const r = await db.prepare(
+    `SELECT rr.run_id, rr.material_quote_usd, rr.material_true_usd, rr.pkg_quote_usd,
+            rr.mva_usd, rr.sga_usd, rr.profit_amount_usd, rr.nre_per_unit_quote_usd, rr.nre_per_unit_true_usd,
+            cf.costing_model
+       FROM bom_cs_run_result rr
+       JOIN bom_cs_run run ON run.run_id = rr.run_id
+       JOIN bom_cs_case_factory cf ON cf.case_factory_id = run.case_factory_id
+      WHERE rr.run_id = ?`,
+  ).get(runId).catch(() => null);
+  if (!r) return null;
+  const material = num(pick(r, 'material_quote_usd')), materialTrue = num(pick(r, 'material_true_usd'));
+  const pkg = num(pick(r, 'pkg_quote_usd'));
+  const mva = num(pick(r, 'mva_usd')), sga = num(pick(r, 'sga_usd')), profit = num(pick(r, 'profit_amount_usd'));
+  const nreAmort = num(pick(r, 'nre_per_unit_quote_usd')), nreAmortTrue = num(pick(r, 'nre_per_unit_true_usd'));
+  const total = material + mva + sga + profit + nreAmort;                  // pkg 恆入 material rollup(=0)
+  const totalTrue = materialTrue + mva + sga + profit + nreAmortTrue;
+  const marginUsd = total - totalTrue, marginPct = total > 0 ? marginUsd / total : 0;
+  return {
+    runId: num(pick(r, 'run_id')), costingModel: pick(r, 'costing_model'),
+    costBreakdown: { material, materialTrue, pkg, mva, sga, profit, nreAmort, nreAmortTrue, total, totalTrue, marginUsd, marginPct },
+  };
+}
+
 module.exports = {
   computeCase,
+  loadPersistedRun,
   buildComponentPlan,
   loadCaseInputs,
   resolveBaseRef,

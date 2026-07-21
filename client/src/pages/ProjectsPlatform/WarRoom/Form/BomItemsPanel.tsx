@@ -13,7 +13,7 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
 import { useAuth } from '../../../../context/AuthContext'
-import { ChevronRight, ChevronDown, Plus, Check, Loader2, Save } from 'lucide-react'
+import { ChevronRight, ChevronDown, Plus, Check, Loader2, Save, Pencil, Trash2, X } from 'lucide-react'
 
 type ItemRow = {
   module_category: string; sub_assembly?: string; category: string; id: number; item_sequence: number
@@ -161,6 +161,10 @@ function ItemEnrich({ itemId, token, onChanged }: { itemId: number; token: strin
   const [vName, setVName] = useState(''); const [vPn, setVPn] = useState('')
   const [pMfg, setPMfg] = useState<number | ''>(''); const [pCur, setPCur] = useState('USD')
   const [pTrue, setPTrue] = useState(''); const [pFx, setPFx] = useState('1'); const [pQuote, setPQuote] = useState('')
+  // 編輯既有報價
+  const [editSnap, setEditSnap] = useState<number | null>(null)
+  const [eVendor, setEVendor] = useState(''); const [eMfgPn, setEMfgPn] = useState(''); const [eCur, setECur] = useState('USD')
+  const [eTrue, setETrue] = useState(''); const [eFx, setEFx] = useState('1'); const [eQuote, setEQuote] = useState('')
 
   async function load() { try { setDetail(await api.get(token, `/bom/items/${itemId}/detail`)) } catch (e: any) { setErr(e.message) } }
   useEffect(() => { load() }, [itemId])
@@ -187,6 +191,28 @@ function ItemEnrich({ itemId, token, onChanged }: { itemId: number; token: strin
     try { await api.put(token, `/bom/items/${itemId}/choose`, { snapshotId }); await load(); onChanged() }
     catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
+  function startEdit(s: any, t: any, mfg: any) {
+    setEditSnap(Number(s.id)); setErr('')
+    setEVendor(mfg?.manufacturer_name || ''); setEMfgPn(mfg?.mfg_part_number || '')
+    setECur(t?.source_currency || 'USD'); setETrue(t?.true_cost_source != null ? String(t.true_cost_source) : '')
+    setEFx(t?.fx_rate != null ? String(t.fx_rate) : '1'); setEQuote(t?.quote_price_usd != null ? String(t.quote_price_usd) : '')
+  }
+  async function saveEdit(snapshotId: number) {
+    setBusy(true); setErr('')
+    try {
+      await api.put(token, `/bom/items/${itemId}/price/${snapshotId}`, {
+        vendor: eVendor, mfgPn: eMfgPn, sourceCurrency: eCur,
+        trueCostSource: eTrue === '' ? null : Number(eTrue), fxRate: Number(eFx) || 1, quotePrice: eQuote === '' ? null : Number(eQuote),
+      })
+      setEditSnap(null); await load(); onChanged()
+    } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
+  async function delPrice(snapshotId: number) {
+    if (!confirm('刪除這筆報價?')) return
+    setBusy(true); setErr('')
+    try { await api.delete(token, `/bom/items/${itemId}/price/${snapshotId}`); setEditSnap(null); await load(); onChanged() }
+    catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
 
   if (!detail) return <div className="text-[11px] text-cortex-muted"><Loader2 className="w-3 h-3 inline animate-spin" /> 載入…</div>
   const priced = (detail.snapshots || []).filter((s: any) => s.strategy_used !== 'PENDING')
@@ -205,15 +231,36 @@ function ItemEnrich({ itemId, token, onChanged }: { itemId: number; token: strin
             const t = (s.tiers || []).find((x: any) => Number(x.is_chosen) === 1) || (s.tiers || [])[0]
             const mfg = (detail.mfgs || []).find((m: any) => Number(m.id) === Number(s.bom_item_mfg_id))
             const chosen = Number(s.is_chosen) === 1
+            const editing = editSnap === Number(s.id)
             return (
-              <div key={s.id} className={`flex items-center gap-2 text-[11px] px-2 py-1 rounded border ${chosen ? 'border-cortex-teal bg-cortex-cyan-bg/40' : 'border-cortex-line bg-white'}`}>
-                <button onClick={() => choose(s.id)} disabled={busy || chosen} title="選為採用價"
-                  className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${chosen ? 'bg-cortex-teal border-cortex-teal' : 'border-cortex-muted hover:border-cortex-teal'}`}>
-                  {chosen && <Check className="w-2.5 h-2.5 text-white" />}
-                </button>
-                <span className="flex-1 truncate">{mfg?.manufacturer_name || mfg?.mfg_part_number || '(未指定供應商)'}</span>
-                <span className="font-mono">quote {money(s.applied_price_usd)}</span>
-                {t && <span className="font-mono text-cortex-muted">true {money(t.true_cost_usd)} · mk {pct(t.markup_pct)}</span>}
+              <div key={s.id} className={`text-[11px] rounded border ${chosen ? 'border-cortex-teal bg-cortex-cyan-bg/40' : 'border-cortex-line bg-white'}`}>
+                <div className="flex items-center gap-2 px-2 py-1">
+                  <button onClick={() => choose(s.id)} disabled={chosen} title="選為 rollup 採用價"
+                    className={`flex items-center gap-1 shrink-0 rounded px-1 py-0.5 ${chosen ? 'cursor-default' : 'cursor-pointer hover:bg-cortex-cyan-bg'}`}>
+                    <span className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${chosen ? 'bg-cortex-teal border-cortex-teal' : 'border-cortex-muted'}`}>
+                      {chosen && <Check className="w-2.5 h-2.5 text-white" />}
+                    </span>
+                    <span className={`text-[9px] whitespace-nowrap ${chosen ? 'text-cortex-teal font-semibold' : 'text-cortex-muted'}`}>{chosen ? '採用中' : '選採用'}</span>
+                  </button>
+                  <span className="flex-1 truncate">{mfg?.manufacturer_name || mfg?.mfg_part_number || '(未指定供應商)'}</span>
+                  <span className="font-mono">quote {money(s.applied_price_usd)}</span>
+                  {t && <span className="font-mono text-cortex-muted">true {money(t.true_cost_usd)} · mk {pct(t.markup_pct)}</span>}
+                  <button onClick={() => (editing ? setEditSnap(null) : startEdit(s, t, mfg))} disabled={busy} title="編輯這筆"
+                    className="shrink-0 p-0.5 text-cortex-muted hover:text-cortex-teal">{editing ? <X className="w-3 h-3" /> : <Pencil className="w-3 h-3" />}</button>
+                  <button onClick={() => delPrice(s.id)} disabled={busy} title="刪除這筆"
+                    className="shrink-0 p-0.5 text-cortex-muted hover:text-red-500"><Trash2 className="w-3 h-3" /></button>
+                </div>
+                {editing && (
+                  <div className="flex items-end gap-1.5 flex-wrap border-t border-cortex-line/60 px-2 py-1.5 bg-cortex-bg/40">
+                    <label className="text-[10px] text-cortex-muted">供應商<br /><input value={eVendor} onChange={(e) => setEVendor(e.target.value)} className="border border-cortex-line rounded px-1 py-0.5 text-[11px] w-28" /></label>
+                    <label className="text-[10px] text-cortex-muted">Mfg P/N<br /><input value={eMfgPn} onChange={(e) => setEMfgPn(e.target.value)} className="border border-cortex-line rounded px-1 py-0.5 text-[11px] w-28 font-mono" /></label>
+                    <label className="text-[10px] text-cortex-muted">幣別<br /><input value={eCur} onChange={(e) => setECur(e.target.value)} className="border border-cortex-line rounded px-1 py-0.5 text-[11px] w-12" /></label>
+                    <label className="text-[10px] text-cortex-muted">true(原幣)<br /><input value={eTrue} onChange={(e) => setETrue(e.target.value)} className="border border-cortex-line rounded px-1 py-0.5 text-[11px] w-16 font-mono" /></label>
+                    <label className="text-[10px] text-cortex-muted">fx<br /><input value={eFx} onChange={(e) => setEFx(e.target.value)} className="border border-cortex-line rounded px-1 py-0.5 text-[11px] w-12 font-mono" /></label>
+                    <label className="text-[10px] text-cortex-muted">quote(USD)<br /><input value={eQuote} onChange={(e) => setEQuote(e.target.value)} className="border border-cortex-line rounded px-1 py-0.5 text-[11px] w-20 font-mono" /></label>
+                    <button onClick={() => saveEdit(s.id)} disabled={busy} className="flex items-center gap-1 text-[11px] px-2 py-1 bg-cortex-teal text-white rounded hover:opacity-90 disabled:opacity-40"><Save className="w-3 h-3" />存</button>
+                  </div>
+                )}
               </div>
             )
           })}

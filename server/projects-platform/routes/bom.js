@@ -129,13 +129,18 @@ router.get('/provision/templates', asyncHandler(async (req, res) => {
   res.json({ templates: await provisionSvc.listTemplates(getDb()) });
 }));
 
-// POST /provision-case — 為專案建 case_factory(body: projectId, sourceCaseFactoryId, variantKey?)
+// POST /provision-case — 為專案建 case_factory(body: projectId, sourceCaseFactoryId, variantKey?, factoryCode?, baselineId?)
+// factoryCode override:clone 範本的成本模型結構,但綁「別的廠 site」(加 CN/VN 多廠差異化用)
 router.post('/provision-case', asyncHandler(async (req, res) => {
   const projectId = Number(req.body.projectId);
   const sourceCaseFactoryId = Number(req.body.sourceCaseFactoryId);
   if (!projectId) return res.status(400).json({ error: 'projectId required' });
   if (!sourceCaseFactoryId) return res.status(400).json({ error: 'sourceCaseFactoryId required' });
-  const out = await provisionSvc.provisionCase(getDb(), { projectId, sourceCaseFactoryId, variantKey: req.body.variantKey || null });
+  const out = await provisionSvc.provisionCase(getDb(), {
+    projectId, sourceCaseFactoryId, variantKey: req.body.variantKey || null,
+    factoryCode: req.body.factoryCode || null,
+    baselineId: req.body.baselineId ? Number(req.body.baselineId) : null,
+  });
   res.json({ ok: true, ...out });
 }));
 
@@ -306,6 +311,16 @@ router.get('/project/:projectId/latest-instance', asyncHandler(async (req, res) 
   });
 }));
 
+// GET /project/:projectId/variants — 此專案已存在的 variant/顏色(顏色下拉來源 · 不硬編 LOV)
+router.get('/project/:projectId/variants', asyncHandler(async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (!projectId) return res.status(400).json({ error: 'projectId required' });
+  const rows = await getDb().prepare(
+    `SELECT DISTINCT variant_key FROM bom_instance WHERE project_id = ? AND variant_key IS NOT NULL ORDER BY variant_key`,
+  ).all(projectId).catch(() => []);
+  res.json({ variants: rows.map((r) => r.variant_key).filter(Boolean) });
+}));
+
 // GET /instances/:id — instance + sections
 router.get('/instances/:id', asyncHandler(async (req, res) => {
   const id = reqId(req.params.id, res); if (id === null) return;
@@ -399,6 +414,24 @@ router.post('/items/:itemId/price', asyncHandler(async (req, res) => {
   res.json({ ok: true, ...out });
 }));
 
+// PUT /items/:itemId/price/:snapshotId — 改既有報價(body: vendor?, mfgPn?, sourceCurrency?, trueCostSource?, fxRate?, quotePrice?)
+router.put('/items/:itemId/price/:snapshotId', asyncHandler(async (req, res) => {
+  const id = reqId(req.params.itemId, res, 'itemId'); if (id === null) return;
+  const snapshotId = Number(req.params.snapshotId);
+  if (!snapshotId) return res.status(400).json({ error: 'snapshotId required' });
+  const out = await enrichSvc.updatePrice(getDb(), id, snapshotId, req.body || {});
+  res.json({ ok: true, ...out });
+}));
+
+// DELETE /items/:itemId/price/:snapshotId — 刪一筆報價
+router.delete('/items/:itemId/price/:snapshotId', asyncHandler(async (req, res) => {
+  const id = reqId(req.params.itemId, res, 'itemId'); if (id === null) return;
+  const snapshotId = Number(req.params.snapshotId);
+  if (!snapshotId) return res.status(400).json({ error: 'snapshotId required' });
+  const out = await enrichSvc.deletePrice(getDb(), id, snapshotId);
+  res.json({ ok: true, ...out });
+}));
+
 // PUT /items/:itemId/choose — 選定某 vendor snapshot 為此料件的價(body: snapshotId)
 router.put('/items/:itemId/choose', asyncHandler(async (req, res) => {
   const id = reqId(req.params.itemId, res, 'itemId'); if (id === null) return;
@@ -447,6 +480,36 @@ router.get('/runs/:runId', asyncHandler(async (req, res) => {
     `SELECT process_code, component_code, cost_per_unit_usd FROM bom_cs_run_cell WHERE run_id=? ORDER BY process_code, component_code`,
   ).all(id).catch(() => []);
   res.json({ run, result, cells });
+}));
+
+// GET /case/:caseFactoryId/latest-run — 某廠別最近一次 compute 結果(試算廠別 ↔ 成本結果 耦合)
+router.get('/case/:caseFactoryId/latest-run', asyncHandler(async (req, res) => {
+  const cf = Number(req.params.caseFactoryId);
+  if (!cf) return res.status(400).json({ error: 'caseFactoryId required' });
+  const row = await getDb().prepare(
+    `SELECT run_id FROM bom_cs_run WHERE case_factory_id = ? ORDER BY run_id DESC FETCH FIRST 1 ROWS ONLY`,
+  ).get(cf).catch(() => null);
+  if (!row) return res.json({ runId: null });
+  const out = await engine.loadPersistedRun(getDb(), Number(row.run_id));
+  if (!out) return res.json({ runId: null });
+  res.json({ ...out, caseFactoryId: cf });
+}));
+
+// GET /project/:projectId/latest-run — 此專案最近一次 compute 結果(還原 ⑤ 成本結果 · 重整不消失)
+router.get('/project/:projectId/latest-run', asyncHandler(async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (!projectId) return res.status(400).json({ error: 'projectId required' });
+  const row = await getDb().prepare(
+    `SELECT run.run_id, run.case_factory_id
+       FROM bom_cs_run run
+       JOIN bom_cs_case_factory cf ON cf.case_factory_id = run.case_factory_id
+      WHERE cf.case_id = ?
+      ORDER BY run.run_id DESC FETCH FIRST 1 ROWS ONLY`,
+  ).get(projectId).catch(() => null);
+  if (!row) return res.json({ runId: null });
+  const out = await engine.loadPersistedRun(getDb(), Number(row.run_id));
+  if (!out) return res.json({ runId: null });
+  res.json({ ...out, caseFactoryId: Number(row.case_factory_id) });
 }));
 
 module.exports = router;

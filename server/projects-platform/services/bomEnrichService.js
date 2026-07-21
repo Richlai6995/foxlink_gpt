@@ -103,6 +103,78 @@ async function addPrice(db, itemId, { mfgId = null, sourceCurrency = 'USD', tier
   return { snapshotId, appliedPrice: appliedQuote, autoChosen };
 }
 
+/**
+ * 更新既有報價(改供應商/mfgPn/true/fx/quote)· 只更新有帶的欄位。
+ * vendor/mfgPn → upsert 連結的 mfg(無 mfg 則建);true/fx/quote → 改 chosen(或首個)tier;quote 同步 snapshot.applied。
+ */
+async function updatePrice(db, itemId, snapshotId, patch = {}) {
+  const snap = await db.prepare(`SELECT id, bom_item_mfg_id FROM bom_item_price_snapshot WHERE id=? AND bom_item_id=?`).get(snapshotId, itemId);
+  if (!snap) throw new Error('snapshot not found for item');
+  let mfgId = num(pick(snap, 'bom_item_mfg_id')) || null;
+
+  // 供應商 / Mfg P/N → upsert mfg
+  if (patch.vendor !== undefined || patch.mfgPn !== undefined) {
+    if (mfgId) {
+      const sets = [], binds = [];
+      if (patch.vendor !== undefined) { sets.push('manufacturer_name=?'); binds.push(str(patch.vendor)); }
+      if (patch.mfgPn !== undefined) { sets.push('mfg_part_number=?'); binds.push(str(patch.mfgPn)); }
+      if (sets.length) { binds.push(mfgId); await db.prepare(`UPDATE bom_item_mfg SET ${sets.join(', ')} WHERE id=?`).run(...binds); }
+    } else if (str(patch.vendor) != null || str(patch.mfgPn) != null) {
+      const item = await getItem(db, itemId);
+      const flkId = num(pick(item, 'final_flk_id')) || null;
+      const r = await db.prepare(
+        `INSERT INTO bom_item_mfg (bom_item_id, bom_item_flk_id, display_order, manufacturer_name, mfg_part_number, source, is_preferred) VALUES (?, ?, 100, ?, ?, 'MANUAL', 0)`,
+      ).run(itemId, flkId, str(patch.vendor), str(patch.mfgPn));
+      mfgId = Number(r.lastInsertRowid);
+      await db.prepare(`UPDATE bom_item_price_snapshot SET bom_item_mfg_id=? WHERE id=?`).run(mfgId, snapshotId);
+    }
+  }
+
+  // true / fx / quote / 幣別 → chosen(或首個)tier
+  const tier = await db.prepare(
+    `SELECT tier_id FROM bom_item_price_tier WHERE snapshot_id=? ORDER BY is_chosen DESC, tier_seq FETCH FIRST 1 ROWS ONLY`,
+  ).get(snapshotId).catch(() => null);
+  if (tier) {
+    const tid = num(pick(tier, 'tier_id'));
+    const sets = [], binds = [];
+    if (patch.sourceCurrency !== undefined) { sets.push('source_currency=?'); binds.push(str(patch.sourceCurrency) || 'USD'); }
+    if (patch.trueCostSource !== undefined) { sets.push('true_cost_source=?'); binds.push(patch.trueCostSource === '' || patch.trueCostSource == null ? null : num(patch.trueCostSource)); }
+    if (patch.fxRate !== undefined) { sets.push('fx_rate=?'); binds.push(patch.fxRate === '' || patch.fxRate == null ? 1 : num(patch.fxRate)); }
+    if (patch.quotePrice !== undefined) { sets.push('quote_price_usd=?'); binds.push(patch.quotePrice === '' || patch.quotePrice == null ? null : num(patch.quotePrice)); }
+    if (sets.length) { binds.push(tid); await db.prepare(`UPDATE bom_item_price_tier SET ${sets.join(', ')} WHERE tier_id=?`).run(...binds); }
+  }
+  // quote 同步 snapshot.applied_price_usd(相容現況單軌)
+  if (patch.quotePrice !== undefined) {
+    await db.prepare(`UPDATE bom_item_price_snapshot SET applied_price_usd=? WHERE id=?`)
+      .run(patch.quotePrice === '' || patch.quotePrice == null ? null : num(patch.quotePrice), snapshotId);
+  }
+  return { snapshotId, mfgId };
+}
+
+/** 刪一筆報價(snapshot+tiers)· 若刪的是 chosen → 改選另一有價的,無則還原 PENDING placeholder */
+async function deletePrice(db, itemId, snapshotId) {
+  const snap = await db.prepare(`SELECT id, is_chosen FROM bom_item_price_snapshot WHERE id=? AND bom_item_id=?`).get(snapshotId, itemId);
+  if (!snap) throw new Error('snapshot not found for item');
+  const wasChosen = Number(pick(snap, 'is_chosen')) === 1;
+  await db.prepare(`DELETE FROM bom_item_price_tier WHERE snapshot_id=?`).run(snapshotId);
+  await db.prepare(`DELETE FROM bom_item_price_snapshot WHERE id=?`).run(snapshotId);
+  if (wasChosen) {
+    const other = await db.prepare(
+      `SELECT id FROM bom_item_price_snapshot WHERE bom_item_id=? AND applied_price_usd IS NOT NULL ORDER BY id FETCH FIRST 1 ROWS ONLY`,
+    ).get(itemId).catch(() => null);
+    if (other) { await chooseSnapshot(db, itemId, Number(pick(other, 'id'))); }
+    else {
+      const item = await getItem(db, itemId);
+      const flkId = num(pick(item, 'final_flk_id')) || null;
+      await db.prepare(
+        `INSERT INTO bom_item_price_snapshot (bom_item_id, bom_item_flk_id, period_months, strategy_used, applied_price_usd, po_line_count, vendor_count, is_chosen)
+         VALUES (?, ?, 0, 'PENDING', NULL, 0, 0, 1)`,
+      ).run(itemId, flkId);
+    }
+  }
+  return { deleted: snapshotId };
+}
+
 /** 選定某 vendor snapshot 為此料件的價(rollup 取 chosen 的 applied_price)*/
 async function chooseSnapshot(db, itemId, snapshotId) {
   const s = await db.prepare(`SELECT id FROM bom_item_price_snapshot WHERE id=? AND bom_item_id=?`).get(snapshotId, itemId);
@@ -112,4 +184,4 @@ async function chooseSnapshot(db, itemId, snapshotId) {
   return { itemId, snapshotId };
 }
 
-module.exports = { getItemDetail, addVendor, addPrice, chooseSnapshot };
+module.exports = { getItemDetail, addVendor, addPrice, updatePrice, deletePrice, chooseSnapshot };

@@ -15,7 +15,7 @@ import { useEffect, useState } from 'react'
 import type { ProjectDetail } from '../../api'
 import { api, ApiError } from '../../api'
 import { useAuth } from '../../../../context/AuthContext'
-import { Download, Upload, Calculator, Loader2, CheckCircle2, AlertCircle, Info, Settings } from 'lucide-react'
+import { Download, Upload, Calculator, Loader2, CheckCircle2, AlertCircle, Info, Settings, Factory } from 'lucide-react'
 import BomItemsPanel from './BomItemsPanel'
 import BomFactoryCompare from './BomFactoryCompare'
 
@@ -27,6 +27,8 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
   const [cases, setCases] = useState<CaseRow[]>([])
   const [caseFactoryId, setCaseFactoryId] = useState<number | ''>('')
   const [variantKey, setVariantKey] = useState('')
+  const [variants, setVariants] = useState<string[]>([])
+  const [customVariant, setCustomVariant] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const [profiles, setProfiles] = useState<any[]>([])
   const [profileCode, setProfileCode] = useState('CANONICAL')
@@ -45,16 +47,27 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
     api.get<{ cases: CaseRow[] }>(token, `/bom/cases?projectId=${projectId}`)
       .then((r) => {
         setCases(r.cases || [])
-        if (r.cases?.length) setCaseFactoryId(r.cases[0].case_factory_id)
+        if (r.cases?.length) setCaseFactoryId((prev) => prev || r.cases[0].case_factory_id)
       })
       .catch((e) => setErr(e.message))
     api.get<{ templates: any[] }>(token, `/bom/provision/templates`).then((r) => setTemplates(r.templates || [])).catch(() => {})
     api.get<{ profiles: any[] }>(token, `/bom/profiles`).then((r) => { setProfiles(r.profiles || []); if (r.profiles?.length) setProfileCode(r.profiles[0].profile_code) }).catch(() => {})
     // 還原:此專案已有匯入的 bom_instance → 重整不消失(#2 修)
     api.get<any>(token, `/bom/project/${projectId}/latest-instance`).then((r) => { if (r?.bomInstanceId) setImportResult(r) }).catch(() => {})
+    // 顏色/variant 下拉來源(此專案已存在的)
+    api.get<{ variants: string[] }>(token, `/bom/project/${projectId}/variants`).then((r) => setVariants(r.variants || [])).catch(() => {})
   }, [token, projectId])
 
+  // 試算廠別 ↔ 成本結果 耦合:切廠別 → 撈該廠最近一次 run(無則清空 ⑤,提示尚未試算)
+  useEffect(() => {
+    if (!token || !caseFactoryId) { setRunResult(null); return }
+    api.get<any>(token, `/bom/case/${caseFactoryId}/latest-run`)
+      .then((r) => setRunResult(r?.runId ? r : null))
+      .catch(() => setRunResult(null))
+  }, [token, caseFactoryId])
+
   const hasCase = cases.length > 0
+  const activeFactory = cases.find((c) => c.case_factory_id === caseFactoryId)
 
   async function downloadTemplate() {
     setErr('')
@@ -82,6 +95,8 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || `匯入失敗 (HTTP ${res.status})`)
       setImportResult(data)
+      // 新顏色 → 刷新下拉
+      api.get<{ variants: string[] }>(token, `/bom/project/${projectId}/variants`).then((r) => setVariants(r.variants || [])).catch(() => {})
     } catch (e: any) { setErr(e.message) } finally { setImporting(false) }
   }
 
@@ -158,6 +173,20 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
         </div>
       )}
 
+      {/* A: 頂部試算廠別切換器 — 結構/材料全廠共用,廠別只換加工成本模型(人力/設備/OH) */}
+      {hasCase && (
+        <div className="flex items-center gap-2 flex-wrap bg-cortex-navy/5 border border-cortex-navy/20 rounded-lg p-2.5">
+          <span className="text-[12px] font-semibold text-cortex-ink flex items-center gap-1.5"><Factory className="w-4 h-4 text-cortex-navy" /> 試算廠別</span>
+          <select value={caseFactoryId} onChange={(e) => setCaseFactoryId(e.target.value ? Number(e.target.value) : '')}
+            className="border border-cortex-line rounded px-2 py-1 text-[12px] font-medium">
+            {cases.map((c) => <option key={c.case_factory_id} value={c.case_factory_id}>{c.factory_code} · {c.costing_model}</option>)}
+          </select>
+          <span className="text-[10px] text-cortex-muted flex-1 min-w-[200px]">
+            料表結構 / 材料 rollup <b className="text-cortex-ink">全廠共用</b>;切廠別 → 換加工成本模型(人力 / 設備 / OH / SGA),按下方「算成本」重算此廠 total。
+          </span>
+        </div>
+      )}
+
       {/* ① 下載範本 */}
       <div className="flex items-center justify-between bg-cortex-bg/40 border border-cortex-line rounded-lg p-3">
         <div className="text-[12px]">
@@ -180,8 +209,21 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
             className="border border-cortex-line rounded px-2 py-1 text-[12px]">
             {profiles.map((p) => <option key={p.profile_code} value={p.profile_code}>{p.name || p.profile_code}</option>)}
           </select>
-          <input value={variantKey} onChange={(e) => setVariantKey(e.target.value)} placeholder="variant(選填 black/white)"
-            className="border border-cortex-line rounded px-2 py-1 text-[12px] w-44" />
+          {/* 顏色/variant 下拉(正式化 · 結構層維度 · 空=共用)· 不硬編顏色,選項來自此專案已存在的 */}
+          <select value={customVariant ? '__custom__' : variantKey}
+            onChange={(e) => {
+              if (e.target.value === '__custom__') { setCustomVariant(true); setVariantKey('') }
+              else { setCustomVariant(false); setVariantKey(e.target.value) }
+            }}
+            title="顏色/variant — 不同顏色=不同結構(cosmetic 件 PN 不同)" className="border border-cortex-line rounded px-2 py-1 text-[12px]">
+            <option value="">顏色/variant:共用</option>
+            {variants.map((v) => <option key={v} value={v}>{v}</option>)}
+            <option value="__custom__">＋ 自訂顏色…</option>
+          </select>
+          {customVariant && (
+            <input value={variantKey} onChange={(e) => setVariantKey(e.target.value)} placeholder="輸入顏色(如 Black)" autoFocus
+              className="border border-cortex-line rounded px-2 py-1 text-[12px] w-36" />
+          )}
           <button onClick={doImport} disabled={importing || !file}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-cortex-teal text-white text-[12px] rounded hover:opacity-90 disabled:opacity-40 shrink-0">
             {importing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />} 匯入
@@ -222,16 +264,11 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
           {hasCase ? (
             <div className="space-y-2">
               <div className="flex items-center gap-2 flex-wrap">
-                {cases.length > 1 && (
-                  <select value={caseFactoryId} onChange={(e) => setCaseFactoryId(Number(e.target.value))}
-                    className="border border-cortex-line rounded px-2 py-1 text-[12px]">
-                    {cases.map((c) => <option key={c.case_factory_id} value={c.case_factory_id}>#{c.case_factory_id} · {c.factory_code} · {c.costing_model}</option>)}
-                  </select>
-                )}
                 <button onClick={() => doCompute()} disabled={computing}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-cortex-navy text-white text-[12px] rounded hover:opacity-90 disabled:opacity-40">
-                  {computing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Calculator className="w-3.5 h-3.5" />} ④ 算成本
+                  {computing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Calculator className="w-3.5 h-3.5" />} ④ 算成本{activeFactory ? ` · ${activeFactory.factory_code}` : ''}
                 </button>
+                {cases.length > 1 && <span className="text-[10px] text-cortex-muted">廠別在上方「試算廠別」切換</span>}
               </div>
               {pendingGate && (
                 <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-800 rounded p-2.5 text-[11px]">
