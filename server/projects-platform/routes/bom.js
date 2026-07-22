@@ -236,7 +236,8 @@ router.post('/import', upload.single('file'), asyncHandler(async (req, res) => {
   try {
     let r;
     if (profileCode) {
-      r = await importSvc.importCanonicalBom(getDb(), { filePath: req.file.path, projectId, profileCode, variantKey, versionNo });
+      const mergeMode = req.body.mergeMode === 'true' || req.body.mergeMode === true;   // B-3b 分開匯入
+      r = await importSvc.importCanonicalBom(getDb(), { filePath: req.file.path, projectId, profileCode, variantKey, versionNo, mergeMode });
     } else if (format === 'rival3') {
       const sheetKeys = String(req.body.sheetKeys || 'EE,ME,PKG').split(',').map((s) => s.trim()).filter(Boolean);
       r = await importSvc.importBom(getDb(), { filePath: req.file.path, projectId, sheetKeys, variantKey, versionNo });

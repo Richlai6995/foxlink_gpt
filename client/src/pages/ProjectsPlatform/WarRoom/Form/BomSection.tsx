@@ -36,6 +36,7 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
   const [showSetup, setShowSetup] = useState(false)
   const [undefVals, setUndefVals] = useState<{ dimCode: string; valueCode: string }[]>([])
   const [file, setFile] = useState<File | null>(null)
+  const [mergeMode, setMergeMode] = useState(false)
   const [profiles, setProfiles] = useState<any[]>([])
   const [profileCode, setProfileCode] = useState('CANONICAL')
   const [importing, setImporting] = useState(false)
@@ -119,6 +120,7 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
       fd.append('file', file)
       fd.append('projectId', String(projectId))
       fd.append('profileCode', profileCode)
+      if (mergeMode) fd.append('mergeMode', 'true')   // B-3b 分開匯入(併入現有)
       if (variantKey) fd.append('variantKey', variantKey)
       const res = await fetch('/api/projects/bom/import', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd })
       const data = await res.json()
@@ -129,7 +131,12 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
         return
       }
       if (!res.ok) throw new Error(data.error || `匯入失敗 (HTTP ${res.status})`)
-      setImportResult(data); setUndefVals([])
+      setUndefVals([])
+      // 分開匯入(merge):回應只含本次 section → 重載完整 instance 顯總量;整份匯入直接用回應
+      if (data.merged) {
+        const full = await api.get<any>(token, `/bom/project/${projectId}/latest-instance`).catch(() => null)
+        setImportResult(full?.bomInstanceId ? full : data)
+      } else { setImportResult(data) }
       // 新顏色 → 刷新下拉
       api.get<{ variants: string[] }>(token, `/bom/project/${projectId}/variants`).then((r) => setVariants(r.variants || [])).catch(() => {})
     } catch (e: any) { setErr(e.message) } finally { setImporting(false) }
@@ -290,9 +297,12 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
             <input value={variantKey} onChange={(e) => setVariantKey(e.target.value)} placeholder="輸入顏色(如 Black)" autoFocus
               className="border border-cortex-line rounded px-2 py-1 text-[12px] w-36" />
           )}
+          <label className="flex items-center gap-1 text-[11px] text-cortex-muted cursor-pointer" title="勾選=併入現有 BOM(只覆蓋此檔涵蓋的變異範圍,不動 EE/其他顏色包裝)· 不勾=整份取代">
+            <input type="checkbox" checked={mergeMode} onChange={(e) => setMergeMode(e.target.checked)} /> 分開匯入(併入)
+          </label>
           <button onClick={doImport} disabled={importing || !file}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-cortex-teal text-white text-[12px] rounded hover:opacity-90 disabled:opacity-40 shrink-0">
-            {importing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />} 匯入
+            {importing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />} {mergeMode ? '併入匯入' : '匯入'}
           </button>
         </div>
       </div>

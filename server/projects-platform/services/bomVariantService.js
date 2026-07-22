@@ -66,6 +66,30 @@ async function collectUndefinedValues(db, projectId, rows) {
   return undef;
 }
 
+/**
+ * MERGE 分開匯入用:刪某 section 內「effectivity 集合 exact = valueIds」的料件(cascade 清 price/flk/mfg/tag)。
+ * valueIds 空 → 刪共用料(無 effectivity);非空 → 刪 tag 集合完全等於 valueIds 的料。回刪除數。
+ */
+async function deleteItemsByScope(db, sectionId, valueIds) {
+  const ids = (valueIds || []).map(Number).filter(Boolean);
+  let sql, binds;
+  if (!ids.length) {
+    sql = `SELECT i.id FROM bom_item i JOIN bom_category c ON c.id = i.bom_category_id
+            WHERE c.bom_section_id = ? AND NOT EXISTS (SELECT 1 FROM bom_item_effectivity e WHERE e.bom_item_id = i.id)`;
+    binds = [sectionId];
+  } else {
+    const ph = ids.map(() => '?').join(',');
+    sql = `SELECT i.id FROM bom_item i JOIN bom_category c ON c.id = i.bom_category_id
+            WHERE c.bom_section_id = ?
+              AND (SELECT COUNT(*) FROM bom_item_effectivity e WHERE e.bom_item_id = i.id) = ?
+              AND NOT EXISTS (SELECT 1 FROM bom_item_effectivity e WHERE e.bom_item_id = i.id AND e.value_id NOT IN (${ph}))`;
+    binds = [sectionId, ids.length, ...ids];
+  }
+  const items = await db.prepare(sql).all(...binds).catch(() => []);
+  for (const it of items) await db.prepare(`DELETE FROM bom_item WHERE id=?`).run(Number(pick(it, 'id'))).catch(() => {});
+  return items.length;
+}
+
 /** 匯入 helper:effectivity=[{dimCode,valueCode}] → lookup(不建)+ tag(未定義跳過 · import 已前置驗證擋下) */
 async function applyEffectivity(db, projectId, itemId, effectivity) {
   if (!Array.isArray(effectivity) || !effectivity.length) return 0;
@@ -169,7 +193,7 @@ async function effectivityByInstance(db, instanceId) {
 
 module.exports = {
   ensureDimension, ensureValue, ensureDimensionValue, tagItem, applyEffectivity,
-  resolveDimensionValue, collectUndefinedValues,
+  resolveDimensionValue, collectUndefinedValues, deleteItemsByScope,
   createDimension, addValue, deleteDimension, deleteValue,
   listDimensions, effectivityFilter, configToValueIds, effectivityByInstance,
 };

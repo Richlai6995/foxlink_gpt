@@ -381,7 +381,7 @@ async function importMultiBoardBom(db, opts = {}) {
  * 系統唯一匯入路徑 · 各專案差異全在 profile(CANONICAL 直讀 / MAPPED 用設定轉)。
  */
 async function importCanonicalBom(db, opts = {}) {
-  const { filePath, projectId, profileCode = 'CANONICAL', variantKey = null, versionNo = 1 } = opts;
+  const { filePath, projectId, profileCode = 'CANONICAL', variantKey = null, versionNo = 1, mergeMode = false } = opts;
   if (!filePath) throw new Error('bomImportService: filePath required');
   if (!projectId) throw new Error('bomImportService: projectId required');
   const run = (sql, ...a) => db.prepare(sql).run(...a);
@@ -401,38 +401,77 @@ async function importCanonicalBom(db, opts = {}) {
     throw e;
   }
 
+  const variantSvc = require('./bomVariantService');
   const old = await get(
     `SELECT id FROM bom_instance WHERE project_id=? AND version_no=? AND ${variantKey == null ? 'variant_key IS NULL' : 'variant_key=?'}`,
     ...(variantKey == null ? [projectId, versionNo] : [projectId, versionNo, variantKey]),
   );
-  if (old) await run(`DELETE FROM bom_instance WHERE id=?`, Number(pick(old, 'id')));
-  const inst = await run(
-    `INSERT INTO bom_instance (project_id, version_no, variant_scope, variant_key, state, price_period_months, price_strategy)
-     VALUES (?, ?, ?, ?, 'DRAFT', 12, 'AVG')`,
-    projectId, versionNo, variantKey ? 'per_variant' : 'shared', variantKey,
-  );
-  const bomInstanceId = Number(inst.lastInsertRowid);
 
-  const secMap = {};   // subAssembly → { catId, module, items }
-  let itemCount = 0, mfgCount = 0, pricedCount = 0, pendingCount = 0, seq = 0, si = 0, effTagged = 0;
-  for (const cr of rows) {
-    let sec = secMap[cr.subAssembly];
-    if (!sec) {
-      si += 1;
-      const s = await run(`INSERT INTO bom_section (bom_instance_id, module_code, module_category, display_order, name) VALUES (?, ?, ?, ?, ?)`,
-        bomInstanceId, cr.subAssembly.slice(0, 40), cr.module, si * 10, cr.subAssembly.slice(0, 120));
-      const catId = Number((await run(`INSERT INTO bom_category (bom_section_id, display_order, name, process_type) VALUES (?, 10, ?, NULL)`, Number(s.lastInsertRowid), cr.subAssembly.slice(0, 60))).lastInsertRowid);
-      sec = secMap[cr.subAssembly] = { catId, module: cr.module, items: 0 };
+  const secMap = {};   // subAssembly → { sectionId, catId, module, items }
+  let bomInstanceId, si = 0;
+  if (mergeMode && old) {
+    // MERGE:併入既有 instance(不刪)· 載既有 sections reuse
+    bomInstanceId = Number(pick(old, 'id'));
+    const secs = await db.prepare(
+      `SELECT sec.id AS sec_id, sec.name AS name, sec.module_category AS cat, c.id AS cat_id
+         FROM bom_section sec JOIN bom_category c ON c.bom_section_id = sec.id WHERE sec.bom_instance_id = ? ORDER BY sec.display_order`,
+    ).all(bomInstanceId).catch(() => []);
+    for (const s of secs) { const nm = pick(s, 'name'); if (!secMap[nm]) secMap[nm] = { sectionId: Number(pick(s, 'sec_id')), catId: Number(pick(s, 'cat_id')), module: pick(s, 'cat'), items: 0 }; }
+    si = secs.length;
+  } else {
+    if (old) await run(`DELETE FROM bom_instance WHERE id=?`, Number(pick(old, 'id')));
+    const inst = await run(
+      `INSERT INTO bom_instance (project_id, version_no, variant_scope, variant_key, state, price_period_months, price_strategy)
+       VALUES (?, ?, ?, ?, 'DRAFT', 12, 'AVG')`,
+      projectId, versionNo, variantKey ? 'per_variant' : 'shared', variantKey,
+    );
+    bomInstanceId = Number(inst.lastInsertRowid);
+  }
+
+  // 每 category seq 從既有 max 續(merge 不撞 unique(cat,seq))
+  const catSeq = {};
+  const nextSeq = async (catId) => {
+    if (catSeq[catId] == null) catSeq[catId] = Number(pick(await get(`SELECT NVL(MAX(item_sequence),0) AS m FROM bom_item WHERE bom_category_id=?`, catId), 'm')) || 0;
+    return ++catSeq[catId];
+  };
+  const ensureSection = async (subAssembly, module) => {
+    if (secMap[subAssembly]) return secMap[subAssembly];
+    si += 1;
+    const s = await run(`INSERT INTO bom_section (bom_instance_id, module_code, module_category, display_order, name) VALUES (?, ?, ?, ?, ?)`,
+      bomInstanceId, subAssembly.slice(0, 40), module, si * 10, subAssembly.slice(0, 120));
+    const catId = Number((await run(`INSERT INTO bom_category (bom_section_id, display_order, name, process_type) VALUES (?, 10, ?, NULL)`, Number(s.lastInsertRowid), subAssembly.slice(0, 60))).lastInsertRowid);
+    return (secMap[subAssembly] = { sectionId: Number(s.lastInsertRowid), catId, module, items: 0 });
+  };
+
+  // MERGE:先刪各 scope 既有料(該 半成品 + 該 effectivity 集合)→ 覆蓋該變異,不動 EE/其他顏色包裝
+  let deletedInMerge = 0;
+  if (mergeMode) {
+    const scopes = {};
+    for (const cr of rows) {
+      const sig = (cr.effectivity || []).map((e) => `${e.dimCode}=${e.valueCode}`).sort().join('|');
+      const key = `${cr.subAssembly}||${sig}`;
+      if (!scopes[key]) scopes[key] = { subAssembly: cr.subAssembly, effectivity: cr.effectivity || [] };
     }
-    seq += 1; sec.items += 1;
+    for (const sc of Object.values(scopes)) {
+      const secExisting = secMap[sc.subAssembly]; if (!secExisting) continue;
+      const valueIds = [];
+      for (const e of sc.effectivity) { const dv = await variantSvc.resolveDimensionValue(db, projectId, e.dimCode, e.valueCode); if (dv) valueIds.push(dv.valueId); }
+      deletedInMerge += await variantSvc.deleteItemsByScope(db, secExisting.sectionId, valueIds);
+    }
+  }
+
+  let itemCount = 0, mfgCount = 0, pricedCount = 0, pendingCount = 0, effTagged = 0;
+  for (const cr of rows) {
+    const sec = await ensureSection(cr.subAssembly, cr.module);
+    const seq = await nextSeq(sec.catId);
+    sec.items += 1;
     const res = await _insertBomRow(db, sec.catId, seq, { qty: cr.qty, price: cr.unitPrice, itemNo: cr.itemNo, desc: cr.desc, fpn: cr.fpn, remark: cr.remark, vendor: cr.vendor, mfgPn: cr.mfgPn }, variantKey);
     itemCount += 1; if (res.priced) pricedCount += 1; else pendingCount += 1; if (res.mfg) mfgCount += 1;
-    // B-1:super-BOM effectivity(顏色/包裝 tag · 無 tag=共用)
-    if (cr.effectivity && cr.effectivity.length) { try { effTagged += await require('./bomVariantService').applyEffectivity(db, projectId, res.itemId, cr.effectivity); } catch (e) { log.warn('applyEffectivity:', e.message); } }
+    if (cr.effectivity && cr.effectivity.length) { try { effTagged += await variantSvc.applyEffectivity(db, projectId, res.itemId, cr.effectivity); } catch (e) { log.warn('applyEffectivity:', e.message); } }
   }
-  const sections = Object.entries(secMap).map(([k, v]) => ({ section: k, category: v.module, itemCount: v.items }));
-  log.log(`importCanonicalBom[${profileCode}]: instance=${bomInstanceId} sections=${sections.length} items=${itemCount} priced=${pricedCount} pending=${pendingCount} effTagged=${effTagged}`);
-  return { bomInstanceId, itemCount, mfgCount, pricedCount, pendingCount, sections, profileCode, effTagged };
+  const sections = Object.entries(secMap).filter(([, v]) => v.items > 0).map(([k, v]) => ({ section: k, category: v.module, itemCount: v.items }));
+  log.log(`importCanonicalBom[${profileCode}]${mergeMode ? ' MERGE' : ''}: instance=${bomInstanceId} sections=${sections.length} items=${itemCount} priced=${pricedCount} pending=${pendingCount} effTagged=${effTagged} deleted=${deletedInMerge}`);
+  return { bomInstanceId, itemCount, mfgCount, pricedCount, pendingCount, sections, profileCode, effTagged, merged: !!mergeMode, deletedInMerge };
 }
 
 // rollupMaterial 已移至獨立 service(引擎解耦)· 此處 re-export 維持 API 相容
