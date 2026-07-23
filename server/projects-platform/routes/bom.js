@@ -145,6 +145,42 @@ router.post('/provision-case', asyncHandler(async (req, res) => {
   res.json({ ok: true, ...out });
 }));
 
+// ── C-1 成本模型 通用匯入/匯出(docs/cortex-cost-model-import-plan.md)────────
+const costModelSvc = require('../services/bomCostModelService');
+const XLSXcm = require('xlsx');
+const sendWb = (res, wb, filename) => {
+  const buf = XLSXcm.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+  res.send(buf);
+};
+// GET /cost-model/template?model=SIMPLIFIED_WEARABLE|FULL_MVA — 下載範本(fixture 真實樣例)
+router.get('/cost-model/template', asyncHandler(async (req, res) => {
+  const model = String(req.query.model || 'SIMPLIFIED_WEARABLE');
+  const { wb } = await costModelSvc.templateWorkbook(getDb(), model);
+  sendWb(res, wb, `cost-model-template-${model}.xlsx`);
+}));
+// GET /case/:caseFactoryId/cost-model — 匯出此廠成本模型(round-trip)
+router.get('/case/:caseFactoryId/cost-model', asyncHandler(async (req, res) => {
+  const cf = Number(req.params.caseFactoryId);
+  if (!cf) return res.status(400).json({ error: 'caseFactoryId required' });
+  const { wb, model, factoryCode } = await costModelSvc.exportCostModel(getDb(), cf);
+  sendWb(res, wb, `cost-model-${factoryCode}-${model}-cf${cf}.xlsx`);
+}));
+// POST /cost-model/import — 匯入成本模型 → 專案(multipart: file, projectId, factoryCode?)
+router.post('/cost-model/import', upload.single('file'), asyncHandler(async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'file required' });
+  const projectId = Number(req.body.projectId);
+  if (!projectId) return res.status(400).json({ error: 'projectId required' });
+  try {
+    const out = await costModelSvc.importCostModel(getDb(), { filePath: req.file.path, projectId, factoryCode: req.body.factoryCode || null });
+    res.json({ ok: true, ...out });
+  } catch (e) {
+    if (String(e.code || '').startsWith('COST_MODEL_')) return res.status(409).json({ error: e.message, code: e.code, missing: e.missing || undefined });
+    throw e;
+  } finally { try { fs.unlinkSync(req.file.path); } catch (_) {} }
+}));
+
 // GET /project/:projectId/matrix — 多廠矩陣(B-3d):配置組合 × 廠別 · cell 讀 run 快取(缺格前端 on-demand /compute)
 router.get('/project/:projectId/matrix', asyncHandler(async (req, res) => {
   const projectId = Number(req.params.projectId);

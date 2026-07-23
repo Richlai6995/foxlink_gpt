@@ -47,6 +47,10 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
   const [templates, setTemplates] = useState<any[]>([])
   const [tplId, setTplId] = useState<number | ''>('')
   const [provisioning, setProvisioning] = useState(false)
+  // C-1 成本模型 Excel 匯入
+  const [cmFile, setCmFile] = useState<File | null>(null)
+  const [cmFactory, setCmFactory] = useState('')
+  const [cmBusy, setCmBusy] = useState(false)
   const [err, setErr] = useState('')
 
   useEffect(() => {
@@ -167,6 +171,58 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
     } catch { /* noop */ }
   }
 
+  // C-1:成本模型 Excel(下載檔案共用 helper)
+  async function dlBlob(path: string, filename: string) {
+    setErr('')
+    try {
+      const res = await fetch(`/api/projects/bom${path}`, { headers: { Authorization: `Bearer ${token}` } })
+      if (!res.ok) throw new Error(`下載失敗 (HTTP ${res.status})`)
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = url; a.download = filename; a.click()
+      URL.revokeObjectURL(url)
+    } catch (e: any) { setErr(e.message) }
+  }
+  async function doImportCostModel() {
+    if (!cmFile) { setErr('請選成本模型 Excel'); return }
+    setCmBusy(true); setErr('')
+    try {
+      const fd = new FormData()
+      fd.append('file', cmFile); fd.append('projectId', String(projectId))
+      if (cmFactory.trim()) fd.append('factoryCode', cmFactory.trim().toUpperCase())
+      const res = await fetch('/api/projects/bom/cost-model/import', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || `匯入失敗 (HTTP ${res.status})`)
+      setCmFile(null); setCmFactory('')
+      const r = await api.get<{ cases: CaseRow[] }>(token, `/bom/cases?projectId=${projectId}`)
+      setCases(r.cases || [])
+      if (data.caseFactoryId) setCaseFactoryId(data.caseFactoryId)
+    } catch (e: any) { setErr(e.message) } finally { setCmBusy(false) }
+  }
+  const costModelTools = (
+    <div className="flex items-center gap-2 flex-wrap text-[11px]">
+      <span className="text-cortex-muted">成本模型 Excel:</span>
+      <input type="file" accept=".xlsx" onChange={(e) => setCmFile(e.target.files?.[0] || null)}
+        className="text-[11px] file:mr-1.5 file:px-2 file:py-0.5 file:border-0 file:rounded file:bg-white file:cursor-pointer file:text-[11px]" />
+      <input value={cmFactory} onChange={(e) => setCmFactory(e.target.value)} placeholder="廠別碼(空=用檔內)" className="border border-cortex-line rounded px-1.5 py-0.5 text-[11px] w-32" />
+      <button onClick={doImportCostModel} disabled={cmBusy || !cmFile}
+        className="flex items-center gap-1 px-2 py-0.5 bg-cortex-teal text-white rounded hover:opacity-90 disabled:opacity-40">
+        {cmBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />} 匯入模型
+      </button>
+      <span className="text-cortex-muted">·</span>
+      <button onClick={() => dlBlob('/cost-model/template?model=SIMPLIFIED_WEARABLE', 'cost-model-template-SIMPLIFIED.xlsx')} className="text-cortex-teal hover:underline">範本(穿戴 SIMPLIFIED)</button>
+      <button onClick={() => dlBlob('/cost-model/template?model=FULL_MVA', 'cost-model-template-FULL.xlsx')} className="text-cortex-teal hover:underline">範本(FULL)</button>
+      {activeFactory && (
+        <>
+          <span className="text-cortex-muted">·</span>
+          <button onClick={() => dlBlob(`/case/${activeFactory.case_factory_id}/cost-model`, `cost-model-${activeFactory.factory_code}.xlsx`)} className="text-cortex-teal hover:underline">
+            匯出 {activeFactory.factory_code} 模型
+          </button>
+        </>
+      )}
+    </div>
+  )
+
   // §9.4:此專案無 case_factory 時,從範本 clone 建立成本模型(製程/設備/人力/廠房)
   async function doProvision() {
     if (!tplId) { setErr('請選擇成本模型範本'); return }
@@ -213,6 +269,7 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
               {provisioning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Settings className="w-3.5 h-3.5" />} 建立成本模型
             </button>
           </div>
+          <div className="pt-1 border-t border-amber-200">{costModelTools}</div>
         </div>
       )}
 
@@ -424,6 +481,7 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
               {provisioning ? '建立中…' : '建立'}
             </button>
           </div>
+          {costModelTools}
         </div>
       )}
     </div>
