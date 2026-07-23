@@ -181,8 +181,8 @@ function CatGroup({ cat, expanded, dirty, onToggle, onEdit, token, onChanged }: 
 }) {
   return (
     <>
-      {cat.items.map((it, i) => (
-        <ItemRowComp key={it.id} it={it} catName={i === 0 ? cat.name : ''}
+      {cat.items.map((it) => (
+        <ItemRowComp key={it.id} it={it} catName={cat.name}
           expanded={expanded === it.id} dirty={dirty.has(it.id)}
           onToggle={onToggle} onEdit={onEdit} token={token} onChanged={onChanged} />
       ))}

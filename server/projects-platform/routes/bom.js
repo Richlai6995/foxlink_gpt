@@ -455,7 +455,8 @@ router.get('/instances/:id/items', asyncHandler(async (req, res) => {
        ) ch ON ch.bom_item_id = i.id
       WHERE sec.bom_instance_id = ?${ef.clause}
       ORDER BY sec.display_order, c.display_order,
-               NVL(TO_NUMBER(REGEXP_SUBSTR(i.customer_item, '^\\d+')), 999999),   -- Item No 自然排序(1,2,10 非 1,10,2)
+               REGEXP_SUBSTR(i.customer_item, '^\\D*'),                    -- Item No 自然排序:前綴文字(空=純數字排最前)
+               TO_NUMBER(REGEXP_SUBSTR(i.customer_item, '\\d+')),          -- 內嵌數字數值排(P9 < P10 · 1 < 10)
                i.customer_item, i.item_sequence
       FETCH FIRST ${limit} ROWS ONLY`,
   ).all(id, ...ef.binds).catch(() => []);
