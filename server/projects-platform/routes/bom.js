@@ -145,6 +145,13 @@ router.post('/provision-case', asyncHandler(async (req, res) => {
   res.json({ ok: true, ...out });
 }));
 
+// GET /project/:projectId/matrix — 多廠矩陣(B-3d):配置組合 × 廠別 · cell 讀 run 快取(缺格前端 on-demand /compute)
+router.get('/project/:projectId/matrix', asyncHandler(async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (!projectId) return res.status(400).json({ error: 'projectId required' });
+  res.json(await compareSvc.getMatrix(getDb(), { projectId }));
+}));
+
 // POST /compare — 多廠對比(算專案所有 case_factory 的同一 BOM · 標最便宜)(body: projectId, bomInstanceId?, qtyScenarioCode?, force?)
 router.post('/compare', asyncHandler(async (req, res) => {
   const projectId = Number(req.body.projectId);
