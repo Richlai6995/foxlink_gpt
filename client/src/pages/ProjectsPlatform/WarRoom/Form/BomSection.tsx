@@ -278,9 +278,9 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
         <div className="flex items-center gap-2 flex-wrap">
           <input type="file" accept=".xlsx,.xls" onChange={(e) => setFile(e.target.files?.[0] || null)}
             className="text-[12px] text-cortex-text file:mr-2 file:px-2.5 file:py-1 file:border-0 file:rounded file:bg-white file:text-cortex-ink file:cursor-pointer file:text-[12px]" />
-          <select value={profileCode} onChange={(e) => setProfileCode(e.target.value)} title="匯入設定檔(統一格式 · 各專案用設定轉)"
+          <select value={profileCode} onChange={(e) => setProfileCode(e.target.value)} title="一般使用統一格式;「進階轉檔」= 原始廠商 Excel 對映(power-user)"
             className="border border-cortex-line rounded px-2 py-1 text-[12px]">
-            {profiles.map((p) => <option key={p.profile_code} value={p.profile_code}>{p.name || p.profile_code}</option>)}
+            {profiles.map((p) => <option key={p.profile_code} value={p.profile_code}>{(p.source_kind === 'MAPPED' ? '進階轉檔 · ' : '') + (p.name || p.profile_code)}</option>)}
           </select>
           {/* 顏色/variant 下拉(正式化 · 結構層維度 · 空=共用)· 不硬編顏色,選項來自此專案已存在的 */}
           <select value={customVariant ? '__custom__' : variantKey}
