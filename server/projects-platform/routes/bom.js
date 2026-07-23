@@ -418,7 +418,10 @@ router.get('/instances/:id/items', asyncHandler(async (req, res) => {
            FROM bom_item_price_snapshot WHERE is_chosen = 1 GROUP BY bom_item_id
        ) ch ON ch.bom_item_id = i.id
       WHERE sec.bom_instance_id = ?${ef.clause}
-      ORDER BY sec.display_order, sec.module_category, i.item_sequence FETCH FIRST ${limit} ROWS ONLY`,
+      ORDER BY sec.display_order, c.display_order,
+               NVL(TO_NUMBER(REGEXP_SUBSTR(i.customer_item, '^\\d+')), 999999),   -- Item No 自然排序(1,2,10 非 1,10,2)
+               i.customer_item, i.item_sequence
+      FETCH FIRST ${limit} ROWS ONLY`,
   ).all(id, ...ef.binds).catch(() => []);
   // B-1:附 effectivity tags(明細徽章 · 共用 vs 顏色/包裝)
   const effMap = await variantSvc.effectivityByInstance(getDb(), id).catch(() => ({}));
