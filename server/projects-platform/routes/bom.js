@@ -393,12 +393,14 @@ router.get('/instances/:id/items', asyncHandler(async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 500, 2000);
   const rows = await getDb().prepare(
     `SELECT sec.module_category, sec.name AS sub_assembly, sec.part_number AS sub_assy_pn, c.name AS category, i.id, i.item_sequence,
-            i.customer_item AS item_no, i.qty, i.fpn, i.description, i.reference AS remark,
+            i.customer_item AS item_no, i.qty, NVL(ff.flk_part_number, i.fpn) AS fpn, i.description, i.reference AS remark,
             ch.applied_price_usd AS applied_price,
             (i.qty * ch.applied_price_usd) AS extended,
             CASE WHEN ch.applied_price_usd IS NULL THEN 'pending' ELSE 'priced' END AS status,
-            (SELECT COUNT(*) FROM bom_item_mfg m WHERE m.bom_item_id = i.id) AS vendor_count
+            (SELECT COUNT(*) FROM bom_item_mfg m WHERE m.bom_item_id = i.id) AS vendor_count,
+            (SELECT COUNT(*) FROM bom_item_flk fl WHERE fl.bom_item_id = i.id) AS flk_count
        FROM bom_item i
+       LEFT JOIN bom_item_flk ff ON ff.id = i.final_flk_id
        JOIN bom_category c ON c.id = i.bom_category_id
        JOIN bom_section sec ON sec.id = c.bom_section_id
        LEFT JOIN (
@@ -446,18 +448,34 @@ router.get('/items/:itemId/detail', asyncHandler(async (req, res) => {
   res.json(d);
 }));
 
-// POST /items/:itemId/vendor — 加替代供應商(body: vendor, mfgPn)
+// POST /items/:itemId/vendor — 加替代供應商(body: vendor, mfgPn, flkId? 掛哪顆 FLK,預設採用料號)
 router.post('/items/:itemId/vendor', asyncHandler(async (req, res) => {
   const id = reqId(req.params.itemId, res, 'itemId'); if (id === null) return;
-  const out = await enrichSvc.addVendor(getDb(), id, { vendor: req.body.vendor, mfgPn: req.body.mfgPn });
+  const out = await enrichSvc.addVendor(getDb(), id, { vendor: req.body.vendor, mfgPn: req.body.mfgPn, flkId: req.body.flkId || null });
   res.json({ ok: true, ...out });
 }));
 
-// POST /items/:itemId/price — 加報價(body: mfgId?, sourceCurrency?, tiers[{qtyMin,qtyMax,label,sourceCurrency,trueCostSource,fxRate,quotePrice,isChosen}])
+// POST /items/:itemId/flk — 加 FLK 候選料號(body: fpn, desc)(R-3)
+router.post('/items/:itemId/flk', asyncHandler(async (req, res) => {
+  const id = reqId(req.params.itemId, res, 'itemId'); if (id === null) return;
+  const out = await enrichSvc.addFlk(getDb(), id, { fpn: req.body.fpn, desc: req.body.desc });
+  res.json({ ok: true, ...out });
+}));
+
+// PUT /items/:itemId/choose-flk — 選採用料號(body: flkId)· chosen 自動跳該 FLK 首價(R-3)
+router.put('/items/:itemId/choose-flk', asyncHandler(async (req, res) => {
+  const id = reqId(req.params.itemId, res, 'itemId'); if (id === null) return;
+  const flkId = Number(req.body.flkId);
+  if (!flkId) return res.status(400).json({ error: 'flkId required' });
+  const out = await enrichSvc.chooseFlk(getDb(), id, flkId);
+  res.json({ ok: true, ...out });
+}));
+
+// POST /items/:itemId/price — 加報價(body: mfgId?, flkId?, sourceCurrency?, tiers[{…}])· flkId 指定掛哪顆 FLK
 router.post('/items/:itemId/price', asyncHandler(async (req, res) => {
   const id = reqId(req.params.itemId, res, 'itemId'); if (id === null) return;
   if (!Array.isArray(req.body.tiers) || !req.body.tiers.length) return res.status(400).json({ error: 'tiers required (>=1)' });
-  const out = await enrichSvc.addPrice(getDb(), id, { mfgId: req.body.mfgId || null, sourceCurrency: req.body.sourceCurrency || 'USD', tiers: req.body.tiers });
+  const out = await enrichSvc.addPrice(getDb(), id, { mfgId: req.body.mfgId || null, flkId: req.body.flkId || null, sourceCurrency: req.body.sourceCurrency || 'USD', tiers: req.body.tiers });
   res.json({ ok: true, ...out });
 }));
 

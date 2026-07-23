@@ -19,15 +19,23 @@ async function getItem(db, itemId) {
   return db.prepare(`SELECT id, bom_category_id, item_sequence, qty, description, fpn, final_flk_id FROM bom_item WHERE id=?`).get(itemId);
 }
 
-/** item 明細:item + vendors(mfg)+ 每 vendor 的 snapshot(含 tiers)+ 狀態 */
+/**
+ * item 明細(R-3 分層):item + flks[](FLK 候選 · 每顆帶 vendors + snapshots(含 tiers))+ 狀態。
+ * 採用料號 = final_flk;採用價 = chosen snapshot(不變式:chosen ∈ final_flk)。
+ * 舊資料 snapshot.flk_id NULL → 歸到 final_flk 群(fallback)。
+ */
 async function getItemDetail(db, itemId) {
   const item = await getItem(db, itemId);
   if (!item) return null;
+  const finalFlkId = num(pick(item, 'final_flk_id')) || null;
+  const flkRows = await db.prepare(
+    `SELECT id, flk_part_number, description, source, display_order FROM bom_item_flk WHERE bom_item_id=? ORDER BY display_order, id`,
+  ).all(itemId).catch(() => []);
   const mfgs = await db.prepare(
     `SELECT id, bom_item_flk_id, manufacturer_name, mfg_part_number, source, is_preferred FROM bom_item_mfg WHERE bom_item_id=? ORDER BY display_order, id`,
   ).all(itemId).catch(() => []);
   const snaps = await db.prepare(
-    `SELECT id, bom_item_mfg_id, strategy_used, applied_price_usd, is_chosen FROM bom_item_price_snapshot WHERE bom_item_id=? ORDER BY is_chosen DESC, id`,
+    `SELECT id, bom_item_flk_id, bom_item_mfg_id, strategy_used, applied_price_usd, is_chosen FROM bom_item_price_snapshot WHERE bom_item_id=? ORDER BY is_chosen DESC, id`,
   ).all(itemId).catch(() => []);
   const snapOut = snaps.map((s) => ({ ...lc(s), tiers: [] }));
   const byId = {}; snapOut.forEach((o) => { byId[num(o.id)] = o; });
@@ -40,20 +48,71 @@ async function getItemDetail(db, itemId) {
     ).all(...snapIds).catch(() => []);
     for (const t of tiers) { const o = byId[num(pick(t, 'snapshot_id'))]; if (o) o.tiers.push(lc(t)); }
   }
-  const chosen = snapOut.find((s) => Number(s.is_chosen) === 1);
+  // 分層組裝:flk → vendors + snapshots(flk_id NULL 的舊資料歸 final)
+  let flks = flkRows.map(lc).map((f) => ({
+    ...f, is_final: Number(f.id) === finalFlkId ? 1 : 0,
+    mfgs: mfgs.map(lc).filter((m) => num(m.bom_item_flk_id) === num(f.id)),
+    snapshots: snapOut.filter((s) => (num(s.bom_item_flk_id) || finalFlkId) === num(f.id) && s.strategy_used !== 'PENDING'),
+  }));
+  if (!flks.length) {   // 極舊資料無 flk 列 → 虛擬一顆(item.fpn)
+    flks = [{ id: null, flk_part_number: pick(item, 'fpn') || null, description: null, is_final: 1, mfgs: mfgs.map(lc), snapshots: snapOut.filter((s) => s.strategy_used !== 'PENDING') }];
+  }
+  const chosen = snapOut.find((s) => Number(s.is_chosen) === 1 && s.strategy_used !== 'PENDING');
   const appliedPrice = chosen ? chosen.applied_price_usd : null;
-  return { item: lc(item), mfgs: mfgs.map(lc), snapshots: snapOut, status: appliedPrice == null ? 'pending' : 'priced', appliedPrice };
+  return { item: lc(item), finalFlkId, flks, status: appliedPrice == null ? 'pending' : 'priced', appliedPrice };
 }
 
-/** 加 vendor(採購新增替代供應商)→ 回 mfgId */
-async function addVendor(db, itemId, { vendor, mfgPn }) {
+/** 清 PENDING placeholder(item 已有真 chosen 時的殘留)*/
+async function _cleanPendingPlaceholder(db, itemId) {
+  await db.prepare(`DELETE FROM bom_item_price_snapshot WHERE bom_item_id=? AND strategy_used='PENDING' AND applied_price_usd IS NULL AND is_chosen=0`).run(itemId).catch(() => {});
+}
+
+/** 加 FLK 候選(採購補替代料號)→ 回 flkId(R-3)*/
+async function addFlk(db, itemId, { fpn, desc }) {
+  const item = await getItem(db, itemId);
+  if (!item) throw new Error('item not found');
+  if (!str(fpn) && !str(desc)) throw new Error('fpn or desc required');
+  const res = await db.prepare(
+    `INSERT INTO bom_item_flk (bom_item_id, display_order, flk_part_number, description, source) VALUES (?, 900, ?, ?, 'MANUAL')`,
+  ).run(itemId, str(fpn), str(desc) ? str(desc).slice(0, 500) : null);
+  const flkId = Number(res.lastInsertRowid);
+  // item 尚無採用料號 → 這顆直接成為 final
+  if (!num(pick(item, 'final_flk_id'))) await db.prepare(`UPDATE bom_item SET final_flk_id=? WHERE id=?`).run(flkId, itemId);
+  return { flkId };
+}
+
+/**
+ * 選採用料號(FLK)(R-3):final_flk 切過去 + chosen 自動跳該 FLK 首個有價報價;無價 → item 轉待詢價。
+ * 不變式維護:恰一 chosen(有價 → 該 FLK 首價;無價 → PENDING placeholder 掛此 FLK)。
+ */
+async function chooseFlk(db, itemId, flkId) {
+  const f = await db.prepare(`SELECT id FROM bom_item_flk WHERE id=? AND bom_item_id=?`).get(flkId, itemId);
+  if (!f) throw new Error('flk not found for item');
+  await db.prepare(`UPDATE bom_item SET final_flk_id=? WHERE id=?`).run(flkId, itemId);
+  await db.prepare(`UPDATE bom_item_price_snapshot SET is_chosen=0 WHERE bom_item_id=?`).run(itemId);
+  await db.prepare(`DELETE FROM bom_item_price_snapshot WHERE bom_item_id=? AND strategy_used='PENDING' AND applied_price_usd IS NULL`).run(itemId).catch(() => {});
+  const first = await db.prepare(
+    `SELECT id FROM bom_item_price_snapshot WHERE bom_item_id=? AND bom_item_flk_id=? AND applied_price_usd IS NOT NULL ORDER BY id FETCH FIRST 1 ROWS ONLY`,
+  ).get(itemId, flkId).catch(() => null);
+  if (first) { await db.prepare(`UPDATE bom_item_price_snapshot SET is_chosen=1 WHERE id=?`).run(Number(pick(first, 'id'))); return { itemId, flkId, chosenSnapshotId: Number(pick(first, 'id')), pending: false }; }
+  const item = await getItem(db, itemId);
+  await db.prepare(
+    `INSERT INTO bom_item_price_snapshot (bom_item_id, bom_item_flk_id, period_months, strategy_used, applied_price_usd, po_line_count, vendor_count, is_chosen)
+     VALUES (?, ?, 0, 'PENDING', NULL, 0, 0, 1)`,
+  ).run(itemId, flkId);
+  void item;
+  return { itemId, flkId, chosenSnapshotId: null, pending: true };
+}
+
+/** 加 vendor(採購新增替代供應商 · 可指定掛哪顆 FLK,預設 final)→ 回 mfgId */
+async function addVendor(db, itemId, { vendor, mfgPn, flkId = null }) {
   const item = await getItem(db, itemId);
   if (!item) throw new Error('item not found');
   if (!str(vendor) && !str(mfgPn)) throw new Error('vendor or mfgPn required');
-  const flkId = num(pick(item, 'final_flk_id')) || null;
+  const fid = num(flkId) || num(pick(item, 'final_flk_id')) || null;
   const res = await db.prepare(
     `INSERT INTO bom_item_mfg (bom_item_id, bom_item_flk_id, display_order, manufacturer_name, mfg_part_number, source, is_preferred) VALUES (?, ?, 100, ?, ?, 'MANUAL', 0)`,
-  ).run(itemId, flkId, str(vendor), str(mfgPn));
+  ).run(itemId, fid, str(vendor), str(mfgPn));
   return { mfgId: Number(res.lastInsertRowid) };
 }
 
@@ -61,11 +120,11 @@ async function addVendor(db, itemId, { vendor, mfgPn }) {
  * 加報價(一 vendor 一 snapshot + N tier)。tiers:[{qtyMin,qtyMax,label,sourceCurrency,trueCostSource,fxRate,quotePrice,isChosen}]
  * 若此料件目前無「已有價的 chosen」(仍 pending)→ 自動選這筆為 chosen(首個報價即脫離 PENDING)。
  */
-async function addPrice(db, itemId, { mfgId = null, sourceCurrency = 'USD', tiers = [] }) {
+async function addPrice(db, itemId, { mfgId = null, flkId: flkIdIn = null, sourceCurrency = 'USD', tiers = [] }) {
   const item = await getItem(db, itemId);
   if (!item) throw new Error('item not found');
   if (!Array.isArray(tiers) || !tiers.length) throw new Error('tiers required (>=1)');
-  const flkId = num(pick(item, 'final_flk_id')) || null;
+  const flkId = num(flkIdIn) || num(pick(item, 'final_flk_id')) || null;   // R-3:報價掛指定 FLK(預設 final)
   let chosenIdx = tiers.findIndex((t) => t.isChosen);
   if (chosenIdx < 0) chosenIdx = 0;
   const appliedQuote = num(tiers[chosenIdx].quotePrice);
@@ -175,13 +234,23 @@ async function deletePrice(db, itemId, snapshotId) {
   return { deleted: snapshotId };
 }
 
-/** 選定某 vendor snapshot 為此料件的價(rollup 取 chosen 的 applied_price)*/
+/**
+ * 選定某 vendor snapshot 為此料件的採用價(rollup 取 chosen 的 applied_price)。
+ * R-3 連動:若該報價屬於別顆 FLK → 一鍵換料+換價(final_flk 自動切過去);清 PENDING 殘留。
+ */
 async function chooseSnapshot(db, itemId, snapshotId) {
-  const s = await db.prepare(`SELECT id FROM bom_item_price_snapshot WHERE id=? AND bom_item_id=?`).get(snapshotId, itemId);
+  const s = await db.prepare(`SELECT id, bom_item_flk_id FROM bom_item_price_snapshot WHERE id=? AND bom_item_id=?`).get(snapshotId, itemId);
   if (!s) throw new Error('snapshot not found for item');
   await db.prepare(`UPDATE bom_item_price_snapshot SET is_chosen=0 WHERE bom_item_id=?`).run(itemId);
   await db.prepare(`UPDATE bom_item_price_snapshot SET is_chosen=1 WHERE id=?`).run(snapshotId);
-  return { itemId, snapshotId };
+  const snapFlk = num(pick(s, 'bom_item_flk_id')) || null;
+  let flkSwitched = false;
+  if (snapFlk) {
+    const item = await getItem(db, itemId);
+    if (num(pick(item, 'final_flk_id')) !== snapFlk) { await db.prepare(`UPDATE bom_item SET final_flk_id=? WHERE id=?`).run(snapFlk, itemId); flkSwitched = true; }
+  }
+  await _cleanPendingPlaceholder(db, itemId);
+  return { itemId, snapshotId, flkSwitched };
 }
 
-module.exports = { getItemDetail, addVendor, addPrice, updatePrice, deletePrice, chooseSnapshot };
+module.exports = { getItemDetail, addVendor, addPrice, updatePrice, deletePrice, chooseSnapshot, addFlk, chooseFlk };
