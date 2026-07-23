@@ -392,7 +392,7 @@ router.get('/instances/:id/items', asyncHandler(async (req, res) => {
   const id = reqId(req.params.id, res); if (id === null) return;
   const limit = Math.min(Number(req.query.limit) || 500, 2000);
   const rows = await getDb().prepare(
-    `SELECT sec.module_category, sec.name AS sub_assembly, c.name AS category, i.id, i.item_sequence,
+    `SELECT sec.module_category, sec.name AS sub_assembly, sec.part_number AS sub_assy_pn, c.name AS category, i.id, i.item_sequence,
             i.customer_item AS item_no, i.qty, i.fpn, i.description, i.reference AS remark,
             ch.applied_price_usd AS applied_price,
             (i.qty * ch.applied_price_usd) AS extended,

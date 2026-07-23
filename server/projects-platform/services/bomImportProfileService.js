@@ -23,8 +23,11 @@ function resolveCanonicalHeader(hdr) {
   (hdr || []).forEach((h, i) => {
     const s = String(h == null ? '' : h).trim().toLowerCase();
     if (!s) return;
-    if (s.includes('sub-assembly') || s.includes('sub assembly') || s.includes('半成品') || s === 'board' || s.includes('assembly name')) m.subAssembly = i;
-    else if (s === 'module' || s.includes('模組') || s === 'category' || s.includes('類別')) m.module = i;
+    // v2 注意順序:半成品料號 先於 半成品;模組 先於 分類(category)
+    if (s.includes('半成品料號') || s.includes('sub-assy p/n') || s.includes('sub assy p/n') || s.includes('subassembly p/n')) m.subAssemblyPn = i;
+    else if (s.includes('sub-assembly') || s.includes('sub assembly') || s.includes('半成品') || s === 'board' || s.includes('assembly name')) m.subAssembly = i;
+    else if (s === 'module' || s.includes('模組')) m.module = i;
+    else if (s.includes('分類') || s === 'category' || s.includes('類別')) m.category = i;
     else if (s.includes('item no') || s.includes('item#') || s === 'item') m.itemNo = i;
     else if (s.includes('description') || s.includes('描述')) m.desc = i;
     else if (s.includes('foxlink') || s.includes('flk p/n') || s.includes('foxlink p/n')) m.fpn = i;
@@ -81,7 +84,9 @@ function transformToCanonical(wb, profile) {
           if (!isNum(qty)) continue;
           const subAssembly = sc.subAssembly && sc.subAssembly.fromCol != null ? str(row[sc.subAssembly.fromCol]) : (sc.subAssembly || sheetName);
           const module = sc.module && sc.module.fromCol != null ? str(row[sc.module.fromCol]) : (sc.module || 'EE');
-          rows.push(canonRow(subAssembly, module, row, c, resolveEffectivity(sc.effectivity, row)));
+          const cr = canonRow(subAssembly, module, row, c, resolveEffectivity(sc.effectivity, row));
+          if (!cr.category && sc.category != null) cr.category = sc.category.fromCol != null ? str(row[sc.category.fromCol]) : str(sc.category);
+          rows.push(cr);
         }
       }
     }
@@ -89,6 +94,7 @@ function transformToCanonical(wb, profile) {
   }
 
   // CANONICAL:每 sheet 一半成品(或半成品當欄)· header-based
+  // v2:一列 = 一個 (FLK, Vendor) 組合;續列(Item No 空 + Description 空 + 有 vendor/fpn)承上一列 item 脈絡
   for (const sheetName of wb.SheetNames) {
     if (SKIP_SHEET.test(sheetName)) continue;
     const ws = wb.Sheets[sheetName]; if (!ws) continue;
@@ -96,13 +102,21 @@ function transformToCanonical(wb, profile) {
     if (!data.length) continue;
     const H = resolveCanonicalHeader(data[0] || []);
     if (H.qty == null) continue;
+    let prev = null;   // 上一列脈絡(續列 forward-fill)
     for (let r = 1; r < data.length; r++) {
       const row = data[r]; if (!row) continue;
-      if (!isNum(row[H.qty])) continue;
-      const subAssembly = (H.subAssembly != null && str(row[H.subAssembly])) || sheetName;
-      const module = (H.module != null && str(row[H.module])) || 'EE';
-      const eff = H.effectivity != null ? parseEffectivity(row[H.effectivity]) : [];
-      rows.push(canonRow(subAssembly, module, row, H, eff));
+      const itemNoRaw = H.itemNo != null ? str(row[H.itemNo]) : null;
+      const descRaw = H.desc != null ? str(row[H.desc]) : null;
+      const hasVendorish = (H.fpn != null && str(row[H.fpn])) || (H.vendor != null && str(row[H.vendor])) || (H.mfgPn != null && str(row[H.mfgPn]));
+      const isContinuation = !itemNoRaw && !descRaw && hasVendorish && prev;   // vendor/替代 FLK 續列(Qty 可空)
+      if (!isNum(row[H.qty]) && !isContinuation) continue;
+      const subAssembly = (H.subAssembly != null && str(row[H.subAssembly])) || (isContinuation ? prev.subAssembly : null) || sheetName;
+      const module = (H.module != null && str(row[H.module])) || (isContinuation ? prev.module : null) || 'EE';
+      const eff = H.effectivity != null ? parseEffectivity(row[H.effectivity]) : (isContinuation ? prev.effectivity : []);
+      const cr = canonRow(subAssembly, module, row, H, eff);
+      if (isContinuation) { cr.itemNo = prev.itemNo; cr.desc = cr.desc || prev.desc; cr.qty = prev.qty; cr.category = cr.category || prev.category; cr.subAssemblyPn = cr.subAssemblyPn || prev.subAssemblyPn; }
+      rows.push(cr);
+      prev = cr;
     }
   }
   return rows;
@@ -113,6 +127,8 @@ function canonRow(subAssembly, module, row, c, effectivity = []) {
   const mod = String(module || 'EE').toUpperCase();
   return {
     subAssembly: str(subAssembly) || 'MAIN',
+    subAssemblyPn: str(g('subAssemblyPn')),           // v2 半成品料號(可空 → 匯入自動暫編)
+    category: str(g('category')),                     // v2 分類(Capacitor/Resistor…可空)
     module: /^(EE|ME|PKG)$/.test(mod) ? mod : 'EE',
     itemNo: str(g('itemNo')), desc: str(g('desc')), fpn: str(g('fpn')),
     qty: num(g('qty')), unitPrice: isNum(g('unitPrice')) ? num(g('unitPrice')) : null,

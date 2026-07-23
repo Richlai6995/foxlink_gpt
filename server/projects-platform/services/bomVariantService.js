@@ -117,13 +117,25 @@ async function addValue(db, dimensionId, { valueCode, valueName, sortOrder } = {
   return Number(r.lastInsertRowid);
 }
 async function _valueInUse(db, valueId) { return Number(pick(await db.prepare(`SELECT COUNT(*) AS c FROM bom_item_effectivity WHERE value_id=?`).get(valueId).catch(() => ({})), 'c')) || 0; }
+// run 引用(variant_value_ids = sorted CSV)· 精確 token 比對避免 '1' 誤中 '11'
+async function _valueUsedByRuns(db, valueId) {
+  const v = String(Number(valueId));
+  const r = await db.prepare(
+    `SELECT COUNT(*) AS c FROM bom_cs_run
+      WHERE variant_value_ids = ? OR variant_value_ids LIKE ? OR variant_value_ids LIKE ? OR variant_value_ids LIKE ?`,
+  ).get(v, `${v},%`, `%,${v}`, `%,${v},%`).catch(() => ({}));
+  return Number(pick(r, 'c')) || 0;
+}
 async function deleteValue(db, valueId) {
   if (await _valueInUse(db, valueId)) throw new Error('此值已被料件使用,不可刪(先重匯或清 tag)');
+  if (await _valueUsedByRuns(db, valueId)) throw new Error('此值已有成本試算紀錄引用,不可刪');
   await db.prepare(`DELETE FROM bom_variant_value WHERE id=?`).run(valueId); return { deleted: valueId };
 }
 async function deleteDimension(db, projectId, dimensionId) {
   const inUse = Number(pick(await db.prepare(`SELECT COUNT(*) AS c FROM bom_item_effectivity WHERE dimension_id=?`).get(dimensionId).catch(() => ({})), 'c')) || 0;
   if (inUse) throw new Error('此維度已被料件使用,不可刪(先重匯或清 tag)');
+  const vals = await db.prepare(`SELECT id FROM bom_variant_value WHERE dimension_id=?`).all(dimensionId).catch(() => []);
+  for (const v of vals) if (await _valueUsedByRuns(db, Number(pick(v, 'id')))) throw new Error('此維度的值已有成本試算紀錄引用,不可刪');
   await db.prepare(`DELETE FROM bom_variant_dimension WHERE id=? AND project_id=?`).run(dimensionId, projectId); return { deleted: dimensionId };
 }
 

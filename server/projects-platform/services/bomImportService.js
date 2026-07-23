@@ -229,6 +229,70 @@ async function _insertBomRow(db, catId, seq, f, variantKey) {
 }
 
 /**
+ * _insertBomItemV2 — v2 三層(R-1):一 item + n 顆候選 FLK + 每 FLK n 組 vendor/價。
+ * 首個 FLK = 預設採用(final_flk · 拍板4);chosen 價 = 主料 FLK 首個有價 vendor;主料無價 → PENDING。
+ * g = { itemNo, desc, qty, remark, flks:[{fpn, desc, vendors:[{vendor,mfgPn,price}]}] }
+ */
+async function _insertBomItemV2(db, catId, seq, g, variantKey) {
+  const run = (sql, ...a) => db.prepare(sql).run(...a);
+  const firstFlk = g.flks[0] || {};
+  const it = await run(
+    `INSERT INTO bom_item (bom_category_id, item_sequence, qty, description, reference, customer_item, fpn, variant_key)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    catId, seq, num(g.qty), g.desc, g.remark, g.itemNo || null, firstFlk.fpn || null, variantKey,
+  );
+  const itemId = Number(it.lastInsertRowid);
+
+  let finalFlkId = null, vendorCount = 0, chosenSnapId = null;
+  for (let fi = 0; fi < g.flks.length; fi++) {
+    const f = g.flks[fi];
+    const flk = await run(
+      `INSERT INTO bom_item_flk (bom_item_id, display_order, flk_part_number, description, source) VALUES (?, ?, ?, ?, 'RD_MANUAL')`,
+      itemId, (fi + 1) * 10, f.fpn || null, (f.desc || '').slice(0, 500) || null,
+    );
+    const flkId = Number(flk.lastInsertRowid);
+    if (fi === 0) { finalFlkId = flkId; await run(`UPDATE bom_item SET final_flk_id=? WHERE id=?`, flkId, itemId); }
+
+    for (let vi = 0; vi < f.vendors.length; vi++) {
+      const v = f.vendors[vi];
+      let mfgId = null;
+      if (v.vendor || v.mfgPn) {
+        const m = await run(
+          `INSERT INTO bom_item_mfg (bom_item_id, bom_item_flk_id, display_order, manufacturer_name, mfg_part_number, source, is_preferred)
+           VALUES (?, ?, ?, ?, ?, 'TEMPLATE', ?)`,
+          itemId, flkId, (vi + 1) * 10, v.vendor || null, v.mfgPn || null, fi === 0 && vi === 0 ? 1 : 0,
+        );
+        mfgId = Number(m.lastInsertRowid);
+        vendorCount += 1;
+      }
+      if (isNum(v.price)) {
+        const snap = await run(
+          `INSERT INTO bom_item_price_snapshot (bom_item_id, bom_item_flk_id, bom_item_mfg_id, period_months, strategy_used, price_avg_usd, applied_price_usd, po_line_count, vendor_count, is_chosen)
+           VALUES (?, ?, ?, 0, 'TEMPLATE', ?, ?, 0, 1, 0)`,
+          itemId, flkId, mfgId, num(v.price), num(v.price),
+        );
+        const snapId = Number(snap.lastInsertRowid);
+        await run(
+          `INSERT INTO bom_item_price_tier (snapshot_id, tier_seq, source_currency, true_cost_source, fx_rate, quote_price_usd, is_chosen)
+           VALUES (?, 1, 'USD', ?, 1, ?, 1)`, snapId, num(v.price), num(v.price),
+        );
+        if (chosenSnapId == null && flkId === finalFlkId) chosenSnapId = snapId;   // 主料首價 = 採用
+      }
+    }
+  }
+
+  if (chosenSnapId != null) {
+    await run(`UPDATE bom_item_price_snapshot SET is_chosen=1 WHERE id=?`, chosenSnapId);
+  } else {
+    await run(
+      `INSERT INTO bom_item_price_snapshot (bom_item_id, bom_item_flk_id, period_months, strategy_used, applied_price_usd, po_line_count, vendor_count, is_chosen)
+       VALUES (?, ?, 0, 'PENDING', NULL, 0, 0, 1)`, itemId, finalFlkId,
+    );
+  }
+  return { itemId, priced: chosenSnapId != null, flkCount: g.flks.length, vendorCount };
+}
+
+/**
  * importBomTemplate — 解析標準範本(EE/ME/PKG 三分頁 · header-based)→ 正規化。
  * idempotent 同 importBom。回 { bomInstanceId, itemCount, mfgCount, categoryCount, sections }。
  */
@@ -407,16 +471,47 @@ async function importCanonicalBom(db, opts = {}) {
     ...(variantKey == null ? [projectId, versionNo] : [projectId, versionNo, variantKey]),
   );
 
-  const secMap = {};   // subAssembly → { sectionId, catId, module, items }
+  // ── v2 三層分組(R-1):(半成品, Item No) → 1..n FLK 候選 → 每 FLK 1..n Vendor ──
+  //   一列 = 一個 (FLK, Vendor) 組合;同 (半成品,ItemNo) 多列自動歸群。
+  //   itemNo 空 → 該列自成一 item(v1 相容);首個 FLK = 預設採用(final_flk)。
+  const groups = []; const gIndex = {};
+  rows.forEach((cr, i) => {
+    // item 身分 = (半成品, 適用組合, Item No):不同顏色/包裝的同 Item No 是不同料件(Black P1 ≠ White P1)
+    const effSig = (cr.effectivity || []).map((e) => `${e.dimCode}=${e.valueCode}`).sort().join('|');
+    const key = cr.itemNo ? `${cr.subAssembly}||${effSig}||${cr.itemNo}` : `${cr.subAssembly}||${effSig}||__row${i}`;
+    let g = gIndex[key];
+    if (!g) {
+      g = gIndex[key] = { subAssembly: cr.subAssembly, subAssemblyPn: cr.subAssemblyPn, category: cr.category, module: cr.module, itemNo: cr.itemNo, desc: cr.desc, qty: cr.qty, remark: cr.remark, effectivity: cr.effectivity || [], flks: [], _byFpn: {} };
+      groups.push(g);
+    }
+    if (!g.subAssemblyPn && cr.subAssemblyPn) g.subAssemblyPn = cr.subAssemblyPn;
+    if (!g.category && cr.category) g.category = cr.category;
+    const vend = (cr.vendor || cr.mfgPn || cr.unitPrice != null) ? { vendor: cr.vendor, mfgPn: cr.mfgPn, price: cr.unitPrice } : null;
+    const last = g.flks[g.flks.length - 1];
+    let f = null;
+    if (cr.fpn) { f = g._byFpn[cr.fpn]; if (!f) { f = g._byFpn[cr.fpn] = { fpn: cr.fpn, desc: cr.desc || g.desc, vendors: [] }; g.flks.push(f); } }
+    else if (last && (!cr.desc || cr.desc === last.desc)) f = last;                       // vendor 續列(無 FLK · desc 同上)
+    else { f = { fpn: null, desc: cr.desc || g.desc, vendors: [] }; g.flks.push(f); }    // 無料號的另一顆候選
+    if (vend) f.vendors.push(vend);
+  });
+  for (const g of groups) if (!g.flks.length) g.flks.push({ fpn: null, desc: g.desc, vendors: [] });
+
+  const secMap = {};   // subAssembly → { sectionId, module, partNumber, cats:{name→catId}, items }
   let bomInstanceId, si = 0;
   if (mergeMode && old) {
-    // MERGE:併入既有 instance(不刪)· 載既有 sections reuse
+    // MERGE:併入既有 instance(不刪)· 載既有 sections + categories reuse
     bomInstanceId = Number(pick(old, 'id'));
     const secs = await db.prepare(
-      `SELECT sec.id AS sec_id, sec.name AS name, sec.module_category AS cat, c.id AS cat_id
-         FROM bom_section sec JOIN bom_category c ON c.bom_section_id = sec.id WHERE sec.bom_instance_id = ? ORDER BY sec.display_order`,
+      `SELECT id, name, module_category, part_number FROM bom_section WHERE bom_instance_id = ? ORDER BY display_order`,
     ).all(bomInstanceId).catch(() => []);
-    for (const s of secs) { const nm = pick(s, 'name'); if (!secMap[nm]) secMap[nm] = { sectionId: Number(pick(s, 'sec_id')), catId: Number(pick(s, 'cat_id')), module: pick(s, 'cat'), items: 0 }; }
+    for (const s of secs) {
+      const nm = pick(s, 'name');
+      if (secMap[nm]) continue;
+      const sec = { sectionId: Number(pick(s, 'id')), module: pick(s, 'module_category'), partNumber: pick(s, 'part_number'), cats: {}, items: 0 };
+      const cats = await db.prepare(`SELECT id, name FROM bom_category WHERE bom_section_id = ? ORDER BY display_order`).all(sec.sectionId).catch(() => []);
+      for (const c of cats) sec.cats[pick(c, 'name')] = Number(pick(c, 'id'));
+      secMap[nm] = sec;
+    }
     si = secs.length;
   } else {
     if (old) await run(`DELETE FROM bom_instance WHERE id=?`, Number(pick(old, 'id')));
@@ -434,23 +529,31 @@ async function importCanonicalBom(db, opts = {}) {
     if (catSeq[catId] == null) catSeq[catId] = Number(pick(await get(`SELECT NVL(MAX(item_sequence),0) AS m FROM bom_item WHERE bom_category_id=?`, catId), 'm')) || 0;
     return ++catSeq[catId];
   };
-  const ensureSection = async (subAssembly, module) => {
+  // 半成品:料號可空 → 自動暫編 SA-{MOD}-{n}(報價階段允許無 ERP 半成品料號 · 拍板 1b)
+  const ensureSection = async (subAssembly, module, subAssemblyPn) => {
     if (secMap[subAssembly]) return secMap[subAssembly];
     si += 1;
-    const s = await run(`INSERT INTO bom_section (bom_instance_id, module_code, module_category, display_order, name) VALUES (?, ?, ?, ?, ?)`,
-      bomInstanceId, subAssembly.slice(0, 40), module, si * 10, subAssembly.slice(0, 120));
-    const catId = Number((await run(`INSERT INTO bom_category (bom_section_id, display_order, name, process_type) VALUES (?, 10, ?, NULL)`, Number(s.lastInsertRowid), subAssembly.slice(0, 60))).lastInsertRowid);
-    return (secMap[subAssembly] = { sectionId: Number(s.lastInsertRowid), catId, module, items: 0 });
+    const pn = (subAssemblyPn || `SA-${module}-${si}`).slice(0, 120);
+    const s = await run(`INSERT INTO bom_section (bom_instance_id, module_code, module_category, display_order, name, part_number) VALUES (?, ?, ?, ?, ?, ?)`,
+      bomInstanceId, subAssembly.slice(0, 40), module, si * 10, subAssembly.slice(0, 120), pn);
+    return (secMap[subAssembly] = { sectionId: Number(s.lastInsertRowid), module, partNumber: pn, cats: {}, items: 0 });
+  };
+  const ensureCategory = async (sec, name) => {
+    const key = (name || '一般').slice(0, 60);
+    if (sec.cats[key]) return sec.cats[key];
+    const c = await run(`INSERT INTO bom_category (bom_section_id, display_order, name, process_type) VALUES (?, ?, ?, NULL)`,
+      sec.sectionId, Object.keys(sec.cats).length * 10 + 10, key);
+    return (sec.cats[key] = Number(c.lastInsertRowid));
   };
 
   // MERGE:先刪各 scope 既有料(該 半成品 + 該 effectivity 集合)→ 覆蓋該變異,不動 EE/其他顏色包裝
   let deletedInMerge = 0;
   if (mergeMode) {
     const scopes = {};
-    for (const cr of rows) {
-      const sig = (cr.effectivity || []).map((e) => `${e.dimCode}=${e.valueCode}`).sort().join('|');
-      const key = `${cr.subAssembly}||${sig}`;
-      if (!scopes[key]) scopes[key] = { subAssembly: cr.subAssembly, effectivity: cr.effectivity || [] };
+    for (const g of groups) {
+      const sig = (g.effectivity || []).map((e) => `${e.dimCode}=${e.valueCode}`).sort().join('|');
+      const key = `${g.subAssembly}||${sig}`;
+      if (!scopes[key]) scopes[key] = { subAssembly: g.subAssembly, effectivity: g.effectivity || [] };
     }
     for (const sc of Object.values(scopes)) {
       const secExisting = secMap[sc.subAssembly]; if (!secExisting) continue;
@@ -460,18 +563,20 @@ async function importCanonicalBom(db, opts = {}) {
     }
   }
 
-  let itemCount = 0, mfgCount = 0, pricedCount = 0, pendingCount = 0, effTagged = 0;
-  for (const cr of rows) {
-    const sec = await ensureSection(cr.subAssembly, cr.module);
-    const seq = await nextSeq(sec.catId);
+  let itemCount = 0, flkCount = 0, mfgCount = 0, pricedCount = 0, pendingCount = 0, effTagged = 0;
+  for (const g of groups) {
+    const sec = await ensureSection(g.subAssembly, g.module, g.subAssemblyPn);
+    const catId = await ensureCategory(sec, g.category);
+    const seq = await nextSeq(catId);
     sec.items += 1;
-    const res = await _insertBomRow(db, sec.catId, seq, { qty: cr.qty, price: cr.unitPrice, itemNo: cr.itemNo, desc: cr.desc, fpn: cr.fpn, remark: cr.remark, vendor: cr.vendor, mfgPn: cr.mfgPn }, variantKey);
-    itemCount += 1; if (res.priced) pricedCount += 1; else pendingCount += 1; if (res.mfg) mfgCount += 1;
-    if (cr.effectivity && cr.effectivity.length) { try { effTagged += await variantSvc.applyEffectivity(db, projectId, res.itemId, cr.effectivity); } catch (e) { log.warn('applyEffectivity:', e.message); } }
+    const res = await _insertBomItemV2(db, catId, seq, g, variantKey);
+    itemCount += 1; flkCount += res.flkCount; mfgCount += res.vendorCount;
+    if (res.priced) pricedCount += 1; else pendingCount += 1;
+    if (g.effectivity && g.effectivity.length) { try { effTagged += await variantSvc.applyEffectivity(db, projectId, res.itemId, g.effectivity); } catch (e) { log.warn('applyEffectivity:', e.message); } }
   }
-  const sections = Object.entries(secMap).filter(([, v]) => v.items > 0).map(([k, v]) => ({ section: k, category: v.module, itemCount: v.items }));
-  log.log(`importCanonicalBom[${profileCode}]${mergeMode ? ' MERGE' : ''}: instance=${bomInstanceId} sections=${sections.length} items=${itemCount} priced=${pricedCount} pending=${pendingCount} effTagged=${effTagged} deleted=${deletedInMerge}`);
-  return { bomInstanceId, itemCount, mfgCount, pricedCount, pendingCount, sections, profileCode, effTagged, merged: !!mergeMode, deletedInMerge };
+  const sections = Object.entries(secMap).filter(([, v]) => v.items > 0).map(([k, v]) => ({ section: k, partNumber: v.partNumber, category: v.module, itemCount: v.items }));
+  log.log(`importCanonicalBom[${profileCode}]${mergeMode ? ' MERGE' : ''}: instance=${bomInstanceId} sections=${sections.length} items=${itemCount} flks=${flkCount} vendors=${mfgCount} priced=${pricedCount} pending=${pendingCount} effTagged=${effTagged} deleted=${deletedInMerge}`);
+  return { bomInstanceId, itemCount, flkCount, mfgCount, pricedCount, pendingCount, sections, profileCode, effTagged, merged: !!mergeMode, deletedInMerge };
 }
 
 // rollupMaterial 已移至獨立 service(引擎解耦)· 此處 re-export 維持 API 相容
