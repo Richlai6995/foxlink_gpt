@@ -127,6 +127,8 @@ router.get('/summary', asyncHandler(async (req, res) => {
 // ── §9.4 開案自動建 case_factory(從範本 clone)──────────────────────────────
 // GET /provision/templates — 列可選成本模型範本(廠 / model)
 router.get('/provision/templates', asyncHandler(async (req, res) => {
+  // C-2:確保範本庫存在 + fixture seed(冪等 · 首次呼叫建庫)
+  try { await require('../services/bomCostModelService').ensureTemplateLibrary(getDb()); } catch (e) { /* 庫建失敗仍回列表 */ }
   res.json({ templates: await provisionSvc.listTemplates(getDb()) });
 }));
 
@@ -167,6 +169,19 @@ router.get('/case/:caseFactoryId/cost-model', asyncHandler(async (req, res) => {
   const { wb, model, factoryCode } = await costModelSvc.exportCostModel(getDb(), cf);
   sendWb(res, wb, `cost-model-${factoryCode}-${model}-cf${cf}.xlsx`);
 }));
+// POST /cost-model/import-template — 匯入到範本庫(a 路徑 · admin only)(multipart: file, factoryCode?)
+router.post('/cost-model/import-template', upload.single('file'), asyncHandler(async (req, res) => {
+  if (req.user?.role !== 'admin') { try { fs.unlinkSync(req.file?.path); } catch (_) {} return res.status(403).json({ error: '範本庫維護限 admin' }); }
+  if (!req.file) return res.status(400).json({ error: 'file required' });
+  try {
+    const out = await costModelSvc.importToTemplateLibrary(getDb(), { filePath: req.file.path, factoryCode: req.body.factoryCode || null });
+    res.json({ ok: true, ...out });
+  } catch (e) {
+    if (String(e.code || '').startsWith('COST_MODEL_')) return res.status(409).json({ error: e.message, code: e.code, missing: e.missing || undefined });
+    throw e;
+  } finally { try { fs.unlinkSync(req.file.path); } catch (_) {} }
+}));
+
 // POST /cost-model/import — 匯入成本模型 → 專案(multipart: file, projectId, factoryCode?)
 router.post('/cost-model/import', upload.single('file'), asyncHandler(async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'file required' });

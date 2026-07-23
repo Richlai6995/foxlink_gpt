@@ -288,7 +288,7 @@ async function _createProjectStages(db, projectId, templateId) {
 async function list(db, user, { status, type_code, limit = 50, offset = 0 } = {}) {
   const isAdmin = user.role === 'admin';
   const params = [];
-  const where = ['1=1'];
+  const where = [`p.project_code <> 'CORTEX-COST-TPL'`];   // 系統保留範本專案不入列表(成本模型範本庫 · C-2)
 
   if (!isAdmin) {
     where.push(`(

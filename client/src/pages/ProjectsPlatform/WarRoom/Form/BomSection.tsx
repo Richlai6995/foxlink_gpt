@@ -183,21 +183,32 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
       URL.revokeObjectURL(url)
     } catch (e: any) { setErr(e.message) }
   }
-  async function doImportCostModel() {
-    if (!cmFile) { setErr('請選成本模型 Excel'); return }
+  async function _postCostModel(path: string, withProject: boolean) {
+    if (!cmFile) { setErr('請選成本模型 Excel'); return null }
     setCmBusy(true); setErr('')
     try {
       const fd = new FormData()
-      fd.append('file', cmFile); fd.append('projectId', String(projectId))
+      fd.append('file', cmFile)
+      if (withProject) fd.append('projectId', String(projectId))
       if (cmFactory.trim()) fd.append('factoryCode', cmFactory.trim().toUpperCase())
-      const res = await fetch('/api/projects/bom/cost-model/import', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd })
+      const res = await fetch(`/api/projects/bom${path}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || `匯入失敗 (HTTP ${res.status})`)
       setCmFile(null); setCmFactory('')
-      const r = await api.get<{ cases: CaseRow[] }>(token, `/bom/cases?projectId=${projectId}`)
-      setCases(r.cases || [])
-      if (data.caseFactoryId) setCaseFactoryId(data.caseFactoryId)
-    } catch (e: any) { setErr(e.message) } finally { setCmBusy(false) }
+      return data
+    } catch (e: any) { setErr(e.message); return null } finally { setCmBusy(false) }
+  }
+  async function doImportCostModel() {
+    const data = await _postCostModel('/cost-model/import', true)
+    if (!data) return
+    const r = await api.get<{ cases: CaseRow[] }>(token, `/bom/cases?projectId=${projectId}`)
+    setCases(r.cases || [])
+    if (data.caseFactoryId) setCaseFactoryId(data.caseFactoryId)
+  }
+  async function doImportCostModelToLibrary() {
+    const data = await _postCostModel('/cost-model/import-template', false)
+    if (!data) return
+    api.get<{ templates: any[] }>(token, `/bom/provision/templates`).then((r) => setTemplates(r.templates || [])).catch(() => {})
   }
   const costModelTools = (
     <div className="flex items-center gap-2 flex-wrap text-[11px]">
@@ -208,6 +219,10 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
       <button onClick={doImportCostModel} disabled={cmBusy || !cmFile}
         className="flex items-center gap-1 px-2 py-0.5 bg-cortex-teal text-white rounded hover:opacity-90 disabled:opacity-40">
         {cmBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />} 匯入模型
+      </button>
+      <button onClick={doImportCostModelToLibrary} disabled={cmBusy || !cmFile} title="存進系統範本庫(各專案可 clone · admin)"
+        className="flex items-center gap-1 px-2 py-0.5 border border-cortex-teal text-cortex-teal rounded hover:bg-cortex-cyan-bg disabled:opacity-40">
+        存入範本庫
       </button>
       <span className="text-cortex-muted">·</span>
       <button onClick={() => dlBlob('/cost-model/template?model=SIMPLIFIED_WEARABLE', 'cost-model-template-SIMPLIFIED.xlsx')} className="text-cortex-teal hover:underline">範本(穿戴 SIMPLIFIED)</button>

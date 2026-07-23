@@ -117,8 +117,8 @@ async function importCostModel(db, { filePath, projectId, factoryCode: fcOverrid
   if (!factoryCode) throw new Error('factory_code required(Baseline 分頁或參數)');
   const fac = await db.prepare(`SELECT factory_code FROM bom_factory WHERE factory_code=?`).get(factoryCode);
   if (!fac) { const e = new Error(`COST_MODEL_FACTORY_NOT_FOUND: 廠別 ${factoryCode} 不存在(需先建廠別主檔)`); e.code = 'COST_MODEL_FACTORY_NOT_FOUND'; throw e; }
-  const dup = await db.prepare(`SELECT case_factory_id FROM bom_cs_case_factory WHERE case_id=? AND factory_code=?`).get(projectId, factoryCode);
-  if (dup) { const e = new Error(`COST_MODEL_CASE_EXISTS: 專案已有 ${factoryCode} 成本模型(cf#${num(pick(dup, 'case_factory_id'))}),不可覆蓋`); e.code = 'COST_MODEL_CASE_EXISTS'; throw e; }
+  const dup = await db.prepare(`SELECT case_factory_id FROM bom_cs_case_factory WHERE case_id=? AND factory_code=? AND costing_model=?`).get(projectId, factoryCode, model);
+  if (dup) { const e = new Error(`COST_MODEL_CASE_EXISTS: 已存在 ${factoryCode}·${model} 成本模型(cf#${num(pick(dup, 'case_factory_id'))}),不可覆蓋`); e.code = 'COST_MODEL_CASE_EXISTS'; throw e; }
 
   // 1) baseline(新列 · 薪資換算:時薪空 + 月薪有 → 算)
   const bCols = await tableCols(db, 'bom_factory_baseline');
@@ -163,4 +163,59 @@ async function importCostModel(db, { filePath, projectId, factoryCode: fcOverrid
   return { caseFactoryId, baselineId, factoryCode, costingModel: model, imported: counts };
 }
 
-module.exports = { exportCostModel, templateWorkbook, importCostModel };
+// ── C-2 範本庫(系統保留「範本專案」· 拍板 1=(i))────────────────────────────
+const TPL_PROJECT_CODE = 'CORTEX-COST-TPL';
+
+/**
+ * ensureTemplateLibrary — 確保範本專案存在(insert-from-select clone fixture 專案列 · 蓋 code/title)
+ * + 首次 seed:把 fixture(CORTEX-FIX-%)各 (廠別, 模型) clone 進庫(variantKey=模型 → 同廠多模型共存)。
+ * 範本專案不出現在一般專案列表(projectsService.list 過濾)。
+ */
+async function ensureTemplateLibrary(db) {
+  let p = await db.prepare(`SELECT id FROM projects WHERE project_code=?`).get(TPL_PROJECT_CODE).catch(() => null);
+  if (!p) {
+    const cols = (await db.prepare(
+      `SELECT column_name FROM user_tab_cols WHERE table_name='PROJECTS' AND virtual_column='NO' AND hidden_column='NO' ORDER BY column_id`,
+    ).all().catch(() => [])).map((r) => String(pick(r, 'column_name'))).filter((c) => c !== 'ID');
+    const sel = cols.map((c) => {
+      if (c === 'PROJECT_CODE') return `'${TPL_PROJECT_CODE}'`;
+      if (c === 'TITLE') return `'成本模型範本庫(系統)'`;
+      if (c === 'DATA_PAYLOAD') return `'{"title":"成本模型範本庫(系統)","system":true}'`;
+      return c;
+    }).join(',');
+    await db.prepare(`INSERT INTO projects (${cols.join(',')}) SELECT ${sel} FROM projects WHERE project_code='CORTEX-FIX-WHOOP'`).run();
+    p = await db.prepare(`SELECT id FROM projects WHERE project_code=?`).get(TPL_PROJECT_CODE);
+    log.log(`ensureTemplateLibrary: created template project #${num(pick(p, 'id'))}`);
+  }
+  const libId = num(pick(p, 'id'));
+
+  // seed:fixture 各 (廠別, 模型) 尚未入庫 → clone(provisionCase variantKey=模型)
+  const provisionSvc = require('./bomCaseProvisionService');
+  const fixtures = await db.prepare(
+    `SELECT cf.case_factory_id, cf.factory_code, cf.costing_model
+       FROM bom_cs_case_factory cf JOIN projects fp ON fp.id = cf.case_id
+      WHERE fp.project_code LIKE 'CORTEX-FIX-%' ORDER BY cf.case_factory_id`,
+  ).all().catch(() => []);
+  const seen = new Set();
+  for (const f of fixtures) {
+    const fc = pick(f, 'factory_code'), model = pick(f, 'costing_model');
+    const key = `${fc}|${model}`;
+    if (!fc || !model || seen.has(key)) continue;
+    seen.add(key);
+    const ex = await db.prepare(`SELECT case_factory_id FROM bom_cs_case_factory WHERE case_id=? AND factory_code=? AND costing_model=?`).get(libId, fc, model).catch(() => null);
+    if (ex) continue;
+    try {
+      await provisionSvc.provisionCase(db, { projectId: libId, sourceCaseFactoryId: num(pick(f, 'case_factory_id')), factoryCode: fc, variantKey: model });
+      log.log(`ensureTemplateLibrary: seeded ${fc}·${model} from cf#${num(pick(f, 'case_factory_id'))}`);
+    } catch (e) { log.warn(`seed ${key}:`, e.message); }
+  }
+  return { projectId: libId };
+}
+
+/** 匯入到範本庫(a 路徑)*/
+async function importToTemplateLibrary(db, { filePath, factoryCode = null }) {
+  const lib = await ensureTemplateLibrary(db);
+  return importCostModel(db, { filePath, projectId: lib.projectId, factoryCode });
+}
+
+module.exports = { exportCostModel, templateWorkbook, importCostModel, ensureTemplateLibrary, importToTemplateLibrary, TPL_PROJECT_CODE };
