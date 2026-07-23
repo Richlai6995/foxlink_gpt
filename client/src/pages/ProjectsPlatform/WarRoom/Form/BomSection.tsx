@@ -333,8 +333,8 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
             )}
           </div>
 
-          {/* B-5b 採購 enrich:料件明細 + 逐料多 vendor 多 tier 報價 */}
-          <BomItemsPanel bomInstanceId={importResult.bomInstanceId} onChanged={refreshRollup} />
+          {/* B-5b 採購 enrich:料件明細(R-3 樹狀 · 跟產品配置連動 resolve) */}
+          <BomItemsPanel bomInstanceId={importResult.bomInstanceId} configValueIds={configValueIds} onChanged={refreshRollup} />
 
           {/* ④ 算成本 */}
           {hasCase ? (

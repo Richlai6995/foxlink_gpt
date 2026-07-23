@@ -388,9 +388,12 @@ router.delete('/project/:projectId/values/:valueId', asyncHandler(async (req, re
 }));
 
 // GET /instances/:id/items — item 明細(chosen snapshot 取價 + 狀態 + vendor 數 · B-5b)
+//   ?valueIds=1,2 → 按產品配置 resolve(共用 + tag 全命中的料;明細跟配置連動)
 router.get('/instances/:id/items', asyncHandler(async (req, res) => {
   const id = reqId(req.params.id, res); if (id === null) return;
   const limit = Math.min(Number(req.query.limit) || 500, 2000);
+  const valueIds = String(req.query.valueIds || '').split(',').map(Number).filter(Boolean);
+  const ef = variantSvc.effectivityFilter(valueIds, 'i');
   const rows = await getDb().prepare(
     `SELECT sec.module_category, sec.name AS sub_assembly, sec.part_number AS sub_assy_pn, c.name AS category, i.id, i.item_sequence,
             i.customer_item AS item_no, i.qty, NVL(ff.flk_part_number, i.fpn) AS fpn, i.description, i.reference AS remark,
@@ -407,9 +410,9 @@ router.get('/instances/:id/items', asyncHandler(async (req, res) => {
          SELECT bom_item_id, MAX(applied_price_usd) AS applied_price_usd
            FROM bom_item_price_snapshot WHERE is_chosen = 1 GROUP BY bom_item_id
        ) ch ON ch.bom_item_id = i.id
-      WHERE sec.bom_instance_id = ?
+      WHERE sec.bom_instance_id = ?${ef.clause}
       ORDER BY sec.display_order, sec.module_category, i.item_sequence FETCH FIRST ${limit} ROWS ONLY`,
-  ).all(id).catch(() => []);
+  ).all(id, ...ef.binds).catch(() => []);
   // B-1:附 effectivity tags(明細徽章 · 共用 vs 顏色/包裝)
   const effMap = await variantSvc.effectivityByInstance(getDb(), id).catch(() => ({}));
   const items = rows.map((r) => ({ ...r, effectivity: effMap[Number(r.id)] || [] }));

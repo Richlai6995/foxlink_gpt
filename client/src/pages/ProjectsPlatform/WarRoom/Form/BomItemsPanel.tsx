@@ -25,7 +25,7 @@ const money = (v: any) => (typeof v === 'number' ? `$${v.toFixed(6)}` : '—')  
 const pct = (v: any) => (typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : '—')
 const cellInput = 'w-full bg-transparent border border-transparent hover:border-cortex-line focus:border-cortex-teal focus:bg-white rounded px-1 py-0.5 text-[11px] outline-none'
 
-export default function BomItemsPanel({ bomInstanceId, onChanged }: { bomInstanceId: number; onChanged?: () => void }) {
+export default function BomItemsPanel({ bomInstanceId, configValueIds = [], onChanged }: { bomInstanceId: number; configValueIds?: number[]; onChanged?: () => void }) {
   const { token } = useAuth() as any
   const [items, setItems] = useState<ItemRow[]>([])
   const [expanded, setExpanded] = useState<number | null>(null)
@@ -36,14 +36,16 @@ export default function BomItemsPanel({ bomInstanceId, onChanged }: { bomInstanc
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
 
+  const cfgKey = configValueIds.join(',')
   async function loadItems() {
     setLoading(true); setErr('')
     try {
-      const r = await api.get<{ items: ItemRow[] }>(token, `/bom/instances/${bomInstanceId}/items`)
+      const q = cfgKey ? `?valueIds=${cfgKey}` : ''
+      const r = await api.get<{ items: ItemRow[] }>(token, `/bom/instances/${bomInstanceId}/items${q}`)
       setItems(r.items || []); setDirty(new Set())
     } catch (e: any) { setErr(e.message) } finally { setLoading(false) }
   }
-  useEffect(() => { if (token && bomInstanceId) loadItems() }, [token, bomInstanceId])
+  useEffect(() => { if (token && bomInstanceId) loadItems() }, [token, bomInstanceId, cfgKey])   // 切產品配置 → 明細跟著 resolve
 
   const onToggle = useCallback((id: number) => setExpanded((cur) => (cur === id ? null : id)), [])
   const onEdit = useCallback((id: number, field: EditField, val: string) => {
@@ -92,6 +94,7 @@ export default function BomItemsPanel({ bomInstanceId, onChanged }: { bomInstanc
           <div className="text-[12px] font-semibold text-cortex-ink">
             料件明細 · 採購詢價
             <span className="text-cortex-muted font-normal"> ({items.length} 筆{pendingN > 0 ? ` · ${pendingN} 待詢價` : ' · 全已詢價'})</span>
+            {cfgKey && <span className="ml-1.5 text-[9px] bg-cortex-cyan-bg text-cortex-teal px-1.5 py-0.5 rounded font-normal">已按產品配置過濾</span>}
           </div>
           {/* 模組 tabs */}
           <div className="flex items-center gap-0.5">
