@@ -246,7 +246,7 @@ async function buildRequest(connector, params, inputParamDefs) {
     // 防禦: Oracle 可能存 "null" 字串，trim 後若為空或 "null" 視為無 template
     const bodyTemplateTrimmed = (rawTpl && String(rawTpl).trim() !== 'null') ? String(rawTpl).trim() : null;
     if (bodyTemplateTrimmed) {
-      body = replaceTemplate(bodyTemplate, params);
+      body = replaceTemplate(bodyTemplateTrimmed, params);
     } else {
       // 無 template 時，把所有 body 參數組成 JSON
       const bodyParams = paramDefs.filter(p => !p.param_location || p.param_location === 'body');
