@@ -23,15 +23,19 @@ const SHEETS = [
   { sheet: 'SimplifiedLine', table: 'bom_cs_case_simplified_line',   scope: 'case' },
   { sheet: 'QtyScenario',    table: 'bom_cs_case_qty_scenario',      scope: 'case' },
   { sheet: 'Process',        table: 'bom_cs_case_process',           scope: 'case' },
+  { sheet: 'IDL-Alloc',      table: 'bom_cs_case_idl_alloc',         scope: 'case' },     // 案級 IDL 分攤(FULL MVA 的 IDL_CPU)
   { sheet: 'IDL-LineWage',   table: 'bom_factory_idl_linedep_wage',  scope: 'baseline' },
   { sheet: 'IDL-Role',       table: 'bom_factory_idl_role',          scope: 'baseline' },
   { sheet: 'Equipment',      table: 'bom_cs_case_equip_area',        scope: 'case' },
   { sheet: 'Facility',       table: 'bom_cs_case_facility',          scope: 'case' },
+  { sheet: 'Consumable',     special: 'consumable' },   // master(factory)+case 合併分頁(FULL 用 · 見下方特殊處理)
 ];
 const REQUIRED = {
   SIMPLIFIED_WEARABLE: ['Baseline', 'SimplifiedLine', 'QtyScenario'],
-  FULL_MVA: ['Baseline', 'Process', 'IDL-LineWage', 'IDL-Role', 'Equipment', 'Facility'],
+  FULL_MVA: ['Baseline', 'Process', 'IDL-Alloc', 'IDL-LineWage', 'IDL-Role', 'Equipment', 'Facility', 'Consumable'],
 };
+// Consumable 合併欄(master:code/desc/單價/單位/預設製程 + case:製程/年用量/單價override)
+const CONSUMABLE_COLS = ['CONSUMABLE_CODE', 'DESCRIPTION', 'FOXLINK_PART_NO', 'UNIT_COST_USD', 'UNIT_OF_MEASURE', 'DEFAULT_PROCESS_CODE', 'PROCESS_CODE', 'ANNUAL_USAGE_QTY', 'UNIT_COST_OVERRIDE_USD'];
 // 不進 Excel 的欄(PK/FK/稽核)· 匯入時也不吃
 const SKIP_COLS = new Set(['ID', 'BASELINE_ID', 'CASE_FACTORY_ID', 'SCENARIO_ID', 'LINE_ID', 'TIER_ID', 'CREATED_AT', 'UPDATED_AT', 'CREATED_BY', 'UPDATED_BY', 'AI_CACHE_ID']);
 // Baseline 薪資換算輔助欄(拍板§5:月薪 → 時薪;引擎不改)
@@ -62,6 +66,19 @@ async function exportCostModel(db, caseFactoryId) {
   ]), '說明');
 
   for (const s of SHEETS) {
+    if (s.special === 'consumable') {
+      // 合併匯出:case JOIN master(一列一耗材)
+      const rows = await db.prepare(
+        `SELECT m.consumable_code, m.description, NVL(cc.foxlink_part_no, m.foxlink_part_no) AS foxlink_part_no,
+                m.unit_cost_usd, m.unit_of_measure, m.default_process_code,
+                cc.process_code, cc.annual_usage_qty, cc.unit_cost_override_usd
+           FROM bom_cs_case_consumable cc JOIN bom_factory_consumable m ON m.consumable_id = cc.consumable_id
+          WHERE cc.case_factory_id = ?`,
+      ).all(caseFactoryId).catch(() => []);
+      const aoa = [CONSUMABLE_COLS, ...rows.map((r) => CONSUMABLE_COLS.map((c) => { const v = pick(r, c); return v == null ? '' : v; }))];
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), s.sheet);
+      continue;
+    }
     const cols = await tableCols(db, s.table);
     if (!cols.length) continue;
     const keyCol = s.scope === 'baseline' ? 'baseline_id' : 'case_factory_id';
@@ -141,6 +158,27 @@ async function importCostModel(db, { filePath, projectId, factoryCode: fcOverrid
   for (const s of SHEETS) {
     if (s.sheet === 'Baseline') continue;
     const data = sheetJson(s.sheet); if (!data || !data.length) continue;
+    if (s.special === 'consumable') {
+      // master upsert by (廠別, consumable_code) → case insert(製程取 PROCESS_CODE || 預設)
+      let n = 0;
+      for (const r of data) {
+        const code = str(pick(r, 'CONSUMABLE_CODE')); if (!code) continue;
+        let m = await db.prepare(`SELECT consumable_id FROM bom_factory_consumable WHERE factory_code=? AND consumable_code=?`).get(factoryCode, code).catch(() => null);
+        if (!m) {
+          await db.prepare(
+            `INSERT INTO bom_factory_consumable (factory_code, consumable_code, description, foxlink_part_no, unit_cost_usd, unit_of_measure, default_process_code, is_active)
+             VALUES (?,?,?,?,?,?,?,1)`,
+          ).run(factoryCode, code, str(pick(r, 'DESCRIPTION')), str(pick(r, 'FOXLINK_PART_NO')), num(pick(r, 'UNIT_COST_USD')), str(pick(r, 'UNIT_OF_MEASURE')), str(pick(r, 'DEFAULT_PROCESS_CODE')));
+          m = await db.prepare(`SELECT consumable_id FROM bom_factory_consumable WHERE factory_code=? AND consumable_code=?`).get(factoryCode, code);
+        }
+        await db.prepare(
+          `INSERT INTO bom_cs_case_consumable (case_factory_id, consumable_id, process_code, annual_usage_qty, unit_cost_override_usd, foxlink_part_no) VALUES (?,?,?,?,?,?)`,
+        ).run(caseFactoryId, num(Object.values(m)[0]), str(pick(r, 'PROCESS_CODE')) || str(pick(r, 'DEFAULT_PROCESS_CODE')), num(pick(r, 'ANNUAL_USAGE_QTY')), num(pick(r, 'UNIT_COST_OVERRIDE_USD')), str(pick(r, 'FOXLINK_PART_NO')));
+        n += 1;
+      }
+      counts[s.sheet] = n;
+      continue;
+    }
     const cols = await tableCols(db, s.table); if (!cols.length) continue;
     const keyCol = s.scope === 'baseline' ? 'baseline_id' : 'case_factory_id';
     const keyVal = s.scope === 'baseline' ? baselineId : caseFactoryId;
