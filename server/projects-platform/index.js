@@ -165,6 +165,7 @@ async function runMigrations(db) {
       await require('./migrations/013o_variant_effectivity')(db);    // BOM 變異維度 + 逐料 effectivity(super-BOM · 顏色/包裝)
       await require('./migrations/013p_run_variant_config')(db);     // bom_cs_run 記 config(切配置 → 撈該 config 的 run · B-2)
       await require('./migrations/013q_bom_v2_hierarchy')(db);       // BOM 層級 v2:半成品料號 + FLK 候選描述(R-1)
+      await require('./migrations/013r_template_label')(db);         // 範本命名 template_label(C-2.5)
       console.log('[projects-platform] Cortex BOM/RBAC migrations (S0) ✓');
     } else {
       console.log('[projects-platform] Cortex BOM/RBAC migrations skipped (ENABLE_CORTEX_BOM != true)');

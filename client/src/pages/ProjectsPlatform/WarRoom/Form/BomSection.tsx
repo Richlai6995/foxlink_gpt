@@ -184,13 +184,14 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
       URL.revokeObjectURL(url)
     } catch (e: any) { setErr(e.message) }
   }
-  async function _postCostModel(path: string, withProject: boolean) {
+  async function _postCostModel(path: string, withProject: boolean, label?: string) {
     if (!cmFile) { setErr('請選成本模型 Excel'); return null }
     setCmBusy(true); setErr('')
     try {
       const fd = new FormData()
       fd.append('file', cmFile)
       if (withProject) fd.append('projectId', String(projectId))
+      if (label) fd.append('label', label)
       if (cmFactory.trim()) fd.append('factoryCode', cmFactory.trim().toUpperCase())
       const res = await fetch(`/api/projects/bom${path}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd })
       const data = await res.json()
@@ -207,8 +208,11 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
     if (data.caseFactoryId) setCaseFactoryId(data.caseFactoryId)
   }
   async function doImportCostModelToLibrary() {
-    const data = await _postCostModel('/cost-model/import-template', false)
+    const label = window.prompt('範本名稱(如「CN 穿戴標準 2026Q3」· 同廠同模型可多套靠名稱區分):')
+    if (!label || !label.trim()) return
+    const data = await _postCostModel(`/cost-model/import-template`, false, label.trim())
     if (!data) return
+    if (data.warnings?.length) setErr(`已存入,但有 ${data.warnings.length} 個警告:${data.warnings.slice(0, 3).join(';')}`)
     api.get<{ templates: any[] }>(token, `/bom/provision/templates`).then((r) => setTemplates(r.templates || [])).catch(() => {})
   }
   const costModelTools = (
@@ -226,8 +230,12 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
         存入範本庫
       </button>
       <span className="text-cortex-muted">·</span>
-      <button onClick={() => dlBlob('/cost-model/template?model=SIMPLIFIED_WEARABLE', 'cost-model-template-SIMPLIFIED.xlsx')} className="text-cortex-teal hover:underline">範本(穿戴 SIMPLIFIED)</button>
-      <button onClick={() => dlBlob('/cost-model/template?model=FULL_MVA', 'cost-model-template-FULL.xlsx')} className="text-cortex-teal hover:underline">範本(FULL)</button>
+      <span className="text-cortex-muted">空白範本:</span>
+      <button onClick={() => dlBlob('/cost-model/template?model=SIMPLIFIED_WEARABLE&blank=1', 'cost-model-blank-SIMPLIFIED.xlsx')} className="text-cortex-teal hover:underline">穿戴</button>
+      <button onClick={() => dlBlob('/cost-model/template?model=FULL_MVA&blank=1', 'cost-model-blank-FULL.xlsx')} className="text-cortex-teal hover:underline">FULL</button>
+      <span className="text-cortex-muted">樣例:</span>
+      <button onClick={() => dlBlob('/cost-model/template?model=SIMPLIFIED_WEARABLE', 'cost-model-sample-SIMPLIFIED.xlsx')} className="text-cortex-teal hover:underline">穿戴</button>
+      <button onClick={() => dlBlob('/cost-model/template?model=FULL_MVA', 'cost-model-sample-FULL.xlsx')} className="text-cortex-teal hover:underline">FULL</button>
       {activeFactory && (
         <>
           <span className="text-cortex-muted">·</span>
@@ -281,7 +289,7 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
           <div className="flex items-center gap-2 flex-wrap">
             <select value={tplId} onChange={(e) => setTplId(e.target.value ? Number(e.target.value) : '')} className="border border-cortex-line rounded px-2 py-1 text-[12px]">
               <option value="">選擇範本…</option>
-              {templates.map((t) => <option key={t.caseFactoryId} value={t.caseFactoryId}>{t.factoryCode} · {t.costingModel} ({t.projectCode})</option>)}
+              {templates.map((t) => <option key={t.caseFactoryId} value={t.caseFactoryId}>{t.factoryCode} · {t.costingModel}{t.templateLabel ? ` · ${t.templateLabel}` : ''}</option>)}
             </select>
             <button onClick={doProvision} disabled={provisioning || !tplId}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 text-white text-[12px] rounded hover:opacity-90 disabled:opacity-40 shrink-0">
@@ -314,7 +322,7 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
               <span className="text-[11px] text-cortex-muted">從範本庫新增廠別:</span>
               <select value={tplId} onChange={(e) => setTplId(e.target.value ? Number(e.target.value) : '')} className="border border-cortex-line rounded px-2 py-1 text-[12px]">
                 <option value="">選擇範本…</option>
-                {templates.map((t) => <option key={t.caseFactoryId} value={t.caseFactoryId}>{t.factoryCode} · {t.costingModel}</option>)}
+                {templates.map((t) => <option key={t.caseFactoryId} value={t.caseFactoryId}>{t.factoryCode} · {t.costingModel}{t.templateLabel ? ` · ${t.templateLabel}` : ''}</option>)}
               </select>
               <button onClick={doProvision} disabled={provisioning || !tplId}
                 className="flex items-center gap-1 px-2.5 py-1 bg-cortex-navy text-white text-[12px] rounded hover:opacity-90 disabled:opacity-40">

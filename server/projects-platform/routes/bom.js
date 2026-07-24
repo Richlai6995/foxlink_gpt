@@ -156,11 +156,12 @@ const sendWb = (res, wb, filename) => {
   res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
   res.send(buf);
 };
-// GET /cost-model/template?model=SIMPLIFIED_WEARABLE|FULL_MVA — 下載範本(fixture 真實樣例)
+// GET /cost-model/template?model=&blank=1 — 下載範本(blank=1 空白範本+說明對照;否則真實樣例)
 router.get('/cost-model/template', asyncHandler(async (req, res) => {
   const model = String(req.query.model || 'SIMPLIFIED_WEARABLE');
-  const { wb } = await costModelSvc.templateWorkbook(getDb(), model);
-  sendWb(res, wb, `cost-model-template-${model}.xlsx`);
+  const blank = req.query.blank === '1' || req.query.blank === 'true';
+  const { wb } = blank ? await costModelSvc.blankTemplateWorkbook(getDb(), model) : await costModelSvc.templateWorkbook(getDb(), model);
+  sendWb(res, wb, `cost-model-${blank ? 'blank' : 'sample'}-${model}.xlsx`);
 }));
 // GET /case/:caseFactoryId/cost-model — 匯出此廠成本模型(round-trip)
 router.get('/case/:caseFactoryId/cost-model', asyncHandler(async (req, res) => {
@@ -174,7 +175,7 @@ router.post('/cost-model/import-template', upload.single('file'), asyncHandler(a
   if (req.user?.role !== 'admin') { try { fs.unlinkSync(req.file?.path); } catch (_) {} return res.status(403).json({ error: '範本庫維護限 admin' }); }
   if (!req.file) return res.status(400).json({ error: 'file required' });
   try {
-    const out = await costModelSvc.importToTemplateLibrary(getDb(), { filePath: req.file.path, factoryCode: req.body.factoryCode || null });
+    const out = await costModelSvc.importToTemplateLibrary(getDb(), { filePath: req.file.path, factoryCode: req.body.factoryCode || null, templateLabel: req.body.label || null });
     res.json({ ok: true, ...out });
   } catch (e) {
     if (String(e.code || '').startsWith('COST_MODEL_')) return res.status(409).json({ error: e.message, code: e.code, missing: e.missing || undefined });

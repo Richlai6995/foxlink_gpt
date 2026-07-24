@@ -41,6 +41,81 @@ const SKIP_COLS = new Set(['ID', 'BASELINE_ID', 'CASE_FACTORY_ID', 'SCENARIO_ID'
 // Baseline 薪資換算輔助欄(拍板§5:月薪 → 時薪;引擎不改)
 const WAGE_HELPERS = ['月薪(當地幣)', '薪資匯率', '週工作天', '日工時'];
 
+// ── C-2.5 欄位對照(中文/單位/必填)· 必填 = 引擎實際消費;未列欄 = 選填 ──────
+// req: 'ALL' | 'SIMPLIFIED' | 'FULL'(該模型必填)
+const FIELD_META = {
+  Baseline: [
+    ['FACTORY_CODE', '廠別碼', 'CN/VN/TW(需為系統廠別)', 'ALL'],
+    ['COSTING_MODEL', '成本模型', 'SIMPLIFIED_WEARABLE 或 FULL_MVA', 'ALL'],
+    ['DL_WAGE_PER_HR_USD', 'DL 直接人工時薪', 'USD/hr(可空 → 用月薪欄換算)', 'FULL'],
+    ['OH_PCT', '製造費用率 OH%', '整數口徑:4 = 4%', 'SIMPLIFIED'],
+    ['SGA_PCT', '管銷費率 SGA%', '整數口徑', 'SIMPLIFIED'],
+    ['PROFIT_PCT', '利潤率%', '整數口徑', 'SIMPLIFIED'],
+    ['OUTBOUND_TRANSPORTATION_PER_UNIT_USD', '每台外運費', 'USD/unit', ''],
+    ['ANNUAL_DEMAND_DEFAULT', '預設年需求量', 'pcs/年', ''],
+    ['VERSION_LABEL', '基準版本標籤', '如 2026Q3', ''],
+    ['月薪(當地幣)', 'DL 月薪(換算用)', '當地幣;搭配匯率/工作天/工時 → 自動算時薪', ''],
+    ['薪資匯率', '當地幣→USD 匯率', '如 TWD 31 / RMB 7.2', ''],
+    ['週工作天', '每週工作天數', '如 6', ''],
+    ['日工時', '每日工時', '如 10', ''],
+  ],
+  SimplifiedLine: [
+    ['LINE_CODE', '成本線代碼', '如 MATERIAL / SMT / FATP / SMT_LOSS', 'SIMPLIFIED'],
+    ['LINE_GROUP', '群組', 'MATERIAL(材料·有BOM時自動改用rollup)/ PROCESS(製程)/ LOSS(損耗)', 'SIMPLIFIED'],
+    ['COST_PER_UNIT_USD', '每台成本', 'USD/unit', 'SIMPLIFIED'],
+    ['SORT_ORDER', '排序', '數字', ''],
+  ],
+  QtyScenario: [
+    ['SCENARIO_CODE', '情境代碼', '如 BASE', 'ALL'],
+    ['TARGET_QTY', '目標年量', 'pcs', 'ALL'],
+    ['IS_BASELINE', '是否基準情境', '1/0', ''],
+  ],
+  Process: [
+    ['PROCESS_CODE', '製程代碼', '如 SMT_MAIN / BB_ASSY / FATP', 'FULL'],
+    ['TAKT_SECONDS', 'TAKT 秒數', '秒/台', ''],
+    ['YIELD_PCT', '良率%', '整數口徑', ''],
+    ['DL_PER_SHIFT', '每班 DL 人數', '人', ''],
+    ['WEEKLY_OUTPUT_OVERRIDE', '週產出覆寫', '台/週(空=由 TAKT 推)', ''],
+  ],
+  'IDL-Alloc': [
+    ['PROCESS_CODE', '製程代碼', '對應 Process 分頁', 'FULL'],
+    ['ROLE_CODE', 'IDL 角色代碼', '對應 IDL-Role 分頁', 'FULL'],
+    ['MULTIPLIER', '分攤倍率', '如 0.5 = 半個人力', 'FULL'],
+  ],
+  'IDL-LineWage': [
+    ['ROLE_CODE', '線級角色', 'LINE_LEADER / TECHNICIAN / IQC / SUPERVISOR', 'FULL'],
+    ['WEEKLY_WAGE_USD', '週薪', 'USD/週(可空 → 月薪欄換算)', ''],
+  ],
+  'IDL-Role': [
+    ['ROLE_CODE', 'IDL 角色代碼', '', 'FULL'],
+    ['ANNUAL_RATE_USD', '年薪', 'USD/年', ''],
+    ['DISPLAY_NAME_ZH_TW', '中文名稱', '', ''],
+  ],
+  Equipment: [
+    ['PROCESS_CODE', '製程代碼', '', 'FULL'],
+    ['BUCKET', '分類', 'EQUIP / MRO', ''],
+    ['ANNUAL_COST_USD', '年化成本', 'USD/年(Σ 設備價/年限)', 'FULL'],
+    ['APPLY_UTIL', '套稼動率', '1=套(SMT)/ 0=全額', ''],
+  ],
+  Facility: [
+    ['PROCESS_CODE', '製程代碼', '', 'FULL'],
+    ['SQFT', '面積', '平方英尺', ''],
+    ['SQFT_UNIT_COST_USD', '單位面積年費', 'USD/sqft/年', ''],
+  ],
+  Consumable: [
+    ['CONSUMABLE_CODE', '耗材代碼', '廠內唯一(如 SMT_INDMAT)', 'FULL'],
+    ['DESCRIPTION', '描述', '', ''],
+    ['UNIT_COST_USD', '單價', 'USD', ''],
+    ['PROCESS_CODE', '歸屬製程', '空=用預設製程', ''],
+    ['ANNUAL_USAGE_QTY', '年用量', '', ''],
+  ],
+};
+const _reqFields = (sheet, model) => (FIELD_META[sheet] || [])
+  .filter(([, , , req]) => req === 'ALL' || (req === 'SIMPLIFIED' && model === 'SIMPLIFIED_WEARABLE') || (req === 'FULL' && model === 'FULL_MVA'))
+  .map(([col]) => col);
+// #EXAMPLE 註解列(空白範本示範用 · 匯入一律略過)
+const _isCommentRow = (r) => Object.values(r || {}).some((v) => typeof v === 'string' && v.trim().startsWith('#'));
+
 async function tableCols(db, table) {
   // user_tab_cols(非 columns)才有 virtual/hidden 標記 — VIRTUAL 欄不可 INSERT(如 equip 年化欄)
   const rows = await db.prepare(
@@ -91,14 +166,56 @@ async function exportCostModel(db, caseFactoryId) {
   return { wb, model, factoryCode: pick(cf, 'factory_code') };
 }
 
-/** 找 fixture 範本 cf(costing_model 相符的 CORTEX-FIX-%)→ 匯出當空白範本 */
+/** 找 fixture/庫 範本 cf(costing_model 相符)→ 匯出當樣例範本 */
 async function templateWorkbook(db, model) {
   const row = await db.prepare(
     `SELECT cf.case_factory_id FROM bom_cs_case_factory cf JOIN projects p ON p.id = cf.case_id
-      WHERE p.project_code LIKE 'CORTEX-FIX-%' AND cf.costing_model = ? ORDER BY cf.case_factory_id FETCH FIRST 1 ROWS ONLY`,
+      WHERE (p.project_code LIKE 'CORTEX-FIX-%' OR p.project_code = 'CORTEX-COST-TPL') AND cf.costing_model = ?
+      ORDER BY cf.case_factory_id FETCH FIRST 1 ROWS ONLY`,
   ).get(model);
   if (!row) throw new Error(`無 ${model} 範本來源(fixture)`);
   return exportCostModel(db, num(pick(row, 'case_factory_id')));
+}
+
+/**
+ * 空白範本(C-2.5):header + #EXAMPLE 範例列(取樣例前 2 列 · 首格前綴 # → 匯入自動略過)
+ * + 「說明」分頁 = 完整欄位對照總表(分頁/欄位/中文/單位口徑/必填/該模型必要分頁)。
+ */
+async function blankTemplateWorkbook(db, model) {
+  const { wb: src } = await templateWorkbook(db, model);
+  const wb = XLSX.utils.book_new();
+  const required = REQUIRED[model] || REQUIRED.SIMPLIFIED_WEARABLE;
+  const guide = [
+    ['Cortex 成本模型 — 空白範本'],
+    [`costing_model = ${model}`],
+    [`必要分頁:${required.join(' + ')}(其餘分頁選填;缺必要分頁 → 匯入擋下)`],
+    ['#EXAMPLE 開頭的列是範例,匯入自動略過;請在範例列下方填入正式資料'],
+    ['% 欄整數口徑(4 = 4%);薪資可直填 USD 時薪/週薪,或填 月薪(當地幣)+匯率+週工作天+日工時 自動換算'],
+    [],
+    ['分頁', '欄位', '中文說明', '單位 / 口徑', '必填'],
+  ];
+  for (const s of SHEETS) {
+    const metas = FIELD_META[s.sheet] || [];
+    const reqSet = new Set(_reqFields(s.sheet, model));
+    const isReqSheet = required.includes(s.sheet);
+    for (const [col, zh, unit] of metas) {
+      guide.push([s.sheet + (isReqSheet ? '' : '(選填頁)'), col, zh, unit, reqSet.has(col) ? '必填' : '']);
+    }
+  }
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(guide), '說明');
+  for (const name of src.SheetNames) {
+    if (name === '說明') continue;
+    const aoa = XLSX.utils.sheet_to_json(src.Sheets[name], { header: 1, raw: true, defval: '' });
+    if (!aoa.length) continue;
+    const out = [aoa[0]];
+    for (const r of aoa.slice(1, 3)) {   // 樣例前 2 列 → #EXAMPLE
+      const row = [...r];
+      row[0] = `#EXAMPLE ${row[0] ?? ''}`.trim();
+      out.push(row);
+    }
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(out), name);
+  }
+  return { wb, model };
 }
 
 /** 薪資換算:月薪(當地幣)/匯率/週工作天/日工時 → 時薪 USD(月工作天 = 週工作天×52/12)*/
@@ -114,28 +231,62 @@ function hourlyFromMonthly(row) {
  * 匯入成本模型 → 專案(b 路徑):新 baseline + 新 case_factory + case/baseline 子表。
  * 硬擋:缺必要分頁 / 廠別不存在 / 同專案同廠別已有 case_factory。
  */
-async function importCostModel(db, { filePath, projectId, factoryCode: fcOverride = null }) {
+async function importCostModel(db, { filePath, projectId, factoryCode: fcOverride = null, templateLabel = null, isTemplateLib = false }) {
   if (!filePath || !projectId) throw new Error('filePath + projectId required');
   const wb = XLSX.readFile(filePath);
   const sheetJson = (name) => {
     const ws = wb.Sheets[name]; if (!ws) return null;
-    return XLSX.utils.sheet_to_json(ws, { raw: true, defval: null });   // header-based objects
+    const rows = XLSX.utils.sheet_to_json(ws, { raw: true, defval: null });   // header-based objects
+    return rows.filter((r) => !_isCommentRow(r));                             // C-2.5:#EXAMPLE 範例列略過
   };
 
   const base = sheetJson('Baseline');
-  if (!base || !base.length) { const e = new Error('COST_MODEL_MISSING_SHEETS: 缺 Baseline 分頁'); e.code = 'COST_MODEL_MISSING_SHEETS'; e.missing = ['Baseline']; throw e; }
+  if (!base || !base.length) { const e = new Error('COST_MODEL_MISSING_SHEETS: 缺 Baseline 分頁(或只有範例列)'); e.code = 'COST_MODEL_MISSING_SHEETS'; e.missing = ['Baseline']; throw e; }
   const bRow = base[0];
   const model = str(pick(bRow, 'costing_model')) || 'SIMPLIFIED_WEARABLE';
   const required = REQUIRED[model] || REQUIRED.SIMPLIFIED_WEARABLE;
   const missing = required.filter((s) => { const d = sheetJson(s); return !d || !d.length; });
   if (missing.length) { const e = new Error(`COST_MODEL_MISSING_SHEETS: ${model} 缺必要分頁 ${missing.join(', ')}`); e.code = 'COST_MODEL_MISSING_SHEETS'; e.missing = missing; throw e; }
 
+  // C-2.5 必填欄硬擋(逐分頁逐列)+ 數值異常警告(不擋)
+  const fieldErrors = [], warnings = [];
+  const pctCols = new Set(['OH_PCT', 'SGA_PCT', 'PROFIT_PCT', 'YIELD_PCT', 'EFFICIENCY_PCT', 'VAT_RATE_PCT', 'SMT_ALLOWANCE_PCT', 'LOSS_FACTOR_PCT']);
+  for (const s of SHEETS) {
+    const data = sheetJson(s.sheet); if (!data || !data.length) continue;
+    const reqCols = _reqFields(s.sheet, model);
+    data.forEach((r, i) => {
+      for (const c of reqCols) {
+        const v = pick(r, c);
+        if (v == null || v === '') {
+          if (s.sheet === 'Baseline' && c === 'DL_WAGE_PER_HR_USD' && hourlyFromMonthly(r) != null) continue;   // 月薪換算可補
+          fieldErrors.push(`[${s.sheet}] 第 ${i + 1} 列缺必填欄 ${c}`);
+        }
+      }
+      for (const [k, v] of Object.entries(r)) {
+        const kk = String(k).toUpperCase();
+        // % 超界 = 硬擋(DB NUMBER(6,4) 也塞不下;給乾淨錯誤而非 ORA-01438)
+        if (pctCols.has(kk) && v != null && v !== '' && (num(v) < 0 || num(v) > 100)) fieldErrors.push(`[${s.sheet}] 第 ${i + 1} 列 ${kk}=${v} 超出 0–100(整數口徑 4=4%)`);
+        if ((kk === 'DL_WAGE_PER_HR_USD' || kk === 'WEEKLY_WAGE_USD' || kk === 'ANNUAL_RATE_USD') && v != null && v !== '' && num(v) <= 0) warnings.push(`[${s.sheet}] 第 ${i + 1} 列 ${kk}=${v} ≤ 0`);
+        if (kk === 'LINE_GROUP' && v && !/^(MATERIAL|PROCESS|LOSS)$/i.test(String(v))) warnings.push(`[${s.sheet}] 第 ${i + 1} 列 LINE_GROUP=${v} 不在 MATERIAL/PROCESS/LOSS`);
+        if (kk === 'TARGET_QTY' && v != null && v !== '' && num(v) <= 0) warnings.push(`[${s.sheet}] 第 ${i + 1} 列 TARGET_QTY ≤ 0`);
+      }
+    });
+  }
+  if (fieldErrors.length) { const e = new Error(`COST_MODEL_MISSING_FIELDS: ${fieldErrors.slice(0, 10).join(';')}${fieldErrors.length > 10 ? ` …共 ${fieldErrors.length} 項` : ''}`); e.code = 'COST_MODEL_MISSING_FIELDS'; e.fieldErrors = fieldErrors; throw e; }
+
   const factoryCode = str(fcOverride) || str(pick(bRow, 'factory_code'));
   if (!factoryCode) throw new Error('factory_code required(Baseline 分頁或參數)');
   const fac = await db.prepare(`SELECT factory_code FROM bom_factory WHERE factory_code=?`).get(factoryCode);
   if (!fac) { const e = new Error(`COST_MODEL_FACTORY_NOT_FOUND: 廠別 ${factoryCode} 不存在(需先建廠別主檔)`); e.code = 'COST_MODEL_FACTORY_NOT_FOUND'; throw e; }
-  const dup = await db.prepare(`SELECT case_factory_id FROM bom_cs_case_factory WHERE case_id=? AND factory_code=? AND costing_model=?`).get(projectId, factoryCode, model);
-  if (dup) { const e = new Error(`COST_MODEL_CASE_EXISTS: 已存在 ${factoryCode}·${model} 成本模型(cf#${num(pick(dup, 'case_factory_id'))}),不可覆蓋`); e.code = 'COST_MODEL_CASE_EXISTS'; throw e; }
+  // dup 檢查:一般專案 = (專案, 廠別, 模型);範本庫 = label 唯一(同組合可多套 · C-2.5)
+  if (isTemplateLib) {
+    if (!str(templateLabel)) { const e = new Error('COST_MODEL_LABEL_REQUIRED: 存入範本庫需填範本名稱(label)'); e.code = 'COST_MODEL_LABEL_REQUIRED'; throw e; }
+    const dupL = await db.prepare(`SELECT case_factory_id FROM bom_cs_case_factory WHERE case_id=? AND template_label=?`).get(projectId, str(templateLabel));
+    if (dupL) { const e = new Error(`COST_MODEL_CASE_EXISTS: 範本名稱「${str(templateLabel)}」已存在(cf#${num(pick(dupL, 'case_factory_id'))})`); e.code = 'COST_MODEL_CASE_EXISTS'; throw e; }
+  } else {
+    const dup = await db.prepare(`SELECT case_factory_id FROM bom_cs_case_factory WHERE case_id=? AND factory_code=? AND costing_model=?`).get(projectId, factoryCode, model);
+    if (dup) { const e = new Error(`COST_MODEL_CASE_EXISTS: 已存在 ${factoryCode}·${model} 成本模型(cf#${num(pick(dup, 'case_factory_id'))}),不可覆蓋`); e.code = 'COST_MODEL_CASE_EXISTS'; throw e; }
+  }
 
   // 1) baseline(新列 · 薪資換算:時薪空 + 月薪有 → 算)
   const bCols = await tableCols(db, 'bom_factory_baseline');
@@ -148,8 +299,13 @@ async function importCostModel(db, { filePath, projectId, factoryCode: fcOverrid
   await db.prepare(`INSERT INTO bom_factory_baseline (${ins.join(',')}) VALUES (${ins.map(() => '?').join(',')})`).run(...ins.map((k) => bVals[k]));
   const baselineId = num(Object.values(await db.prepare(`SELECT MAX(baseline_id) AS m FROM bom_factory_baseline WHERE factory_code=?`).get(factoryCode))[0]);
 
-  // 2) case_factory
-  await db.prepare(`INSERT INTO bom_cs_case_factory (case_id, factory_code, baseline_id, costing_model, status) VALUES (?,?,?,?,'draft')`).run(projectId, factoryCode, baselineId, model);
+  // 2) case_factory(範本庫帶 label;variant_key 塞短 hash 區分同廠多套 · VARCHAR2(40) byte 上限,CJK 不可直塞)
+  const vkey = isTemplateLib
+    ? `TPL-${require('crypto').createHash('md5').update(`${model}:${str(templateLabel)}`).digest('hex').slice(0, 12)}`
+    : null;
+  await db.prepare(
+    `INSERT INTO bom_cs_case_factory (case_id, factory_code, baseline_id, costing_model, status, template_label, variant_key) VALUES (?,?,?,?,'draft',?,?)`,
+  ).run(projectId, factoryCode, baselineId, model, str(templateLabel), vkey);
   const caseFactoryId = num(Object.values(await db.prepare(`SELECT MAX(case_factory_id) AS m FROM bom_cs_case_factory WHERE case_id=? AND factory_code=?`).get(projectId, factoryCode))[0]);
 
   // 3) 子表(header = DB 欄名 · introspection 白名單)· 薪資換算:IDL 週薪空 + 月薪有 → 時薪×日工時×週工作天
@@ -197,8 +353,8 @@ async function importCostModel(db, { filePath, projectId, factoryCode: fcOverrid
     }
     counts[s.sheet] = n;
   }
-  log.log(`importCostModel: project=${projectId} factory=${factoryCode} model=${model} cf#${caseFactoryId} baseline#${baselineId}`, counts);
-  return { caseFactoryId, baselineId, factoryCode, costingModel: model, imported: counts };
+  log.log(`importCostModel: project=${projectId} factory=${factoryCode} model=${model} cf#${caseFactoryId} baseline#${baselineId} warn=${warnings.length}`, counts);
+  return { caseFactoryId, baselineId, factoryCode, costingModel: model, templateLabel: str(templateLabel), imported: counts, warnings };
 }
 
 // ── C-2 範本庫(系統保留「範本專案」· 拍板 1=(i))────────────────────────────
@@ -250,10 +406,10 @@ async function ensureTemplateLibrary(db) {
   return { projectId: libId };
 }
 
-/** 匯入到範本庫(a 路徑)*/
-async function importToTemplateLibrary(db, { filePath, factoryCode = null }) {
+/** 匯入到範本庫(a 路徑 · label 必填 · 同組合多套)*/
+async function importToTemplateLibrary(db, { filePath, factoryCode = null, templateLabel = null }) {
   const lib = await ensureTemplateLibrary(db);
-  return importCostModel(db, { filePath, projectId: lib.projectId, factoryCode });
+  return importCostModel(db, { filePath, projectId: lib.projectId, factoryCode, templateLabel, isTemplateLib: true });
 }
 
-module.exports = { exportCostModel, templateWorkbook, importCostModel, ensureTemplateLibrary, importToTemplateLibrary, TPL_PROJECT_CODE };
+module.exports = { exportCostModel, templateWorkbook, blankTemplateWorkbook, importCostModel, ensureTemplateLibrary, importToTemplateLibrary, TPL_PROJECT_CODE };

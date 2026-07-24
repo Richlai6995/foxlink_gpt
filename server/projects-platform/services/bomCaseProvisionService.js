@@ -50,15 +50,16 @@ async function cloneCaseTable(db, table, srcCf, newCf) {
 async function listTemplates(db) {
   // C-2:範本庫 = 系統範本專案(CORTEX-COST-TPL);fixture 除名(僅 seed 來源)
   const rows = await db.prepare(
-    `SELECT cf.case_factory_id, cf.factory_code, cf.costing_model, cf.baseline_id, p.project_code
+    `SELECT cf.case_factory_id, cf.factory_code, cf.costing_model, cf.baseline_id, cf.template_label, p.project_code
        FROM bom_cs_case_factory cf JOIN projects p ON p.id = cf.case_id
       WHERE p.project_code = 'CORTEX-COST-TPL'
-      ORDER BY cf.factory_code, cf.costing_model`,
+      ORDER BY cf.factory_code, cf.costing_model, cf.case_factory_id`,
   ).all().catch(() => []);
   return rows.map((r) => ({
     caseFactoryId: Number(pick(r, 'case_factory_id')),
     factoryCode: pick(r, 'factory_code'),
     costingModel: pick(r, 'costing_model'),
+    templateLabel: pick(r, 'template_label') || null,
     projectCode: pick(r, 'project_code'),
   }));
 }
