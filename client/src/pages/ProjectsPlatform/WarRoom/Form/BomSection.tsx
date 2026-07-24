@@ -369,12 +369,22 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
       <div className="flex items-center justify-between bg-cortex-bg/40 border border-cortex-line rounded-lg p-3">
         <div className="text-[12px]">
           <div className="font-semibold text-cortex-ink">① 下載匯入範本</div>
-          <div className="text-cortex-muted mt-0.5">EE / ME / PKG 三分頁。必填:Category / Qty / Unit Price (USD)。</div>
+          <div className="text-cortex-muted mt-0.5">BOM = 料件結構+單價;成本模型 = 非 BOM 成本(費率/製程/人力/設備),內含「說明/填寫指南/欄位對照」三分頁教學。</div>
         </div>
-        <button onClick={downloadTemplate} disabled={!token}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-cortex-navy text-white text-[12px] rounded hover:opacity-90 disabled:opacity-40 shrink-0">
-          <Download className="w-3.5 h-3.5" /> 下載範本
-        </button>
+        <div className="flex items-center gap-1.5 flex-wrap shrink-0 justify-end">
+          <button onClick={downloadTemplate} disabled={!token}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-cortex-navy text-white text-[12px] rounded hover:opacity-90 disabled:opacity-40">
+            <Download className="w-3.5 h-3.5" /> BOM 範本
+          </button>
+          <button onClick={() => dlBlob('/cost-model/template?model=SIMPLIFIED_WEARABLE&blank=1', 'cost-model-standard-SIMPLIFIED.xlsx')} disabled={!token}
+            className="flex items-center gap-1.5 px-3 py-1.5 border border-cortex-navy text-cortex-navy text-[12px] rounded hover:bg-cortex-navy/10 disabled:opacity-40">
+            <Download className="w-3.5 h-3.5" /> 成本模型範本(穿戴)
+          </button>
+          <button onClick={() => dlBlob('/cost-model/template?model=FULL_MVA&blank=1', 'cost-model-standard-FULL.xlsx')} disabled={!token}
+            className="flex items-center gap-1.5 px-3 py-1.5 border border-cortex-navy text-cortex-navy text-[12px] rounded hover:bg-cortex-navy/10 disabled:opacity-40">
+            <Download className="w-3.5 h-3.5" /> 成本模型範本(FULL)
+          </button>
+        </div>
       </div>
 
       {/* ② 上傳 */}

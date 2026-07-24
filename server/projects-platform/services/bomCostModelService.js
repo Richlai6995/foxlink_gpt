@@ -181,28 +181,103 @@ async function templateWorkbook(db, model) {
  * 空白範本(C-2.5):header + #EXAMPLE 範例列(取樣例前 2 列 · 首格前綴 # → 匯入自動略過)
  * + 「說明」分頁 = 完整欄位對照總表(分頁/欄位/中文/單位口徑/必填/該模型必要分頁)。
  */
+// 逐頁簽填寫指南(C-2.5+:成本模型比 BOM 複雜,每頁簽講清楚 作用/誰填/怎麼填)
+const SHEET_GUIDE = {
+  Baseline: ['廠別成本基準(兩種模型都必填 · 一列 = 一廠別)', 'EPM / 成本中心', [
+    'FACTORY_CODE(CN/VN/TW)+ COSTING_MODEL 必填,決定整份檔的模型與必要頁簽',
+    'SIMPLIFIED 必填:OH_PCT / SGA_PCT / PROFIT_PCT(整數口徑 4 = 4%);選填 OUTBOUND_TRANSPORTATION_PER_UNIT_USD(每台運費)',
+    'FULL 必填:DL_WAGE_PER_HR_USD(DL 時薪 USD)— 或改填「月薪(當地幣)+薪資匯率+週工作天+日工時」由系統換算',
+    'ANNUAL_DEMAND_DEFAULT = 預設年需求量(無 QtyScenario 時的分攤基礎)',
+  ]],
+  SimplifiedLine: ['SIMPLIFIED 每台成本線(穿戴模型的核心 · 一列 = 一條線)', 'EPM', [
+    'LINE_GROUP 三選一:MATERIAL(材料/台 · 專案匯入 BOM 後自動改用 BOM rollup,此處為 fallback)',
+    'PROCESS(加工費/台:SMT、組裝測試、FATP…)· LOSS(良率損耗/台)',
+    'COST_PER_UNIT_USD = 每台 USD;SORT_ORDER 控制顯示順序',
+    '成本公式:Σ(MATERIAL+PROCESS+LOSS) = subtotal → ×OH% ×SGA% ×Profit% + 運費 = 報價',
+  ]],
+  QtyScenario: ['數量情境(一列 = 一個年量)', 'EPM / PM', [
+    'SCENARIO_CODE 必填(至少一筆,慣用 BASE)· TARGET_QTY = 年量(設備/NRE 攤提分母)',
+    'IS_BASELINE = 1 標記基準情境',
+  ]],
+  Process: ['製程站設定(FULL · 一列 = 一站:SMT_MAIN / BB_ASSY / FATP…)', 'EPM / IE', [
+    'TAKT_SECONDS + EFFICIENCY_PCT + YIELD_PCT → 推算週產出;WEEKLY_OUTPUT_OVERRIDE 可直接指定(蓋過推算)',
+    'DL_PER_SHIFT 等人力欄 → DL 成本;WORKING_HOURS_PER_DAY / DAYS_PER_WEEK / SHIFTS_PER_DAY 決定工時基礎',
+    'PROCESS_CODE 是其他頁簽(IDL-Alloc / Equipment / Facility / Consumable)的關聯鍵,要一致',
+  ]],
+  'IDL-Alloc': ['IDL 分攤(FULL · 一列 = 製程 × 角色 × 倍率)', 'EPM', [
+    'ROLE_CODE 需在 IDL-Role 頁定義;MULTIPLIER = 分攤倍率(0.5 = 半個人力攤到此製程)',
+    '漏填會讓 MVA 少算 IDL 分項(系統擋必填)',
+  ]],
+  'IDL-LineWage': ['線級 IDL 週薪(FULL · LINE_LEADER / TECHNICIAN / IQC / SUPERVISOR)', 'EPM / HR', [
+    'WEEKLY_WAGE_USD 直填;或填月薪欄位由系統換算(時薪 × 日工時 × 週工作天)',
+  ]],
+  'IDL-Role': ['廠務/工程 IDL 角色年薪(FULL)', 'EPM / HR', [
+    'ROLE_CODE + ANNUAL_RATE_USD(年薪 USD);IDL-Alloc 引用這裡的 ROLE_CODE',
+  ]],
+  Equipment: ['設備年化(FULL · 一列 = 一製程的設備分攤)', 'EPM / 設備', [
+    'ANNUAL_COST_USD = Σ(設備購置價 ÷ 使用年限);BUCKET = EQUIP(設備)/ MRO(維護)',
+    'APPLY_UTIL = 1 → 按 SMT 稼動率折算(SMT 區);0 → 全額分攤(BB/組裝區)',
+  ]],
+  Facility: ['廠房分攤(FULL · 面積 × 單價)', 'EPM / 廠務', [
+    'SQFT(面積)× SQFT_UNIT_COST_USD(USD/sqft/年)= 年廠房費;APPLY_UTIL 同 Equipment',
+  ]],
+  Consumable: ['耗材(FULL · 主檔+用量一頁搞定)', 'EPM / 採購', [
+    'CONSUMABLE_CODE 廠內唯一(如 SMT_INDMAT);UNIT_COST_USD 單價;ANNUAL_USAGE_QTY 年用量',
+    'PROCESS_CODE = 歸屬製程(決定分攤位置,空 = 用 DEFAULT_PROCESS_CODE)',
+  ]],
+};
+
 async function blankTemplateWorkbook(db, model) {
   const { wb: src } = await templateWorkbook(db, model);
   const wb = XLSX.utils.book_new();
   const required = REQUIRED[model] || REQUIRED.SIMPLIFIED_WEARABLE;
-  const guide = [
-    ['Cortex 成本模型 — 空白範本'],
-    [`costing_model = ${model}`],
-    [`必要分頁:${required.join(' + ')}(其餘分頁選填;缺必要分頁 → 匯入擋下)`],
-    ['#EXAMPLE 開頭的列是範例,匯入自動略過;請在範例列下方填入正式資料'],
-    ['% 欄整數口徑(4 = 4%);薪資可直填 USD 時薪/週薪,或填 月薪(當地幣)+匯率+週工作天+日工時 自動換算'],
+
+  // ① 說明:總覽 + 快速開始 + 模型差異
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ['Cortex 成本模型 — 標準範本(非 BOM 成本:費率 / 製程 / 人力 / 設備 / 廠房 / 耗材)'],
     [],
-    ['分頁', '欄位', '中文說明', '單位 / 口徑', '必填'],
-  ];
+    ['█ 快速開始'],
+    ['1. 選成本模型:SIMPLIFIED_WEARABLE(穿戴/簡化)或 FULL_MVA(完整製造分攤)— 填在 Baseline.COSTING_MODEL'],
+    [`2. 本檔 model = ${model};必要頁簽:${required.join(' + ')}(缺 → 匯入擋下並列出)`],
+    ['3. #EXAMPLE 開頭的列是範例(匯入自動略過),請填在範例列下方'],
+    ['4. % 一律整數口徑(4 = 4%);金額 USD;薪資可填「月薪(當地幣)+匯率+週工作天+日工時」自動換算'],
+    ['5. 填完 → 專案 📦 BOM「匯入模型」(單案用)或「存入範本庫」命名(各專案可 ＋廠別 clone)'],
+    ['6. 同名稱再存入範本庫 = 新版生效、舊版自動留歷史(版本化)'],
+    [],
+    ['█ 兩種模型差異'],
+    ['SIMPLIFIED_WEARABLE:材料+製程線+損耗 → subtotal → ×OH% ×SGA% ×Profit% + 運費(WHOOP 型)'],
+    ['  只填 3 頁:Baseline / SimplifiedLine / QtyScenario'],
+    ['FULL_MVA:BOM 材料 + MVA(DL/IDL/設備/廠房/耗材逐項分攤)+ SGA/Profit(Rival3 型)'],
+    ['  填 8 頁:Baseline / Process / IDL-Alloc / IDL-LineWage / IDL-Role / Equipment / Facility / Consumable'],
+    [],
+    ['█ 各頁簽怎麼填 → 見「填寫指南」分頁;逐欄定義 → 見「欄位對照」分頁'],
+  ]), '說明');
+  wb.Sheets['說明']['!cols'] = [{ wch: 110 }];
+
+  // ② 填寫指南:逐頁簽敘事(作用 / 誰填 / 怎麼填)
+  const g2 = [['頁簽', '作用', '誰填', '填寫要點']];
+  for (const s of SHEETS) {
+    const gd = SHEET_GUIDE[s.sheet]; if (!gd) continue;
+    const isReq = required.includes(s.sheet);
+    const [role, owner, points] = gd;
+    g2.push([`${s.sheet}${isReq ? '(必要)' : '(此模型免填)'}`, role, owner, points[0] || '']);
+    for (let i = 1; i < points.length; i++) g2.push(['', '', '', points[i]]);
+  }
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(g2), '填寫指南');
+  wb.Sheets['填寫指南']['!cols'] = [{ wch: 24 }, { wch: 44 }, { wch: 14 }, { wch: 96 }];
+
+  // ③ 欄位對照:逐欄定義表
+  const g3 = [['頁簽', '欄位', '中文說明', '單位 / 口徑', '必填']];
   for (const s of SHEETS) {
     const metas = FIELD_META[s.sheet] || [];
     const reqSet = new Set(_reqFields(s.sheet, model));
     const isReqSheet = required.includes(s.sheet);
     for (const [col, zh, unit] of metas) {
-      guide.push([s.sheet + (isReqSheet ? '' : '(選填頁)'), col, zh, unit, reqSet.has(col) ? '必填' : '']);
+      g3.push([s.sheet + (isReqSheet ? '' : '(選填頁)'), col, zh, unit, reqSet.has(col) ? '必填' : '']);
     }
   }
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(guide), '說明');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(g3), '欄位對照');
+  wb.Sheets['欄位對照']['!cols'] = [{ wch: 22 }, { wch: 34 }, { wch: 24 }, { wch: 40 }, { wch: 6 }];
   for (const name of src.SheetNames) {
     if (name === '說明') continue;
     const aoa = XLSX.utils.sheet_to_json(src.Sheets[name], { header: 1, raw: true, defval: '' });
