@@ -278,11 +278,17 @@ async function importCostModel(db, { filePath, projectId, factoryCode: fcOverrid
   if (!factoryCode) throw new Error('factory_code required(Baseline 分頁或參數)');
   const fac = await db.prepare(`SELECT factory_code FROM bom_factory WHERE factory_code=?`).get(factoryCode);
   if (!fac) { const e = new Error(`COST_MODEL_FACTORY_NOT_FOUND: 廠別 ${factoryCode} 不存在(需先建廠別主檔)`); e.code = 'COST_MODEL_FACTORY_NOT_FOUND'; throw e; }
-  // dup 檢查:一般專案 = (專案, 廠別, 模型);範本庫 = label 唯一(同組合可多套 · C-2.5)
+  // dup 檢查:一般專案 = (專案, 廠別, 模型);範本庫 = label 對現行版唯一
+  // C-3 版本化:同 label 再存 → 舊版自動停用(is_active=0 留歷史),新版入庫
+  let supersededCf = null;
   if (isTemplateLib) {
     if (!str(templateLabel)) { const e = new Error('COST_MODEL_LABEL_REQUIRED: 存入範本庫需填範本名稱(label)'); e.code = 'COST_MODEL_LABEL_REQUIRED'; throw e; }
-    const dupL = await db.prepare(`SELECT case_factory_id FROM bom_cs_case_factory WHERE case_id=? AND template_label=?`).get(projectId, str(templateLabel));
-    if (dupL) { const e = new Error(`COST_MODEL_CASE_EXISTS: 範本名稱「${str(templateLabel)}」已存在(cf#${num(pick(dupL, 'case_factory_id'))})`); e.code = 'COST_MODEL_CASE_EXISTS'; throw e; }
+    const dupL = await db.prepare(`SELECT case_factory_id FROM bom_cs_case_factory WHERE case_id=? AND template_label=? AND NVL(is_active,1)=1`).get(projectId, str(templateLabel));
+    if (dupL) {
+      supersededCf = num(pick(dupL, 'case_factory_id'));
+      await db.prepare(`UPDATE bom_cs_case_factory SET is_active=0 WHERE case_factory_id=?`).run(supersededCf);
+      log.log(`importCostModel: template label「${str(templateLabel)}」新版取代 → 舊版 cf#${supersededCf} 停用(留歷史)`);
+    }
   } else {
     const dup = await db.prepare(`SELECT case_factory_id FROM bom_cs_case_factory WHERE case_id=? AND factory_code=? AND costing_model=?`).get(projectId, factoryCode, model);
     if (dup) { const e = new Error(`COST_MODEL_CASE_EXISTS: 已存在 ${factoryCode}·${model} 成本模型(cf#${num(pick(dup, 'case_factory_id'))}),不可覆蓋`); e.code = 'COST_MODEL_CASE_EXISTS'; throw e; }
@@ -299,12 +305,11 @@ async function importCostModel(db, { filePath, projectId, factoryCode: fcOverrid
   await db.prepare(`INSERT INTO bom_factory_baseline (${ins.join(',')}) VALUES (${ins.map(() => '?').join(',')})`).run(...ins.map((k) => bVals[k]));
   const baselineId = num(Object.values(await db.prepare(`SELECT MAX(baseline_id) AS m FROM bom_factory_baseline WHERE factory_code=?`).get(factoryCode))[0]);
 
-  // 2) case_factory(範本庫帶 label;variant_key 塞短 hash 區分同廠多套 · VARCHAR2(40) byte 上限,CJK 不可直塞)
-  const vkey = isTemplateLib
-    ? `TPL-${require('crypto').createHash('md5').update(`${model}:${str(templateLabel)}`).digest('hex').slice(0, 12)}`
-    : null;
+  // 2) case_factory(範本庫帶 label;variant_key = TPL-{baselineId}:每版唯一 · 不撞 UQ_CSF(case,factory,variant)
+  //    CJK label 不可直塞(VARCHAR2(40) byte 上限);同 label 版本化後 hash 也會撞 → 用 baselineId)
+  const vkey = isTemplateLib ? `TPL-${baselineId}` : null;
   await db.prepare(
-    `INSERT INTO bom_cs_case_factory (case_id, factory_code, baseline_id, costing_model, status, template_label, variant_key) VALUES (?,?,?,?,'draft',?,?)`,
+    `INSERT INTO bom_cs_case_factory (case_id, factory_code, baseline_id, costing_model, status, template_label, variant_key, is_active, effective_from) VALUES (?,?,?,?,'draft',?,?,1,SYSTIMESTAMP)`,
   ).run(projectId, factoryCode, baselineId, model, str(templateLabel), vkey);
   const caseFactoryId = num(Object.values(await db.prepare(`SELECT MAX(case_factory_id) AS m FROM bom_cs_case_factory WHERE case_id=? AND factory_code=?`).get(projectId, factoryCode))[0]);
 
@@ -354,7 +359,16 @@ async function importCostModel(db, { filePath, projectId, factoryCode: fcOverrid
     counts[s.sheet] = n;
   }
   log.log(`importCostModel: project=${projectId} factory=${factoryCode} model=${model} cf#${caseFactoryId} baseline#${baselineId} warn=${warnings.length}`, counts);
-  return { caseFactoryId, baselineId, factoryCode, costingModel: model, templateLabel: str(templateLabel), imported: counts, warnings };
+  return { caseFactoryId, baselineId, factoryCode, costingModel: model, templateLabel: str(templateLabel), imported: counts, warnings, supersededCf };
+}
+
+/** 停用/啟用 範本(C-3 · 範本庫內)*/
+async function setTemplateActive(db, caseFactoryId, active) {
+  const lib = await ensureTemplateLibrary(db);
+  const r = await db.prepare(`SELECT case_factory_id FROM bom_cs_case_factory WHERE case_factory_id=? AND case_id=?`).get(caseFactoryId, lib.projectId);
+  if (!r) throw new Error('template not found in library');
+  await db.prepare(`UPDATE bom_cs_case_factory SET is_active=? WHERE case_factory_id=?`).run(active ? 1 : 0, caseFactoryId);
+  return { caseFactoryId: num(caseFactoryId), isActive: active ? 1 : 0 };
 }
 
 // ── C-2 範本庫(系統保留「範本專案」· 拍板 1=(i))────────────────────────────
@@ -412,4 +426,4 @@ async function importToTemplateLibrary(db, { filePath, factoryCode = null, templ
   return importCostModel(db, { filePath, projectId: lib.projectId, factoryCode, templateLabel, isTemplateLib: true });
 }
 
-module.exports = { exportCostModel, templateWorkbook, blankTemplateWorkbook, importCostModel, ensureTemplateLibrary, importToTemplateLibrary, TPL_PROJECT_CODE };
+module.exports = { exportCostModel, templateWorkbook, blankTemplateWorkbook, importCostModel, ensureTemplateLibrary, importToTemplateLibrary, setTemplateActive, TPL_PROJECT_CODE };

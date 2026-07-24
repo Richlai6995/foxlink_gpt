@@ -127,8 +127,9 @@ router.get('/summary', asyncHandler(async (req, res) => {
 // ── §9.4 開案自動建 case_factory(從範本 clone)──────────────────────────────
 // GET /provision/templates — 列可選成本模型範本(廠 / model)
 router.get('/provision/templates', asyncHandler(async (req, res) => {
-  // C-2:確保範本庫存在 + fixture seed(冪等 · 首次呼叫建庫)
+  // C-2:確保範本庫存在 + fixture seed(冪等);C-3:?includeInactive=1 查歷史版
   try { await require('../services/bomCostModelService').ensureTemplateLibrary(getDb()); } catch (e) { /* 庫建失敗仍回列表 */ }
+  if (req.query.includeInactive === '1') return res.json({ templates: await provisionSvc.listTemplates(getDb(), { includeInactive: true }) });
   res.json({ templates: await provisionSvc.listTemplates(getDb()) });
 }));
 
@@ -181,6 +182,15 @@ router.post('/cost-model/import-template', upload.single('file'), asyncHandler(a
     if (String(e.code || '').startsWith('COST_MODEL_')) return res.status(409).json({ error: e.message, code: e.code, missing: e.missing || undefined });
     throw e;
   } finally { try { fs.unlinkSync(req.file.path); } catch (_) {} }
+}));
+
+// PUT /cost-model/template/:cfId/active — 停用/啟用範本(C-3 · admin)(body: active 0|1)
+router.put('/cost-model/template/:cfId/active', asyncHandler(async (req, res) => {
+  if (req.user?.role !== 'admin') return res.status(403).json({ error: '範本庫維護限 admin' });
+  const cfId = Number(req.params.cfId);
+  if (!cfId) return res.status(400).json({ error: 'cfId required' });
+  try { res.json({ ok: true, ...(await costModelSvc.setTemplateActive(getDb(), cfId, req.body.active !== 0 && req.body.active !== '0')) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 }));
 
 // POST /cost-model/import — 匯入成本模型 → 專案(multipart: file, projectId, factoryCode?)

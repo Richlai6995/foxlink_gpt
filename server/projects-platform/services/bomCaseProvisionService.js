@@ -47,12 +47,13 @@ async function cloneCaseTable(db, table, srcCf, newCf) {
 }
 
 /** 列可選範本(MVP:fixtures CORTEX-FIX-* 當 golden 範本 · 之後可換 is_template flag)*/
-async function listTemplates(db) {
-  // C-2:範本庫 = 系統範本專案(CORTEX-COST-TPL);fixture 除名(僅 seed 來源)
+async function listTemplates(db, { includeInactive = false } = {}) {
+  // C-2:範本庫 = 系統範本專案(CORTEX-COST-TPL);C-3:預設只列現行(is_active=1),歷史版可選查
   const rows = await db.prepare(
-    `SELECT cf.case_factory_id, cf.factory_code, cf.costing_model, cf.baseline_id, cf.template_label, p.project_code
+    `SELECT cf.case_factory_id, cf.factory_code, cf.costing_model, cf.baseline_id, cf.template_label,
+            NVL(cf.is_active,1) AS is_active, cf.effective_from, p.project_code
        FROM bom_cs_case_factory cf JOIN projects p ON p.id = cf.case_id
-      WHERE p.project_code = 'CORTEX-COST-TPL'
+      WHERE p.project_code = 'CORTEX-COST-TPL'${includeInactive ? '' : ' AND NVL(cf.is_active,1)=1'}
       ORDER BY cf.factory_code, cf.costing_model, cf.case_factory_id`,
   ).all().catch(() => []);
   return rows.map((r) => ({
@@ -60,6 +61,8 @@ async function listTemplates(db) {
     factoryCode: pick(r, 'factory_code'),
     costingModel: pick(r, 'costing_model'),
     templateLabel: pick(r, 'template_label') || null,
+    isActive: Number(pick(r, 'is_active')),
+    effectiveFrom: pick(r, 'effective_from') || null,
     projectCode: pick(r, 'project_code'),
   }));
 }
