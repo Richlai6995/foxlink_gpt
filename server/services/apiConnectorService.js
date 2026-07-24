@@ -78,6 +78,28 @@ function resolveSystemParam(source, userCtx) {
   }
 }
 
+/**
+ * 解析 default_value 中的系統 token（server 端用真實系統時間填，不依賴 LLM 猜日期）
+ * 支援 {{today}}=system_date、{{now}}=system_datetime、{{year}}、{{month}}、{{timestamp}}
+ * 以及直接寫 {{system_date}} 等 system_* 來源；未知 token 保持原樣不動。
+ * @param {string} tpl - default_value 字串
+ * @param {object} userCtx - 使用者上下文
+ * @returns {string}
+ */
+function resolveDefaultTemplate(tpl, userCtx = {}) {
+  if (typeof tpl !== 'string' || tpl.indexOf('{{') === -1) return tpl;
+  const ALIAS = {
+    today: 'system_date', now: 'system_datetime', year: 'system_year',
+    month: 'system_month', timestamp: 'system_timestamp',
+  };
+  return tpl.replace(/\{\{\s*(\w+)\s*\}\}/g, (whole, key) => {
+    const source = key.startsWith('system_') ? key : ALIAS[key];
+    if (!source) return whole; // 未知 token 原樣保留
+    const v = resolveSystemParam(source, userCtx);
+    return v !== null && v !== undefined ? v : '';
+  });
+}
+
 // ── Input Parameters Resolution ─────────────────────────────────────────────
 /**
  * 解析所有輸入參數
@@ -112,9 +134,9 @@ function resolveInputParams(inputParams, aiArgs = {}, userCtx = {}) {
           } catch (_) { /* ignore bad regex */ }
         }
 
-        // 還是沒有就用 default_value
+        // 還是沒有就用 default_value（支援 {{today}}/{{system_*}} 等 token，由 server 用真實系統時間填，不依賴 LLM 猜日期）
         if (!value && param.default_value !== undefined && param.default_value !== null) {
-          value = param.default_value;
+          value = resolveDefaultTemplate(param.default_value, userCtx);
         }
         break;
       }
