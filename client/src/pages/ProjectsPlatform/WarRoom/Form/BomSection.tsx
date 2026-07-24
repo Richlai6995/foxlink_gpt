@@ -47,6 +47,7 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
   const [templates, setTemplates] = useState<any[]>([])
   const [tplId, setTplId] = useState<number | ''>('')
   const [provisioning, setProvisioning] = useState(false)
+  const [addingFactory, setAddingFactory] = useState(false)   // 頂部 bar「＋廠別」展開
   // C-1 成本模型 Excel 匯入
   const [cmFile, setCmFile] = useState<File | null>(null)
   const [cmFactory, setCmFactory] = useState('')
@@ -243,10 +244,13 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
     if (!tplId) { setErr('請選擇成本模型範本'); return }
     setProvisioning(true); setErr('')
     try {
-      await api.post(token, '/bom/provision-case', { projectId, sourceCaseFactoryId: tplId })
+      const out = await api.post<any>(token, '/bom/provision-case', { projectId, sourceCaseFactoryId: tplId })
       const r = await api.get<{ cases: CaseRow[] }>(token, `/bom/cases?projectId=${projectId}`)
       setCases(r.cases || [])
-      if (r.cases?.length) setCaseFactoryId(r.cases[0].case_factory_id)
+      // 選中剛建立的廠別 + 收合新增列
+      if (out?.caseFactoryId) setCaseFactoryId(out.caseFactoryId)
+      else if (r.cases?.length) setCaseFactoryId(r.cases[0].case_factory_id)
+      setAddingFactory(false); setTplId('')
     } catch (e: any) { setErr(e.message) } finally { setProvisioning(false) }
   }
 
@@ -290,15 +294,36 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
 
       {/* A: 頂部試算廠別切換器 — 結構/材料全廠共用,廠別只換加工成本模型(人力/設備/OH) */}
       {hasCase && (
-        <div className="flex items-center gap-2 flex-wrap bg-cortex-navy/5 border border-cortex-navy/20 rounded-lg p-2.5">
-          <span className="text-[12px] font-semibold text-cortex-ink flex items-center gap-1.5"><Factory className="w-4 h-4 text-cortex-navy" /> 試算廠別</span>
-          <select value={caseFactoryId} onChange={(e) => setCaseFactoryId(e.target.value ? Number(e.target.value) : '')}
-            className="border border-cortex-line rounded px-2 py-1 text-[12px] font-medium">
-            {cases.map((c) => <option key={c.case_factory_id} value={c.case_factory_id}>{c.factory_code} · {c.costing_model}</option>)}
-          </select>
-          <span className="text-[10px] text-cortex-muted flex-1 min-w-[200px]">
-            料表結構 / 材料 rollup <b className="text-cortex-ink">全廠共用</b>;切廠別 → 換加工成本模型(人力 / 設備 / OH / SGA),按下方「算成本」重算此廠 total。
-          </span>
+        <div className="bg-cortex-navy/5 border border-cortex-navy/20 rounded-lg p-2.5 space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[12px] font-semibold text-cortex-ink flex items-center gap-1.5"><Factory className="w-4 h-4 text-cortex-navy" /> 試算廠別</span>
+            <select value={caseFactoryId} onChange={(e) => setCaseFactoryId(e.target.value ? Number(e.target.value) : '')}
+              className="border border-cortex-line rounded px-2 py-1 text-[12px] font-medium">
+              {cases.map((c) => <option key={c.case_factory_id} value={c.case_factory_id}>{c.factory_code} · {c.costing_model}</option>)}
+            </select>
+            <button onClick={() => setAddingFactory((s) => !s)}
+              className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded border ${addingFactory ? 'border-cortex-navy bg-cortex-navy text-white' : 'border-cortex-navy/40 text-cortex-navy hover:bg-cortex-navy/10'}`}>
+              ＋廠別
+            </button>
+            <span className="text-[10px] text-cortex-muted flex-1 min-w-[200px]">
+              料表結構 / 材料 rollup <b className="text-cortex-ink">全廠共用</b>;切廠別 → 換加工成本模型(人力 / 設備 / OH / SGA),按下方「算成本」重算此廠 total。
+            </span>
+          </div>
+          {addingFactory && (
+            <div className="flex items-center gap-2 flex-wrap border-t border-cortex-navy/15 pt-2">
+              <span className="text-[11px] text-cortex-muted">從範本庫新增廠別:</span>
+              <select value={tplId} onChange={(e) => setTplId(e.target.value ? Number(e.target.value) : '')} className="border border-cortex-line rounded px-2 py-1 text-[12px]">
+                <option value="">選擇範本…</option>
+                {templates.map((t) => <option key={t.caseFactoryId} value={t.caseFactoryId}>{t.factoryCode} · {t.costingModel}</option>)}
+              </select>
+              <button onClick={doProvision} disabled={provisioning || !tplId}
+                className="flex items-center gap-1 px-2.5 py-1 bg-cortex-navy text-white text-[12px] rounded hover:opacity-90 disabled:opacity-40">
+                {provisioning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Settings className="w-3.5 h-3.5" />} 建立
+              </button>
+              <button onClick={() => setAddingFactory(false)} className="text-[11px] text-cortex-muted hover:underline">取消</button>
+              <span className="text-[10px] text-cortex-muted">已設:{cases.map((c) => c.factory_code).join(' / ')}</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -485,17 +510,6 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
       {hasCase && (
         <div className="space-y-2">
           <BomFactoryCompare projectId={projectId} bomInstanceId={importResult?.bomInstanceId} factoryCount={cases.length} />
-          <div className="flex items-center gap-2 flex-wrap text-[11px]">
-            <span className="text-cortex-muted">已設廠別:{cases.map((c) => c.factory_code).join(' / ') || '—'}</span>
-            <span className="text-cortex-muted">·</span>
-            <select value={tplId} onChange={(e) => setTplId(e.target.value ? Number(e.target.value) : '')} className="border border-cortex-line rounded px-1.5 py-0.5 text-[11px]">
-              <option value="">＋新增廠別範本…</option>
-              {templates.map((t) => <option key={t.caseFactoryId} value={t.caseFactoryId}>{t.factoryCode} · {t.costingModel}</option>)}
-            </select>
-            <button onClick={doProvision} disabled={provisioning || !tplId} className="px-2 py-0.5 border border-cortex-line rounded hover:bg-cortex-bg disabled:opacity-40">
-              {provisioning ? '建立中…' : '建立'}
-            </button>
-          </div>
           {costModelTools}
         </div>
       )}
