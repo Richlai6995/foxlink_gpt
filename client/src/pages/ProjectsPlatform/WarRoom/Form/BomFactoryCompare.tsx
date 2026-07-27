@@ -146,7 +146,7 @@ export default function BomFactoryCompare({ projectId, bomInstanceId, factoryCou
                     return (
                       <td key={key} className={`px-2 py-1 text-right font-mono whitespace-nowrap ${isRowMin ? 'bg-cortex-cyan-bg/50 font-semibold' : ''}`}>
                         {cell ? (
-                          <span title={`true ${money(cell.totalTrue)} · margin ${money(cell.marginUsd)} · run#${cell.runId}`}>
+                          <span title={`${cell.totalTrue != null ? `true ${money(cell.totalTrue)} · margin ${money(cell.marginUsd)} · ` : ''}run#${cell.runId}`}>
                             {isGlobal && <Crown className="w-3 h-3 inline text-amber-500 mr-0.5" />}
                             {money(cell.total)}
                           </span>

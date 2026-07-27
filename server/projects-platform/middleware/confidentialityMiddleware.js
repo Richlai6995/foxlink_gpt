@@ -151,10 +151,45 @@ function maskSummary(summary, role) {
   return { ...summary, _viewer_role: role };
 }
 
+// ── S2 成本機密遮罩(true cost / margin · P1)────────────────────────────────
+// 權威遮罩在 server:非全視角(PARTICIPANT/OUTSIDER…)一律砍 true/margin 欄 → UI guard 自動隱藏。
+
+/** 此請求可看內部真實成本/毛利?(HOST/OBSERVER/SUPER_PARTICIPANT/admin)*/
+function canViewTrueCost(req) {
+  return ROLE_FULL_VIEW.has(getDemoRole(req));
+}
+
+const TRUE_COST_KEYS = new Set([
+  'totaltrue', 'materialtrue', 'nreamorttrue', 'marginusd', 'marginpct',
+  'material_true_usd', 'materialtrueusd', 'total_true_usd', 'unit_true_usd', 'unit_price_true',
+  'true_cost_source', 'true_cost_usd', 'markup_pct', 'nre_per_unit_true_usd', 'sub_total_true', 'totaltrueusd',
+]);
+
+/** 深層遮罩:物件/陣列內所有 true-cost 相關欄 → null;回傳同 shape + costMasked 旗標(頂層物件)*/
+function maskCostDeep(obj, canView) {
+  if (canView || obj == null) return obj;
+  const walk = (o) => {
+    if (Array.isArray(o)) return o.map(walk);
+    if (o && typeof o === 'object') {
+      const out = {};
+      for (const [k, v] of Object.entries(o)) {
+        out[k] = TRUE_COST_KEYS.has(String(k).toLowerCase()) ? null : walk(v);
+      }
+      return out;
+    }
+    return o;
+  };
+  const masked = walk(obj);
+  if (masked && typeof masked === 'object' && !Array.isArray(masked)) masked.costMasked = true;
+  return masked;
+}
+
 module.exports = {
   getDemoRole,
   applyStrategy,
   maskProject,
   maskProjects,
   maskSummary,
+  canViewTrueCost,
+  maskCostDeep,
 };

@@ -36,8 +36,18 @@ const nreSvc = require('../services/bomNreService');
 const quoteSvc = require('../services/bomQuoteService');
 const engine = require('../services/bomCostEngine');
 const variantSvc = require('../services/bomVariantService');
+const { canViewTrueCost, maskCostDeep } = require('../middleware/confidentialityMiddleware');
 
 const router = express.Router();
+
+// ── S2 機密遮罩(P1):全 BOM JSON 回應統一過 true-cost 深層遮罩 ─────────────
+// 非全視角(PARTICIPANT/OUTSIDER)→ totalTrue/margin/true_cost/markup/unit_true… 一律 null + costMasked
+// UI 既有 typeof==='number' guard 自動隱藏;權威在 server,前端切 RoleSwitcher 立即生效。
+router.use((req, res, next) => {
+  const origJson = res.json.bind(res);
+  res.json = (body) => origJson(maskCostDeep(body, canViewTrueCost(req)));
+  next();
+});
 function getDb() { return require('../../database-oracle').db; }
 // 數字參數防呆:非數字 → 400(避免 Number("<id>")=NaN 打進 Oracle 噴 NJS-105 500)
 function reqId(v, res, name = 'id') { const n = Number(v); if (!Number.isFinite(n)) { res.status(400).json({ error: `invalid ${name}: ${v}` }); return null; } return n; }
@@ -157,6 +167,10 @@ const sendWb = (res, wb, filename) => {
   res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
   res.send(buf);
 };
+// 成本模型 Excel(範本/匯出)整包 = 內部參數 → 非全視角 403(S2)
+router.use('/cost-model', (req, res, next) => { if (!canViewTrueCost(req)) return res.status(403).json({ error: '成本模型維護需完整成本視角(HOST/admin)' }); next(); });
+router.use('/case/:caseFactoryId/cost-model', (req, res, next) => { if (!canViewTrueCost(req)) return res.status(403).json({ error: '成本模型匯出需完整成本視角' }); next(); });
+
 // GET /cost-model/template?model=&blank=1 — 下載範本(blank=1 空白範本+說明對照;否則真實樣例)
 router.get('/cost-model/template', asyncHandler(async (req, res) => {
   const model = String(req.query.model || 'SIMPLIFIED_WEARABLE');

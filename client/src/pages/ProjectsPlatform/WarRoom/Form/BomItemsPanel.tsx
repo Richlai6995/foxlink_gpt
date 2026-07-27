@@ -331,7 +331,7 @@ function ItemEnrich({ itemId, token, onChanged }: { itemId: number; token: strin
                       </button>
                       <span className="flex-1 truncate">{mfg?.manufacturer_name || mfg?.mfg_part_number || '(未指定供應商)'}{mfg?.mfg_part_number && mfg?.manufacturer_name ? ` / ${mfg.mfg_part_number}` : ''}</span>
                       <span className="font-mono">quote {money(s.applied_price_usd)}</span>
-                      {t && <span className="font-mono text-cortex-muted">true {money(t.true_cost_usd)} · mk {pct(t.markup_pct)}</span>}
+                      {t && t.true_cost_usd != null && <span className="font-mono text-cortex-muted">true {money(t.true_cost_usd)} · mk {pct(t.markup_pct)}</span>}
                       <button onClick={() => (editing ? setEditSnap(null) : startEdit(s, t, mfg))} disabled={busy} title="編輯"
                         className="shrink-0 p-0.5 text-cortex-muted hover:text-cortex-teal">{editing ? <X className="w-3 h-3" /> : <Pencil className="w-3 h-3" />}</button>
                       <button onClick={() => delPrice(s.id)} disabled={busy} title="刪除"
