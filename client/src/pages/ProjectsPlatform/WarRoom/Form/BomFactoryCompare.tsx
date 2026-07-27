@@ -54,13 +54,14 @@ export default function BomFactoryCompare({ projectId, bomInstanceId, factoryCou
     for (const c of mx.combos) for (const f of mx.factories) {
       if (recomputeAll || !mx.cells[`${f.caseFactoryId}|${c.sig}`]) targets.push({ cfId: f.caseFactoryId, combo: c })
     }
-    let done = 0
+    let done = 0, fails = 0, firstErr = ''
     for (const m of targets) {
       setProgress(`${++done}/${targets.length}`)
       try { await api.post(token, '/bom/compute', { caseFactoryId: m.cfId, bomInstanceId, valueIds: m.combo.valueIds, force: true }) }
-      catch { /* 單格失敗不中斷 */ }
+      catch (e: any) { fails += 1; if (!firstErr) firstErr = e?.message || String(e) }   // 單格失敗不中斷,但要浮出
     }
     setProgress(''); setBusyAll(false); await load()
+    if (fails) setErr(`${fails}/${targets.length} 格計算失敗:${firstErr}${/401|unauthor|token/i.test(firstErr) ? '(登入逾期 → 請重新登入後再試)' : ''}`)
   }
 
   // 全域最便宜 + 每列最便宜
@@ -94,10 +95,12 @@ export default function BomFactoryCompare({ projectId, bomInstanceId, factoryCou
         <div className="flex items-center gap-2">
           {/* 常駐:缺格 → 補缺;全齊 → 全格重算(改價後刷新)。一鍵 = 各配置×各廠「分開」各算一價 */}
           <button onClick={() => computeAll(missingN === 0)} disabled={busyAll || !bomInstanceId || !mx}
+            title={!bomInstanceId ? '此專案尚未匯入 BOM(無法試算)' : (missingN > 0 ? '補算缺格' : '全格重算(改價後刷新)')}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-cortex-navy text-white text-[12px] rounded hover:opacity-90 disabled:opacity-40">
             {busyAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
             {busyAll && progress ? `計算中 ${progress}` : (missingN > 0 ? `算全部(缺 ${missingN} 格)` : '重算全部')}
           </button>
+          {!bomInstanceId && <span className="text-[10px] text-amber-700">先匯入 BOM 才能試算</span>}
           <button onClick={load} title="重新整理" className="p-1 text-cortex-muted hover:text-cortex-teal"><RefreshCw className="w-3.5 h-3.5" /></button>
         </div>
       </div>
