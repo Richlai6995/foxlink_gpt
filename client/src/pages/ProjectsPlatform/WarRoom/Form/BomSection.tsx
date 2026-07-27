@@ -355,13 +355,15 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
           {dimensions.map((d) => (
             <label key={d.id} className="text-[11px] text-cortex-muted flex items-center gap-1">
               {d.dimName || d.dimCode}
-              <select value={config[d.dimCode] || ''} onChange={(e) => setConfig({ ...config, [d.dimCode]: Number(e.target.value) })}
+              <select value={config[d.dimCode] || ''}
+                onChange={(e) => setConfig((prev) => { const c = { ...prev }; if (e.target.value === '') delete c[d.dimCode]; else c[d.dimCode] = Number(e.target.value); return c })}
                 className="border border-cortex-line rounded px-2 py-1 text-[12px] font-medium text-cortex-ink">
+                <option value="">(全部)</option>
                 {d.values.map((v: any) => <option key={v.id} value={v.id}>{v.valueName || v.valueCode}</option>)}
               </select>
             </label>
           ))}
-          <span className="text-[10px] text-cortex-muted flex-1 min-w-[180px]">同一份 super-BOM;切配置 → 共用料(EE)不變、變異料(ME/PKG)換該配置 → rollup / 算成本用此配置</span>
+          <span className="text-[10px] text-cortex-muted flex-1 min-w-[180px]">切配置 → 共用料不變、變異料換該配置;選「(全部)」= 該維度不過濾(如所有包裝一起計)</span>
         </div>
       )}
 
