@@ -5,7 +5,15 @@ const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { verifyToken } = require('./auth');
-const { streamChat, generateWithImage, generateWithTools, generateWithToolsStream, transcribeAudio, transcribeLongAudio, extractTextFromFile, fileToGeminiPart, generateTitle } = require('../services/gemini');
+const { streamChat, generateWithImage, generateWithTools, generateWithToolsStream, transcribeAudio, transcribeLongAudio, extractTextFromFile, fileToGeminiPart, generateTitle, _probeAudioDuration, _transcribeWithRetry } = require('../services/gemini');
+
+// ── 音訊分流門檻(2026-07-27 改時長判斷)──────────────────────────────────────
+// 舊 50MB 檔案大小門檻是照 WAV 設的,對壓縮格式(m4a/aac/opus)嚴重失準:
+// 35MB m4a 實際是 ~37 分鐘會議,被誤判短音訊走單發 Flash(maxOut=8192)→
+// 撞 MAX_TOKENS + phrase-loop degenerate 全滅(2026-07-27 事故)。
+// ≤10 分鐘是單段轉錄實證可靠區(gemini.js LONG_AUDIO_SEGMENT_SEC 註解),12 分留一點 buffer。
+const AUDIO_LONG_ROUTE_SEC = 12 * 60;   // > 12 分鐘 → 切片 long pipeline
+const AUDIO_BG_JOB_SEC = 30 * 60;       // > 30 分鐘(單獨音訊)→ 背景 job(同步 SSE 撐太久體驗差)
 const { streamChatAoai, streamChatAoaiWithTools } = require('../services/llmService');
 const { processGenerateBlocks } = require('../services/fileGenerator');
 const { parseChartBlocks } = require('../services/chartSpecParser');
@@ -1467,9 +1475,15 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
     //   有其他附件混合 → fallback 同步路徑(維持原本能力,99% case 用不到混合)
     // 設計文件:docs/long-audio-background-job-plan.md
     const audioFiles = uploadedFiles.filter(f => (f.mimetype || '').startsWith('audio/'));
+    // 時長為主、size 為輔:ffprobe 失敗(回 0)時 fallback 50MB 舊門檻
+    let audioDurationSec = 0;
+    if (audioFiles.length === 1 && uploadedFiles.length === 1) {
+      audioDurationSec = await _probeAudioDuration(audioFiles[0].path);
+      console.log(`[Chat] Audio duration probe: ${(audioDurationSec / 60).toFixed(1)}min for "${Buffer.from(audioFiles[0].originalname, 'latin1').toString('utf8')}"`);
+    }
     const isLongAudioBackgroundJob = audioFiles.length === 1
-      && audioFiles[0].size > 50 * 1024 * 1024
-      && uploadedFiles.length === 1;
+      && uploadedFiles.length === 1
+      && (audioFiles[0].size > 50 * 1024 * 1024 || audioDurationSec > AUDIO_BG_JOB_SEC);
 
     if (isLongAudioBackgroundJob) {
       const audioFile = audioFiles[0];
@@ -1555,17 +1569,23 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
       // Audio → transcribe
       if (mimeType.startsWith('audio/')) {
         const audioSizeMB = +(file.size / 1024 / 1024).toFixed(2);
-        // > 50MB 走 long-audio pipeline(ffmpeg 切 30 分鐘/段 + Pro + 平行轉錄 + 反摘要 prompt)
-        // 解決 Gemini 對長音訊「自動壓縮輸出」問題:3.5 小時會議只回 2k token 的根因
-        const isLongAudio = file.size > 50 * 1024 * 1024;
-        console.log(`[Chat] Audio branch: "${originalName}" size=${audioSizeMB}MB mime=${mimeType} long=${isLongAudio} user=${req.user.id}`);
-        // 經驗值:Flash 約 1.2 秒/MB(WAV);long path sequential 切 15 分鐘段,
-        // ~1.5 分鐘/段 + 偶爾 retry,3.5h 估 12-18 分鐘 → 約 4 秒/MB
+        // 時長分流(2026-07-27):> 12 分鐘走 long-audio pipeline(ffmpeg 切 10 分鐘/段 +
+        // Pro + retry/加溫/salvage + 反摘要 prompt)。單段可靠區 ≤10 分,超過必撞
+        // Flash maxOut=8192 截斷 + 段尾 phrase-loop(35MB m4a=37 分鐘事故根因)。
+        // ffprobe 失敗(durationSec=0)fallback 舊 50MB size 門檻。
+        const durationSec = audioDurationSec || await _probeAudioDuration(filePath);
+        const durationMin = +(durationSec / 60).toFixed(1);
+        const isLongAudio = durationSec > AUDIO_LONG_ROUTE_SEC
+          || (!durationSec && file.size > 50 * 1024 * 1024);
+        console.log(`[Chat] Audio branch: "${originalName}" size=${audioSizeMB}MB duration=${durationMin}min mime=${mimeType} long=${isLongAudio} user=${req.user.id}`);
+        // ETA:long path sequential ~100s/段(含偶發 retry);時長拿不到 fallback MB 經驗值
         const etaSec = isLongAudio
-          ? Math.max(180, Math.round(audioSizeMB * 4))
+          ? (durationSec
+              ? Math.max(180, Math.ceil(durationSec / 600) * 100)
+              : Math.max(180, Math.round(audioSizeMB * 4)))
           : Math.max(30, Math.round(audioSizeMB * 1.2));
         const initMsg = isLongAudio
-          ? `正在轉錄(長音訊模式): ${originalName} (${audioSizeMB}MB),切 15 分鐘/段順序處理,預計 ${etaSec}s,請耐心等候勿刷新...`
+          ? `正在轉錄(長音訊模式): ${originalName} (${audioSizeMB}MB / ${durationMin} 分鐘),切 10 分鐘/段順序處理,預計 ${etaSec}s,請耐心等候勿刷新...`
           : `正在轉錄: ${originalName} (${audioSizeMB}MB),預計 ${etaSec}s,大檔請耐心等候勿刷新...`;
         sendEvent({ type: 'status', message: initMsg });
         const tAudio0 = Date.now();
@@ -1576,9 +1596,32 @@ router.post('/sessions/:id/messages', uploadChatFiles, budgetGuard, async (req, 
           sendEvent({ type: 'status', message: `轉錄中: ${originalName} — 已等 ${elapsedSec}s / 預計 ${etaSec}s` });
         }, 10000);
         try {
-          const transcribeResult = isLongAudio
-            ? await transcribeLongAudio(filePath, mimeType)
-            : await transcribeAudio(filePath, mimeType);
+          let transcribeResult;
+          if (isLongAudio) {
+            transcribeResult = await transcribeLongAudio(filePath, mimeType);
+          } else {
+            try {
+              transcribeResult = await transcribeAudio(filePath, mimeType);
+            } catch (e) {
+              // 短路徑 degenerate 逃脫(2026-07-27):Flash greedy 卡 loop → 借 long pipeline
+              // 同一套 _transcribeWithRetry(Pro 0→0.7→1.0 逐級加溫 + salvage 前綴落地)。
+              // 舊版直接 throw = 連 8642 字可救內容都丟掉(拓創.m4a 事故)。
+              if (e.code !== 'TRANSCRIBE_DEGENERATE') throw e;
+              console.warn(`[Chat] Short-audio DEGENERATE (${e.degenerateReason}) for "${originalName}", escalating to Pro retry...`);
+              sendEvent({ type: 'status', message: `轉錄輸出異常(重複迴圈),改用 Pro 模型加溫重試,約需多等 1-3 分鐘...` });
+              const r = await _transcribeWithRetry(filePath, mimeType, undefined, 1, 1, `${originalName}|short-degen`);
+              if (!r.ok) {
+                // Pro 重試全滅:第一發的可救前綴夠長就用它,別整份丟
+                if ((e.partialText || '').length > 200) {
+                  console.warn(`[Chat] Pro retry failed too, salvaging first-attempt prefix ${e.partialText.length}chars`);
+                  r.text = `${e.partialText}\n[⚠ 後半偵測到異常重複/脫稿,已自動截斷(Pro 重試亦失敗)]`;
+                } else {
+                  throw new Error(r.error || e.message);
+                }
+              }
+              transcribeResult = { text: r.text, inputTokens: r.inputTokens || 0, outputTokens: r.outputTokens || 0 };
+            }
+          }
           const transcription = transcribeResult.text;
 
           // 長 transcription(>10000 chars)寫 .txt 附件 + chat input 用 stub
