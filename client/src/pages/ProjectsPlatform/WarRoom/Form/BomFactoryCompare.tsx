@@ -46,14 +46,17 @@ export default function BomFactoryCompare({ projectId, bomInstanceId, factoryCou
     } catch (e: any) { setErr(e.message) } finally { setBusyCell(null) }
   }
 
-  async function computeAll() {
+  // 一鍵算全格:缺格模式只補缺;recomputeAll=true 全格重算(改價後刷新快取)
+  async function computeAll(recomputeAll = false) {
     if (!mx || !bomInstanceId) return
     setBusyAll(true); setErr('')
-    const missing: { cfId: number; combo: Matrix['combos'][0] }[] = []
-    for (const c of mx.combos) for (const f of mx.factories) if (!mx.cells[`${f.caseFactoryId}|${c.sig}`]) missing.push({ cfId: f.caseFactoryId, combo: c })
+    const targets: { cfId: number; combo: Matrix['combos'][0] }[] = []
+    for (const c of mx.combos) for (const f of mx.factories) {
+      if (recomputeAll || !mx.cells[`${f.caseFactoryId}|${c.sig}`]) targets.push({ cfId: f.caseFactoryId, combo: c })
+    }
     let done = 0
-    for (const m of missing) {
-      setProgress(`${++done}/${missing.length}`)
+    for (const m of targets) {
+      setProgress(`${++done}/${targets.length}`)
       try { await api.post(token, '/bom/compute', { caseFactoryId: m.cfId, bomInstanceId, valueIds: m.combo.valueIds, force: true }) }
       catch { /* 單格失敗不中斷 */ }
     }
@@ -89,13 +92,12 @@ export default function BomFactoryCompare({ projectId, bomInstanceId, factoryCou
           <span className="text-cortex-muted font-normal">(配置 {mx?.combos.length ?? '…'} × 廠 {mx?.factories.length ?? factoryCount})</span>
         </div>
         <div className="flex items-center gap-2">
-          {missingN > 0 && (
-            <button onClick={computeAll} disabled={busyAll || !bomInstanceId}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-cortex-navy text-white text-[12px] rounded hover:opacity-90 disabled:opacity-40">
-              {busyAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
-              算全部{busyAll && progress ? ` ${progress}` : `(缺 ${missingN} 格)`}
-            </button>
-          )}
+          {/* 常駐:缺格 → 補缺;全齊 → 全格重算(改價後刷新)。一鍵 = 各配置×各廠「分開」各算一價 */}
+          <button onClick={() => computeAll(missingN === 0)} disabled={busyAll || !bomInstanceId || !mx}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-cortex-navy text-white text-[12px] rounded hover:opacity-90 disabled:opacity-40">
+            {busyAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+            {busyAll && progress ? `計算中 ${progress}` : (missingN > 0 ? `算全部(缺 ${missingN} 格)` : '重算全部')}
+          </button>
           <button onClick={load} title="重新整理" className="p-1 text-cortex-muted hover:text-cortex-teal"><RefreshCw className="w-3.5 h-3.5" /></button>
         </div>
       </div>
