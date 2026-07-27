@@ -84,8 +84,15 @@ export default function BomFactoryCompare({ projectId, bomInstanceId, factoryCou
     return { globalKey, rowMin }
   }, [mx])
 
+  // 逐格精確計缺(cells 可能含無配置/舊配置快取 key,用總數相減會變負 → 重算誤判成補缺 0 格)
+  const missingN = useMemo(() => {
+    if (!mx) return 0
+    let n = 0
+    for (const c of mx.combos) for (const f of mx.factories) if (!mx.cells[`${f.caseFactoryId}|${c.sig}`]) n += 1
+    return n
+  }, [mx])
+
   if (factoryCount < 1) return null
-  const missingN = mx ? mx.combos.length * mx.factories.length - Object.keys(mx.cells).filter((k) => mx.cells[k]).length : 0
   const mixedModel = mx && mx.factories.some((f) => mx.factories.some((g) => g.costingModel !== f.costingModel))
 
   return (
