@@ -433,8 +433,10 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
           <div className="flex flex-wrap gap-1.5 text-[11px]">
             <span className="px-2 py-0.5 bg-cortex-bg border border-cortex-line rounded">料件 {importResult.itemCount}</span>
             <span className="px-2 py-0.5 bg-cortex-bg border border-cortex-line rounded">供應商 {importResult.mfgCount}</span>
-            {importResult.sections?.map((s: any) => (
-              <span key={s.category} className="px-2 py-0.5 bg-cortex-bg border border-cortex-line rounded">{s.category}: {s.itemCount}</span>
+            {importResult.sections?.map((s: any, i: number) => (
+              <span key={`${s.section || s.category}-${i}`} className="px-2 py-0.5 bg-cortex-bg border border-cortex-line rounded" title={s.category}>
+                {s.section || s.category}: {s.itemCount}
+              </span>
             ))}
           </div>
           <div className="bg-cortex-bg/60 border border-cortex-line rounded p-2.5 text-[12px]">

@@ -29,6 +29,7 @@ export default function BomFactoryCompare({ projectId, bomInstanceId, factoryCou
   const [busyCell, setBusyCell] = useState<string | null>(null)   // "cf|sig" 計算中
   const [busyAll, setBusyAll] = useState(false)
   const [progress, setProgress] = useState('')
+  const [ok, setOk] = useState('')
   const [err, setErr] = useState('')
 
   async function load() {
@@ -48,8 +49,9 @@ export default function BomFactoryCompare({ projectId, bomInstanceId, factoryCou
 
   // 一鍵算全格:缺格模式只補缺;recomputeAll=true 全格重算(改價後刷新快取)
   async function computeAll(recomputeAll = false) {
-    if (!mx || !bomInstanceId) return
-    setBusyAll(true); setErr('')
+    if (!mx) { setErr('矩陣尚未載入,請按重新整理'); return }
+    if (!bomInstanceId) { setErr('此專案尚未匯入 BOM,無法試算'); return }
+    setBusyAll(true); setErr(''); setOk('')
     const targets: { cfId: number; combo: Matrix['combos'][0] }[] = []
     for (const c of mx.combos) for (const f of mx.factories) {
       if (recomputeAll || !mx.cells[`${f.caseFactoryId}|${c.sig}`]) targets.push({ cfId: f.caseFactoryId, combo: c })
@@ -62,6 +64,7 @@ export default function BomFactoryCompare({ projectId, bomInstanceId, factoryCou
     }
     setProgress(''); setBusyAll(false); await load()
     if (fails) setErr(`${fails}/${targets.length} 格計算失敗:${firstErr}${/401|unauthor|token/i.test(firstErr) ? '(登入逾期 → 請重新登入後再試)' : ''}`)
+    else setOk(`✓ 已${recomputeAll ? '重算' : '補算'} ${targets.length} 格(數字若相同代表資料未變)`)
   }
 
   // 全域最便宜 + 每列最便宜
@@ -105,6 +108,7 @@ export default function BomFactoryCompare({ projectId, bomInstanceId, factoryCou
         </div>
       </div>
       {err && <div className="text-[11px] text-red-600 break-all">{err}</div>}
+      {ok && <div className="text-[11px] text-green-700">{ok}</div>}
 
       {mx && (
         <div className="overflow-x-auto">
