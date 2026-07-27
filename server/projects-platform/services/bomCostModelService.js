@@ -29,7 +29,11 @@ const SHEETS = [
   { sheet: 'Equipment',      table: 'bom_cs_case_equip_area',        scope: 'case' },
   { sheet: 'Facility',       table: 'bom_cs_case_facility',          scope: 'case' },
   { sheet: 'Consumable',     special: 'consumable' },   // master(factory)+case 合併分頁(FULL 用 · 見下方特殊處理)
+  { sheet: 'NRE',            special: 'nre' },          // 專案級一次性工程費(bom_nre_item · 選填)
+  { sheet: 'NRE-Config',     special: 'nreConfig' },    // NRE 模式(SEPARATE/AMORTIZED + 攤提量 · 選填)
 ];
+const NRE_COLS = ['CATEGORY', 'ITEM_NO', 'DESCRIPTION', 'QTY', 'UNIT_PRICE_QUOTE', 'UNIT_PRICE_TRUE', 'FACTORY_CODE', 'REMARK'];
+const NRE_CFG_COLS = ['NRE_MODE', 'NRE_AMORTIZE_QTY', 'AMORTIZE_SIDE'];
 const REQUIRED = {
   SIMPLIFIED_WEARABLE: ['Baseline', 'SimplifiedLine', 'QtyScenario'],
   FULL_MVA: ['Baseline', 'Process', 'IDL-Alloc', 'IDL-LineWage', 'IDL-Role', 'Equipment', 'Facility', 'Consumable'],
@@ -126,7 +130,7 @@ async function tableCols(db, table) {
 
 /** 匯出 caseFactoryId 的完整成本模型 → workbook(範本 = 匯出 fixture)*/
 async function exportCostModel(db, caseFactoryId) {
-  const cf = await db.prepare(`SELECT case_factory_id, factory_code, costing_model, baseline_id FROM bom_cs_case_factory WHERE case_factory_id=?`).get(caseFactoryId);
+  const cf = await db.prepare(`SELECT case_factory_id, case_id, factory_code, costing_model, baseline_id FROM bom_cs_case_factory WHERE case_factory_id=?`).get(caseFactoryId);
   if (!cf) throw new Error('case_factory not found');
   const baselineId = num(pick(cf, 'baseline_id'));
   const model = pick(cf, 'costing_model') || 'SIMPLIFIED_WEARABLE';
@@ -140,7 +144,20 @@ async function exportCostModel(db, caseFactoryId) {
     ['匯入:專案 BOM 區「上傳成本模型」;同專案同廠別已存在 → 擋(避免覆蓋)'],
   ]), '說明');
 
+  const projId = num(pick(cf, 'case_id'));
   for (const s of SHEETS) {
+    if (s.special === 'nre') {
+      const rows = await db.prepare(
+        `SELECT category, item_no, description, qty, unit_price_quote, unit_price_true, factory_code, remark FROM bom_nre_item WHERE project_id=? ORDER BY sort_order, id`,
+      ).all(projId).catch(() => []);
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([NRE_COLS, ...rows.map((r) => NRE_COLS.map((c) => { const v = pick(r, c); return v == null ? '' : v; }))]), s.sheet);
+      continue;
+    }
+    if (s.special === 'nreConfig') {
+      const r = await db.prepare(`SELECT nre_mode, nre_amortize_qty, amortize_side FROM bom_nre_config WHERE project_id=?`).get(projId).catch(() => null);
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([NRE_CFG_COLS, r ? NRE_CFG_COLS.map((c) => { const v = pick(r, c); return v == null ? '' : v; }) : []]), s.sheet);
+      continue;
+    }
     if (s.special === 'consumable') {
       // 合併匯出:case JOIN master(一列一耗材)
       const rows = await db.prepare(
@@ -394,6 +411,33 @@ async function importCostModel(db, { filePath, projectId, factoryCode: fcOverrid
   for (const s of SHEETS) {
     if (s.sheet === 'Baseline') continue;
     const data = sheetJson(s.sheet); if (!data || !data.length) continue;
+    if (s.special === 'nre') {
+      // 專案級 NRE:replace(範本檔為 SOT)· 一般專案/範本庫都寫在該 project 下
+      await db.prepare(`DELETE FROM bom_nre_item WHERE project_id=?`).run(projectId).catch(() => {});
+      let n = 0;
+      for (const r of data) {
+        const desc = str(pick(r, 'DESCRIPTION')); const cat = str(pick(r, 'CATEGORY'));
+        if (!desc && !cat) continue;
+        await db.prepare(
+          `INSERT INTO bom_nre_item (project_id, category, item_no, description, qty, unit_price_quote, unit_price_true, factory_code, remark, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        ).run(projectId, cat || 'OTHER', str(pick(r, 'ITEM_NO')), desc, num(pick(r, 'QTY')) ?? 1, num(pick(r, 'UNIT_PRICE_QUOTE')), num(pick(r, 'UNIT_PRICE_TRUE')), str(pick(r, 'FACTORY_CODE')), str(pick(r, 'REMARK')), (n + 1) * 10);
+        n += 1;
+      }
+      counts[s.sheet] = n;
+      continue;
+    }
+    if (s.special === 'nreConfig') {
+      const r = data[0];
+      const mode = str(pick(r, 'NRE_MODE'));
+      if (mode) {
+        const ex = await db.prepare(`SELECT project_id FROM bom_nre_config WHERE project_id=?`).get(projectId).catch(() => null);
+        const qty = num(pick(r, 'NRE_AMORTIZE_QTY')); const side = str(pick(r, 'AMORTIZE_SIDE')) || 'quote';
+        if (ex) await db.prepare(`UPDATE bom_nre_config SET nre_mode=?, nre_amortize_qty=?, amortize_side=?, updated_at=SYSTIMESTAMP WHERE project_id=?`).run(mode, qty, side, projectId);
+        else await db.prepare(`INSERT INTO bom_nre_config (project_id, nre_mode, nre_amortize_qty, amortize_side) VALUES (?,?,?,?)`).run(projectId, mode, qty, side);
+        counts[s.sheet] = 1;
+      }
+      continue;
+    }
     if (s.special === 'consumable') {
       // master upsert by (廠別, consumable_code) → case insert(製程取 PROCESS_CODE || 預設)
       let n = 0;

@@ -457,6 +457,21 @@ async function importCanonicalBom(db, opts = {}) {
   const rows = profileSvc.transformToCanonical(wb, profile);
   if (!rows.length) throw new Error(`no BOM rows parsed (profile=${profileCode} · 檢查格式/對映)`);
 
+  // 「變異軸」分頁(demo/範本自帶定義):維度 | 值1 | 值2 … → 匯入時自動建(明確定義,不違反硬擋精神)
+  const dimWs = wb.Sheets['變異軸'];
+  if (dimWs) {
+    const variantSvc0 = require('./bomVariantService');
+    const dimRows = XLSX.utils.sheet_to_json(dimWs, { header: 1, raw: true, defval: null });
+    for (let r = 1; r < dimRows.length; r++) {   // row0 = header
+      const row = dimRows[r] || [];
+      const dimCode = row[0] != null ? String(row[0]).trim() : '';
+      if (!dimCode || dimCode.startsWith('#')) continue;
+      const dimId = await variantSvc0.ensureDimension(db, projectId, dimCode);
+      for (let c = 1; c < row.length; c++) { const v = row[c] != null ? String(row[c]).trim() : ''; if (v) await variantSvc0.ensureValue(db, dimId, v); }
+    }
+    log.log(`importCanonicalBom: 變異軸分頁 → 定義同步完成`);
+  }
+
   // B-3a:變異值必須先定義(硬擋)· import 前置驗證,未定義 → 中止(不半匯入)
   const undef = await require('./bomVariantService').collectUndefinedValues(db, projectId, rows);
   if (undef.length) {
