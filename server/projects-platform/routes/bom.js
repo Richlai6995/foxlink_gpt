@@ -36,6 +36,7 @@ const nreSvc = require('../services/bomNreService');
 const quoteSvc = require('../services/bomQuoteService');
 const engine = require('../services/bomCostEngine');
 const variantSvc = require('../services/bomVariantService');
+const stageSvc = require('../services/bomStageService');
 const { canViewTrueCost, maskCostDeep } = require('../middleware/confidentialityMiddleware');
 
 const router = express.Router();
@@ -283,7 +284,9 @@ router.post('/quote/submit', asyncHandler(async (req, res) => {
   const projectId = Number(req.body.projectId), caseFactoryId = Number(req.body.caseFactoryId);
   if (!projectId || !caseFactoryId) return res.status(400).json({ error: 'projectId + caseFactoryId required' });
   try {
-    res.json({ ok: true, ...(await quoteSvc.submitQuote(getDb(), { projectId, caseFactoryId, note: req.body.note || null, userId: req.user?.id || null })) });
+    const out = await quoteSvc.submitQuote(getDb(), { projectId, caseFactoryId, note: req.body.note || null, userId: req.user?.id || null });
+    stageSvc.autoAdvanceTo(getDb(), projectId, 'RFQ_COST_REVIEW', '報價送審').catch(() => {});
+    res.json({ ok: true, ...out });
   } catch (e) { res.status(400).json({ error: e.message }); }
 }));
 
@@ -292,7 +295,9 @@ router.post('/quote/approve', asyncHandler(async (req, res) => {
   const versionId = Number(req.body.versionId);
   if (!versionId) return res.status(400).json({ error: 'versionId required' });
   try {
-    res.json({ ok: true, ...(await quoteSvc.approveQuote(getDb(), { versionId, userId: req.user?.id || null, isAdmin: req.user?.role === 'admin' })) });
+    const out = await quoteSvc.approveQuote(getDb(), { versionId, userId: req.user?.id || null, isAdmin: req.user?.role === 'admin' });
+    if (out.projectId) stageSvc.autoAdvanceTo(getDb(), out.projectId, 'SUBMIT_QUOTE', '報價核准').catch(() => {});
+    res.json({ ok: true, ...out });
   } catch (e) {
     if (e.code === 'SELF_APPROVAL_BLOCKED') return res.status(403).json({ error: e.message, code: e.code });
     throw e;
@@ -342,6 +347,7 @@ router.post('/import', upload.single('file'), asyncHandler(async (req, res) => {
       r = await importSvc.importBomTemplate(getDb(), { filePath: req.file.path, projectId, variantKey, versionNo });
     }
     const roll = await rollupSvc.rollupMaterial(getDb(), r.bomInstanceId);
+    stageSvc.autoAdvanceTo(getDb(), projectId, 'BOM_PROVIDE', 'BOM 匯入').catch(() => {});   // Stage Gate 自動推進
     res.json({ ok: true, format, profileCode, ...r, rollup: roll });
   } catch (e) {
     // B-3a:未定義變異值 → 409 + 清單(前端引導去設定)
@@ -578,6 +584,8 @@ router.post('/items/:itemId/price', asyncHandler(async (req, res) => {
   const id = reqId(req.params.itemId, res, 'itemId'); if (id === null) return;
   if (!Array.isArray(req.body.tiers) || !req.body.tiers.length) return res.status(400).json({ error: 'tiers required (>=1)' });
   const out = await enrichSvc.addPrice(getDb(), id, { mfgId: req.body.mfgId || null, flkId: req.body.flkId || null, sourceCurrency: req.body.sourceCurrency || 'USD', tiers: req.body.tiers });
+  // Stage Gate:此 instance 詢價全完成 → PARALLEL_COLLECT
+  stageSvc.pendingCountByItem(getDb(), id).then((r) => { if (r && r.pending === 0) return stageSvc.autoAdvanceTo(getDb(), r.projectId, 'PARALLEL_COLLECT', '詢價完成'); }).catch(() => {});
   res.json({ ok: true, ...out });
 }));
 
@@ -619,6 +627,9 @@ router.post('/compute', asyncHandler(async (req, res) => {
   if (req.body.force === true || req.body.force === 'true' || req.body.allowPending) opts.allowPending = true;
   try {
     const out = await engine.computeCase(getDb(), opts);
+    // Stage Gate:首次/每次試算 → BOM_COST_REVIEW(冪等)
+    getDb().prepare(`SELECT case_id FROM bom_cs_case_factory WHERE case_factory_id=?`).get(caseFactoryId)
+      .then((r) => { const pid = r && Number(Object.values(r)[0]); if (pid) return stageSvc.autoAdvanceTo(getDb(), pid, 'BOM_COST_REVIEW', '成本試算'); }).catch(() => {});
     res.json({ ok: true, runId: out.runId, costingModel: out.costingModel, costBreakdown: out.costBreakdown });
   } catch (e) {
     if (e.code === 'BOM_HAS_PENDING_PRICES') {

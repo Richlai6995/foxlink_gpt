@@ -278,6 +278,18 @@ async function _createProjectStages(db, projectId, templateId) {
       log.warn(`createStage ${s.stage_code}:`, e.message);
     }
   }
+
+  // Stage Gate(P1):第一階直接 ACTIVE(否則全 PENDING 連 advance 都推不動)+ 同步 current_stage_id
+  try {
+    const first = await db.prepare(
+      `SELECT id, sla_hours FROM project_stages WHERE project_id = ? AND stage_order = 1`,
+    ).get(projectId);
+    if (first) {
+      const dueAt = first.sla_hours ? new Date(Date.now() + Number(first.sla_hours) * 3600000) : null;
+      await db.prepare(`UPDATE project_stages SET status='ACTIVE', entered_at=SYSTIMESTAMP, sla_due_at=? WHERE id=?`).run(dueAt, Number(first.id));
+      await db.prepare(`UPDATE projects SET current_stage_id=? WHERE id=?`).run(Number(first.id), projectId);
+    }
+  } catch (e) { log.warn('activate stage1:', e.message); }
 }
 
 /**
