@@ -303,7 +303,8 @@ router.post('/quote/approve', asyncHandler(async (req, res) => {
 router.get('/quote/:versionId/pdf', asyncHandler(async (req, res) => {
   const versionId = Number(req.params.versionId);
   if (!versionId) return res.status(400).json({ error: 'versionId required' });
-  const { doc, filename } = await require('../services/bomQuotePdfService').renderQuotePdf(getDb(), versionId);
+  const lang = String(req.query.lang || 'zh').toLowerCase() === 'en' ? 'en' : 'zh';   // ?lang=en 英文版
+  const { doc, filename } = await require('../services/bomQuotePdfService').renderQuotePdf(getDb(), versionId, lang);
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
   doc.pipe(res);
