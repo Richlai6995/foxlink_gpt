@@ -73,6 +73,14 @@ export default function WarRoom() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, token, demoRole])  // demoRole 變 → 重拉(機密案 OUTSIDER 看 403)
 
+  // 同頁 BOM 動作(匯入/補價/算成本/送審/核准)完成 → 立即 reload(WS 在 dev 不穩,主動通知不靠它)
+  useEffect(() => {
+    const h = () => reload()
+    window.addEventListener('cortex:stage-refresh', h)
+    return () => window.removeEventListener('cortex:stage-refresh', h)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, token])
+
   // WebSocket — stage 推進 / lifecycle 變動時自動 reload(別人推 stage 後本機也跟上)
   const { lastEvent } = useProjectsPlatformSocket({
     projectId: project?.id || null,

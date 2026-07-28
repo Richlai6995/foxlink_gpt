@@ -40,7 +40,7 @@ export default function CostSummarySection({ project }: { project: ProjectDetail
   async function doSubmit() {
     if (!submitCf) return
     setBusy(true); setErr('')
-    try { await api.post(token, '/bom/quote/submit', { projectId, caseFactoryId: submitCf }); setSubmitCf(''); await load() }
+    try { await api.post(token, '/bom/quote/submit', { projectId, caseFactoryId: submitCf }); setSubmitCf(''); await load(); setTimeout(() => window.dispatchEvent(new CustomEvent('cortex:stage-refresh')), 600) }
     catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
   // 報價單 PDF 下載(P1 · 全 quote 側;非 APPROVED 蓋 DRAFT 浮水印;lang=zh|en)
@@ -61,7 +61,7 @@ export default function CostSummarySection({ project }: { project: ProjectDetail
 
   async function doApprove(versionId: number) {
     setBusy(true); setErr('')
-    try { await api.post(token, '/bom/quote/approve', { versionId }); await load() }
+    try { await api.post(token, '/bom/quote/approve', { versionId }); await load(); setTimeout(() => window.dispatchEvent(new CustomEvent('cortex:stage-refresh')), 600) }
     catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
 

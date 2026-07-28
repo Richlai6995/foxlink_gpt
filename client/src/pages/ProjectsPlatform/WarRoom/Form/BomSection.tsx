@@ -82,6 +82,9 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
 
   const configValueIds = Object.values(config).filter(Boolean)
 
+  // Stage Gate:BOM 動作完成 → 通知 WarRoom 立即刷 ribbon(server 推進是 fire-and-forget,延遲一拍)
+  const pokeStage = () => setTimeout(() => window.dispatchEvent(new CustomEvent('cortex:stage-refresh')), 600)
+
   // config(顏色/包裝)變 → 重抓該 config 的 rollup(EE 共用不變、ME/PKG 隨 config)
   useEffect(() => {
     if (!token || !importResult?.bomInstanceId) return
@@ -144,6 +147,7 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
       } else { setImportResult(data) }
       // 新顏色 → 刷新下拉
       api.get<{ variants: string[] }>(token, `/bom/project/${projectId}/variants`).then((r) => setVariants(r.variants || [])).catch(() => {})
+      pokeStage()
     } catch (e: any) { setErr(e.message) } finally { setImporting(false) }
   }
 
@@ -152,7 +156,7 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
     setComputing(true); setErr('')
     try {
       const r = await api.post(token, '/bom/compute', { caseFactoryId, bomInstanceId: importResult.bomInstanceId, valueIds: configValueIds, ...(force ? { force: true } : {}) })
-      setRunResult(r); setPendingGate(null)
+      setRunResult(r); setPendingGate(null); pokeStage()
     } catch (e: any) {
       // B-5a:有未詢價料件 → 409,提示可「強制試算」只算已詢價材料
       if (e instanceof ApiError && e.status === 409 && e.body?.code === 'BOM_HAS_PENDING_PRICES') {
@@ -168,7 +172,7 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
       const q = configValueIds.length ? `?valueIds=${configValueIds.join(',')}` : ''
       const roll = await api.get(token, `/bom/instances/${importResult.bomInstanceId}/rollup${q}`)
       setImportResult((prev: any) => (prev ? { ...prev, rollup: roll } : prev))
-      setPendingGate(null)
+      setPendingGate(null); pokeStage()
     } catch { /* noop */ }
   }
 
