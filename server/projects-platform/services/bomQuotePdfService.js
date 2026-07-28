@@ -108,10 +108,11 @@ async function renderQuotePdf(db, versionId, lang = 'zh') {
   const W = doc.page.width - 100;   // 內容寬
   const teal = '#0E7490', ink = '#0F172A', muted = '#64748B', line = '#E2E8F0';
 
-  // 浮水印(非正式版)
+  // 浮水印(非正式版)· text() 會推進游標且 restore() 不復原 → 畫完手動拉回頁首,否則 Header 從半頁起
   if (!isOfficial) {
     doc.save().rotate(-30, { origin: [300, 400] }).fontSize(90).fillColor('#FCA5A5').opacity(0.18)
       .text(T.draft, 60, 360, { width: 500, align: 'center' }).opacity(1).restore();
+    doc.x = 50; doc.y = 46;
   }
 
   // Header
