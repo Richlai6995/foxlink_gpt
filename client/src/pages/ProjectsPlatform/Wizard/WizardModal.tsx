@@ -14,7 +14,7 @@
  *   - 真實 PM 推薦 / 交期合理性 / priority AI(Sprint F)
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { X, Loader2, Rocket } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
@@ -43,6 +43,17 @@ export default function WizardModal({ open, onClose }: Props) {
   }))
   const [submitting, setSubmitting] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+
+  // P1 報價設定(Step 5 附掛):廠別成本模型(範本庫多選)+ 變異軸 + NRE — 建案後自動 provision
+  const [cmTemplates, setCmTemplates] = useState<any[]>([])
+  const [selTpl, setSelTpl] = useState<number[]>([])
+  const [dimText, setDimText] = useState('')          // 一行一維度:顏色=Black,White
+  const [nreMode, setNreMode] = useState<'SEPARATE' | 'AMORTIZED'>('SEPARATE')
+  const [nreQty, setNreQty] = useState('')
+  useEffect(() => {
+    if (!open || !token) return
+    api.get<{ templates: any[] }>(token, '/bom/provision/templates').then((r) => setCmTemplates(r.templates || [])).catch(() => {})
+  }, [open, token])
 
   if (!open) return null
 
@@ -101,8 +112,30 @@ export default function WizardModal({ open, onClose }: Props) {
           priorityScore: data.priorityScore,
         },
       })
+      // P1 報價設定:建案後自動 provision 廠別 / 變異軸 / NRE(單項失敗不擋進 WarRoom)
+      const pid = r.project.id
+      const warns: string[] = []
+      for (const tid of selTpl) {
+        try { await api.post(token, '/bom/provision-case', { projectId: pid, sourceCaseFactoryId: tid }) }
+        catch (e: any) { warns.push(`廠別範本 #${tid}:${e.message}`) }
+      }
+      for (const line of dimText.split('\n').map((l) => l.trim()).filter(Boolean)) {
+        const m = line.match(/^([^=:]+)[=:](.+)$/)
+        if (!m) { warns.push(`變異軸格式不對:${line}`); continue }
+        try {
+          const d = await api.post<{ dimensionId: number }>(token, `/bom/project/${pid}/dimensions`, { dimCode: m[1].trim() })
+          for (const v of m[2].split(/[,、;]/).map((x) => x.trim()).filter(Boolean)) {
+            await api.post(token, `/bom/project/${pid}/dimensions/${d.dimensionId}/values`, { valueCode: v })
+          }
+        } catch (e: any) { warns.push(`變異軸 ${m[1]}:${e.message}`) }
+      }
+      if (nreMode === 'AMORTIZED' || nreQty) {
+        try { await api.put(token, '/bom/nre/config', { projectId: pid, nreMode, nreAmortizeQty: nreQty ? Number(nreQty) : (Number(data.quantity) || null) }) }
+        catch (e: any) { warns.push(`NRE 設定:${e.message}`) }
+      }
+      if (warns.length) console.warn('[Wizard 報價設定]', warns)
       onClose()
-      navigate(`/projects-platform/projects/${r.project.id}`)
+      navigate(`/projects-platform/projects/${pid}`)
     } catch (e: any) {
       setErr(e.message || '啟動失敗')
     } finally {
@@ -144,7 +177,56 @@ export default function WizardModal({ open, onClose }: Props) {
           {step === 2 && <Step2History         data={data} onChange={patch} />}
           {step === 3 && <Step3Confidentiality data={data} onChange={patch} />}
           {step === 4 && <Step4PmTeam          data={data} onChange={patch} />}
-          {step === 5 && <Step5Workflow        data={data} onChange={patch} />}
+          {step === 5 && (
+            <>
+              <Step5Workflow data={data} onChange={patch} />
+              {/* P1 報價設定:廠別成本模型 / 變異軸 / NRE — 建案時自動帶好,免去 BOM 區拼裝 */}
+              <div className="mt-4 border border-cortex-teal/30 bg-cortex-cyan-bg/30 rounded-lg p-3 space-y-2.5">
+                <div className="text-[12px] font-bold text-cortex-ink">💰 報價設定(建案自動帶入)</div>
+                <div>
+                  <div className="text-[11px] text-cortex-muted mb-1">生產廠別 × 成本模型(範本庫 · 可多選,之後仍可在 BOM 區加)</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {cmTemplates.map((t) => {
+                      const on = selTpl.includes(t.caseFactoryId)
+                      return (
+                        <button key={t.caseFactoryId} type="button"
+                          onClick={() => setSelTpl((p) => {
+                            if (on) return p.filter((x) => x !== t.caseFactoryId)
+                            // 同廠單選(一專案一廠一模型):點同廠另一模型 = 替換
+                            const sameFactory = cmTemplates.filter((c) => c.factoryCode === t.factoryCode).map((c) => c.caseFactoryId)
+                            return [...p.filter((x) => !sameFactory.includes(x)), t.caseFactoryId]
+                          })}
+                          className={`text-[11px] px-2 py-1 rounded border ${on ? 'bg-cortex-teal text-white border-cortex-teal' : 'bg-white border-cortex-line text-cortex-muted hover:border-cortex-teal'}`}>
+                          {t.factoryCode} · {t.costingModel === 'FULL_MVA' ? 'FULL' : 'SIMP'}{t.templateLabel ? ` · ${t.templateLabel}` : ''}
+                        </button>
+                      )
+                    })}
+                    {cmTemplates.length === 0 && <span className="text-[11px] text-cortex-muted">(範本庫載入中/為空)</span>}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] text-cortex-muted mb-1">產品變異軸(一行一軸:<span className="font-mono">顏色=Black,White</span>;沒有可留空)</div>
+                  <textarea value={dimText} onChange={(e) => setDimText(e.target.value)} rows={2}
+                    placeholder={'顏色=Black,White\n包裝=Retail,WB-Suit'}
+                    className="w-full border border-cortex-line rounded px-2 py-1 text-[11px] font-mono" />
+                </div>
+                <div className="flex items-end gap-2 flex-wrap">
+                  <label className="text-[11px] text-cortex-muted">NRE 模式<br />
+                    <select value={nreMode} onChange={(e) => setNreMode(e.target.value as any)} className="border border-cortex-line rounded px-2 py-1 text-[12px]">
+                      <option value="SEPARATE">SEPARATE(另計)</option>
+                      <option value="AMORTIZED">AMORTIZED(攤入單價)</option>
+                    </select>
+                  </label>
+                  {nreMode === 'AMORTIZED' && (
+                    <label className="text-[11px] text-cortex-muted">攤提量(空=用年量)<br />
+                      <input value={nreQty} onChange={(e) => setNreQty(e.target.value)} placeholder={String(data.quantity || 100000)}
+                        className="border border-cortex-line rounded px-2 py-1 text-[12px] w-28 font-mono" />
+                    </label>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
           {step === 6 && <Step6Priority        data={data} onChange={patch} />}
           {step === 7 && <Step7Confirm         data={data} onChange={patch} />}
         </div>
