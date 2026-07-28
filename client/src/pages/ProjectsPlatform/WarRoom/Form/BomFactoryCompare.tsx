@@ -21,6 +21,7 @@ type Matrix = {
 }
 
 const money = (v: any) => (typeof v === 'number' ? `$${v.toFixed(4)}` : '—')
+const pokeStage = () => setTimeout(() => window.dispatchEvent(new CustomEvent('cortex:stage-refresh')), 600)   // ribbon 即時刷
 const comboLabel = (c: Matrix['combos'][0]) => (c.labels.length ? c.labels.map((l) => l.value).join(' · ') : '(無配置)')
 
 export default function BomFactoryCompare({ projectId, bomInstanceId, factoryCount }: { projectId: number; bomInstanceId?: number | null; factoryCount: number }) {
@@ -43,7 +44,7 @@ export default function BomFactoryCompare({ projectId, bomInstanceId, factoryCou
     setBusyCell(`${cfId}|${combo.sig}`); setErr('')
     try {
       await api.post(token, '/bom/compute', { caseFactoryId: cfId, bomInstanceId, valueIds: combo.valueIds, force: true })
-      await load()
+      await load(); pokeStage()
     } catch (e: any) { setErr(e.message) } finally { setBusyCell(null) }
   }
 
@@ -62,7 +63,7 @@ export default function BomFactoryCompare({ projectId, bomInstanceId, factoryCou
       try { await api.post(token, '/bom/compute', { caseFactoryId: m.cfId, bomInstanceId, valueIds: m.combo.valueIds, force: true }) }
       catch (e: any) { fails += 1; if (!firstErr) firstErr = e?.message || String(e) }   // 單格失敗不中斷,但要浮出
     }
-    setProgress(''); setBusyAll(false); await load()
+    setProgress(''); setBusyAll(false); await load(); pokeStage()
     if (fails) setErr(`${fails}/${targets.length} 格計算失敗:${firstErr}${/401|unauthor|token/i.test(firstErr) ? '(登入逾期 → 請重新登入後再試)' : ''}`)
     else setOk(`✓ 已${recomputeAll ? '重算' : '補算'} ${targets.length} 格(數字若相同代表資料未變)`)
   }

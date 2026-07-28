@@ -34,7 +34,7 @@ export default function CostSummarySection({ project }: { project: ProjectDetail
 
   async function recompute() {
     setBusy(true); setErr('')
-    try { await api.post(token, '/bom/compare', { projectId, force: true }); await load() }
+    try { await api.post(token, '/bom/compare', { projectId, force: true }); await load(); setTimeout(() => window.dispatchEvent(new CustomEvent('cortex:stage-refresh')), 600) }
     catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
   async function doSubmit() {

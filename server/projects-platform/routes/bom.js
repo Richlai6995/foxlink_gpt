@@ -237,7 +237,9 @@ router.post('/compare', asyncHandler(async (req, res) => {
   if (req.body.bomInstanceId) opts.bomInstanceId = Number(req.body.bomInstanceId);
   if (req.body.qtyScenarioCode) opts.qtyScenarioCode = req.body.qtyScenarioCode;
   if (req.body.force === true || req.body.force === 'true' || req.body.allowPending) opts.allowPending = true;
-  res.json(await compareSvc.compareFactories(getDb(), opts));
+  const cmp = await compareSvc.compareFactories(getDb(), opts);
+  stageSvc.autoAdvanceTo(getDb(), projectId, 'BOM_COST_REVIEW', '多廠成本重算').catch(() => {});   // Stage Gate
+  res.json(cmp);
 }));
 
 // ── Track N NRE(一次性工程費 · project 層)──────────────────────────────────
