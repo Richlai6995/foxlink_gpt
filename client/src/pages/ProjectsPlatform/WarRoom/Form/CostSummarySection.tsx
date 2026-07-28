@@ -43,6 +43,18 @@ export default function CostSummarySection({ project }: { project: ProjectDetail
     try { await api.post(token, '/bom/quote/submit', { projectId, caseFactoryId: submitCf }); setSubmitCf(''); await load() }
     catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
+  // 報價單 PDF 下載(P1 · 全 quote 側;非 APPROVED 蓋 DRAFT 浮水印)
+  async function dlPdf(versionId: number, versionNo: number) {
+    try {
+      const res = await fetch(`/api/projects/bom/quote/${versionId}/pdf`, { headers: { Authorization: `Bearer ${token}` } })
+      if (!res.ok) throw new Error(`PDF 產生失敗 (HTTP ${res.status})`)
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = url; a.download = `quotation-v${versionNo}.pdf`; a.click()
+      URL.revokeObjectURL(url)
+    } catch (e: any) { setErr(e.message) }
+  }
+
   async function doApprove(versionId: number) {
     setBusy(true); setErr('')
     try { await api.post(token, '/bom/quote/approve', { versionId }); await load() }
@@ -111,6 +123,8 @@ export default function CostSummarySection({ project }: { project: ProjectDetail
               <span>· {quote.official.factory_code}</span>
               <span className="font-mono font-bold text-cortex-teal">{money(quote.official.unit_quote_usd)}/台</span>
               <span className="text-[10px] text-cortex-muted">已核准</span>
+              <button onClick={() => dlPdf(quote.official.id, quote.official.version_no)}
+                className="ml-auto px-2 py-0.5 bg-cortex-teal text-white rounded hover:opacity-90 text-[11px]">📄 報價單 PDF</button>
             </div>
           )}
           <div className="flex items-center gap-2 flex-wrap text-[11px]">
@@ -139,7 +153,11 @@ export default function CostSummarySection({ project }: { project: ProjectDetail
                     </td>
                     <td className="px-2 py-1 text-cortex-muted">{v.submitted_by_name || v.submitted_by || '—'}</td>
                     <td className="px-2 py-1 text-cortex-muted">{v.approved_by_name || (v.status === 'SUBMITTED' ? '待核准' : '—')}</td>
-                    <td className="px-2 py-1 text-center">{v.status === 'SUBMITTED' && <button onClick={() => doApprove(v.id)} disabled={busy} className="text-[10px] text-cortex-teal hover:underline font-semibold">核准</button>}</td>
+                    <td className="px-2 py-1 text-center whitespace-nowrap">
+                      {v.status === 'SUBMITTED' && <button onClick={() => doApprove(v.id)} disabled={busy} className="text-[10px] text-cortex-teal hover:underline font-semibold mr-1">核准</button>}
+                      <button onClick={() => dlPdf(v.id, v.version_no)} title={v.status === 'APPROVED' ? '下載報價單 PDF' : '下載草稿 PDF(DRAFT 浮水印)'}
+                        className="text-[10px] text-cortex-muted hover:text-cortex-teal">📄</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

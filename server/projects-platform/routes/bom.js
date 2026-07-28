@@ -299,6 +299,17 @@ router.post('/quote/approve', asyncHandler(async (req, res) => {
   }
 }));
 
+// GET /quote/:versionId/pdf — 報價單 PDF(P1 · 全 quote 側 · 非 APPROVED 蓋 DRAFT 浮水印)
+router.get('/quote/:versionId/pdf', asyncHandler(async (req, res) => {
+  const versionId = Number(req.params.versionId);
+  if (!versionId) return res.status(400).json({ error: 'versionId required' });
+  const { doc, filename } = await require('../services/bomQuotePdfService').renderQuotePdf(getDb(), versionId);
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+  doc.pipe(res);
+  doc.end();
+}));
+
 // POST /quote/supersede — 作廢版本(admin 解鎖)(body: versionId)
 router.post('/quote/supersede', asyncHandler(async (req, res) => {
   const versionId = Number(req.body.versionId);
