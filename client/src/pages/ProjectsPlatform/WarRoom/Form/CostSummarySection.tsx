@@ -23,12 +23,35 @@ export default function CostSummarySection({ project }: { project: ProjectDetail
   const [submitCf, setSubmitCf] = useState<number | ''>('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  // P1 議價紀錄
+  const [neg, setNeg] = useState<any>(null)
+  const [negTarget, setNegTarget] = useState(''); const [negOffer, setNegOffer] = useState(''); const [negNote, setNegNote] = useState('')
 
   async function load() {
     try {
       const r = await api.get<{ factories: any[] }>(token, `/bom/summary?projectId=${projectId}`); setFactories(r.factories || [])
       const q = await api.get<any>(token, `/bom/quote?projectId=${projectId}`); setQuote(q)
+      api.get<any>(token, `/bom/negotiation?projectId=${projectId}`).then(setNeg).catch(() => {})
     } catch (e: any) { setErr(e.message); setFactories((f) => f ?? []) }
+  }
+  async function addRound() {
+    setBusy(true); setErr('')
+    try {
+      await api.post(token, '/bom/negotiation', { projectId, customerTargetUsd: negTarget || null, ourOfferUsd: negOffer || null, note: negNote || null })
+      setNegTarget(''); setNegOffer(''); setNegNote('')
+      setNeg(await api.get<any>(token, `/bom/negotiation?projectId=${projectId}`))
+    } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
+  async function updRound(id: number, outcome: string) {
+    setBusy(true); setErr('')
+    try { await api.put(token, `/bom/negotiation/${id}`, { outcome }); setNeg(await api.get<any>(token, `/bom/negotiation?projectId=${projectId}`)) }
+    catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
+  async function delRound(id: number) {
+    if (!confirm('刪除這輪議價紀錄?')) return
+    setBusy(true); setErr('')
+    try { await api.delete(token, `/bom/negotiation/${id}`); setNeg(await api.get<any>(token, `/bom/negotiation?projectId=${projectId}`)) }
+    catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
   useEffect(() => { if (token) load() }, [token, projectId])
 
@@ -173,6 +196,64 @@ export default function CostSummarySection({ project }: { project: ProjectDetail
               </tbody>
             </table>
           )}
+        </div>
+      )}
+
+      {/* P1 議價紀錄(官方版之後 · 輪次 · vs 底線 margin 走 S2 遮罩) */}
+      {quote?.official && (
+        <div className="border-t border-cortex-line pt-2 space-y-2">
+          <div className="text-[12px] font-bold text-cortex-ink">🤝 議價紀錄
+            <span className="text-[10px] text-cortex-muted font-normal ml-1.5">vs 官方報價 v{quote.official.version_no}({money(quote.official.unit_quote_usd)}/台)· 讓價成立 → 回 BOM 改價重算 → 送審新版本</span>
+          </div>
+          {neg?.rounds?.length > 0 && (
+            <table className="w-full text-[11px]">
+              <thead className="text-cortex-muted border-b border-cortex-line"><tr>
+                <th className="text-left px-2 py-1">輪</th>
+                <th className="text-right px-2 py-1">客戶目標</th>
+                <th className="text-right px-2 py-1">我方回應</th>
+                <th className="text-right px-2 py-1">差距</th>
+                <th className="text-right px-2 py-1">vs 底線</th>
+                <th className="text-center px-2 py-1">結果</th>
+                <th className="text-left px-2 py-1">備註</th>
+                <th className="w-10"></th>
+              </tr></thead>
+              <tbody>
+                {neg.rounds.map((r: any) => (
+                  <tr key={r.id} className={`border-b border-cortex-line/40 ${r.outcome === 'ACCEPTED' ? 'bg-green-50 font-semibold' : r.outcome === 'REJECTED' ? 'opacity-60' : ''}`}>
+                    <td className="px-2 py-1">R{r.round_no}{r.outcome === 'ACCEPTED' && ' 🤝'}</td>
+                    <td className="px-2 py-1 text-right font-mono">{money(r.customer_target_usd)}</td>
+                    <td className="px-2 py-1 text-right font-mono">{money(r.our_offer_usd)}</td>
+                    <td className="px-2 py-1 text-right font-mono text-cortex-muted">
+                      {typeof r.customer_target_usd === 'number' && typeof r.our_offer_usd === 'number' ? money(r.our_offer_usd - r.customer_target_usd) : '—'}
+                    </td>
+                    <td className="px-2 py-1 text-right font-mono">
+                      {typeof r.marginUsd === 'number'
+                        ? <span className={r.marginUsd < 0 ? 'text-red-600 font-semibold' : 'text-cortex-teal'}>{money(r.marginUsd)} · {pct(r.marginPct)}</span>
+                        : <span className="text-cortex-muted">▒▒▒</span>}
+                    </td>
+                    <td className="px-2 py-1 text-center">
+                      <select value={r.outcome} onChange={(e) => updRound(r.id, e.target.value)} disabled={busy}
+                        className={`text-[10px] border rounded px-1 py-0.5 ${r.outcome === 'ACCEPTED' ? 'border-green-400 text-green-700' : 'border-cortex-line text-cortex-muted'}`}>
+                        {['OPEN', 'COUNTER', 'ACCEPTED', 'REJECTED'].map((o) => <option key={o} value={o}>{o === 'OPEN' ? '進行中' : o === 'COUNTER' ? '再議' : o === 'ACCEPTED' ? '成交' : '破局'}</option>)}
+                      </select>
+                    </td>
+                    <td className="px-2 py-1 text-cortex-muted max-w-[180px] truncate" title={r.note || ''}>{r.note || '—'}</td>
+                    <td className="px-2 py-1 text-center"><button onClick={() => delRound(r.id)} disabled={busy} className="text-[10px] text-cortex-muted hover:text-red-500">✕</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <div className="flex items-end gap-1.5 flex-wrap text-[11px]">
+            <label className="text-[10px] text-cortex-muted">客戶目標/台<br />
+              <input value={negTarget} onChange={(e) => setNegTarget(e.target.value)} placeholder="95.00" className="border border-cortex-line rounded px-1.5 py-0.5 text-[11px] w-20 font-mono" /></label>
+            <label className="text-[10px] text-cortex-muted">我方回應/台<br />
+              <input value={negOffer} onChange={(e) => setNegOffer(e.target.value)} placeholder="102.00" className="border border-cortex-line rounded px-1.5 py-0.5 text-[11px] w-20 font-mono" /></label>
+            <label className="text-[10px] text-cortex-muted">備註(條件)<br />
+              <input value={negNote} onChange={(e) => setNegNote(e.target.value)} placeholder="量增至 150k / NRE 分期…" className="border border-cortex-line rounded px-1.5 py-0.5 text-[11px] w-56" /></label>
+            <button onClick={addRound} disabled={busy || (!negTarget && !negOffer)}
+              className="px-2.5 py-1 bg-cortex-navy text-white rounded hover:opacity-90 disabled:opacity-40 text-[11px]">＋ 記一輪</button>
+          </div>
         </div>
       )}
 

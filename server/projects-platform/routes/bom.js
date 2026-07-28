@@ -306,6 +306,75 @@ router.post('/quote/approve', asyncHandler(async (req, res) => {
   }
 }));
 
+// ── P1 議價紀錄(定版後輪次 · vs 底線 margin 走 S2 遮罩)────────────────────
+// GET /negotiation?projectId= — 輪次列表 + 對照官方版(quote/true)
+router.get('/negotiation', asyncHandler(async (req, res) => {
+  const projectId = Number(req.query.projectId);
+  if (!projectId) return res.status(400).json({ error: 'projectId required' });
+  const db = getDb();
+  const official = await db.prepare(
+    `SELECT id, version_no, factory_code, unit_quote_usd, unit_true_usd FROM bom_quote_version
+      WHERE project_id=? AND status='APPROVED' ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`,
+  ).get(projectId).catch(() => null);
+  const rows = await db.prepare(
+    `SELECT n.id, n.round_no, n.quote_version_id, n.customer_target_usd, n.our_offer_usd, n.outcome, n.note, n.created_at,
+            u.name AS created_by_name
+       FROM bom_negotiation_round n LEFT JOIN users u ON u.id = n.created_by
+      WHERE n.project_id=? ORDER BY n.round_no`,
+  ).all(projectId).catch(() => []);
+  const trueUsd = official ? Number(official.unit_true_usd) : null;
+  const rounds = rows.map((r) => ({
+    ...r,
+    // vs 底線(true):S2 wrapper 依欄名(marginUsd/marginPct)對非全視角自動砍
+    marginUsd: (trueUsd != null && r.our_offer_usd != null) ? Number(r.our_offer_usd) - trueUsd : null,
+    marginPct: (trueUsd != null && r.our_offer_usd != null && Number(r.our_offer_usd) > 0) ? (Number(r.our_offer_usd) - trueUsd) / Number(r.our_offer_usd) : null,
+  }));
+  res.json({ projectId, official, rounds });
+}));
+
+// POST /negotiation — 新增一輪(body: projectId, customerTargetUsd?, ourOfferUsd?, note?, outcome?)
+router.post('/negotiation', asyncHandler(async (req, res) => {
+  const projectId = Number(req.body.projectId);
+  if (!projectId) return res.status(400).json({ error: 'projectId required' });
+  if (req.body.customerTargetUsd == null && req.body.ourOfferUsd == null) return res.status(400).json({ error: '至少填 客戶目標價 或 我方回應價' });
+  const db = getDb();
+  const official = await db.prepare(
+    `SELECT id FROM bom_quote_version WHERE project_id=? AND status='APPROVED' ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`,
+  ).get(projectId).catch(() => null);
+  const mx = await db.prepare(`SELECT NVL(MAX(round_no),0) AS m FROM bom_negotiation_round WHERE project_id=?`).get(projectId);
+  const roundNo = Number(Object.values(mx)[0]) + 1;
+  await db.prepare(
+    `INSERT INTO bom_negotiation_round (project_id, quote_version_id, round_no, customer_target_usd, our_offer_usd, outcome, note, created_by)
+     VALUES (?,?,?,?,?,?,?,?)`,
+  ).run(projectId, official ? Number(official.id) : null, roundNo,
+    req.body.customerTargetUsd != null && req.body.customerTargetUsd !== '' ? Number(req.body.customerTargetUsd) : null,
+    req.body.ourOfferUsd != null && req.body.ourOfferUsd !== '' ? Number(req.body.ourOfferUsd) : null,
+    ['OPEN', 'COUNTER', 'ACCEPTED', 'REJECTED'].includes(req.body.outcome) ? req.body.outcome : 'OPEN',
+    req.body.note ? String(req.body.note).slice(0, 1000) : null, req.user?.id || null);
+  res.json({ ok: true, roundNo });
+}));
+
+// PUT /negotiation/:id — 改結果/備註(body: outcome?, note?, ourOfferUsd?, customerTargetUsd?)
+router.put('/negotiation/:id', asyncHandler(async (req, res) => {
+  const id = reqId(req.params.id, res); if (id === null) return;
+  const sets = [], binds = [];
+  if (['OPEN', 'COUNTER', 'ACCEPTED', 'REJECTED'].includes(req.body.outcome)) { sets.push('outcome=?'); binds.push(req.body.outcome); }
+  if ('note' in req.body) { sets.push('note=?'); binds.push(req.body.note ? String(req.body.note).slice(0, 1000) : null); }
+  if ('ourOfferUsd' in req.body) { sets.push('our_offer_usd=?'); binds.push(req.body.ourOfferUsd === '' || req.body.ourOfferUsd == null ? null : Number(req.body.ourOfferUsd)); }
+  if ('customerTargetUsd' in req.body) { sets.push('customer_target_usd=?'); binds.push(req.body.customerTargetUsd === '' || req.body.customerTargetUsd == null ? null : Number(req.body.customerTargetUsd)); }
+  if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
+  binds.push(id);
+  await getDb().prepare(`UPDATE bom_negotiation_round SET ${sets.join(', ')} WHERE id=?`).run(...binds);
+  res.json({ ok: true });
+}));
+
+// DELETE /negotiation/:id
+router.delete('/negotiation/:id', asyncHandler(async (req, res) => {
+  const id = reqId(req.params.id, res); if (id === null) return;
+  await getDb().prepare(`DELETE FROM bom_negotiation_round WHERE id=?`).run(id);
+  res.json({ ok: true, deleted: id });
+}));
+
 // GET /quote/:versionId/pdf — 報價單 PDF(P1 · 全 quote 側 · 非 APPROVED 蓋 DRAFT 浮水印)
 router.get('/quote/:versionId/pdf', asyncHandler(async (req, res) => {
   const versionId = Number(req.params.versionId);
