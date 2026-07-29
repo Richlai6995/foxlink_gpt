@@ -281,14 +281,14 @@ async function persistRun(db, { caseFactoryId, factoryCode, costingModel, cells,
   const sigBind = sig || '_NONE_';
 
   // 1. 冪等:archive 舊 ready run(同廠別 + 同 config 才 archive → 不同 config 各留一筆)
-  await run(`UPDATE bom_cs_run SET status='archived' WHERE case_factory_id=? AND NVL(variant_value_ids,'_NONE_')=? AND status='ready'`, caseFactoryId, sigBind);
+  await run(`UPDATE bom_cs_run SET status='archived' WHERE case_factory_id=? AND NVL(variant_value_ids,'_NONE_')=? AND NVL(qty_scenario_code,'BASE')=? AND status='ready'`, caseFactoryId, sigBind, scenario);
 
   // 2. run header(wrapper RETURNING 只認 'id' 欄 → run_id 拿不到 → MAX 回讀 · compute 非高並發)
   await run(
-    `INSERT INTO bom_cs_run (case_factory_id, status, compute_engine, raw_inputs_json, computed_by, variant_value_ids) VALUES (?, 'ready', ?, ?, ?, ?)`,
-    caseFactoryId, 'bomCostEngine@S1', rawInputs ? JSON.stringify(rawInputs) : null, computedBy || null, sig || null,
+    `INSERT INTO bom_cs_run (case_factory_id, status, compute_engine, raw_inputs_json, computed_by, variant_value_ids, qty_scenario_code) VALUES (?, 'ready', ?, ?, ?, ?, ?)`,
+    caseFactoryId, 'bomCostEngine@S1', rawInputs ? JSON.stringify(rawInputs) : null, computedBy || null, sig || null, scenario,
   );
-  const runId = Number(val(await get(`SELECT MAX(run_id) AS id FROM bom_cs_run WHERE case_factory_id=? AND NVL(variant_value_ids,'_NONE_')=?`, caseFactoryId, sigBind)));
+  const runId = Number(val(await get(`SELECT MAX(run_id) AS id FROM bom_cs_run WHERE case_factory_id=? AND NVL(variant_value_ids,'_NONE_')=? AND NVL(qty_scenario_code,'BASE')=?`, caseFactoryId, sigBind, scenario)));
 
   // 3. run_cell:先按 (scenario, process, component) 聚合(SIMPLIFIED 多 line → 同 component 免撞 PK)
   const agg = new Map();

@@ -899,9 +899,10 @@ router.get('/case/:caseFactoryId/latest-run', asyncHandler(async (req, res) => {
   const cf = Number(req.params.caseFactoryId);
   if (!cf) return res.status(400).json({ error: 'caseFactoryId required' });
   const sig = String(req.query.valueIds || '').split(',').map(Number).filter(Boolean).sort((a, b) => a - b).join(',');
+  const qty = String(req.query.qty || 'BASE');   // v0.16 #8:qty scenario 軸(預設 BASE · 既有 run NULL=BASE)
   const row = await getDb().prepare(
-    `SELECT run_id FROM bom_cs_run WHERE case_factory_id = ? AND NVL(variant_value_ids,'_NONE_') = ? ORDER BY run_id DESC FETCH FIRST 1 ROWS ONLY`,   // Oracle ''=NULL → sentinel
-  ).get(cf, sig || '_NONE_').catch(() => null);
+    `SELECT run_id FROM bom_cs_run WHERE case_factory_id = ? AND NVL(variant_value_ids,'_NONE_') = ? AND NVL(qty_scenario_code,'BASE') = ? ORDER BY run_id DESC FETCH FIRST 1 ROWS ONLY`,   // Oracle ''=NULL → sentinel
+  ).get(cf, sig || '_NONE_', qty).catch(() => null);
   if (!row) return res.json({ runId: null });
   const out = await engine.loadPersistedRun(getDb(), Number(row.run_id));
   if (!out) return res.json({ runId: null });

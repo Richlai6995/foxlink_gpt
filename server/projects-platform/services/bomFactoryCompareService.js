@@ -78,12 +78,23 @@ async function getMatrix(db, { projectId }) {
   }
   combos = combos.map((c) => ({ ...c, sig: [...c.valueIds].sort((a, b) => a - b).join(',') }));
 
+  // v0.16 #8:qty scenario 軸(distinct scenario code · BASE 排最前;無資料 → ['BASE'])
+  let qtyScenarios = ['BASE'];
+  if (factories.length) {
+    const ph0 = factories.map(() => '?').join(',');
+    const qs = await db.prepare(
+      `SELECT DISTINCT scenario_code FROM bom_cs_case_qty_scenario WHERE case_factory_id IN (${ph0})`,
+    ).all(...factories.map((f) => f.caseFactoryId)).catch(() => []);
+    const codes = qs.map((r) => String(Object.values(r)[0])).filter(Boolean);
+    if (codes.length) qtyScenarios = ['BASE', ...codes.filter((c) => c !== 'BASE').sort()];
+  }
+
   // 快取:各 (cf, sig) 的 ready run + result(persistRun archive 保證每組合最多一筆 ready)
   const cells = {};
   if (factories.length) {
     const ph = factories.map(() => '?').join(',');
     const rows = await db.prepare(
-      `SELECT run.case_factory_id, NVL(run.variant_value_ids,'') AS sig, run.run_id, run.computed_at,
+      `SELECT run.case_factory_id, NVL(run.variant_value_ids,'') AS sig, NVL(run.qty_scenario_code,'BASE') AS qty_code, run.run_id, run.computed_at,
               rr.material_quote_usd, rr.material_true_usd, rr.mva_usd, rr.sga_usd, rr.profit_amount_usd,
               rr.nre_per_unit_quote_usd, rr.nre_per_unit_true_usd
          FROM bom_cs_run run JOIN bom_cs_run_result rr ON rr.run_id = run.run_id
@@ -95,14 +106,15 @@ async function getMatrix(db, { projectId }) {
       const nreQ = num(pick(r, 'nre_per_unit_quote_usd')), nreT = num(pick(r, 'nre_per_unit_true_usd'));
       const total = mat + mva + sga + profit + nreQ;
       const totalTrue = matT + mva + sga + profit + nreT;
-      cells[`${num(pick(r, 'case_factory_id'))}|${pick(r, 'sig') || ''}`] = {
+      cells[`${num(pick(r, 'case_factory_id'))}|${pick(r, 'sig') || ''}|${pick(r, 'qty_code') || 'BASE'}`] = {
         runId: num(pick(r, 'run_id')), total, totalTrue,
         marginUsd: total - totalTrue, marginPct: total > 0 ? (total - totalTrue) / total : 0,
+        material: mat, materialTrue: matT, mva, sga, profit, nreQuote: nreQ,
         computedAt: pick(r, 'computed_at'),
       };
     }
   }
-  return { projectId, factories, dimensions: dims.map((d) => ({ dimCode: d.dimCode, values: d.values.map((v) => v.valueCode) })), combos, cells };
+  return { projectId, factories, qtyScenarios, dimensions: dims.map((d) => ({ dimCode: d.dimCode, values: d.values.map((v) => v.valueCode) })), combos, cells };
 }
 
 module.exports = { compareFactories, getMatrix };

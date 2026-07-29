@@ -16,8 +16,9 @@ import { BarChart3, Loader2, Crown, Play, RefreshCw } from 'lucide-react'
 type Cell = { runId: number; total: number; totalTrue: number; marginUsd: number; marginPct: number; computedAt?: string }
 type Matrix = {
   factories: { caseFactoryId: number; factoryCode: string; costingModel: string }[]
+  qtyScenarios?: string[]
   combos: { sig: string; valueIds: number[]; labels: { dim: string; value: string }[] }[]
-  cells: Record<string, Cell>
+  cells: Record<string, Cell & { material?: number; mva?: number; sga?: number; profit?: number; nreQuote?: number }>
 }
 
 const money = (v: any) => (typeof v === 'number' ? `$${v.toFixed(4)}` : '—')
@@ -32,6 +33,8 @@ export default function BomFactoryCompare({ projectId, bomInstanceId, factoryCou
   const [progress, setProgress] = useState('')
   const [ok, setOk] = useState('')
   const [err, setErr] = useState('')
+  const [activeQty, setActiveQty] = useState('BASE')   // v0.16 #8:qty scenario 軸
+  const [showBreak, setShowBreak] = useState(false)    // cell 分解列(MVA/材料/SGA+P/NRE)
 
   async function load() {
     try { setMx(await api.get<Matrix>(token, `/bom/project/${projectId}/matrix`)) }
@@ -43,7 +46,7 @@ export default function BomFactoryCompare({ projectId, bomInstanceId, factoryCou
     if (!bomInstanceId) { setErr('先匯入 BOM 才能試算'); return }
     setBusyCell(`${cfId}|${combo.sig}`); setErr('')
     try {
-      await api.post(token, '/bom/compute', { caseFactoryId: cfId, bomInstanceId, valueIds: combo.valueIds, force: true })
+      await api.post(token, '/bom/compute', { caseFactoryId: cfId, bomInstanceId, valueIds: combo.valueIds, qtyScenarioCode: activeQty, force: true })
       await load(); pokeStage()
     } catch (e: any) { setErr(e.message) } finally { setBusyCell(null) }
   }
@@ -55,12 +58,12 @@ export default function BomFactoryCompare({ projectId, bomInstanceId, factoryCou
     setBusyAll(true); setErr(''); setOk('')
     const targets: { cfId: number; combo: Matrix['combos'][0] }[] = []
     for (const c of mx.combos) for (const f of mx.factories) {
-      if (recomputeAll || !mx.cells[`${f.caseFactoryId}|${c.sig}`]) targets.push({ cfId: f.caseFactoryId, combo: c })
+      if (recomputeAll || !mx.cells[`${f.caseFactoryId}|${c.sig}|${activeQty}`]) targets.push({ cfId: f.caseFactoryId, combo: c })
     }
     let done = 0, fails = 0, firstErr = ''
     for (const m of targets) {
       setProgress(`${++done}/${targets.length}`)
-      try { await api.post(token, '/bom/compute', { caseFactoryId: m.cfId, bomInstanceId, valueIds: m.combo.valueIds, force: true }) }
+      try { await api.post(token, '/bom/compute', { caseFactoryId: m.cfId, bomInstanceId, valueIds: m.combo.valueIds, qtyScenarioCode: activeQty, force: true }) }
       catch (e: any) { fails += 1; if (!firstErr) firstErr = e?.message || String(e) }   // 單格失敗不中斷,但要浮出
     }
     setProgress(''); setBusyAll(false); await load(); pokeStage()
@@ -76,22 +79,22 @@ export default function BomFactoryCompare({ projectId, bomInstanceId, factoryCou
     for (const c of mx.combos) {
       let rmin = Infinity
       for (const f of mx.factories) {
-        const cell = mx.cells[`${f.caseFactoryId}|${c.sig}`]
+        const cell = mx.cells[`${f.caseFactoryId}|${c.sig}|${activeQty}`]
         if (cell && cell.total < rmin) rmin = cell.total
-        if (cell && cell.total < globalMin) { globalMin = cell.total; globalKey = `${f.caseFactoryId}|${c.sig}` }
+        if (cell && cell.total < globalMin) { globalMin = cell.total; globalKey = `${f.caseFactoryId}|${c.sig}|${activeQty}` }
       }
       rowMin[c.sig] = rmin
     }
     return { globalKey, rowMin }
-  }, [mx])
+  }, [mx, activeQty])
 
   // 逐格精確計缺(cells 可能含無配置/舊配置快取 key,用總數相減會變負 → 重算誤判成補缺 0 格)
   const missingN = useMemo(() => {
     if (!mx) return 0
     let n = 0
-    for (const c of mx.combos) for (const f of mx.factories) if (!mx.cells[`${f.caseFactoryId}|${c.sig}`]) n += 1
+    for (const c of mx.combos) for (const f of mx.factories) if (!mx.cells[`${f.caseFactoryId}|${c.sig}|${activeQty}`]) n += 1
     return n
-  }, [mx])
+  }, [mx, activeQty])
 
   if (factoryCount < 1) return null
   const mixedModel = mx && mx.factories.some((f) => mx.factories.some((g) => g.costingModel !== f.costingModel))
@@ -101,7 +104,18 @@ export default function BomFactoryCompare({ projectId, bomInstanceId, factoryCou
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="text-[12px] font-semibold text-cortex-ink flex items-center gap-1.5">
           <BarChart3 className="w-4 h-4 text-cortex-teal" /> 多廠矩陣
-          <span className="text-cortex-muted font-normal">(配置 {mx?.combos.length ?? '…'} × 廠 {mx?.factories.length ?? factoryCount})</span>
+          <span className="text-cortex-muted font-normal">(配置 {mx?.combos.length ?? '…'} × 廠 {mx?.factories.length ?? factoryCount}{(mx?.qtyScenarios?.length || 1) > 1 ? ` × 量 ${mx?.qtyScenarios?.length}` : ''})</span>
+          {(mx?.qtyScenarios?.length || 0) > 1 && (
+            <span className="flex items-center gap-1 ml-2">
+              {mx!.qtyScenarios!.map((q) => (
+                <button key={q} onClick={() => setActiveQty(q)}
+                  className={`px-1.5 py-0.5 rounded text-[10px] border ${activeQty === q ? 'bg-cortex-teal text-white border-cortex-teal' : 'bg-white border-cortex-line text-cortex-muted'}`}>{q}</button>
+              ))}
+            </span>
+          )}
+          <label className="flex items-center gap-1 text-[10px] text-cortex-muted ml-2 cursor-pointer">
+            <input type="checkbox" checked={showBreak} onChange={(e) => setShowBreak(e.target.checked)} /> 分解
+          </label>
         </div>
         <div className="flex items-center gap-2">
           {/* 常駐:缺格 → 補缺;全齊 → 全格重算(改價後刷新)。一鍵 = 各配置×各廠「分開」各算一價 */}
@@ -140,7 +154,7 @@ export default function BomFactoryCompare({ projectId, bomInstanceId, factoryCou
                       : <span className="text-cortex-muted">(無配置)</span>}
                   </td>
                   {mx.factories.map((f) => {
-                    const key = `${f.caseFactoryId}|${c.sig}`
+                    const key = `${f.caseFactoryId}|${c.sig}|${activeQty}`
                     const cell = mx.cells[key]
                     const isRowMin = cell && mx.factories.length > 1 && cell.total === marks.rowMin[c.sig]
                     const isGlobal = key === marks.globalKey
@@ -150,6 +164,13 @@ export default function BomFactoryCompare({ projectId, bomInstanceId, factoryCou
                           <span title={`${cell.totalTrue != null ? `true ${money(cell.totalTrue)} · margin ${money(cell.marginUsd)} · ` : ''}run#${cell.runId}`}>
                             {isGlobal && <Crown className="w-3 h-3 inline text-amber-500 mr-0.5" />}
                             {money(cell.total)}
+                            {showBreak && (
+                              <span className="block text-[8.5px] leading-tight text-cortex-muted font-normal text-right mt-0.5">
+                                M {money(cell.material)}<br />MVA {money(cell.mva)}<br />S+P {money((cell.sga || 0) + (cell.profit || 0))}
+                                {typeof cell.nreQuote === 'number' && cell.nreQuote > 0 && <><br />NRE {money(cell.nreQuote)}</>}
+                                {cell.totalTrue != null && <><br /><span className={cell.marginUsd! < 0 ? 'text-red-500' : 'text-cortex-teal'}>Mg {money(cell.marginUsd)}</span></>}
+                              </span>
+                            )}
                           </span>
                         ) : busyCell === key ? (
                           <Loader2 className="w-3 h-3 inline animate-spin text-cortex-muted" />

@@ -53,7 +53,7 @@ async function _buildCtx(db, projectId) {
     const mx = await require('./bomFactoryCompareService').getMatrix(db, { projectId });
     const total = (mx.combos || []).length * (mx.factories || []).length;
     let f = 0;
-    for (const c of mx.combos || []) for (const fa of mx.factories || []) if (mx.cells[`${fa.caseFactoryId}|${c.sig}`]) f += 1;
+    for (const c of mx.combos || []) for (const fa of mx.factories || []) if (mx.cells[`${fa.caseFactoryId}|${c.sig}|BASE`]) f += 1;   // BASE 口徑(#8)
     ctx.matrixFull = total > 0 && f >= total;
   } catch (_) { /* noop */ }
   const qv = await g(`SELECT SUM(CASE WHEN status='SUBMITTED' THEN 1 ELSE 0 END) AS s, SUM(CASE WHEN status='APPROVED' THEN 1 ELSE 0 END) AS a FROM bom_quote_version WHERE project_id=?`, projectId);

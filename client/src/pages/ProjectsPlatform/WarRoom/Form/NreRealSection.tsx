@@ -42,6 +42,16 @@ export default function NreRealSection({ project }: { project: ProjectDetail }) 
   async function saveNeg(id: number) {
     const v = negEdit[id]
     if (v === undefined) return
+    // 防呆:議價後 < 原價 10% 多半是把千元打成元(13600 → 12)→ 跳確認
+    const it = (data?.rollup?.items || []).find((x: any) => x.id === id)
+    const orig = Number(it?.unit_price_quote)
+    const nv = v === '' ? null : Number(v)
+    if (nv != null && Number.isFinite(orig) && orig > 0 && nv > 0 && nv < orig * 0.1) {
+      if (!confirm(`確定議價到 $${nv.toLocaleString()}?\n原價 $${orig.toLocaleString()} 的 ${((nv / orig) * 100).toFixed(1)}% —— 欄位單位是「單價」,不是千元。`)) {
+        setNegEdit((p) => { const n = { ...p }; delete n[id]; return n })
+        return
+      }
+    }
     setBusy(true); setErr('')
     try {
       await api.put(token, `/bom/nre/item/${id}`, { unitPriceNegotiated: v === '' ? '' : Number(v) })

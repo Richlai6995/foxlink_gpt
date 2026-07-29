@@ -107,7 +107,7 @@ const SECTION_DEFS = [
         const total = (mx.combos || []).length * (mx.factories || []).length;
         if (!total) return { filled: 0, total: 0 };
         let f = 0;
-        for (const c of mx.combos) for (const fa of mx.factories) if (mx.cells[`${fa.caseFactoryId}|${c.sig}`]) f += 1;
+        for (const c of mx.combos) for (const fa of mx.factories) if (mx.cells[`${fa.caseFactoryId}|${c.sig}|BASE`]) f += 1;   // BASE 口徑(#8 key 擴 qty)
         return { filled: f, total };
       } catch (_) { return { filled: 0, total: 0 }; }
     },
