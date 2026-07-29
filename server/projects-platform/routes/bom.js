@@ -679,6 +679,35 @@ router.get('/instances/:id/items', asyncHandler(async (req, res) => {
   res.json({ count: items.length, items });
 }));
 
+// GET /instances/:id/sourcing — 採購策略總覽(v0.16 #4):每料 chosen vendor + price 一覽
+router.get('/instances/:id/sourcing', asyncHandler(async (req, res) => {
+  const id = reqId(req.params.id, res); if (id === null) return;
+  const rows = await getDb().prepare(
+    `SELECT sec.module_category, c.name AS category, i.customer_item AS item_no,
+            NVL(ff.flk_part_number, i.fpn) AS fpn, i.description, i.qty,
+            ch.applied_price_usd AS price, (i.qty * ch.applied_price_usd) AS extended,
+            m.manufacturer_name AS vendor, m.mfg_part_number AS mfg_pn,
+            (SELECT COUNT(*) FROM bom_item_mfg mm WHERE mm.bom_item_id = i.id) AS vendor_count
+       FROM bom_item i
+       LEFT JOIN bom_item_flk ff ON ff.id = i.final_flk_id
+       JOIN bom_category c ON c.id = i.bom_category_id
+       JOIN bom_section sec ON sec.id = c.bom_section_id
+       LEFT JOIN (
+         SELECT s.bom_item_id, s.applied_price_usd, s.bom_item_mfg_id,
+                ROW_NUMBER() OVER (PARTITION BY s.bom_item_id ORDER BY s.applied_price_usd, s.id) AS rn
+           FROM bom_item_price_snapshot s WHERE s.is_chosen = 1
+       ) ch ON ch.bom_item_id = i.id AND ch.rn = 1
+       LEFT JOIN bom_item_mfg m ON m.id = ch.bom_item_mfg_id
+      WHERE sec.bom_instance_id = ?
+      ORDER BY sec.display_order, c.display_order,
+               REGEXP_SUBSTR(i.customer_item, '^\\D*'),
+               TO_NUMBER(REGEXP_SUBSTR(i.customer_item, '\\d+')),
+               i.customer_item, i.item_sequence`,
+  ).all(id).catch(() => []);
+  const singleSource = rows.filter((r) => Number(r.vendor_count) === 1).length;
+  res.json({ count: rows.length, singleSource, items: rows });
+}));
+
 // PUT /items/batch — 批次存回主列欄位(Item No/描述/料號/Qty/Remark)· 前端「存檔」按鈕
 // body: { items:[{ id, itemNo?, description?, fpn?, qty?, remark? }] } · 只更新有帶的欄位
 router.put('/items/batch', asyncHandler(async (req, res) => {

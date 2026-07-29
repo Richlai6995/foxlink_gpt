@@ -17,6 +17,7 @@ import { api, ApiError } from '../../api'
 import { useAuth } from '../../../../context/AuthContext'
 import { Download, Upload, Calculator, Loader2, CheckCircle2, AlertCircle, Info, Settings, Factory, Layers, ChevronDown, ChevronUp } from 'lucide-react'
 import BomItemsPanel from './BomItemsPanel'
+import { BomMetaCard, SourcingOverview } from './BomMetaCard'
 import BomFactoryCompare from './BomFactoryCompare'
 import BomVariantSetup from './BomVariantSetup'
 
@@ -371,6 +372,9 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
         </div>
       )}
 
+      {/* v0.16 #4:BOM 案級欄(ECN/lock/客供料) */}
+      <BomMetaCard projectId={projectId} />
+
       {/* ① 下載範本 */}
       <div className="flex items-center justify-between bg-cortex-bg/40 border border-cortex-line rounded-lg p-3">
         <div className="text-[12px]">
@@ -458,6 +462,9 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
 
           {/* B-5b 採購 enrich:料件明細(R-3 樹狀 · 跟產品配置連動 resolve) */}
           <BomItemsPanel bomInstanceId={importResult.bomInstanceId} configValueIds={configValueIds} onChanged={refreshRollup} />
+
+          {/* v0.16 #4:採購策略總覽(chosen vendor/price 一覽 + 單一來源風險) */}
+          <SourcingOverview bomInstanceId={importResult.bomInstanceId} />
 
           {/* ④ 算成本 */}
           {hasCase ? (

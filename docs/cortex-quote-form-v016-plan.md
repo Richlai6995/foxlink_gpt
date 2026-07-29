@@ -21,8 +21,8 @@
 | 0 | **基礎設施** | form 欄位 GET/PUT API(data_payload.form)+ 完成度計算 service + sidebar 完成度徽章 | ✅ 0cafca5 |
 | 1 | 客戶資料 | 8 欄可編輯(客戶名稱/別名/統編/ERP 代號/PO 號/付款條件/收貨地址/採購窗口) | ✅ 0cafca5 |
 | 2 | 🎬 操作流程 | 26 步 checklist(Stage 4–7)+ action 跳轉 + 自動完成判定 + **附圖上傳** | ✅ cc8bf4e |
-| 3 | CMF 變體 | 變異值 share%/qty + 加權平均料成本(接現有變異軸) | ⬜ |
-| 4 | BOM 結構(案級欄) | ECN 版本/BOM lock 狀態/客供料(有無+明細)/採購策略總覽視圖(樹已有) | ⬜ |
+| 3 | CMF 變體 | 變異值 share%/qty + 加權平均料成本(接現有變異軸) | ✅ d4973f7 |
+| 4 | BOM 結構(案級欄) | ECN 版本/BOM lock 狀態/客供料(有無+明細)/採購策略總覽視圖(樹已有) | ✅ 見 git log |
 | 5 | 包裝 BOM | per-item true/quote/markup 視圖 + Pallet Compliance 欄(商包/工包=包裝變異值,已有) | ⬜ |
 | 6 | ~~詢價彙總~~ | 不做(D6) | ✂️ |
 | 7 | NRE 成本 | Original vs Negotiated 雙欄 + 議價削減 %(接議價紀錄語意) | ⬜ |
