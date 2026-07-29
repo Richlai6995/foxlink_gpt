@@ -27,9 +27,9 @@
 | 6 | ~~詢價彙總~~ | 不做(D6) | ✂️ |
 | 7 | NRE 成本 | Original vs Negotiated 雙欄 + 議價削減 %(接議價紀錄語意) | ✅ dcf52b4 |
 | 8 | 多廠矩陣 v0.7 | **qty scenario 軸**(cell key 擴充)+ cell 分解列(MVA/材料/SGA/Total/Margin)+ toggle(qty/pkg/true/margin) | ✅ 93838bc |
-| 9 | Cleansheet 檢視 | 9 cost component × 9 process 矩陣 + baseline bar + KPI 卡 + step trace(資料全有,純檢視 UI) | ✅ |
-| 10 | MVA 操作流程 | Phase A–G(素材/步驟/兩案差異/DB 表)教學段 + PPTX 手冊連結 | ⬜ |
-| 11 | Margin Analysis | 24-cell margin heatmap + Top Markup Items per PKG + VIEW_TRUE_COST 閘 | ⬜ |
+| 9 | Cleansheet 檢視 | 9 cost component × 9 process 矩陣 + baseline bar + KPI 卡 + step trace(資料全有,純檢視 UI) | ✅ d9af738 |
+| 10 | MVA 操作流程 | Phase A–G(素材/步驟/兩案差異/DB 表)教學段 + PPTX 手冊連結 | ✅ |
+| 11 | Margin Analysis | 24-cell margin heatmap + Top Markup Items per PKG + VIEW_TRUE_COST 閘 | ✅ |
 | 12 | 成本核算(補) | 建議售價/毛利率/年營收摘要卡(其餘已有:定版/議價/AI 比對) | ⬜ |
 | 13 | 議價策略 | 10 欄(底線毛利率/輪次(自動)/競品價/議價空間/過往折讓/筆記/贏單機率/最低可接受價/量價條件/特殊條件)+ AI 輔助填 | ⬜ |
 | 14 | ~~法務 review~~ | 不做(舊 RFQ 流程) | ✂️ |

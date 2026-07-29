@@ -377,6 +377,33 @@ router.get('/case/:caseFactoryId/cleansheet', asyncHandler(async (req, res) => {
   });
 }));
 
+// GET /instances/:id/top-markup?limit= — Top Markup 料件(v0.16 #11 · markup 高→低)
+router.get('/instances/:id/top-markup', asyncHandler(async (req, res) => {
+  const id = reqId(req.params.id, res); if (id === null) return;
+  const limit = Math.min(Number(req.query.limit) || 10, 50);
+  const rows = await getDb().prepare(
+    `SELECT sec.module_category, i.customer_item AS item_no, i.description, i.qty,
+            ch.applied_price_usd AS quote_price, t.true_cost_usd, t.markup_pct,
+            (i.qty * (ch.applied_price_usd - t.true_cost_usd)) AS markup_ext
+       FROM bom_item i
+       JOIN bom_category c ON c.id = i.bom_category_id
+       JOIN bom_section sec ON sec.id = c.bom_section_id
+       JOIN (
+         SELECT s.id AS snap_id, s.bom_item_id, s.applied_price_usd,
+                ROW_NUMBER() OVER (PARTITION BY s.bom_item_id ORDER BY s.applied_price_usd, s.id) AS rn
+           FROM bom_item_price_snapshot s WHERE s.is_chosen = 1
+       ) ch ON ch.bom_item_id = i.id AND ch.rn = 1
+       JOIN (
+         SELECT snapshot_id, MAX(true_cost_usd) AS true_cost_usd, MAX(markup_pct) AS markup_pct
+           FROM bom_item_price_tier WHERE is_chosen = 1 GROUP BY snapshot_id
+       ) t ON t.snapshot_id = ch.snap_id
+      WHERE sec.bom_instance_id = ? AND t.markup_pct IS NOT NULL AND t.markup_pct > 0
+      ORDER BY (i.qty * (ch.applied_price_usd - t.true_cost_usd)) DESC
+      FETCH FIRST ${limit} ROWS ONLY`,
+  ).all(id).catch(() => []);
+  res.json({ count: rows.length, items: rows });
+}));
+
 // ── v0.16 #2 操作流程 checklist(26 步 · 自動判定 + 手動勾 + 附圖)────────────
 // GET /workflow/checklist?projectId=
 router.get('/workflow/checklist', asyncHandler(async (req, res) => {

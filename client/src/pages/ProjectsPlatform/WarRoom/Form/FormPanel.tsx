@@ -30,6 +30,8 @@ import BomSection from './BomSection'
 import CostSummarySection from './CostSummarySection'
 import WorkflowChecklistSection from './WorkflowChecklistSection'
 import CleansheetSection from './CleansheetSection'
+import MvaWorkflowSection from './MvaWorkflowSection'
+import MarginSection from './MarginSection'
 
 type SectionId =
   | 'customer'
@@ -39,6 +41,8 @@ type SectionId =
   | 'nre'
   | 'packaging'
   | 'cleansheet'
+  | 'mva_workflow'
+  | 'margin'
   | 'cost'
   | 'ai'
 
@@ -63,6 +67,8 @@ const SECTIONS: SectionDef[] = [
     badge:   (p) => `${(p.data_payload as any)?.packaging?.items?.length || 0} 項` },
   { id: 'nre',       label: 'NRE 成本',  icon: '🔧', isNew: true, visible: () => true },
   { id: 'cleansheet', label: 'Cleansheet', icon: '🧮', isNew: true, visible: () => false },
+  { id: 'mva_workflow', label: 'MVA 操作流程', icon: '🛠️', isNew: true, visible: () => true },
+  { id: 'margin', label: 'Margin Analysis', icon: '📈', isNew: true, visible: () => false },
   { id: 'cost',      label: '成本核算',  icon: '📊',
     visible: () => true,
     badge:   (p) => (p.data_payload as any)?.factory_matrix ? '3 廠對比 v0.5' : null },
@@ -78,7 +84,9 @@ const COMPLETION_MAP: Record<SectionId, string[]> = {
   packaging: ['packaging'],
   nre: ['nre'],
   cleansheet: ['cleansheet'],
-  cost: ['cost', 'factory_matrix', 'strategy'],
+  mva_workflow: [],
+  margin: ['factory_matrix'],
+  cost: ['cost', 'strategy'],
   ai: [],
 }
 
@@ -113,7 +121,7 @@ export default function FormPanel({ project }: { project: ProjectDetail }) {
     return t > 0 ? { f, t, pct: Math.round((f / t) * 100) } : null
   }
   // 真 BOM 專案:有顏色維度(completion.variant.total>0)→ CMF 變體段也顯示(v0.16 #3)
-  const visibleSections = SECTIONS.filter((s) => s.visible(project) || (s.id === 'variant' && (completion['variant']?.total || 0) > 0) || (s.id === 'packaging' && (completion['packaging']?.filled || 0) > 0) || (s.id === 'cleansheet' && (completion['cleansheet']?.total || 0) > 0))
+  const visibleSections = SECTIONS.filter((s) => s.visible(project) || (s.id === 'variant' && (completion['variant']?.total || 0) > 0) || (s.id === 'packaging' && (completion['packaging']?.filled || 0) > 0) || (s.id === 'cleansheet' && (completion['cleansheet']?.total || 0) > 0) || (s.id === 'margin' && (completion['factory_matrix']?.filled || 0) > 0))
 
   return (
     <div className="grid grid-cols-[180px_1fr] divide-x divide-cortex-line min-h-[560px]">
@@ -178,6 +186,8 @@ export default function FormPanel({ project }: { project: ProjectDetail }) {
         {activeSection === 'packaging' && <PackagingSection project={project} />}
         {activeSection === 'nre'       && <NreRealSection   project={project} />}
         {activeSection === 'cleansheet' && <CleansheetSection project={project} />}
+        {activeSection === 'mva_workflow' && <MvaWorkflowSection />}
+        {activeSection === 'margin'    && <MarginSection    project={project} />}
         {activeSection === 'cost'      && <CostSection      project={project} />}
         {activeSection === 'ai'        && <AiToolbarSection project={project} />}
       </main>
