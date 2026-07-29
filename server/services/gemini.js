@@ -1125,6 +1125,22 @@ async function streamChat(apiModel, history, userParts, onChunk, extraSystemInst
   };
 }
 
+/**
+ * 產生「目前日期時間」提示句(台北時間)。
+ * LLM 訓練資料不含當前日期,不注入會把「今天/昨天/上週/本月」全算錯。
+ * 每次 getSystemInstruction() 呼叫都即時計算。
+ */
+function _currentDateTimeLine() {
+  const tz = 'Asia/Taipei';
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('zh-TW', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }); // 2026/07/29
+  const weekday = now.toLocaleDateString('zh-TW', { timeZone: tz, weekday: 'long' }); // 星期三
+  const timeStr = now.toLocaleTimeString('zh-TW', { timeZone: tz, hour12: false, hour: '2-digit', minute: '2-digit' }); // 14:30
+  const iso = dateStr.replace(/\//g, '-'); // 2026-07-29
+  return `**目前日期時間：${iso}（${weekday}）${timeStr}（台北時間 Asia/Taipei）。** ` +
+    `使用者提到的相對日期（今天/昨天/明天/上週/本週/本月/上個月/這一季/今年 等）一律以此為基準換算，日期格式輸出用 YYYY-MM-DD，切勿臆測或沿用其他日期。`;
+}
+
 function getSystemInstruction() {
   return `# 檔案生成規則（最高優先級，必須嚴格遵守）
 
@@ -1156,6 +1172,8 @@ function getSystemInstruction() {
 你是 Cortex，正崴精密工業的企業內部 AI 助理。
 請以繁體中文回覆（除非使用者明確要求其他語言）。
 回答要準確、專業、有條理。支援 Markdown 格式輸出。
+
+${_currentDateTimeLine()}
 
 **生成 PPT:**
 
@@ -1715,4 +1733,6 @@ module.exports = {
   LONG_AUDIO_SEGMENT_SEC, LONG_AUDIO_CONCURRENCY, LONG_AUDIO_PER_SEG_TIMEOUT_MS, LONG_AUDIO_OVERLAP_SEC,
   LONG_AUDIO_STITCH, _llmFindSeamAnchor, _transcribeSegmentSubsplit,
   _transcribeTailClip, TAIL_GUARD_CLIP_SEC, TAIL_GUARD_SUBSEG_SEC,
+  // 給 llmService.js(AOAI 路徑)共用同一份「目前日期」提示句
+  getSystemInstruction, _currentDateTimeLine,
 };

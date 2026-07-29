@@ -256,6 +256,7 @@ async function streamChatAoai(modelRow, history, userParts, onChunk, extraSystem
   // System prompt
   const systemPrompt = [
     '你是 Cortex，一個企業智能助手。請以清晰、專業的繁體中文回答問題，並使用 Markdown 格式化輸出。',
+    require('./gemini')._currentDateTimeLine(), // 注入台北時間,讓相對日期換算正確
     extraSystem,
   ].filter(Boolean).join('\n\n---\n\n');
   messages.push({ role: 'system', content: systemPrompt });
@@ -362,6 +363,7 @@ async function streamChatAoaiWithTools(
   // ── Build initial messages ────────────────────────────────────────────────
   const systemPrompt = [
     '你是 Cortex，一個企業智能助手。請以清晰、專業的繁體中文回答問題，並使用 Markdown 格式化輸出。',
+    require('./gemini')._currentDateTimeLine(), // 注入台北時間,讓相對日期換算正確
     extraSystemInstruction,
   ].filter(Boolean).join('\n\n---\n\n');
 
