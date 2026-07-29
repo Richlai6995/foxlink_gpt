@@ -109,7 +109,7 @@ export default function FormPanel({ project }: { project: ProjectDetail }) {
     return t > 0 ? { f, t, pct: Math.round((f / t) * 100) } : null
   }
   // 真 BOM 專案:有顏色維度(completion.variant.total>0)→ CMF 變體段也顯示(v0.16 #3)
-  const visibleSections = SECTIONS.filter((s) => s.visible(project) || (s.id === 'variant' && (completion['variant']?.total || 0) > 0))
+  const visibleSections = SECTIONS.filter((s) => s.visible(project) || (s.id === 'variant' && (completion['variant']?.total || 0) > 0) || (s.id === 'packaging' && (completion['packaging']?.filled || 0) > 0))
 
   return (
     <div className="grid grid-cols-[180px_1fr] divide-x divide-cortex-line min-h-[560px]">

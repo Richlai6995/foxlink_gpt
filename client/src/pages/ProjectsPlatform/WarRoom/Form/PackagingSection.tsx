@@ -7,7 +7,141 @@
  *   - pallet_compliance enum
  */
 
+import { useEffect, useState } from 'react'
+import { Loader2 } from 'lucide-react'
 import type { ProjectDetail } from '../../api'
+import { api } from '../../api'
+import { useAuth } from '../../../../context/AuthContext'
+
+const m4 = (v: any) => (typeof v === 'number' ? `$${v.toFixed(4)}` : '—')
+const m6 = (v: any) => (typeof v === 'number' ? `$${v.toFixed(6)}` : '—')
+const pc = (v: any) => (typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : '—')
+
+const PALLETS = [
+  { key: 'EPAL', label: 'EU EPAL(歐標)' },
+  { key: 'GMA', label: 'US GMA(美標)' },
+  { key: 'PLYWOOD', label: 'APAC Plywood(亞太合板)' },
+]
+
+/**
+ * v0.16 #5:真 BOM 專案包裝視圖 —— 包裝變異值 tabs × PKG 料 true/quote/markup + Pallet Compliance
+ */
+function RealPackagingView({ project }: { project: ProjectDetail }) {
+  const { token } = useAuth() as any
+  const projectId = project.id
+  const [inst, setInst] = useState<number | null>(null)
+  const [pkgVals, setPkgVals] = useState<{ id: number; code: string }[]>([])
+  const [active, setActive] = useState<number | 0>(0)   // 0 = 全部
+  const [data, setData] = useState<any>(null)
+  const [pallet, setPallet] = useState<string[]>([])
+  const [palletDirty, setPalletDirty] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    if (!token) return
+    ;(async () => {
+      try {
+        const i = await api.get<any>(token, `/bom/project/${projectId}/latest-instance`).catch(() => null)
+        if (i?.bomInstanceId) setInst(i.bomInstanceId)
+        const dims = await api.get<any>(token, `/bom/project/${projectId}/dimensions`)
+        const pkgDim = (dims.dimensions || []).find((d: any) => /包裝|PKG|PACK/i.test(d.dimCode))
+        setPkgVals((pkgDim?.values || []).map((v: any) => ({ id: v.id, code: v.valueCode })))
+        const f = await api.get<any>(token, `/bom/form?projectId=${projectId}`)
+        setPallet(f.form?.pkg_meta?.pallet_compliance || [])
+      } catch { /* noop */ } finally { setLoaded(true) }
+    })()
+  }, [token, projectId])   // eslint-disable-line
+
+  useEffect(() => {
+    if (!token || !inst) return
+    const q = active ? `?valueIds=${active}` : ''
+    api.get<any>(token, `/bom/instances/${inst}/packaging${q}`).then(setData).catch(() => setData(null))
+  }, [token, inst, active])
+
+  async function savePallet(next: string[]) {
+    setPallet(next); setPalletDirty(false); setBusy(true)
+    try {
+      await api.put(token, '/bom/form/pkg_meta', { projectId, fields: { pallet_compliance: next } })
+      window.dispatchEvent(new CustomEvent('cortex:form-refresh'))
+    } catch { setPalletDirty(true) } finally { setBusy(false) }
+  }
+
+  if (!loaded) return <div className="text-[12px] text-cortex-muted"><Loader2 className="w-3.5 h-3.5 inline animate-spin" /> 載入包裝…</div>
+  if (!inst) return <div className="p-4 text-center text-cortex-muted text-[12px] italic">此專案尚未匯入 BOM(PKG 料隨 BOM 匯入)</div>
+
+  return (
+    <div className="space-y-3">
+      <h3 className="text-lg font-bold text-cortex-ink">📦 包裝 BOM</h3>
+      {/* 包裝變異 tabs */}
+      {pkgVals.length > 0 && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <button onClick={() => setActive(0)}
+            className={`px-2.5 py-1 rounded text-[11px] border ${active === 0 ? 'bg-cortex-navy text-white border-cortex-navy' : 'bg-white border-cortex-line text-cortex-muted'}`}>全部</button>
+          {pkgVals.map((v) => (
+            <button key={v.id} onClick={() => setActive(v.id)}
+              className={`px-2.5 py-1 rounded text-[11px] border ${active === v.id ? 'bg-cortex-navy text-white border-cortex-navy' : 'bg-white border-cortex-line text-cortex-muted'}`}>{v.code}</button>
+          ))}
+        </div>
+      )}
+      {/* 合計卡 */}
+      {data && (
+        <div className="flex items-center gap-4 text-[11px] bg-cortex-cyan-bg/40 border border-cortex-teal/30 rounded p-2 flex-wrap">
+          <span>包裝單件 Quote:<span className="font-mono font-bold text-cortex-teal">{m4(data.totalQuote)}</span></span>
+          {typeof data.totalTrue === 'number' && <span>True Cost:<span className="font-mono">{m4(data.totalTrue)}</span></span>}
+          {typeof data.markupAvg === 'number' && <span>Markup:<span className="font-mono">{pc(data.markupAvg)}</span></span>}
+          <span className="text-cortex-muted">{data.count} 項</span>
+        </div>
+      )}
+      {/* 明細 */}
+      {data && data.items.length > 0 ? (
+        <div className="overflow-x-auto border border-cortex-line rounded-lg">
+          <table className="w-full text-[10px]">
+            <thead className="text-cortex-muted border-b border-cortex-line bg-cortex-bg/40"><tr>
+              <th className="text-left px-2 py-1">分類</th><th className="text-left px-2 py-1">Item</th>
+              <th className="text-left px-2 py-1">Description</th><th className="text-right px-2 py-1">Qty</th>
+              <th className="text-left px-2 py-1">Vendor</th>
+              <th className="text-right px-2 py-1">True</th><th className="text-right px-2 py-1">Quote</th>
+              <th className="text-right px-2 py-1">Markup</th><th className="text-right px-2 py-1">小計(Quote)</th>
+            </tr></thead>
+            <tbody>
+              {data.items.map((r: any, i: number) => (
+                <tr key={i} className={`border-b border-cortex-line/30 ${!r.quote_price ? 'bg-amber-50/50' : ''}`}>
+                  <td className="px-2 py-1">{r.category}</td>
+                  <td className="px-2 py-1 font-mono">{r.item_no || '—'}</td>
+                  <td className="px-2 py-1 max-w-[260px] truncate" title={r.description}>{r.description}</td>
+                  <td className="px-2 py-1 text-right font-mono">{r.qty}</td>
+                  <td className="px-2 py-1">{r.vendor || '—'}</td>
+                  <td className="px-2 py-1 text-right font-mono text-cortex-muted">{m6(r.true_cost_usd)}</td>
+                  <td className="px-2 py-1 text-right font-mono">{m6(r.quote_price)}</td>
+                  <td className="px-2 py-1 text-right font-mono">{pc(r.markup_pct)}</td>
+                  <td className="px-2 py-1 text-right font-mono">{m6(r.ext_quote)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="text-[11px] text-cortex-muted">此配置下無 PKG 料。</div>
+      )}
+      {/* Pallet Compliance */}
+      <div className="border border-cortex-line rounded-lg p-2.5 flex items-center gap-3 flex-wrap text-[11px]">
+        <span className="font-semibold text-cortex-ink">Pallet Compliance:</span>
+        {PALLETS.map((p) => {
+          const on = pallet.includes(p.key)
+          return (
+            <label key={p.key} className="flex items-center gap-1 cursor-pointer">
+              <input type="checkbox" checked={on} disabled={busy}
+                onChange={() => savePallet(on ? pallet.filter((x) => x !== p.key) : [...pallet, p.key])} />
+              {p.label}
+            </label>
+          )
+        })}
+        {palletDirty && <span className="text-red-600 text-[10px]">存檔失敗,再點一次</span>}
+      </div>
+    </div>
+  )
+}
 
 type PackagingItem = {
   no: number
@@ -34,11 +168,8 @@ export default function PackagingSection({ project }: { project: ProjectDetail }
   const data: PackagingData | undefined = dp.packaging
 
   if (!data?.items?.length) {
-    return (
-      <div className="p-4 text-center text-cortex-muted text-[12px] italic">
-        此專案未啟用 Packaging Sub-form
-      </div>
-    )
+    // 真 BOM 專案:PKG 模組料視圖(v0.16 #5)
+    return <RealPackagingView project={project} />
   }
 
   const total = data.total_per_unit

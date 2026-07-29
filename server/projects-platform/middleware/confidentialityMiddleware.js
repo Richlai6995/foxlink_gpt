@@ -163,6 +163,7 @@ const TRUE_COST_KEYS = new Set([
   'totaltrue', 'materialtrue', 'nreamorttrue', 'marginusd', 'marginpct',
   'material_true_usd', 'materialtrueusd', 'total_true_usd', 'unit_true_usd', 'unit_price_true',
   'true_cost_source', 'true_cost_usd', 'markup_pct', 'nre_per_unit_true_usd', 'sub_total_true', 'totaltrueusd',
+  'ext_true', 'exttrue', 'markupavg', 'unit_price_negotiated_true',
 ]);
 
 /** 深層遮罩:物件/陣列內所有 true-cost 相關欄 → null;回傳同 shape + costMasked 旗標(頂層物件)*/
