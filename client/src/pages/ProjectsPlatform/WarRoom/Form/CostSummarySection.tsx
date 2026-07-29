@@ -125,10 +125,16 @@ export default function CostSummarySection({ project }: { project: ProjectDetail
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <div className="text-[13px] font-bold text-cortex-ink flex items-center gap-1.5"><BarChart3 className="w-4 h-4 text-cortex-teal" /> 成本核算 · 多廠彙總</div>
-        <button onClick={recompute} disabled={busy} className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] border border-cortex-line rounded hover:bg-white disabled:opacity-40">
-          {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} 重新計算所有廠
-        </button>
+        <div className="text-[13px] font-bold text-cortex-ink flex items-center gap-1.5"><BarChart3 className="w-4 h-4 text-cortex-teal" /> 成本核算 · 多廠彙總
+          <span className="text-[10px] text-cortex-muted font-normal">(每廠最新 run)</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => window.dispatchEvent(new CustomEvent('cortex:goto-section', { detail: 'bom' }))}
+            className="text-[11px] text-cortex-teal hover:underline">配置×廠×量 矩陣(BOM 區)→</button>
+          <button onClick={recompute} disabled={busy} className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] border border-cortex-line rounded hover:bg-white disabled:opacity-40">
+            {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} 重新計算所有廠
+          </button>
+        </div>
       </div>
       {err && <div className="text-[11px] text-red-600">{err}</div>}
       <table className="w-full text-[12px]">
