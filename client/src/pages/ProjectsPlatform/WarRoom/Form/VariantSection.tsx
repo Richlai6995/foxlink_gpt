@@ -7,7 +7,121 @@
  *   - Roll-up:加權平均 material cost + 總年材料成本
  */
 
+import { useEffect, useState } from 'react'
+import { Loader2 } from 'lucide-react'
 import type { ProjectDetail } from '../../api'
+import { api } from '../../api'
+import { useAuth } from '../../../../context/AuthContext'
+
+const fmtMoney = (v: any) => (typeof v === 'number' && Number.isFinite(v) ? `$${v.toFixed(4)}` : '—')
+
+/**
+ * v0.16 #3:真 BOM 專案的 CMF 變體 —— 顏色維度值 × share/qty(存 form.variant.shares)
+ * 材料成本 = 該顏色 config 的 rollup(動態);加權平均 = Σ(mat×qty)/Σqty
+ */
+function CmfSharesCard({ project }: { project: ProjectDetail }) {
+  const { token } = useAuth() as any
+  const projectId = project.id
+  const [vals, setVals] = useState<{ id: number; code: string; mat: number | null }[]>([])
+  const [shares, setShares] = useState<Record<string, { share?: string; qty?: string }>>({})
+  const [dirty, setDirty] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    if (!token) return
+    ;(async () => {
+      try {
+        const dims = await api.get<any>(token, `/bom/project/${projectId}/dimensions`)
+        const colorDim = (dims.dimensions || []).find((d: any) => /顏色|COLOR/i.test(d.dimCode))
+        if (!colorDim?.values?.length) { setLoaded(true); return }
+        const inst = await api.get<any>(token, `/bom/project/${projectId}/latest-instance`).catch(() => null)
+        const rows: { id: number; code: string; mat: number | null }[] = []
+        for (const v of colorDim.values) {
+          let mat: number | null = null
+          if (inst?.bomInstanceId) {
+            const roll = await api.get<any>(token, `/bom/instances/${inst.bomInstanceId}/rollup?valueIds=${v.id}`).catch(() => null)
+            const n = Number(roll?.materialUsd)
+            mat = Number.isFinite(n) ? n : null
+          }
+          rows.push({ id: v.id, code: v.valueCode, mat })
+        }
+        setVals(rows)
+        const f = await api.get<any>(token, `/bom/form?projectId=${projectId}`)
+        setShares((f.form?.variant?.shares) || {})
+      } catch { /* noop */ } finally { setLoaded(true) }
+    })()
+  }, [token, projectId])   // eslint-disable-line
+
+  if (!loaded) return <div className="text-[12px] text-cortex-muted"><Loader2 className="w-3.5 h-3.5 inline animate-spin" /> 載入變體…</div>
+  if (!vals.length) return null
+
+  const set = (id: number, k: 'share' | 'qty', v: string) => { setShares((p) => ({ ...p, [id]: { ...(p[id] || {}), [k]: v } })); setDirty(true) }
+  async function save() {
+    setBusy(true); setMsg('')
+    try {
+      await api.put(token, '/bom/form/variant', { projectId, fields: { shares } })
+      setDirty(false); setMsg('✓ 已存檔'); window.dispatchEvent(new CustomEvent('cortex:form-refresh'))
+      setTimeout(() => setMsg(''), 2500)
+    } catch (e: any) { setMsg(`存檔失敗:${e.message}`) } finally { setBusy(false) }
+  }
+  // 加權平均(share 正規化;qty 有填優先用 qty 權重)
+  const rows = vals.map((v) => ({ ...v, share: Number(shares[v.id]?.share) || 0, qty: Number(shares[v.id]?.qty) || 0 }))
+  const qtySum = rows.reduce((a, r) => a + r.qty, 0)
+  const shareSum = rows.reduce((a, r) => a + r.share, 0)
+  const weights = rows.map((r) => (qtySum > 0 ? r.qty / qtySum : shareSum > 0 ? r.share / shareSum : 0))
+  const wAvg = rows.every((r) => r.mat != null) && (qtySum > 0 || shareSum > 0)
+    ? rows.reduce((a, r, i) => a + (r.mat as number) * weights[i], 0) : null
+
+  return (
+    <div className="border border-cortex-line rounded-lg p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="text-[12px] font-bold text-cortex-ink">🎨 CMF 變體 · 佔比 / 數量
+          <span className="text-[10px] text-cortex-muted font-normal ml-1.5">材料成本 = 該顏色配置 rollup(動態)· 加權平均供成本核算參考</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {msg && <span className={`text-[10px] ${msg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{msg}</span>}
+          <button onClick={save} disabled={busy || !dirty}
+            className="px-2.5 py-1 bg-cortex-navy text-white rounded hover:opacity-90 disabled:opacity-40 text-[11px]">
+            {busy ? <Loader2 className="w-3 h-3 inline animate-spin" /> : null} 存檔
+          </button>
+        </div>
+      </div>
+      <table className="w-full text-[11px]">
+        <thead className="text-cortex-muted border-b border-cortex-line"><tr>
+          <th className="text-left px-2 py-1">變體(顏色)</th>
+          <th className="text-right px-2 py-1">佔比 %</th>
+          <th className="text-right px-2 py-1">年量(pcs)</th>
+          <th className="text-right px-2 py-1">材料成本(rollup)</th>
+          <th className="text-right px-2 py-1">權重</th>
+        </tr></thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={r.id} className="border-b border-cortex-line/40">
+              <td className="px-2 py-1.5"><span className="text-[10px] bg-purple-50 text-purple-700 border border-purple-200 rounded px-1.5 py-0.5">{r.code}</span></td>
+              <td className="px-2 py-1.5 text-right">
+                <input value={shares[r.id]?.share || ''} onChange={(e) => set(r.id, 'share', e.target.value)} placeholder="80"
+                  className="w-16 border border-cortex-line rounded px-1.5 py-0.5 text-right font-mono text-[11px]" />
+              </td>
+              <td className="px-2 py-1.5 text-right">
+                <input value={shares[r.id]?.qty || ''} onChange={(e) => set(r.id, 'qty', e.target.value)} placeholder="334400"
+                  className="w-24 border border-cortex-line rounded px-1.5 py-0.5 text-right font-mono text-[11px]" />
+              </td>
+              <td className="px-2 py-1.5 text-right font-mono">{fmtMoney(r.mat)}</td>
+              <td className="px-2 py-1.5 text-right font-mono text-cortex-muted">{(weights[i] * 100).toFixed(1)}%</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="flex items-center gap-4 text-[11px] bg-cortex-cyan-bg/40 border border-cortex-teal/30 rounded p-2">
+        <span>加權平均材料成本:<span className="font-mono font-bold text-cortex-teal">{fmtMoney(wAvg)}</span></span>
+        <span className="text-cortex-muted">總年量:<span className="font-mono">{qtySum ? qtySum.toLocaleString('en-US') : '—'}</span></span>
+        {shareSum > 0 && Math.abs(shareSum - 100) > 0.01 && qtySum === 0 && <span className="text-amber-600">⚠ 佔比合計 {shareSum}%(非 100,已自動正規化)</span>}
+      </div>
+    </div>
+  )
+}
 
 type Variant = {
   key: string
@@ -31,9 +145,11 @@ export default function VariantSection({ project }: { project: ProjectDetail }) 
   const data: VariantData | undefined = dp.variants
 
   if (!data?.items?.length) {
+    // 真 BOM 專案:走變異軸(顏色維度)share/qty 卡(v0.16 #3)
     return (
-      <div className="p-4 text-center text-cortex-muted text-[12px] italic">
-        此專案未啟用 variant 維度
+      <div className="space-y-3">
+        <h3 className="text-lg font-bold text-cortex-ink">🎨 CMF 變體</h3>
+        <CmfSharesCard project={project} />
       </div>
     )
   }

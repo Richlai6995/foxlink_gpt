@@ -80,8 +80,7 @@ const COMPLETION_MAP: Record<SectionId, string[]> = {
 
 export default function FormPanel({ project }: { project: ProjectDetail }) {
   const { token } = useAuth() as any
-  const visibleSections = SECTIONS.filter((s) => s.visible(project))
-  const [activeSection, setActiveSection] = useState<SectionId>(visibleSections[0]?.id || 'customer')
+  const [activeSection, setActiveSection] = useState<SectionId>('customer')
   // 完成度(真計算 · GET /bom/form);表單存檔後由 cortex:form-refresh 重抓
   const [completion, setCompletion] = useState<Record<string, { filled: number; total: number; status: string }>>({})
   useEffect(() => {
@@ -109,6 +108,8 @@ export default function FormPanel({ project }: { project: ProjectDetail }) {
     for (const k of keys) { const c = completion[k]; if (c && c.total > 0) { f += c.filled; t += c.total } }
     return t > 0 ? { f, t, pct: Math.round((f / t) * 100) } : null
   }
+  // 真 BOM 專案:有顏色維度(completion.variant.total>0)→ CMF 變體段也顯示(v0.16 #3)
+  const visibleSections = SECTIONS.filter((s) => s.visible(project) || (s.id === 'variant' && (completion['variant']?.total || 0) > 0))
 
   return (
     <div className="grid grid-cols-[180px_1fr] divide-x divide-cortex-line min-h-[560px]">
