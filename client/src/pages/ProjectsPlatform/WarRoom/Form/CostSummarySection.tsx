@@ -23,6 +23,9 @@ export default function CostSummarySection({ project }: { project: ProjectDetail
   const [submitCf, setSubmitCf] = useState<number | ''>('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  // v0.16 #12:建議售價(草)+ 年營收卡
+  const [salePrice, setSalePrice] = useState('')
+  const [spDirty, setSpDirty] = useState(false)
   // P1 議價紀錄
   const [neg, setNeg] = useState<any>(null)
   const [negTarget, setNegTarget] = useState(''); const [negOffer, setNegOffer] = useState(''); const [negNote, setNegNote] = useState('')
@@ -32,7 +35,13 @@ export default function CostSummarySection({ project }: { project: ProjectDetail
       const r = await api.get<{ factories: any[] }>(token, `/bom/summary?projectId=${projectId}`); setFactories(r.factories || [])
       const q = await api.get<any>(token, `/bom/quote?projectId=${projectId}`); setQuote(q)
       api.get<any>(token, `/bom/negotiation?projectId=${projectId}`).then(setNeg).catch(() => {})
+      api.get<any>(token, `/bom/form?projectId=${projectId}`).then((f) => { if (!spDirty) setSalePrice(f.form?.cost_meta?.sale_price_draft || '') }).catch(() => {})
     } catch (e: any) { setErr(e.message); setFactories((f) => f ?? []) }
+  }
+  async function saveSalePrice() {
+    setSpDirty(false)
+    try { await api.put(token, '/bom/form/cost_meta', { projectId, fields: { sale_price_draft: salePrice } }); window.dispatchEvent(new CustomEvent('cortex:form-refresh')) }
+    catch (e: any) { setErr(e.message) }
   }
   async function addRound() {
     setBusy(true); setErr('')
@@ -227,6 +236,28 @@ export default function CostSummarySection({ project }: { project: ProjectDetail
           )}
         </div>
       )}
+
+      {/* v0.16 #12:建議售價(草)+ 毛利率 + 年營收 */}
+      {quote?.official && (() => {
+        const sp = Number(salePrice)
+        const annualQty = Number((project.data_payload as any)?.quantity) || null
+        const trueUsd = typeof quote.official.unit_true_usd === 'number' ? quote.official.unit_true_usd : null
+        return (
+          <div className="border-t border-cortex-line pt-2 flex items-end gap-4 flex-wrap text-[11px]">
+            <label className="text-[10px] text-cortex-muted">建議售價(草)/台<br />
+              <input value={salePrice} onChange={(e) => { setSalePrice(e.target.value); setSpDirty(true) }} onBlur={saveSalePrice}
+                placeholder={String(quote.official.unit_quote_usd || '')}
+                className="mt-0.5 border border-cortex-line rounded px-2 py-1 text-[12px] font-mono w-24" /></label>
+            <span className="text-cortex-muted">官方版 <b className="font-mono text-cortex-ink">{money(quote.official.unit_quote_usd)}</b></span>
+            {Number.isFinite(sp) && sp > 0 && trueUsd != null && (
+              <span className="text-cortex-muted">毛利率(草)<b className={`font-mono ${sp - trueUsd < 0 ? 'text-red-600' : 'text-cortex-teal'}`}>{(((sp - trueUsd) / sp) * 100).toFixed(1)}%</b></span>
+            )}
+            {Number.isFinite(sp) && sp > 0 && annualQty && (
+              <span className="text-cortex-muted">年營收(草)<b className="font-mono text-cortex-ink">${(sp * annualQty).toLocaleString('en-US', { maximumFractionDigits: 0 })}</b><span className="text-[9px]">(× 年量 {annualQty.toLocaleString('en-US')})</span></span>
+            )}
+          </div>
+        )
+      })()}
 
       {/* P1 議價紀錄(官方版之後 · 輪次 · vs 底線 margin 走 S2 遮罩) */}
       {quote?.official && (

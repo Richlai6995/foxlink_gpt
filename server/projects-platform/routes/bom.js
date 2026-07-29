@@ -404,6 +404,41 @@ router.get('/instances/:id/top-markup', asyncHandler(async (req, res) => {
   res.json({ count: rows.length, items: rows });
 }));
 
+// POST /strategy/ai-suggest — 議價策略 AI 草稿(v0.16 #13 · Pro · 只回建議不落庫)
+router.post('/strategy/ai-suggest', asyncHandler(async (req, res) => {
+  if (!canViewTrueCost(req)) return res.status(403).json({ error: '議價策略需完整成本視角' });
+  const projectId = Number(req.body.projectId);
+  if (!projectId) return res.status(400).json({ error: 'projectId required' });
+  const db = getDb();
+  const official = await db.prepare(
+    `SELECT version_no, factory_code, unit_quote_usd, unit_true_usd, nre_total_quote_usd FROM bom_quote_version
+      WHERE project_id=? AND status='APPROVED' ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`,
+  ).get(projectId).catch(() => null);
+  const rounds = await db.prepare(
+    `SELECT round_no, customer_target_usd, our_offer_usd, outcome, note FROM bom_negotiation_round WHERE project_id=? ORDER BY round_no`,
+  ).all(projectId).catch(() => []);
+  const p = await db.prepare(`SELECT project_code, data_payload FROM projects WHERE id=?`).get(projectId).catch(() => null);
+  let payload = {}; try { payload = JSON.parse((p && (p.data_payload || Object.values(p)[1])) || '{}'); } catch (_) { /* noop */ }
+  const ctx = {
+    project: p ? (p.project_code || Object.values(p)[0]) : projectId,
+    customer: payload.customer || null, annualQty: payload.quantity || null,
+    official: official ? { quote: Number(official.unit_quote_usd), true: Number(official.unit_true_usd), factory: official.factory_code, nre: Number(official.nre_total_quote_usd) } : null,
+    negotiationRounds: rounds.map((r) => ({ round: Number(r.round_no), target: r.customer_target_usd, offer: r.our_offer_usd, outcome: r.outcome, note: r.note })),
+  };
+  const gemini = require('../../services/gemini');
+  const prompt = [
+    '你是 ODM 業務策略顧問。根據以下報價案脈絡,用繁體中文產出議價策略草稿。',
+    '只回 JSON(不要 markdown fence),欄位:',
+    '{"cust_room":"客戶議價空間評估(2-3 句)","strategy_note":"議價策略建議(3-4 句,含讓價階梯)","qty_discount":"量價條件建議(1-2 句)","win_prob":"HIGH|MEDIUM|LOW","fallback":"最低可接受價(數字,依底線+合理 margin)"}',
+    '鐵則:引用脈絡中的數字,不得虛構;fallback 不得低於 true 成本。',
+    `脈絡:${JSON.stringify(ctx)}`,
+  ].join('\n');
+  const r = await gemini.generateTextSync(process.env.GEMINI_MODEL_PRO, [], prompt, {});
+  let suggest = null;
+  try { suggest = JSON.parse(String(r.text || '').replace(/^```json?\s*|\s*```$/g, '')); } catch (_) { suggest = { strategy_note: r.text }; }
+  res.json({ ok: true, suggest, model: process.env.GEMINI_MODEL_PRO });
+}));
+
 // ── v0.16 #2 操作流程 checklist(26 步 · 自動判定 + 手動勾 + 附圖)────────────
 // GET /workflow/checklist?projectId=
 router.get('/workflow/checklist', asyncHandler(async (req, res) => {

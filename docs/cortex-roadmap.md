@@ -16,6 +16,8 @@
 | DEMO | tmp/cortex-demo/ 6 檔+README(兩檔=一專案全資料 · 純檔案零手設 e2e 驗證) |
 | **P1 全清(2026-07-28/29)** | **S2 機密遮罩**(6f6a95c:bom router res.json 深層遮 true/margin · RoleSwitcher 即時 · cost-model 匯出 403)· **報價 PDF**(191da17/467f4f6:雙語 zh/en · 檔名=碼+名+日期+語言 · DRAFT 浮水印 · quote 側 only)· **Stage Gate**(6a60246/123d527:開案 activate 第一階 + BOM 六事件自動推進(import/詢價完/compute/compare/submit/approve)+ CustomEvent 即時刷 ribbon)· **議價紀錄**(93e2306:013t 輪次 · vs 底線虧本紅字 · 成交🤝 · S2 遮罩)· **開案 Wizard 報價設定**(b4e0b66:Step5 附掛 廠別模型 chips 同廠單選/變異軸/NRE 自動帶入)· **AI 比對上代**(460d4f0:程式 diff 權威(FPN 匹配+替換料偵測+成本橋)+ Pro 只解讀;demo=167 CORTEX-FIX-RIVAL3-GEN1) |
 
+| **v0.16 報價 Form 全清(2026-07-29)** | 14 段對齊 [cortex-quote-form-v016-plan.md](cortex-quote-form-v016-plan.md):form 欄位 data_payload+完成度真計算+sidebar 進度條 · 客戶 8 欄 · 🎬26步 checklist(自動判定+附圖) · CMF share/qty · BOM 案級欄+採購總覽 · 包裝 markup+Pallet · NRE 議價雙欄(effective)+防呆 · 矩陣 qty 軸+分解列(013v run key 擴) · 🧮Cleansheet 檢視(9×10 矩陣+公式 hover) · 🛠️MVA 流程 A-G · 📈Margin heatmap+Top Markup · 成本卡(售價草/年營收) · 🎯議價策略 10 欄+AI 填空(Pro 遵守底線鐵則) |
+
 ## 🔜 Backlog(優先序草案 · 待拍板)
 
 ### P2 — 管理介面補完

@@ -32,6 +32,7 @@ import WorkflowChecklistSection from './WorkflowChecklistSection'
 import CleansheetSection from './CleansheetSection'
 import MvaWorkflowSection from './MvaWorkflowSection'
 import MarginSection from './MarginSection'
+import StrategySection from './StrategySection'
 
 type SectionId =
   | 'customer'
@@ -44,6 +45,7 @@ type SectionId =
   | 'mva_workflow'
   | 'margin'
   | 'cost'
+  | 'strategy'
   | 'ai'
 
 type SectionDef = {
@@ -72,6 +74,7 @@ const SECTIONS: SectionDef[] = [
   { id: 'cost',      label: '成本核算',  icon: '📊',
     visible: () => true,
     badge:   (p) => (p.data_payload as any)?.factory_matrix ? '3 廠對比 v0.5' : null },
+  { id: 'strategy',  label: '議價策略', icon: '🎯', isNew: true, visible: () => true },
   { id: 'ai',        label: 'AI 工具',  icon: '✨',  visible: () => true },
 ]
 
@@ -86,7 +89,8 @@ const COMPLETION_MAP: Record<SectionId, string[]> = {
   cleansheet: ['cleansheet'],
   mva_workflow: [],
   margin: ['factory_matrix'],
-  cost: ['cost', 'strategy'],
+  cost: ['cost'],
+  strategy: ['strategy'],
   ai: [],
 }
 
@@ -188,6 +192,7 @@ export default function FormPanel({ project }: { project: ProjectDetail }) {
         {activeSection === 'cleansheet' && <CleansheetSection project={project} />}
         {activeSection === 'mva_workflow' && <MvaWorkflowSection />}
         {activeSection === 'margin'    && <MarginSection    project={project} />}
+        {activeSection === 'strategy'  && <StrategySection  project={project} />}
         {activeSection === 'cost'      && <CostSection      project={project} />}
         {activeSection === 'ai'        && <AiToolbarSection project={project} />}
       </main>
