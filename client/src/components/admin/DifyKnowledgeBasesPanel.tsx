@@ -47,7 +47,7 @@ interface ApiConnector {
 interface InputParam {
   name: string
   label: string
-  type: 'string' | 'number' | 'date' | 'enum' | 'boolean'
+  type: 'string' | 'number' | 'date' | 'enum' | 'boolean' | 'array'
   required: boolean
   source: string
   fixed_value?: string
@@ -811,6 +811,7 @@ export default function DifyKnowledgeBasesPanel() {
                                 <option value="date">Date</option>
                                 <option value="enum">Enum</option>
                                 <option value="boolean">Boolean</option>
+                                <option value="array">Array (多值)</option>
                               </select>
                             </div>
                           </div>

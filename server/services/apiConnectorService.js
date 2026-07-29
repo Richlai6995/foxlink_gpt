@@ -147,6 +147,14 @@ function resolveInputParams(inputParams, aiArgs = {}, userCtx = {}) {
         break;
     }
 
+    // ── 陣列型參數：正規化為真陣列(供 buildRequest JSON.stringify 成 array)，跳過 scalar 驗證/String() ──
+    if (param.type === 'array') {
+      const arr = normalizeToArray(value);
+      if (param.required && arr.length === 0) missing.push(param.label || param.name);
+      resolved[param.name] = arr;
+      continue;
+    }
+
     // 驗證
     if (param.required && (value === null || value === undefined || value === '')) {
       missing.push(param.label || param.name);
@@ -536,12 +544,20 @@ function buildFunctionDeclaration(connector) {
       desc.push(`可選值: ${p.enum_options.map(o => o.label || o.value).join('、')}`);
     }
 
-    properties[p.name] = {
-      type: p.type === 'number' ? 'number' : 'string',
-      description: desc.join('。') || p.label || p.name,
-    };
+    if (p.type === 'array') {
+      properties[p.name] = {
+        type: 'array',
+        items: { type: 'string' },
+        description: (desc.join('。') || p.label || p.name) + '。可傳多個值（陣列）。',
+      };
+    } else {
+      properties[p.name] = {
+        type: p.type === 'number' ? 'number' : 'string',
+        description: desc.join('。') || p.label || p.name,
+      };
+    }
 
-    if (p.enum_options && p.enum_options.length) {
+    if (p.type !== 'array' && p.enum_options && p.enum_options.length) {
       properties[p.name].enum = p.enum_options.map(o => o.value);
     }
 
@@ -667,6 +683,20 @@ function parseJson(val) {
   if (!val) return null;
   if (typeof val === 'object') return val;
   try { return JSON.parse(val); } catch { return null; }
+}
+
+/**
+ * 正規化為字串陣列。
+ * - 已是陣列 → trim + 去空
+ * - 字串 → 以逗號 / 頓號分隔(不切空白，保留 "X5114 E85" 這類含空白的值)
+ * - 空 / null → []
+ * @param {*} value
+ * @returns {string[]}
+ */
+function normalizeToArray(value) {
+  if (value === null || value === undefined || value === '') return [];
+  if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);
+  return String(value).split(/[,、]/).map(s => s.trim()).filter(Boolean);
 }
 
 /**
