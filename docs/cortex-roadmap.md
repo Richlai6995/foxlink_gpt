@@ -1,9 +1,9 @@
 # Cortex BOM 報價平台 — Roadmap(SOT)
 
-> 更新:2026-07-27。**下一步規劃的唯一紀錄處** —— 拍板/完成後更新此檔。
+> 更新:2026-07-29。**下一步規劃的唯一紀錄處** —— 拍板/完成後更新此檔。
 > 相關:[cortex-bom-source-excel-structure.md](cortex-bom-source-excel-structure.md)(資料 SOT)· [cortex-bom-import-plan.md](cortex-bom-import-plan.md) · [cortex-cost-model-import-plan.md](cortex-cost-model-import-plan.md) · [cortex-whoop-e2e-plan.md](cortex-whoop-e2e-plan.md)
 
-## ✅ 已完成(至 2026-07-27 · commit 81867f8)
+## ✅ 已完成(至 2026-07-29 · commit 460d4f0)
 
 | 區塊 | 內容 |
 |---|---|
@@ -14,18 +14,9 @@
 | 成本模型(C 系列) | 通用匯入/匯出(round-trip 六位等值 · SIMPLIFIED 3頁/FULL 8頁)· 月薪→時薪換算 · 範本庫(系統範本專案+版本化+停用)· 標準範本三層指南 · NRE/NRE-Config 隨檔 |
 | 流程終點 | NRE 攤提入 total · 定版送審(SoD)· W3 端到端(開案→官方版)驗證 |
 | DEMO | tmp/cortex-demo/ 6 檔+README(兩檔=一專案全資料 · 純檔案零手設 e2e 驗證) |
+| **P1 全清(2026-07-28/29)** | **S2 機密遮罩**(6f6a95c:bom router res.json 深層遮 true/margin · RoleSwitcher 即時 · cost-model 匯出 403)· **報價 PDF**(191da17/467f4f6:雙語 zh/en · 檔名=碼+名+日期+語言 · DRAFT 浮水印 · quote 側 only)· **Stage Gate**(6a60246/123d527:開案 activate 第一階 + BOM 六事件自動推進(import/詢價完/compute/compare/submit/approve)+ CustomEvent 即時刷 ribbon)· **議價紀錄**(93e2306:013t 輪次 · vs 底線虧本紅字 · 成交🤝 · S2 遮罩)· **開案 Wizard 報價設定**(b4e0b66:Step5 附掛 廠別模型 chips 同廠單選/變異軸/NRE 自動帶入)· **AI 比對上代**(460d4f0:程式 diff 權威(FPN 匹配+替換料偵測+成本橋)+ Pro 只解讀;demo=167 CORTEX-FIX-RIVAL3-GEN1) |
 
 ## 🔜 Backlog(優先序草案 · 待拍板)
-
-### P1 — W4:v0.12 demo gap(報價平台補完)
-| 項 | Scope |
-|---|---|
-| 開案 Wizard | 建案引導流(客戶/BG/BU/廠別/模型選擇 → 自動 provision)取代手動拼裝 |
-| Stage Gate | 8 階段狀態機(v0.12:開案→BOM→詢價→試算→對比→議價→定版→結案)+ 進度視覺 |
-| 機密遮罩 S2 | true cost / margin 依角色遮罩(012 RBAC 三軸:RD×資料範圍×欄位)· view_true_cost |
-| 議價紀錄 | 客戶議價輪次(目標價 vs 報價 vs true · 讓價紀錄)|
-| 報價 PDF | 官方版 → 客戶報價單輸出(pptx/pdf · 遮 true) |
-| AI 比對上代 | 新舊案 BOM/成本差異分析(LLM 摘要) |
 
 ### P2 — 管理介面補完
 | 項 | Scope |
