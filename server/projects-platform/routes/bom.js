@@ -312,6 +312,71 @@ router.post('/quote/approve', asyncHandler(async (req, res) => {
   }
 }));
 
+// ── v0.16 #9 Cleansheet 檢視(component × process 矩陣 · run cells pivot)─────
+// GET /case/:caseFactoryId/cleansheet?qty= — baseline bar + KPI + 矩陣(整包內部成本 → 非全視角 403)
+router.get('/case/:caseFactoryId/cleansheet', asyncHandler(async (req, res) => {
+  if (!canViewTrueCost(req)) return res.status(403).json({ error: 'Cleansheet 為內部成本結構,需完整成本視角(HOST/admin)' });
+  const cf = reqId(req.params.caseFactoryId, res, 'caseFactoryId'); if (cf === null) return;
+  const qty = String(req.query.qty || 'BASE');
+  const db = getDb();
+  const cfRow = await db.prepare(
+    `SELECT cf.case_factory_id, cf.factory_code, cf.costing_model, cf.baseline_id,
+            b.version_label, b.effective_from, b.dl_wage_per_hr_usd, b.sga_pct, b.profit_pct,
+            b.oh_pct, b.vat_rate_pct, b.annual_demand_default, b.imported_by
+       FROM bom_cs_case_factory cf LEFT JOIN bom_factory_baseline b ON b.baseline_id = cf.baseline_id
+      WHERE cf.case_factory_id = ?`,
+  ).get(cf).catch(() => null);
+  if (!cfRow) return res.status(404).json({ error: 'case_factory not found' });
+  const runRow = await db.prepare(
+    `SELECT run_id, variant_value_ids, computed_at FROM bom_cs_run
+      WHERE case_factory_id = ? AND status = 'ready' AND NVL(qty_scenario_code,'BASE') = ?
+      ORDER BY run_id DESC FETCH FIRST 1 ROWS ONLY`,
+  ).get(cf, qty).catch(() => null);
+  let matrix = null, kpi = null, runId = null;
+  if (runRow) {
+    runId = Number(runRow.run_id || Object.values(runRow)[0]);
+    const cells = await db.prepare(
+      `SELECT process_code, component_code, cost_per_unit_usd, formula_text
+         FROM bom_cs_run_cell WHERE run_id = ?`,
+    ).all(runId).catch(() => []);
+    const comps = [], procs = [], m = {};
+    for (const r of cells) {
+      const co = String(r.component_code || Object.values(r)[1]);
+      const pr = String(r.process_code || Object.values(r)[0]);
+      const v = Number(r.cost_per_unit_usd);
+      if (!comps.includes(co)) comps.push(co);
+      if (!procs.includes(pr)) procs.push(pr);
+      m[co] = m[co] || {};
+      m[co][pr] = { v, formula: r.formula_text || null };
+    }
+    // 排序:demo 順序(LABOR → EQUIP → FACILITY → OTHERS;SMT → ASSY → COMMON)
+    const compOrder = ['DL_CPU', 'IDL_CPU', 'EQUIP_MRO', 'EQUIP_DEPR', 'IND_MAT', 'FACILITY', 'FREIGHT', 'VAT', 'LOSS'];
+    const procOrder = ['SMT_MAIN', 'WAVE_SOLDER', 'ROUTER_OFFLINE', 'LASER_ETCH', 'BB_ASSY', 'BB_TEST', 'MAT_MGMT', 'Q_SMT', 'Q_BB', 'COMMON'];
+    comps.sort((a, b) => (compOrder.indexOf(a) + 99 * (compOrder.indexOf(a) < 0 ? 1 : 0)) - (compOrder.indexOf(b) + 99 * (compOrder.indexOf(b) < 0 ? 1 : 0)));
+    procs.sort((a, b) => (procOrder.indexOf(a) + 99 * (procOrder.indexOf(a) < 0 ? 1 : 0)) - (procOrder.indexOf(b) + 99 * (procOrder.indexOf(b) < 0 ? 1 : 0)));
+    matrix = { components: comps, processes: procs, cells: m };
+    const rr = await engine.loadPersistedRun(db, runId).catch(() => null);
+    if (rr) {
+      const cb = rr.costBreakdown || {};
+      const sumProc = (pred) => { let s = 0; for (const co of comps) for (const pr of procs) if (pred(pr) && m[co][pr]) s += m[co][pr].v; return s; };
+      kpi = {
+        mvaTotal: cb.mva, sga: cb.sga, profit: cb.profit, total: cb.total, material: cb.material,
+        smtMva: sumProc((p) => p.startsWith('SMT') || p === 'WAVE_SOLDER' || p === 'ROUTER_OFFLINE' || p === 'LASER_ETCH' || p === 'Q_SMT'),
+        assyMva: sumProc((p) => p.startsWith('BB_') || p === 'MAT_MGMT' || p === 'Q_BB'),
+      };
+    }
+  }
+  res.json({
+    caseFactoryId: cf, factoryCode: cfRow.factory_code, costingModel: cfRow.costing_model, qty, runId,
+    baseline: cfRow.baseline_id ? {
+      versionLabel: cfRow.version_label, effectiveFrom: cfRow.effective_from,
+      dlWagePerHr: cfRow.dl_wage_per_hr_usd, sgaPct: cfRow.sga_pct, profitPct: cfRow.profit_pct,
+      ohPct: cfRow.oh_pct, vatPct: cfRow.vat_rate_pct, annualDemand: cfRow.annual_demand_default,
+    } : null,
+    matrix, kpi,
+  });
+}));
+
 // ── v0.16 #2 操作流程 checklist(26 步 · 自動判定 + 手動勾 + 附圖)────────────
 // GET /workflow/checklist?projectId=
 router.get('/workflow/checklist', asyncHandler(async (req, res) => {
