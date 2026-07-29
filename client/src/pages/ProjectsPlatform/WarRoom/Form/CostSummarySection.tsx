@@ -55,6 +55,29 @@ export default function CostSummarySection({ project }: { project: ProjectDetail
   }
   useEffect(() => { if (token) load() }, [token, projectId])
 
+  // P1 AI 比對上代:程式 diff(即時)+ Pro 摘要(按需)
+  const [legacyList, setLegacyList] = useState<any[]>([])
+  const [legacyId, setLegacyId] = useState<number | ''>('')
+  const [cmp, setCmp] = useState<any>(null)
+  const [cmpBusy, setCmpBusy] = useState(false)
+  const [aiBusy, setAiBusy] = useState(false)
+  useEffect(() => {
+    if (!token) return
+    api.get<{ projects: any[] }>(token, '/projects?limit=200').then((r) => {
+      const rows = (r.projects || []).filter((p: any) => p.id !== projectId && (p.type_code === 'QUOTE' || !p.type_code))
+        .map((p: any) => { let t = null; try { t = JSON.parse(p.data_payload || '{}').title } catch { /* noop */ } return { ...p, title: p.title || t } })
+      setLegacyList(rows)
+    }).catch(() => {})
+  }, [token, projectId])
+  async function runCompare(withAi: boolean) {
+    if (!legacyId) return
+    withAi ? setAiBusy(true) : setCmpBusy(true); setErr('')
+    try {
+      const r = await api.post<any>(token, '/bom/compare-legacy', { projectId, legacyProjectId: legacyId, withAi })
+      setCmp((prev: any) => (withAi && prev && !r.ai ? { ...r, ai: prev.ai } : r))
+    } catch (e: any) { setErr(e.message) } finally { setCmpBusy(false); setAiBusy(false) }
+  }
+
   async function recompute() {
     setBusy(true); setErr('')
     try { await api.post(token, '/bom/compare', { projectId, force: true }); await load(); setTimeout(() => window.dispatchEvent(new CustomEvent('cortex:stage-refresh')), 600) }
@@ -256,6 +279,78 @@ export default function CostSummarySection({ project }: { project: ProjectDetail
           </div>
         </div>
       )}
+
+      {/* P1 AI 比對上代:程式算 diff · Pro 只解讀 */}
+      <div className="border-t border-cortex-line pt-2 space-y-2">
+        <div className="text-[12px] font-bold text-cortex-ink">🔄 AI 比對上代
+          <span className="text-[10px] text-cortex-muted font-normal ml-1.5">選上一代專案 → 程式算 BOM/成本差異 → AI(Pro)歸納主因與談判要點</span>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap text-[11px]">
+          <select value={legacyId} onChange={(e) => { setLegacyId(e.target.value ? Number(e.target.value) : ''); setCmp(null) }}
+            className="border border-cortex-line rounded px-1.5 py-0.5 text-[11px] max-w-[280px]">
+            <option value="">選上代專案…</option>
+            {legacyList.map((p) => <option key={p.id} value={p.id}>{p.project_code}{p.title ? ` · ${p.title}` : ''}</option>)}
+          </select>
+          <button onClick={() => runCompare(false)} disabled={cmpBusy || !legacyId}
+            className="px-2.5 py-1 bg-cortex-navy text-white rounded hover:opacity-90 disabled:opacity-40">
+            {cmpBusy ? <Loader2 className="w-3 h-3 inline animate-spin" /> : null} 產生對比
+          </button>
+          {cmp && (
+            <button onClick={() => runCompare(true)} disabled={aiBusy}
+              className="px-2.5 py-1 bg-cortex-teal text-white rounded hover:opacity-90 disabled:opacity-40">
+              {aiBusy ? <Loader2 className="w-3 h-3 inline animate-spin" /> : '✨'} AI 摘要(Pro)
+            </button>
+          )}
+        </div>
+        {cmp && (
+          <div className="space-y-2">
+            {/* 成本橋 */}
+            <div className="bg-cortex-bg/40 border border-cortex-line rounded p-2 text-[11px] flex items-center gap-2 flex-wrap font-mono">
+              <span className="text-cortex-muted">{cmp.legacy.projectCode} {money(cmp.diff.bridge.legacyTotal)}</span>
+              <span>→</span>
+              {cmp.diff.bridge.addedSum !== 0 && <span className="text-red-600">+新增 {money(cmp.diff.bridge.addedSum)}</span>}
+              {cmp.diff.bridge.replacedSum !== 0 && <span className={cmp.diff.bridge.replacedSum > 0 ? 'text-red-600' : 'text-green-700'}>替換 {money(cmp.diff.bridge.replacedSum)}</span>}
+              {cmp.diff.bridge.priceUpSum !== 0 && <span className="text-red-600">+漲價 {money(cmp.diff.bridge.priceUpSum)}</span>}
+              {cmp.diff.bridge.priceDownSum !== 0 && <span className="text-green-700">降價 {money(cmp.diff.bridge.priceDownSum)}</span>}
+              {cmp.diff.bridge.removedSum !== 0 && <span className="text-green-700">移除 {money(cmp.diff.bridge.removedSum)}</span>}
+              {typeof cmp.diff.bridge.nonMaterialDelta === 'number' && Math.abs(cmp.diff.bridge.nonMaterialDelta) > 1e-9 && <span className="text-cortex-muted">非材料 {money(cmp.diff.bridge.nonMaterialDelta)}</span>}
+              <span>→</span>
+              <span className="font-bold text-cortex-teal">{cmp.current.projectCode} {money(cmp.diff.bridge.currentTotal)}</span>
+              <span className="text-cortex-muted ml-auto">料件 {cmp.diff.counts.legacyItems}→{cmp.diff.counts.currentItems} · 新增{cmp.diff.counts.added} 移除{cmp.diff.counts.removed} 替換{cmp.diff.counts.replaced} 價差{cmp.diff.counts.changed}</span>
+            </div>
+            {/* 明細 top(合一表) */}
+            <table className="w-full text-[10px]">
+              <thead className="text-cortex-muted border-b border-cortex-line"><tr>
+                <th className="text-left px-1.5 py-0.5">類</th><th className="text-left px-1.5 py-0.5">料件</th>
+                <th className="text-right px-1.5 py-0.5">上代</th><th className="text-right px-1.5 py-0.5">本案</th><th className="text-right px-1.5 py-0.5">影響/台</th>
+              </tr></thead>
+              <tbody>
+                {[
+                  ...cmp.diff.added.map((x: any) => ({ ...x, _t: '新增', _o: '—', _n: `${x.qty}×${money(x.price)}` })),
+                  ...cmp.diff.removed.map((x: any) => ({ ...x, _t: '移除', _o: `${x.qty}×${money(x.price)}`, _n: '—' })),
+                  ...cmp.diff.replaced.map((x: any) => ({ ...x, _t: '替換', _o: money(x.oldPrice), _n: money(x.newPrice) })),
+                  ...cmp.diff.changed.map((x: any) => ({ ...x, _t: '價差', _o: `${x.oldQty}×${money(x.oldPrice)}`, _n: `${x.newQty}×${money(x.newPrice)}` })),
+                ].sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact)).slice(0, 12).map((x: any, i: number) => (
+                  <tr key={i} className="border-b border-cortex-line/30">
+                    <td className="px-1.5 py-0.5"><span className={`px-1 rounded text-[9px] ${x._t === '新增' ? 'bg-red-50 text-red-600' : x._t === '移除' ? 'bg-green-50 text-green-700' : x._t === '替換' ? 'bg-amber-50 text-amber-700' : 'bg-cortex-bg text-cortex-muted'}`}>{x._t}</span></td>
+                    <td className="px-1.5 py-0.5 max-w-[220px] truncate" title={`${x.fpn || x.newFpn || ''} ${x.desc}`}>{x.desc}<span className="text-cortex-muted ml-1">{x.module}</span></td>
+                    <td className="px-1.5 py-0.5 text-right font-mono">{x._o}</td>
+                    <td className="px-1.5 py-0.5 text-right font-mono">{x._n}</td>
+                    <td className={`px-1.5 py-0.5 text-right font-mono ${x.impact > 0 ? 'text-red-600' : 'text-green-700'}`}>{money(x.impact)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {cmp.ai?.text && (
+              <div className="bg-cortex-cyan-bg/30 border border-cortex-teal/40 rounded p-2.5 text-[11px] whitespace-pre-wrap leading-relaxed">
+                <div className="text-[10px] text-cortex-muted mb-1">✨ AI 摘要({cmp.ai.model})— 數字由程式計算,AI 僅解讀</div>
+                {cmp.ai.text}
+              </div>
+            )}
+            {cmp.aiError && <div className="text-[10px] text-red-600">AI 摘要失敗:{cmp.aiError}(diff 仍有效)</div>}
+          </div>
+        )}
+      </div>
 
       {!anyRun && <div className="text-[11px] text-cortex-muted">尚無計算結果 —— 至「BOM/材料」匯入並算成本,或按「重新計算所有廠」。</div>}
       {factories.some((f) => Number(f.nre_per_unit_quote_usd) > 0) && (

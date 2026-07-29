@@ -306,6 +306,18 @@ router.post('/quote/approve', asyncHandler(async (req, res) => {
   }
 }));
 
+// POST /compare-legacy — AI 比對上代(body: projectId, legacyProjectId, withAi?)(P1)
+// diff 程式算(quote 側);withAi=1 → Gemini Pro 摘要(只解讀不算數)
+router.post('/compare-legacy', asyncHandler(async (req, res) => {
+  const svc = require('../services/bomLegacyCompareService');
+  try {
+    res.json(await svc.compareLegacy(getDb(), {
+      projectId: Number(req.body.projectId), legacyProjectId: Number(req.body.legacyProjectId),
+      withAi: req.body.withAi === true || req.body.withAi === 'true' || req.body.withAi === 1,
+    }));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+}));
+
 // ── P1 議價紀錄(定版後輪次 · vs 底線 margin 走 S2 遮罩)────────────────────
 // GET /negotiation?projectId= — 輪次列表 + 對照官方版(quote/true)
 router.get('/negotiation', asyncHandler(async (req, res) => {
