@@ -306,6 +306,61 @@ router.post('/quote/approve', asyncHandler(async (req, res) => {
   }
 }));
 
+// ── v0.16 #2 操作流程 checklist(26 步 · 自動判定 + 手動勾 + 附圖)────────────
+// GET /workflow/checklist?projectId=
+router.get('/workflow/checklist', asyncHandler(async (req, res) => {
+  const projectId = Number(req.query.projectId);
+  if (!projectId) return res.status(400).json({ error: 'projectId required' });
+  const formSvc = require('../services/bomFormService');
+  const { form } = await formSvc.getForm(getDb(), projectId, { canViewTrue: true });
+  res.json(await require('../services/bomWorkflowChecklistService').getChecklist(getDb(), projectId, form));
+}));
+
+// 附圖用獨立 multer(BOM 主 upload 的 fileFilter 只收 xlsx)
+const imgUpload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (/\.(png|jpe?g|gif|webp)$/i.test(file.originalname) || /^image\//.test(file.mimetype || '')) return cb(null, true);
+    cb(new Error(`僅接受圖片檔: ${file.originalname}`));
+  },
+});
+
+// POST /workflow/step-image — 步驟附圖(multipart: file + projectId + stepId + caption?)(D5)
+router.post('/workflow/step-image', imgUpload.single('file'), asyncHandler(async (req, res) => {
+  const projectId = Number(req.body.projectId);
+  const stepId = String(req.body.stepId || '');
+  if (!projectId || !stepId || !req.file) return res.status(400).json({ error: 'projectId + stepId + file required' });
+  if (!/\.(png|jpe?g|gif|webp)$/i.test(req.file.originalname) && !/^image\//.test(req.file.mimetype || '')) {
+    try { fs.unlinkSync(req.file.path); } catch (_) { /* noop */ }
+    return res.status(400).json({ error: '僅接受圖片檔(png/jpg/gif/webp)' });
+  }
+  // 檔案已由 multer 存到 BOM_DIR/{userId}/;記相對 /uploads URL 進 form.workflow.images
+  const rel = path.relative(UPLOAD_ROOT, req.file.path).replace(/\\/g, '/');
+  const url = `/uploads/${rel}`;
+  const formSvc = require('../services/bomFormService');
+  const { form } = await formSvc.getForm(getDb(), projectId, { canViewTrue: true });
+  const wf = form.workflow || {};
+  const images = wf.images || {};
+  images[stepId] = [...(images[stepId] || []), { url, caption: String(req.body.caption || '').slice(0, 200), at: new Date().toISOString(), by: req.user?.id || null }];
+  await formSvc.patchForm(getDb(), projectId, 'workflow', { images }, { canViewTrue: true });
+  res.json({ ok: true, stepId, url });
+}));
+
+// DELETE /workflow/step-image — 移除附圖(body: projectId, stepId, url)
+router.delete('/workflow/step-image', asyncHandler(async (req, res) => {
+  const projectId = Number(req.body.projectId);
+  const stepId = String(req.body.stepId || '');
+  const url = String(req.body.url || '');
+  if (!projectId || !stepId || !url) return res.status(400).json({ error: 'projectId + stepId + url required' });
+  const formSvc = require('../services/bomFormService');
+  const { form } = await formSvc.getForm(getDb(), projectId, { canViewTrue: true });
+  const images = (form.workflow || {}).images || {};
+  images[stepId] = (images[stepId] || []).filter((x) => x.url !== url);
+  await formSvc.patchForm(getDb(), projectId, 'workflow', { images }, { canViewTrue: true });
+  res.json({ ok: true });
+}));
+
 // ── v0.16 報價 Form:案級欄位 + 完成度(plan #0 · data_payload.form)──────────
 // GET /form?projectId= — form 值 + 各段完成度(機密段非全視角遮 ▒▒▒)
 router.get('/form', asyncHandler(async (req, res) => {

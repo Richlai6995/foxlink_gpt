@@ -28,9 +28,11 @@ import CustomerSection from './CustomerSection'
 import AiToolbarSection from './AiToolbarSection'
 import BomSection from './BomSection'
 import CostSummarySection from './CostSummarySection'
+import WorkflowChecklistSection from './WorkflowChecklistSection'
 
 type SectionId =
   | 'customer'
+  | 'workflow'
   | 'bom'
   | 'variant'
   | 'nre'
@@ -49,6 +51,7 @@ type SectionDef = {
 
 const SECTIONS: SectionDef[] = [
   { id: 'customer',  label: '客戶資料', icon: '👥', visible: () => true },
+  { id: 'workflow',  label: '操作流程', icon: '🎬', isNew: true, visible: () => true },
   { id: 'bom',       label: 'BOM / 材料', icon: '📦', isNew: true, visible: () => true },
   { id: 'variant',   label: 'CMF 變體', icon: '🎨', isNew: true,
     visible: (p) => !!(p.data_payload as any)?.variants?.items?.length,
@@ -66,7 +69,8 @@ const SECTIONS: SectionDef[] = [
 // sidebar section id → 完成度 service 段 key(多對一加總;v0.16 plan #0)
 const COMPLETION_MAP: Record<SectionId, string[]> = {
   customer: ['customer'],
-  bom: ['bom', 'workflow'],
+  workflow: ['workflow'],
+  bom: ['bom'],
   variant: ['variant'],
   packaging: ['packaging'],
   nre: ['nre'],
@@ -94,6 +98,11 @@ export default function FormPanel({ project }: { project: ProjectDetail }) {
     window.addEventListener('cortex:stage-refresh', h)
     return () => { window.removeEventListener('cortex:form-refresh', h); window.removeEventListener('cortex:stage-refresh', h) }
   }, [token, project?.id])
+  useEffect(() => {
+    const h = (e: any) => { const id = e?.detail as SectionId; if (id) setActiveSection(id) }
+    window.addEventListener('cortex:goto-section', h)
+    return () => window.removeEventListener('cortex:goto-section', h)
+  }, [])
   const compOf = (id: SectionId) => {
     const keys = COMPLETION_MAP[id] || []
     let f = 0, t = 0
@@ -158,6 +167,7 @@ export default function FormPanel({ project }: { project: ProjectDetail }) {
       {/* Active section content(右) */}
       <main className="overflow-y-auto p-5 bg-white">
         {activeSection === 'customer'  && <CustomerSection  project={project} />}
+        {activeSection === 'workflow'  && <WorkflowChecklistSection project={project} />}
         {activeSection === 'bom'       && <BomSection       project={project} />}
         {activeSection === 'variant'   && <VariantSection   project={project} />}
         {activeSection === 'packaging' && <PackagingSection project={project} />}
