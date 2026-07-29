@@ -16,8 +16,10 @@
  * 全唯讀(讀 project.data_payload JSON)— Phase 2 才上 Form Builder 編輯
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ProjectDetail } from '../../api'
+import { api } from '../../api'
+import { useAuth } from '../../../../context/AuthContext'
 import VariantSection from './VariantSection'
 import NreRealSection from './NreRealSection'
 import PackagingSection from './PackagingSection'
@@ -61,9 +63,43 @@ const SECTIONS: SectionDef[] = [
   { id: 'ai',        label: 'AI 工具',  icon: '✨',  visible: () => true },
 ]
 
+// sidebar section id → 完成度 service 段 key(多對一加總;v0.16 plan #0)
+const COMPLETION_MAP: Record<SectionId, string[]> = {
+  customer: ['customer'],
+  bom: ['bom', 'workflow'],
+  variant: ['variant'],
+  packaging: ['packaging'],
+  nre: ['nre'],
+  cost: ['cost', 'factory_matrix', 'cleansheet', 'strategy'],
+  ai: [],
+}
+
 export default function FormPanel({ project }: { project: ProjectDetail }) {
+  const { token } = useAuth() as any
   const visibleSections = SECTIONS.filter((s) => s.visible(project))
   const [activeSection, setActiveSection] = useState<SectionId>(visibleSections[0]?.id || 'customer')
+  // 完成度(真計算 · GET /bom/form);表單存檔後由 cortex:form-refresh 重抓
+  const [completion, setCompletion] = useState<Record<string, { filled: number; total: number; status: string }>>({})
+  useEffect(() => {
+    if (!token || !project?.id) return
+    const load = () => api.get<any>(token, `/bom/form?projectId=${project.id}`)
+      .then((r) => {
+        const m: any = {}
+        for (const c of r.completion || []) m[c.key] = c
+        setCompletion(m)
+      }).catch(() => {})
+    load()
+    const h = () => load()
+    window.addEventListener('cortex:form-refresh', h)
+    window.addEventListener('cortex:stage-refresh', h)
+    return () => { window.removeEventListener('cortex:form-refresh', h); window.removeEventListener('cortex:stage-refresh', h) }
+  }, [token, project?.id])
+  const compOf = (id: SectionId) => {
+    const keys = COMPLETION_MAP[id] || []
+    let f = 0, t = 0
+    for (const k of keys) { const c = completion[k]; if (c && c.total > 0) { f += c.filled; t += c.total } }
+    return t > 0 ? { f, t, pct: Math.round((f / t) * 100) } : null
+  }
 
   return (
     <div className="grid grid-cols-[180px_1fr] divide-x divide-cortex-line min-h-[560px]">
@@ -97,6 +133,18 @@ export default function FormPanel({ project }: { project: ProjectDetail }) {
               {badge && (
                 <div className="text-[10px] text-cortex-muted mt-0.5 ml-5 font-mono">{badge}</div>
               )}
+              {(() => {
+                const c = compOf(s.id)
+                if (!c) return null
+                return (
+                  <div className="flex items-center gap-1.5 mt-1 ml-5">
+                    <div className="flex-1 h-1 bg-cortex-line/60 rounded overflow-hidden max-w-[90px]">
+                      <div className={`h-full rounded ${c.pct >= 100 ? 'bg-green-500' : c.pct > 0 ? 'bg-amber-400' : 'bg-cortex-line'}`} style={{ width: `${c.pct}%` }} />
+                    </div>
+                    <span className={`text-[9px] font-mono ${c.pct >= 100 ? 'text-green-600' : 'text-cortex-muted'}`}>{c.f}/{c.t} · {c.pct}%</span>
+                  </div>
+                )
+              })()}
             </button>
           )
         })}

@@ -1,13 +1,101 @@
 /**
  * CustomerSection — 客戶資料 + 規格 / 數量 + 其他(原 FormStub 內容拆出)
+ *
+ * v0.16 plan #1:上半 = 8 欄可編輯(存 data_payload.form.customer · PUT /bom/form/customer);
+ * 下半保留原 data_payload 唯讀摘要(規格/數量 · Wizard 值)。
  */
 
-import { useState } from 'react'
-import { Lock, Sparkles, Factory, Activity } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Lock, Sparkles, Factory, Activity, Loader2 } from 'lucide-react'
 import type { ProjectDetail } from '../../api'
+import { api } from '../../api'
+import { useAuth } from '../../../../context/AuthContext'
 import AiSuggestionModal from '../AiSuggestionModal'
 import CleansheetPanel from '../CleansheetPanel'
 import WhatIfPanel from '../WhatIfPanel'
+
+// v0.16 客戶資料 8 欄(欄位對齊 demo schema 10157–10165)
+const CUST_FIELDS: { key: string; label: string; type?: 'textarea' | 'select'; options?: string[]; ph?: string }[] = [
+  { key: 'cust_name', label: '客戶名稱', ph: 'SteelSeries ApS' },
+  { key: 'cust_alias', label: '客戶代號(別名)', ph: '機密案對外用 A001' },
+  { key: 'tax_id', label: '統編 / Tax ID', ph: '04541302' },
+  { key: 'cust_code_erp', label: '客戶代號(ERP 主檔)', ph: 'A001-SS-001' },
+  { key: 'po_number', label: '客戶 PO 號', ph: 'PO-SS-2026-…' },
+  { key: 'payment_terms', label: '付款條件', type: 'select', options: ['月結 30 天', '月結 45 天', '月結 60 天', 'T/T 前付', 'L/C', '其他'] },
+  { key: 'ship_address', label: '收貨地址', type: 'textarea' },
+  { key: 'contact_name', label: '採購窗口', ph: 'David Chang (procurement)' },
+]
+
+function CustomerEditCard({ project }: { project: ProjectDetail }) {
+  const { token } = useAuth() as any
+  const dp = (project.data_payload as any) || {}
+  const [vals, setVals] = useState<Record<string, string>>({})
+  const [dirty, setDirty] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  useEffect(() => {
+    if (!token) return
+    api.get<any>(token, `/bom/form?projectId=${project.id}`).then((r) => {
+      const f = r.form?.customer || {}
+      // prefill:form.customer 優先,退回 Wizard 舊欄位
+      setVals({
+        cust_name: f.cust_name ?? dp.customer ?? '',
+        cust_alias: f.cust_alias ?? dp.customer_alias ?? '',
+        tax_id: f.tax_id ?? '',
+        cust_code_erp: f.cust_code_erp ?? '',
+        po_number: f.po_number ?? '',
+        payment_terms: f.payment_terms ?? '',
+        ship_address: f.ship_address ?? '',
+        contact_name: f.contact_name ?? '',
+      })
+    }).catch(() => {})
+  }, [token, project.id])   // eslint-disable-line
+  async function save() {
+    setBusy(true); setMsg('')
+    try {
+      await api.put(token, '/bom/form/customer', { projectId: project.id, fields: vals })
+      setDirty(false); setMsg('✓ 已存檔')
+      window.dispatchEvent(new CustomEvent('cortex:form-refresh'))
+      setTimeout(() => setMsg(''), 2500)
+    } catch (e: any) { setMsg(`存檔失敗:${e.message}`) } finally { setBusy(false) }
+  }
+  const set = (k: string, v: string) => { setVals((p) => ({ ...p, [k]: v })); setDirty(true) }
+  const filledN = CUST_FIELDS.filter((f) => (vals[f.key] || '').trim()).length
+  return (
+    <div className="border border-cortex-line rounded-lg p-3 space-y-2 mb-4">
+      <div className="flex items-center justify-between">
+        <div className="text-[12px] font-bold text-cortex-ink">👥 客戶資料 <span className="text-[10px] text-cortex-muted font-normal">{filledN} / {CUST_FIELDS.length} 欄</span></div>
+        <div className="flex items-center gap-2">
+          {msg && <span className={`text-[10px] ${msg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{msg}</span>}
+          <button onClick={save} disabled={busy || !dirty}
+            className="px-2.5 py-1 bg-cortex-navy text-white rounded hover:opacity-90 disabled:opacity-40 text-[11px]">
+            {busy ? <Loader2 className="w-3 h-3 inline animate-spin" /> : null} 存檔
+          </button>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+        {CUST_FIELDS.map((f) => (
+          <label key={f.key} className={`text-[10px] text-cortex-muted ${f.type === 'textarea' ? 'col-span-2' : ''}`}>
+            {f.label}
+            {f.type === 'select' ? (
+              <select value={vals[f.key] || ''} onChange={(e) => set(f.key, e.target.value)}
+                className="mt-0.5 w-full border border-cortex-line rounded px-2 py-1 text-[12px] text-cortex-ink bg-white">
+                <option value="">—</option>
+                {(f.options || []).map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
+            ) : f.type === 'textarea' ? (
+              <textarea value={vals[f.key] || ''} onChange={(e) => set(f.key, e.target.value)} rows={2} placeholder={f.ph}
+                className="mt-0.5 w-full border border-cortex-line rounded px-2 py-1 text-[12px] text-cortex-ink" />
+            ) : (
+              <input value={vals[f.key] || ''} onChange={(e) => set(f.key, e.target.value)} placeholder={f.ph}
+                className="mt-0.5 w-full border border-cortex-line rounded px-2 py-1 text-[12px] text-cortex-ink" />
+            )}
+          </label>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 export default function CustomerSection({ project }: { project: ProjectDetail }) {
   const dp = (project.data_payload as any) || {}
@@ -20,15 +108,6 @@ export default function CustomerSection({ project }: { project: ProjectDetail })
   const AI_SUGGEST_FIELDS = new Set(['amount', 'margin', 'cost_breakdown', 'priorityScore'])
 
   const sections: { label: string; fields: { key: string; label: string; confidential?: boolean }[] }[] = [
-    {
-      label: '客戶資料',
-      fields: [
-        { key: 'customer', label: '客戶名稱', confidential: true },
-        { key: 'partNo',   label: '料號' },
-        { key: 'mode',     label: '模式(ODM/OEM/JDM)' },
-        { key: 'customer_alias', label: '客戶 alias' },
-      ],
-    },
     {
       label: '規格 / 數量',
       fields: [
@@ -70,6 +149,9 @@ export default function CustomerSection({ project }: { project: ProjectDetail })
           </p>
         </div>
       </div>
+
+      {/* v0.16 #1:客戶資料 8 欄可編輯 */}
+      <CustomerEditCard project={project} />
 
       {/* 版本鏈 */}
       <div className="bg-cortex-line-2/60 border border-cortex-line rounded p-3 flex items-center gap-2 flex-wrap text-[12px]">

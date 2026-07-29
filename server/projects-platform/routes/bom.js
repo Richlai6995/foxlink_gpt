@@ -306,6 +306,23 @@ router.post('/quote/approve', asyncHandler(async (req, res) => {
   }
 }));
 
+// ── v0.16 報價 Form:案級欄位 + 完成度(plan #0 · data_payload.form)──────────
+// GET /form?projectId= — form 值 + 各段完成度(機密段非全視角遮 ▒▒▒)
+router.get('/form', asyncHandler(async (req, res) => {
+  const projectId = Number(req.query.projectId);
+  if (!projectId) return res.status(400).json({ error: 'projectId required' });
+  res.json(await require('../services/bomFormService').getForm(getDb(), projectId, { canViewTrue: canViewTrueCost(req) }));
+}));
+
+// PUT /form/:section — patch 一段欄位(body: {projectId, fields});機密段非全視角 403
+router.put('/form/:section', asyncHandler(async (req, res) => {
+  const projectId = Number(req.body.projectId);
+  if (!projectId) return res.status(400).json({ error: 'projectId required' });
+  try {
+    res.json(await require('../services/bomFormService').patchForm(getDb(), projectId, String(req.params.section), req.body.fields, { canViewTrue: canViewTrueCost(req) }));
+  } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
+}));
+
 // POST /compare-legacy — AI 比對上代(body: projectId, legacyProjectId, withAi?)(P1)
 // diff 程式算(quote 側);withAi=1 → Gemini Pro 摘要(只解讀不算數)
 router.post('/compare-legacy', asyncHandler(async (req, res) => {
