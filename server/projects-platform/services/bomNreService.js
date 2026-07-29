@@ -13,19 +13,27 @@ const lc = (row) => { const o = {}; if (row) for (const k of Object.keys(row)) o
 async function rollupNre(db, projectId) {
   const rows = await db.prepare(
     `SELECT id, project_id, category, item_no, description, qty, unit_price_true, unit_price_quote,
-            sub_total_true, sub_total_quote, factory_code, remark, sort_order
+            unit_price_negotiated, sub_total_true, sub_total_quote,
+            (NVL(qty,0) * NVL(NVL(unit_price_negotiated, unit_price_quote),0)) AS sub_total_eff,
+            factory_code, remark, sort_order
        FROM bom_nre_item WHERE project_id = ? ORDER BY sort_order, id`,
   ).all(projectId).catch(() => []);
   const items = rows.map(lc);
-  let totalTrue = 0, totalQuote = 0; const byCategory = {};
+  // v0.16 #7:totalQuote = effective(NVL(negotiated, quote))→ 定版/攤提自動吃議價後;另回 original + 削減
+  let totalTrue = 0, totalQuote = 0, totalQuoteOriginal = 0; const byCategory = {};
   for (const it of items) {
-    const t = num(it.sub_total_true), q = num(it.sub_total_quote);
-    totalTrue += t; totalQuote += q;
+    const t = num(it.sub_total_true), q0 = num(it.sub_total_quote), q = num(it.sub_total_eff);
+    totalTrue += t; totalQuote += q; totalQuoteOriginal += q0;
     const c = it.category || 'OTHER';
     byCategory[c] = byCategory[c] || { true: 0, quote: 0, count: 0 };
     byCategory[c].true += t; byCategory[c].quote += q; byCategory[c].count += 1;
   }
-  return { items, totalTrue, totalQuote, marginUsd: totalQuote - totalTrue, byCategory };
+  const reductionUsd = totalQuoteOriginal - totalQuote;
+  return {
+    items, totalTrue, totalQuote, totalQuoteOriginal,
+    reductionUsd, reductionPct: totalQuoteOriginal > 0 ? reductionUsd / totalQuoteOriginal : 0,
+    marginUsd: totalQuote - totalTrue, byCategory,
+  };
 }
 
 async function getConfig(db, projectId) {
@@ -79,4 +87,15 @@ async function amortizedPerUnit(db, projectId) {
   };
 }
 
-module.exports = { rollupNre, getConfig, setConfig, addItem, deleteItem, amortizedPerUnit };
+/** v0.16 #7:更新單項議價後價 / 備註('' → NULL 還原) */
+async function updateItem(db, itemId, { unitPriceNegotiated, remark } = {}) {
+  const sets = [], binds = [];
+  if (unitPriceNegotiated !== undefined) { sets.push('unit_price_negotiated=?'); binds.push(unitPriceNegotiated === '' || unitPriceNegotiated == null ? null : num(unitPriceNegotiated)); }
+  if (remark !== undefined) { sets.push('remark=?'); binds.push(remark ? String(remark).slice(0, 400) : null); }
+  if (!sets.length) return { ok: false };
+  binds.push(num(itemId));
+  await db.prepare(`UPDATE bom_nre_item SET ${sets.join(', ')} WHERE id=?`).run(...binds);
+  return { ok: true };
+}
+
+module.exports = { rollupNre, getConfig, setConfig, addItem, deleteItem, amortizedPerUnit, updateItem };

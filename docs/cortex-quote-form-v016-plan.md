@@ -23,9 +23,9 @@
 | 2 | 🎬 操作流程 | 26 步 checklist(Stage 4–7)+ action 跳轉 + 自動完成判定 + **附圖上傳** | ✅ cc8bf4e |
 | 3 | CMF 變體 | 變異值 share%/qty + 加權平均料成本(接現有變異軸) | ✅ d4973f7 |
 | 4 | BOM 結構(案級欄) | ECN 版本/BOM lock 狀態/客供料(有無+明細)/採購策略總覽視圖(樹已有) | ✅ 55e0023 |
-| 5 | 包裝 BOM | per-item true/quote/markup 視圖 + Pallet Compliance 欄(商包/工包=包裝變異值,已有) | ✅ |
+| 5 | 包裝 BOM | per-item true/quote/markup 視圖 + Pallet Compliance 欄(商包/工包=包裝變異值,已有) | ✅ fe9c33e |
 | 6 | ~~詢價彙總~~ | 不做(D6) | ✂️ |
-| 7 | NRE 成本 | Original vs Negotiated 雙欄 + 議價削減 %(接議價紀錄語意) | ⬜ |
+| 7 | NRE 成本 | Original vs Negotiated 雙欄 + 議價削減 %(接議價紀錄語意) | ✅ |
 | 8 | 多廠矩陣 v0.7 | **qty scenario 軸**(cell key 擴充)+ cell 分解列(MVA/材料/SGA/Total/Margin)+ toggle(qty/pkg/true/margin) | ⬜ |
 | 9 | Cleansheet 檢視 | 9 cost component × 9 process 矩陣 + baseline bar + KPI 卡 + step trace(資料全有,純檢視 UI) | ⬜ |
 | 10 | MVA 操作流程 | Phase A–G(素材/步驟/兩案差異/DB 表)教學段 + PPTX 手冊連結 | ⬜ |

@@ -261,6 +261,12 @@ router.post('/nre/item', asyncHandler(async (req, res) => {
 }));
 
 // DELETE /nre/item/:id
+// PUT /nre/item/:id — 議價後價/備註(v0.16 #7)(body: unitPriceNegotiated?, remark?)
+router.put('/nre/item/:id', asyncHandler(async (req, res) => {
+  const id = reqId(req.params.id, res); if (id === null) return;
+  res.json(await nreSvc.updateItem(getDb(), id, { unitPriceNegotiated: req.body.unitPriceNegotiated, remark: req.body.remark }));
+}));
+
 router.delete('/nre/item/:id', asyncHandler(async (req, res) => {
   const id = reqId(req.params.id, res); if (id === null) return;
   res.json({ ok: true, ...(await nreSvc.deleteItem(getDb(), id)) });

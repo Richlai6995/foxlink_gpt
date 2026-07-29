@@ -168,6 +168,7 @@ async function runMigrations(db) {
       await require('./migrations/013r_template_label')(db);         // 範本命名 template_label(C-2.5)
       await require('./migrations/013s_template_versioning')(db);    // 範本版本化 is_active + effective_from(C-3)
       await require('./migrations/013t_negotiation')(db);            // 議價紀錄 bom_negotiation_round(P1)
+      await require('./migrations/013u_nre_negotiated')(db);         // NRE 議價欄 unit_price_negotiated(v0.16 #7)
       console.log('[projects-platform] Cortex BOM/RBAC migrations (S0) ✓');
     } else {
       console.log('[projects-platform] Cortex BOM/RBAC migrations skipped (ENABLE_CORTEX_BOM != true)');

@@ -37,6 +37,18 @@ export default function NreRealSection({ project }: { project: ProjectDetail }) 
     } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
   async function delItem(id: number) { setBusy(true); setErr(''); try { await api.delete(token, `/bom/nre/item/${id}`); await load() } catch (e: any) { setErr(e.message) } finally { setBusy(false) } }
+  // v0.16 #7:議價後單價 inline 存('' = 還原未議價)
+  const [negEdit, setNegEdit] = useState<Record<number, string>>({})
+  async function saveNeg(id: number) {
+    const v = negEdit[id]
+    if (v === undefined) return
+    setBusy(true); setErr('')
+    try {
+      await api.put(token, `/bom/nre/item/${id}`, { unitPriceNegotiated: v === '' ? '' : Number(v) })
+      setNegEdit((p) => { const n = { ...p }; delete n[id]; return n })
+      await load(); window.dispatchEvent(new CustomEvent('cortex:form-refresh'))
+    } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
   async function saveConfig(mode: string) {
     setBusy(true); setErr('')
     try { await api.put(token, '/bom/nre/config', { projectId, nreMode: mode, nreAmortizeQty: amortQty ? Number(amortQty) : null, amortizeSide: 'quote' }); await load() }
@@ -73,7 +85,10 @@ export default function NreRealSection({ project }: { project: ProjectDetail }) 
           <tr>
             <th className="text-left px-2 py-1">類別</th><th className="text-left px-2 py-1">項目</th>
             <th className="text-right px-2 py-1">Qty</th>
-            <th className="text-right px-2 py-1">對客(quote)</th><th className="text-right px-2 py-1">成本(true)</th>
+            <th className="text-right px-2 py-1">原始(quote)</th>
+            <th className="text-right px-2 py-1">議價後 / 單價</th>
+            <th className="text-right px-2 py-1">議價後小計</th>
+            <th className="text-right px-2 py-1">成本(true)</th>
             <th className="w-8"></th>
           </tr>
         </thead>
@@ -84,22 +99,39 @@ export default function NreRealSection({ project }: { project: ProjectDetail }) 
               <td className="px-2 py-1">{it.description}</td>
               <td className="px-2 py-1 text-right font-mono">{it.qty}</td>
               <td className="px-2 py-1 text-right font-mono">{money(it.sub_total_quote)}</td>
+              <td className="px-2 py-1 text-right">
+                <input
+                  value={negEdit[it.id] !== undefined ? negEdit[it.id] : (it.unit_price_negotiated ?? '')}
+                  onChange={(e) => setNegEdit((p) => ({ ...p, [it.id]: e.target.value }))}
+                  onBlur={() => saveNeg(it.id)} placeholder="未議價"
+                  className={`w-20 border rounded px-1.5 py-0.5 text-right font-mono text-[11px] ${it.unit_price_negotiated != null ? 'border-cortex-teal bg-cortex-cyan-bg/30' : 'border-cortex-line'}`} />
+              </td>
+              <td className="px-2 py-1 text-right font-mono">
+                {money(it.sub_total_eff)}
+                {it.unit_price_negotiated != null && Number(it.sub_total_quote) > 0 && (
+                  <span className="text-[9px] text-green-700 ml-1">↓{Math.round((1 - Number(it.sub_total_eff) / Number(it.sub_total_quote)) * 100)}%</span>
+                )}
+              </td>
               <td className="px-2 py-1 text-right font-mono text-cortex-muted">{money(it.sub_total_true)}</td>
               <td className="px-2 py-1 text-center"><button onClick={() => delItem(it.id)} disabled={busy} className="text-red-400 hover:text-red-600"><Trash2 className="w-3 h-3" /></button></td>
             </tr>
           ))}
-          {(r?.items || []).length === 0 && <tr><td colSpan={6} className="px-2 py-3 text-center text-cortex-muted">尚無 NRE 項目,下方新增。</td></tr>}
+          {(r?.items || []).length === 0 && <tr><td colSpan={8} className="px-2 py-3 text-center text-cortex-muted">尚無 NRE 項目,下方新增。</td></tr>}
         </tbody>
         {(r?.items || []).length > 0 && (
           <tfoot>
             <tr className="font-bold text-cortex-ink border-t-2 border-cortex-line">
               <td className="px-2 py-1.5" colSpan={3}>NRE 合計</td>
-              <td className="px-2 py-1.5 text-right font-mono">{money(r.totalQuote)}</td>
+              <td className="px-2 py-1.5 text-right font-mono text-cortex-muted">{money(r.totalQuoteOriginal)}</td>
+              <td className="px-2 py-1.5 text-right text-[10px] text-green-700">
+                {r.reductionUsd > 0 ? `↓ ${money(r.reductionUsd)}(${(r.reductionPct * 100).toFixed(1)}%)` : '—'}
+              </td>
+              <td className="px-2 py-1.5 text-right font-mono text-cortex-teal">{money(r.totalQuote)}</td>
               <td className="px-2 py-1.5 text-right font-mono text-cortex-muted">{money(r.totalTrue)}</td>
               <td></td>
             </tr>
             <tr className="text-[10px] text-cortex-muted">
-              <td colSpan={6} className="px-2 pb-1 text-right">NRE margin(收費 − 成本):{money(r.marginUsd)}{r.marginUsd < 0 && '（少收 · 由單價 margin 補回）'}</td>
+              <td colSpan={8} className="px-2 pb-1 text-right">定版 / 攤提以「議價後」合計為準 · NRE margin(收費 − 成本):{money(r.marginUsd)}{r.marginUsd < 0 && '（少收 · 由單價 margin 補回）'}</td>
             </tr>
           </tfoot>
         )}
