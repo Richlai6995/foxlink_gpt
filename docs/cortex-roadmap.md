@@ -20,6 +20,17 @@
 
 ## 🔜 Backlog(優先序草案 · 待拍板)
 
+### P1.5 — 參數全面線上化(2026-07-30 拍板 · 競價前提:範本=架構起點,所有參數系統上隨時調+視覺化試算)
+| # | 項 | Scope | 狀態 |
+|---|---|---|---|
+| R1 | 調參 gap 補齊 | IDL 年薪可編輯(COW)· Qty scenario 增刪改 UI · 設備/廠房/耗材 列增刪(製程列增刪留 Excel) | ⬜ |
+| R1.5 | 廠級基礎維護頁 | 範本庫管理頁(國別×BU×模型×版本)+ 點入直開 Cleansheet 編輯器編範本 cf;BU 維度用 baseline.bg_code/bu_code;Excel 降級為批量通道 | ⬜ |
+| R2 | What-if 試算沙盒 | engine persist:false;改參數先進沙盒即時算 → 現行 vs 試算並排 diff → 套用才落庫;不污染 run 歷史 | ⬜ |
+| R3 | SIMPLIFIED line 編輯 | bom_cs_case_simplified_line UI(WHOOP 型案的 Step 1 對應) | ⬜ |
+| R4 | Goal-seek 反推 | 目標價 → 反推 料價降幅/Profit%/量;等成本架構穩定(最後做) | 📌 backlog |
+
+三層定位(拍板):L1 廠級基礎(範本庫=國別×BU×模型,維護 UI 直編)→ L2 開案 clone 案級快照 → L3 案級線上調(COW 隔離)。既有案永不受廠級改動影響。
+
 ### P2 — 管理介面補完
 | 項 | Scope |
 |---|---|
