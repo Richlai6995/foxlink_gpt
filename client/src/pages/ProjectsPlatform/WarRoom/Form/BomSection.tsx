@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { ProjectDetail } from '../../api'
 import { api, ApiError } from '../../api'
 import { useAuth } from '../../../../context/AuthContext'
@@ -25,6 +26,7 @@ type CaseRow = { case_factory_id: number; project_id: number; factory_code: stri
 
 export default function BomSection({ project }: { project: ProjectDetail }) {
   const { token } = useAuth() as any
+  const navigate = useNavigate()
   const projectId = project.id
   const [cases, setCases] = useState<CaseRow[]>([])
   const [caseFactoryId, setCaseFactoryId] = useState<number | ''>('')
@@ -234,6 +236,11 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
         className="flex items-center gap-1 px-2 py-0.5 border border-cortex-teal text-cortex-teal rounded hover:bg-cortex-cyan-bg disabled:opacity-40">
         存入範本庫
       </button>
+      <button onClick={() => { const t = templates.find((x: any) => x.tplProjectId); if (t?.tplProjectId) navigate(`/projects-platform/projects/${t.tplProjectId}`); else setErr('範本庫尚未初始化(先按＋廠別載入範本列表)') }}
+        title="開廠級範本專案 → 用 Cleansheet 編輯器直接維護廠級基礎(影響之後新案)"
+        className="flex items-center gap-1 px-2 py-0.5 border border-amber-400 text-amber-700 rounded hover:bg-amber-50">
+        ⚙ 廠級基礎維護
+      </button>
       <span className="text-cortex-muted">·</span>
       <span className="text-cortex-muted">空白範本:</span>
       <button onClick={() => dlBlob('/cost-model/template?model=SIMPLIFIED_WEARABLE&blank=1', 'cost-model-blank-SIMPLIFIED.xlsx')} className="text-cortex-teal hover:underline">穿戴</button>
@@ -294,7 +301,7 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
           <div className="flex items-center gap-2 flex-wrap">
             <select value={tplId} onChange={(e) => setTplId(e.target.value ? Number(e.target.value) : '')} className="border border-cortex-line rounded px-2 py-1 text-[12px]">
               <option value="">選擇範本…</option>
-              {templates.map((t) => <option key={t.caseFactoryId} value={t.caseFactoryId}>{t.factoryCode} · {t.costingModel}{t.templateLabel ? ` · ${t.templateLabel}` : ''}</option>)}
+              {templates.map((t) => <option key={t.caseFactoryId} value={t.caseFactoryId}>{t.factoryCode}{(t as any).buCode ? `/${(t as any).buCode}` : ''} · {t.costingModel}{t.templateLabel ? ` · ${t.templateLabel}` : ''}</option>)}
             </select>
             <button onClick={doProvision} disabled={provisioning || !tplId}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 text-white text-[12px] rounded hover:opacity-90 disabled:opacity-40 shrink-0">
@@ -327,7 +334,7 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
               <span className="text-[11px] text-cortex-muted">從範本庫新增廠別:</span>
               <select value={tplId} onChange={(e) => setTplId(e.target.value ? Number(e.target.value) : '')} className="border border-cortex-line rounded px-2 py-1 text-[12px]">
                 <option value="">選擇範本…</option>
-                {templates.map((t) => <option key={t.caseFactoryId} value={t.caseFactoryId}>{t.factoryCode} · {t.costingModel}{t.templateLabel ? ` · ${t.templateLabel}` : ''}</option>)}
+                {templates.map((t) => <option key={t.caseFactoryId} value={t.caseFactoryId}>{t.factoryCode}{(t as any).buCode ? `/${(t as any).buCode}` : ''} · {t.costingModel}{t.templateLabel ? ` · ${t.templateLabel}` : ''}</option>)}
               </select>
               <button onClick={doProvision} disabled={provisioning || !tplId}
                 className="flex items-center gap-1 px-2.5 py-1 bg-cortex-navy text-white text-[12px] rounded hover:opacity-90 disabled:opacity-40">

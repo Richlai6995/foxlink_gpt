@@ -51,8 +51,10 @@ async function listTemplates(db, { includeInactive = false } = {}) {
   // C-2:範本庫 = 系統範本專案(CORTEX-COST-TPL);C-3:預設只列現行(is_active=1),歷史版可選查
   const rows = await db.prepare(
     `SELECT cf.case_factory_id, cf.factory_code, cf.costing_model, cf.baseline_id, cf.template_label,
-            NVL(cf.is_active,1) AS is_active, cf.effective_from, p.project_code
+            NVL(cf.is_active,1) AS is_active, cf.effective_from, p.project_code, p.id AS tpl_project_id,
+            b.bg_code, b.bu_code
        FROM bom_cs_case_factory cf JOIN projects p ON p.id = cf.case_id
+       LEFT JOIN bom_factory_baseline b ON b.baseline_id = cf.baseline_id
       WHERE p.project_code = 'CORTEX-COST-TPL'${includeInactive ? '' : ' AND NVL(cf.is_active,1)=1'}
       ORDER BY cf.factory_code, cf.costing_model, cf.case_factory_id`,
   ).all().catch(() => []);
@@ -62,6 +64,9 @@ async function listTemplates(db, { includeInactive = false } = {}) {
     costingModel: pick(r, 'costing_model'),
     templateLabel: pick(r, 'template_label') || null,
     isActive: Number(pick(r, 'is_active')),
+    tplProjectId: Number(pick(r, 'tpl_project_id')) || null,
+    bgCode: pick(r, 'bg_code') || null,
+    buCode: pick(r, 'bu_code') || null,
     effectiveFrom: pick(r, 'effective_from') || null,
     projectCode: pick(r, 'project_code'),
   }));

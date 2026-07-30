@@ -143,6 +143,12 @@ export default function WarRoom() {
       </div>
 
       {/* 8-Stage Ribbon */}
+      {(project as any).project_code === 'CORTEX-COST-TPL' && (
+        <div className="mb-2 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2 text-[12px] text-amber-800">
+          ⚙ <b>廠級成本基礎(範本庫專案)</b> — 這裡的每個廠別 = 一份廠級範本(國別×模型)。
+          在「報價 Form → 🧮 Cleansheet」直接修改參數 = 廠級新狀態,<b>影響之後新開的案</b>;既有專案為開案時快照,不受影響。
+        </div>
+      )}
       <StageRibbon stages={project.stages} />
 
       {/* Tabs */}

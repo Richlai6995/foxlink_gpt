@@ -197,7 +197,7 @@ export default function WizardModal({ open, onClose }: Props) {
                             return [...p.filter((x) => !sameFactory.includes(x)), t.caseFactoryId]
                           })}
                           className={`text-[11px] px-2 py-1 rounded border ${on ? 'bg-cortex-teal text-white border-cortex-teal' : 'bg-white border-cortex-line text-cortex-muted hover:border-cortex-teal'}`}>
-                          {t.factoryCode} · {t.costingModel === 'FULL_MVA' ? 'FULL' : 'SIMP'}{t.templateLabel ? ` · ${t.templateLabel}` : ''}
+                          {t.factoryCode}{t.buCode ? `/${t.buCode}` : ''} · {t.costingModel === 'FULL_MVA' ? 'FULL' : 'SIMP'}{t.templateLabel ? ` · ${t.templateLabel}` : ''}
                         </button>
                       )
                     })}
