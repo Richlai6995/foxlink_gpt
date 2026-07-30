@@ -522,39 +522,57 @@ const CS_PARAM_WHITELIST = {
 };
 // baseline 欄修正(SGA%/Profit%/DL wage…):baseline 共用多案 → copy-on-write(clone 含 IDL 年薪表)
 const BASELINE_FIELDS = new Set(['sga_pct', 'profit_pct', 'dl_wage_per_hr_usd', 'vat_rate_pct', 'oh_pct', 'annual_demand_default', 'loss_factor_pct', 'outbound_transportation_per_unit_usd']);
-async function _updateBaselineField(db, cfId, field, value) {
-  if (!BASELINE_FIELDS.has(field)) { const e = new Error(`baseline 欄不可修改: ${field}`); e.status = 400; throw e; }
+/** COW:確保 cf 的 baseline 為本案私有(共用 → clone 含 IDL 兩表)· 回 {baselineId, cloned} */
+async function _ensurePrivateBaseline(db, cfId) {
   const cfRow = await db.prepare(`SELECT baseline_id FROM bom_cs_case_factory WHERE case_factory_id=?`).get(cfId);
   const blId = cfRow && Number(cfRow.baseline_id || Object.values(cfRow)[0]);
   if (!blId) { const e = new Error('此廠未綁 baseline'); e.status = 400; throw e; }
   const shared = await db.prepare(`SELECT COUNT(*) AS n FROM bom_cs_case_factory WHERE baseline_id=?`).get(blId);
-  let targetId = blId, cloned = false;
-  if (Number(Object.values(shared)[0]) > 1) {
-    // COW:clone baseline row(非 identity 欄動態列舉)+ IDL 年薪兩表 → cf 改指新 baseline
-    const cols = (await db.prepare(
-      `SELECT column_name FROM user_tab_cols WHERE table_name='BOM_FACTORY_BASELINE' AND column_name<>'BASELINE_ID' AND virtual_column='NO' AND hidden_column='NO' ORDER BY column_id`,
-    ).all()).map((r) => String(Object.values(r)[0]));
-    const colList = cols.join(',');
-    const selList = cols.map((c) => (c === 'VERSION_LABEL' ? `SUBSTR(NVL(version_label,'BL')||'-cf${cfId}',1,60)` : c)).join(',');
-    await db.prepare(`INSERT INTO bom_factory_baseline (${colList}) SELECT ${selList} FROM bom_factory_baseline WHERE baseline_id=?`).run(blId);
-    const nb = await db.prepare(`SELECT MAX(baseline_id) AS id FROM bom_factory_baseline`).get();
-    targetId = Number(Object.values(nb)[0]);
-    for (const t of ['bom_factory_idl_role', 'bom_factory_idl_linedep_wage']) {
-      const tc = (await db.prepare(
-        `SELECT column_name FROM user_tab_cols WHERE table_name=UPPER(?) AND column_name<>'BASELINE_ID' AND virtual_column='NO' AND hidden_column='NO' ORDER BY column_id`,
-      ).all(t)).map((r) => String(Object.values(r)[0])).join(',');
-      if (tc) await db.prepare(`INSERT INTO ${t} (baseline_id,${tc}) SELECT ${targetId},${tc} FROM ${t} WHERE baseline_id=?`).run(blId).catch(() => {});
-    }
-    await db.prepare(`UPDATE bom_cs_case_factory SET baseline_id=? WHERE case_factory_id=?`).run(targetId, cfId);
-    cloned = true;
+  if (Number(Object.values(shared)[0]) <= 1) return { baselineId: blId, cloned: false };
+  const cols = (await db.prepare(
+    `SELECT column_name FROM user_tab_cols WHERE table_name='BOM_FACTORY_BASELINE' AND column_name<>'BASELINE_ID' AND virtual_column='NO' AND hidden_column='NO' ORDER BY column_id`,
+  ).all()).map((r) => String(Object.values(r)[0]));
+  const colList = cols.join(',');
+  const selList = cols.map((c) => (c === 'VERSION_LABEL' ? `SUBSTR(NVL(version_label,'BL')||'-cf${cfId}',1,60)` : c)).join(',');
+  await db.prepare(`INSERT INTO bom_factory_baseline (${colList}) SELECT ${selList} FROM bom_factory_baseline WHERE baseline_id=?`).run(blId);
+  const nb = await db.prepare(`SELECT MAX(baseline_id) AS id FROM bom_factory_baseline`).get();
+  const targetId = Number(Object.values(nb)[0]);
+  for (const t of ['bom_factory_idl_role', 'bom_factory_idl_linedep_wage']) {
+    const tc = (await db.prepare(
+      `SELECT column_name FROM user_tab_cols WHERE table_name=UPPER(?) AND column_name<>'BASELINE_ID' AND virtual_column='NO' AND hidden_column='NO' ORDER BY column_id`,
+    ).all(t)).map((r) => String(Object.values(r)[0])).join(',');
+    if (tc) await db.prepare(`INSERT INTO ${t} (baseline_id,${tc}) SELECT ${targetId},${tc} FROM ${t} WHERE baseline_id=?`).run(blId).catch(() => {});
   }
-  await db.prepare(`UPDATE bom_factory_baseline SET ${field}=? WHERE baseline_id=?`).run(value, targetId);
-  return { ok: true, field, value, baselineId: targetId, cloned, note: cloned ? `baseline 原與他案共用 → 已複製為本案私有版(-cf${cfId})再修改;按重算生效` : '已存;按重算生效' };
+  await db.prepare(`UPDATE bom_cs_case_factory SET baseline_id=? WHERE case_factory_id=?`).run(targetId, cfId);
+  return { baselineId: targetId, cloned: true };
+}
+
+async function _updateBaselineField(db, cfId, field, value) {
+  if (!BASELINE_FIELDS.has(field)) { const e = new Error(`baseline 欄不可修改: ${field}`); e.status = 400; throw e; }
+  const { baselineId, cloned } = await _ensurePrivateBaseline(db, cfId);
+  await db.prepare(`UPDATE bom_factory_baseline SET ${field}=? WHERE baseline_id=?`).run(value, baselineId);
+  return { ok: true, field, value, baselineId, cloned, note: cloned ? `baseline 原與他案共用 → 已複製為本案私有版(-cf${cfId})再修改;按重算生效` : '已存;按重算生效' };
+}
+
+/** R1:IDL 角色年薪修正(COW baseline → 改私有版 idl_role)*/
+async function _updateIdlRoleRate(db, cfId, roleCode, value) {
+  const { baselineId, cloned } = await _ensurePrivateBaseline(db, cfId);
+  await db.prepare(`UPDATE bom_factory_idl_role SET annual_rate_usd=? WHERE baseline_id=? AND role_code=?`).run(value, baselineId, roleCode);
+  return { ok: true, roleCode, value, baselineId, cloned, note: cloned ? `baseline 已複製為本案私有版再改年薪;按重算生效` : '年薪已存;按重算生效' };
 }
 
 router.put('/case/:caseFactoryId/cleansheet-param', asyncHandler(async (req, res) => {
   if (!canViewTrueCost(req)) return res.status(403).json({ error: '需完整成本視角(HOST/admin)' });
   const cf = reqId(req.params.caseFactoryId, res, 'caseFactoryId'); if (cf === null) return;
+  // IDL 角色年薪(COW)
+  if (String(req.body.kind) === 'idl_role') {
+    const value = req.body.value === '' || req.body.value == null ? null : Number(req.body.value);
+    if (value == null || !Number.isFinite(value)) return res.status(400).json({ error: '年薪需為數字' });
+    const roleCode = String((req.body.keys || {}).role_code || '');
+    if (!roleCode) return res.status(400).json({ error: 'role_code required' });
+    try { return res.json(await _updateIdlRoleRate(getDb(), cf, roleCode, value)); }
+    catch (e) { return res.status(e.status || 500).json({ error: e.message }); }
+  }
   // baseline 欄走 COW 專用路徑
   if (String(req.body.kind) === 'baseline') {
     const value = req.body.value === '' || req.body.value == null ? null : Number(req.body.value);
@@ -574,6 +592,81 @@ router.put('/case/:caseFactoryId/cleansheet-param', asyncHandler(async (req, res
   const binds = [value, cf, ...def.keys.map((k) => keys[k])];
   const r = await getDb().prepare(`UPDATE ${def.table} SET ${field} = ? WHERE ${where}`).run(...binds);
   res.json({ ok: true, kind: req.body.kind, field, value, note: '已存;按「④ 算成本 / 矩陣重算」後生效' });
+}));
+
+// ── R1:Qty scenario CRUD ─────────────────────────────────────────────────
+// PUT /case/:cf/qty-scenario {code, targetQty} — upsert(改量 or 新增情境)
+router.put('/case/:caseFactoryId/qty-scenario', asyncHandler(async (req, res) => {
+  if (!canViewTrueCost(req)) return res.status(403).json({ error: '需完整成本視角' });
+  const cf = reqId(req.params.caseFactoryId, res, 'caseFactoryId'); if (cf === null) return;
+  const code = String(req.body.code || '').trim().toUpperCase();
+  const qty = Number(req.body.targetQty);
+  if (!code || !/^[A-Z0-9_-]{1,40}$/.test(code)) return res.status(400).json({ error: 'code 需為英數(如 BASE/LOW/HIGH)' });
+  if (!Number.isFinite(qty) || qty <= 0) return res.status(400).json({ error: 'targetQty 需為正數' });
+  const db = getDb();
+  const ex = await db.prepare(`SELECT scenario_id FROM bom_cs_case_qty_scenario WHERE case_factory_id=? AND scenario_code=?`).get(cf, code);
+  if (ex) await db.prepare(`UPDATE bom_cs_case_qty_scenario SET target_qty=? WHERE case_factory_id=? AND scenario_code=?`).run(qty, cf, code);
+  else await db.prepare(`INSERT INTO bom_cs_case_qty_scenario (case_factory_id, scenario_code, target_qty, is_baseline) VALUES (?,?,?,?)`).run(cf, code, qty, code === 'BASE' ? 1 : 0);
+  res.json({ ok: true, code, targetQty: qty, created: !ex, note: '改量後按重算;矩陣 qty 軸自動出現新情境' });
+}));
+
+// DELETE /case/:cf/qty-scenario/:code(BASE 不可刪)
+router.delete('/case/:caseFactoryId/qty-scenario/:code', asyncHandler(async (req, res) => {
+  if (!canViewTrueCost(req)) return res.status(403).json({ error: '需完整成本視角' });
+  const cf = reqId(req.params.caseFactoryId, res, 'caseFactoryId'); if (cf === null) return;
+  const code = String(req.params.code || '').toUpperCase();
+  if (code === 'BASE') return res.status(400).json({ error: 'BASE 情境不可刪除' });
+  await getDb().prepare(`DELETE FROM bom_cs_case_qty_scenario WHERE case_factory_id=? AND scenario_code=?`).run(cf, code);
+  res.json({ ok: true, deleted: code });
+}));
+
+// ── R1:參數列增刪(設備/廠房/耗材)──────────────────────────────────────────
+// POST /case/:cf/cleansheet-row {kind, fields}
+router.post('/case/:caseFactoryId/cleansheet-row', asyncHandler(async (req, res) => {
+  if (!canViewTrueCost(req)) return res.status(403).json({ error: '需完整成本視角' });
+  const cf = reqId(req.params.caseFactoryId, res, 'caseFactoryId'); if (cf === null) return;
+  const kind = String(req.body.kind); const f = req.body.fields || {};
+  const db = getDb();
+  const numOr = (v, d = null) => (v === '' || v == null ? d : Number(v));
+  try {
+    if (kind === 'equipment') {
+      if (!f.process_code || !f.bucket) return res.status(400).json({ error: 'process_code + bucket required' });
+      await db.prepare(`INSERT INTO bom_cs_case_equip_area (case_factory_id, process_code, bucket, annual_cost_usd, apply_util, note) VALUES (?,?,?,?,?,?)`)
+        .run(cf, String(f.process_code), String(f.bucket).toUpperCase(), numOr(f.annual_cost_usd, 0), numOr(f.apply_util, 0), f.note || null);
+    } else if (kind === 'facility') {
+      if (!f.process_code) return res.status(400).json({ error: 'process_code required' });
+      await db.prepare(`INSERT INTO bom_cs_case_facility (case_factory_id, process_code, sqft, sqft_unit_cost_usd, apply_util, note) VALUES (?,?,?,?,?,?)`)
+        .run(cf, String(f.process_code), numOr(f.sqft, 0), numOr(f.sqft_unit_cost_usd, 0), numOr(f.apply_util, 0), f.note || null);
+    } else if (kind === 'consumable') {
+      // 新建 master(廠級)+ case row 一次完成;或帶 consumable_id 直接綁既有
+      let cid = numOr(f.consumable_id);
+      if (!cid) {
+        if (!f.description) return res.status(400).json({ error: 'description required(新耗材)' });
+        const cfRow = await db.prepare(`SELECT factory_code FROM bom_cs_case_factory WHERE case_factory_id=?`).get(cf);
+        const fcode = cfRow && (cfRow.factory_code || Object.values(cfRow)[0]);
+        await db.prepare(`INSERT INTO bom_factory_consumable (factory_code, consumable_code, description, unit_cost_usd, unit_of_measure, is_active) VALUES (?,?,?,?,?,1)`)
+          .run(fcode, String(f.consumable_code || ('C-' + Date.now() % 100000)), String(f.description), numOr(f.unit_cost_usd, 0), f.unit_of_measure || 'EA');
+        const nc = await db.prepare(`SELECT MAX(consumable_id) AS id FROM bom_factory_consumable`).get();
+        cid = Number(Object.values(nc)[0]);
+      }
+      await db.prepare(`INSERT INTO bom_cs_case_consumable (case_factory_id, consumable_id, process_code, annual_usage_qty, unit_cost_override_usd) VALUES (?,?,?,?,?)`)
+        .run(cf, cid, String(f.process_code || 'COMMON'), numOr(f.annual_usage_qty, 0), numOr(f.unit_cost_override_usd));
+    } else return res.status(400).json({ error: `unknown kind: ${kind}` });
+    res.json({ ok: true, note: '已加列;按重算生效' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+}));
+
+// DELETE /case/:cf/cleansheet-row {kind, keys}
+router.delete('/case/:caseFactoryId/cleansheet-row', asyncHandler(async (req, res) => {
+  if (!canViewTrueCost(req)) return res.status(403).json({ error: '需完整成本視角' });
+  const cf = reqId(req.params.caseFactoryId, res, 'caseFactoryId'); if (cf === null) return;
+  const kind = String(req.body.kind); const k = req.body.keys || {};
+  const db = getDb();
+  if (kind === 'equipment') await db.prepare(`DELETE FROM bom_cs_case_equip_area WHERE case_factory_id=? AND process_code=? AND bucket=?`).run(cf, String(k.process_code), String(k.bucket));
+  else if (kind === 'facility') await db.prepare(`DELETE FROM bom_cs_case_facility WHERE case_factory_id=? AND process_code=?`).run(cf, String(k.process_code));
+  else if (kind === 'consumable') await db.prepare(`DELETE FROM bom_cs_case_consumable WHERE case_factory_id=? AND consumable_id=? AND process_code=?`).run(cf, Number(k.consumable_id), String(k.process_code));
+  else return res.status(400).json({ error: `unknown kind: ${kind}` });
+  res.json({ ok: true, note: '已刪列;按重算生效' });
 }));
 
 // ── v0.16 #2 操作流程 checklist(26 步 · 自動判定 + 手動勾 + 附圖)────────────

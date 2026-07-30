@@ -67,6 +67,10 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
   const [activeProc, setActiveProc] = useState('SMT_MAIN')
   const [zone, setZone] = useState<'A' | 'B' | 'C' | 'D' | 'F'>('A')
   const [reveal, setReveal] = useState(0)
+  const [qtyMgr, setQtyMgr] = useState(false)
+  const [newQtyCode, setNewQtyCode] = useState(''); const [newQtyVal, setNewQtyVal] = useState('')
+  const [addKind, setAddKind] = useState('')   // 'equipment'|'facility'|'consumable' 加列表單
+  const [addF, setAddF] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (!token) return
@@ -98,6 +102,36 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
       setDirty(true)
       if (r?.cloned) setNote(r.note); else setNote('')
       await loadAll(Number(activeCf))
+    } catch (e: any) { setErr(e.message) }
+  }
+  async function addRow(kind: string, fields: any) {
+    try {
+      const r = await api.post<any>(token, `/bom/case/${activeCf}/cleansheet-row`, { kind, fields })
+      setDirty(true); setNote(r?.note || ''); await loadAll(Number(activeCf))
+    } catch (e: any) { setErr(e.message) }
+  }
+  async function delRow(kind: string, keys: any) {
+    if (!confirm('刪除此列?(按重算後生效)')) return
+    try {
+      await api.delete(token, `/bom/case/${activeCf}/cleansheet-row`, { kind, keys })
+      setDirty(true); await loadAll(Number(activeCf))
+    } catch (e: any) { setErr(e.message) }
+  }
+  async function saveQty(code: string, targetQty: string) {
+    try {
+      const r = await api.put<any>(token, `/bom/case/${activeCf}/qty-scenario`, { code, targetQty: Number(targetQty) })
+      setDirty(true); setNote(r?.note || '')
+      const m = await api.get<any>(token, `/bom/project/${projectId}/matrix`).catch(() => null)
+      if (m?.qtyScenarioDetails?.length) setQtys(m.qtyScenarioDetails)
+    } catch (e: any) { setErr(e.message) }
+  }
+  async function delQty(code: string) {
+    if (!confirm(`刪除量情境 ${code}?`)) return
+    try {
+      await api.delete(token, `/bom/case/${activeCf}/qty-scenario/${code}`, {})
+      if (qty === code) setQty('BASE')
+      const m = await api.get<any>(token, `/bom/project/${projectId}/matrix`).catch(() => null)
+      if (m?.qtyScenarioDetails?.length) setQtys(m.qtyScenarioDetails)
     } catch (e: any) { setErr(e.message) }
   }
   async function recompute() {
@@ -236,10 +270,14 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
               {FLAG[c.factory_code] || '🏳️'} {c.factory_code} <span className="text-[8px] opacity-80">{c.costing_model === 'FULL_MVA' ? 'FULL' : 'SIMP'}</span>
             </button>
           ))}
-          {qtys.length > 1 && qtys.map((q) => (
+          {qtys.map((q) => (
             <button key={q.code} onClick={() => setQty(q.code)}
-              className={`px-1.5 py-0.5 rounded text-[10px] border ${qty === q.code ? 'bg-cortex-teal text-white border-cortex-teal' : 'bg-white border-cortex-line text-cortex-muted'}`}>{q.code}</button>
+              className={`px-1.5 py-0.5 rounded text-[10px] border ${qty === q.code ? 'bg-cortex-teal text-white border-cortex-teal' : 'bg-white border-cortex-line text-cortex-muted'}`}>
+              {q.code}{q.targetQty ? `(${q.targetQty >= 1000 ? Math.round(q.targetQty / 1000) + 'K' : q.targetQty})` : ''}
+            </button>
           ))}
+          <button onClick={() => setQtyMgr(!qtyMgr)} title="管理量情境(增刪改量)"
+            className={`px-1.5 py-0.5 rounded text-[10px] border ${qtyMgr ? 'bg-amber-500 text-white border-amber-500' : 'bg-white border-cortex-line text-cortex-muted'}`}>⚙</button>
           <button onClick={recompute} disabled={computing || !activeCf}
             className={`flex items-center gap-1 px-2.5 py-1 rounded text-[11px] text-white disabled:opacity-40 ${dirty ? 'bg-red-600 animate-pulse' : 'bg-cortex-navy'}`}>
             {computing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} {dirty ? '參數已改 → 重算' : '🔄 Compute'}
@@ -248,6 +286,26 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
       </div>
       {err && <div className="text-[11px] text-red-600">{err}</div>}
       {note && <div className="text-[11px] text-cortex-teal bg-cortex-cyan-bg/40 border border-cortex-teal/30 rounded px-2 py-1">ℹ️ {note}</div>}
+      {qtyMgr && (
+        <div className="border border-amber-300 bg-amber-50/50 rounded-lg p-2.5 text-[11px] space-y-1.5">
+          <b className="text-amber-800">⚙ 量情境管理(競價改量直接在這改 → 重算)</b>
+          <div className="flex items-center gap-3 flex-wrap">
+            {qtys.map((q) => (
+              <span key={q.code} className="flex items-center gap-1">
+                <b className="font-mono">{q.code}</b>
+                <EditNum value={q.targetQty} w="w-20" onSave={(v) => saveQty(q.code, v)} />
+                {q.code !== 'BASE' && <button onClick={() => delQty(q.code)} className="text-red-500 hover:text-red-700">✕</button>}
+              </span>
+            ))}
+            <span className="flex items-center gap-1 border-l border-amber-300 pl-3">
+              <input value={newQtyCode} onChange={(e) => setNewQtyCode(e.target.value)} placeholder="HIGH" className="w-16 border border-cortex-line rounded px-1 py-0.5 text-[10px] font-mono" />
+              <input value={newQtyVal} onChange={(e) => setNewQtyVal(e.target.value)} placeholder="600000" className="w-20 border border-cortex-line rounded px-1 py-0.5 text-[10px] font-mono" />
+              <button onClick={() => { if (newQtyCode && newQtyVal) { saveQty(newQtyCode, newQtyVal); setNewQtyCode(''); setNewQtyVal('') } }}
+                className="px-1.5 py-0.5 bg-amber-500 text-white rounded text-[10px]">＋ 加情境</button>
+            </span>
+          </div>
+        </div>
+      )}
       {!data && !err && <div className="text-[12px] text-cortex-muted"><Loader2 className="w-3.5 h-3.5 inline animate-spin" /> 載入 Cleansheet…</div>}
 
       {/* Baseline bar */}
@@ -372,7 +430,7 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
                     return (
                       <tr key={role} className="border-b border-cortex-line/30">
                         <td className="px-1.5 py-0.5 whitespace-nowrap sticky left-0 bg-white">{info?.display_name_zh_tw || role}<span className="text-cortex-muted font-mono ml-1 text-[8px]">{info?.category}</span></td>
-                        <td className="px-1.5 py-0.5 text-right font-mono">{info?.annual_rate_usd ? `$${Number(info.annual_rate_usd).toLocaleString('en-US')}` : '—'}</td>
+                        <td className="px-1.5 py-0.5 text-right"><EditNum value={info?.annual_rate_usd} w="w-16" onSave={(v) => saveParam('idl_role', 'annual_rate_usd', { role_code: role }, v)} /></td>
                         {idlProcs.map((p) => {
                           const c = idlCell(role, p)
                           const v = c?.multiplier || 0
@@ -414,10 +472,24 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
                         <td className="px-1.5 py-0.5">{PROC_LABEL[r.process_code] || r.process_code}</td>
                         <td className="px-1.5 py-0.5 font-mono">{r.bucket}</td>
                         <td className="px-1.5 py-0.5 text-right"><EditNum value={r.annual_cost_usd} w="w-20" onSave={(v) => saveParam('equipment', 'annual_cost_usd', { process_code: r.process_code, bucket: r.bucket }, v)} /></td>
-                        <td className="px-1.5 py-0.5 text-center"><EditNum value={r.apply_util} w="w-10" onSave={(v) => saveParam('equipment', 'apply_util', { process_code: r.process_code, bucket: r.bucket }, v)} /></td>
+                        <td className="px-1.5 py-0.5 text-center"><EditNum value={r.apply_util} w="w-10" onSave={(v) => saveParam('equipment', 'apply_util', { process_code: r.process_code, bucket: r.bucket }, v)} />
+                          <button onClick={() => delRow('equipment', { process_code: r.process_code, bucket: r.bucket })} className="ml-1 text-red-400 hover:text-red-600">✕</button></td>
                       </tr>
                     ))}
                     {!(detail?.equipment || []).length && <tr><td colSpan={4} className="px-2 py-2 text-center text-cortex-muted">無設備配置</td></tr>}
+                    <tr><td colSpan={4} className="px-1.5 py-1">
+                      {addKind === 'equipment' ? (
+                        <span className="flex items-center gap-1 flex-wrap text-[10px]">
+                          <select value={addF.process_code || ''} onChange={(e) => setAddF((p) => ({ ...p, process_code: e.target.value }))} className="border border-cortex-line rounded px-1 py-0.5">
+                            <option value="">製程…</option>{procs.map((pp) => <option key={pp.process_code} value={pp.process_code}>{PROC_LABEL[pp.process_code] || pp.process_code}</option>)}
+                          </select>
+                          <input value={addF.bucket || ''} onChange={(e) => setAddF((p) => ({ ...p, bucket: e.target.value }))} placeholder="bucket(如 EQUIP/AOI)" className="w-24 border border-cortex-line rounded px-1 py-0.5 font-mono" />
+                          <input value={addF.annual_cost_usd || ''} onChange={(e) => setAddF((p) => ({ ...p, annual_cost_usd: e.target.value }))} placeholder="年費" className="w-16 border border-cortex-line rounded px-1 py-0.5 font-mono" />
+                          <button onClick={() => { addRow('equipment', addF); setAddKind(''); setAddF({}) }} className="px-1.5 py-0.5 bg-cortex-teal text-white rounded">加</button>
+                          <button onClick={() => { setAddKind(''); setAddF({}) }} className="text-cortex-muted">取消</button>
+                        </span>
+                      ) : <button onClick={() => { setAddKind('equipment'); setAddF({}) }} className="text-[10px] text-cortex-teal hover:underline">＋ 加設備列</button>}
+                    </td></tr>
                   </tbody>
                 </table>
               </div>
@@ -434,10 +506,24 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
                         <td className="px-1.5 py-0.5">{PROC_LABEL[r.process_code] || r.process_code}</td>
                         <td className="px-1.5 py-0.5 text-right"><EditNum value={r.sqft} w="w-16" onSave={(v) => saveParam('facility', 'sqft', { process_code: r.process_code }, v)} /></td>
                         <td className="px-1.5 py-0.5 text-right"><EditNum value={r.sqft_unit_cost_usd} w="w-16" onSave={(v) => saveParam('facility', 'sqft_unit_cost_usd', { process_code: r.process_code }, v)} /></td>
-                        <td className="px-1.5 py-0.5 text-center"><EditNum value={r.apply_util} w="w-10" onSave={(v) => saveParam('facility', 'apply_util', { process_code: r.process_code }, v)} /></td>
+                        <td className="px-1.5 py-0.5 text-center"><EditNum value={r.apply_util} w="w-10" onSave={(v) => saveParam('facility', 'apply_util', { process_code: r.process_code }, v)} />
+                          <button onClick={() => delRow('facility', { process_code: r.process_code })} className="ml-1 text-red-400 hover:text-red-600">✕</button></td>
                       </tr>
                     ))}
                     {!(detail?.facility || []).length && <tr><td colSpan={4} className="px-2 py-2 text-center text-cortex-muted">無廠房配置</td></tr>}
+                    <tr><td colSpan={4} className="px-1.5 py-1">
+                      {addKind === 'facility' ? (
+                        <span className="flex items-center gap-1 flex-wrap text-[10px]">
+                          <select value={addF.process_code || ''} onChange={(e) => setAddF((p) => ({ ...p, process_code: e.target.value }))} className="border border-cortex-line rounded px-1 py-0.5">
+                            <option value="">製程…</option>{procs.map((pp) => <option key={pp.process_code} value={pp.process_code}>{PROC_LABEL[pp.process_code] || pp.process_code}</option>)}
+                          </select>
+                          <input value={addF.sqft || ''} onChange={(e) => setAddF((p) => ({ ...p, sqft: e.target.value }))} placeholder="sqft" className="w-16 border border-cortex-line rounded px-1 py-0.5 font-mono" />
+                          <input value={addF.sqft_unit_cost_usd || ''} onChange={(e) => setAddF((p) => ({ ...p, sqft_unit_cost_usd: e.target.value }))} placeholder="$/sqft" className="w-16 border border-cortex-line rounded px-1 py-0.5 font-mono" />
+                          <button onClick={() => { addRow('facility', addF); setAddKind(''); setAddF({}) }} className="px-1.5 py-0.5 bg-cortex-teal text-white rounded">加</button>
+                          <button onClick={() => { setAddKind(''); setAddF({}) }} className="text-cortex-muted">取消</button>
+                        </span>
+                      ) : <button onClick={() => { setAddKind('facility'); setAddF({}) }} className="text-[10px] text-cortex-teal hover:underline">＋ 加廠房列</button>}
+                    </td></tr>
                   </tbody>
                 </table>
               </div>
@@ -465,11 +551,26 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
                         <td className="px-1.5 py-0.5 text-right"><EditNum value={r.annual_usage_qty} w="w-16" onSave={(v) => saveParam('consumable', 'annual_usage_qty', { consumable_id: r.consumable_id, process_code: r.process_code }, v)} /></td>
                         <td className="px-1.5 py-0.5 text-right"><EditNum value={r.unit_cost_override_usd ?? ''} w="w-16" onSave={(v) => saveParam('consumable', 'unit_cost_override_usd', { consumable_id: r.consumable_id, process_code: r.process_code }, v)} suffix={r.unit_cost_override_usd == null ? `(廠 $${nf(r.unit_cost_usd)})` : ''} /></td>
                         <td className="px-1.5 py-0.5 text-right font-mono">{m2(annual)}</td>
-                        <td className="px-1.5 py-0.5 text-right font-mono">{annualDemand ? m4(annual / Number(annualDemand)) : '—'}</td>
+                        <td className="px-1.5 py-0.5 text-right font-mono">{annualDemand ? m4(annual / Number(annualDemand)) : '—'}
+                          <button onClick={() => delRow('consumable', { consumable_id: r.consumable_id, process_code: r.process_code })} className="ml-1 text-red-400 hover:text-red-600">✕</button></td>
                       </tr>
                     )
                   })}
                   {!(detail?.consumables || []).length && <tr><td colSpan={7} className="px-2 py-2 text-center text-cortex-muted">無耗材配置</td></tr>}
+                  <tr><td colSpan={7} className="px-1.5 py-1">
+                    {addKind === 'consumable' ? (
+                      <span className="flex items-center gap-1 flex-wrap text-[10px]">
+                        <input value={addF.description || ''} onChange={(e) => setAddF((p) => ({ ...p, description: e.target.value }))} placeholder="耗材描述(如 鋼網)" className="w-36 border border-cortex-line rounded px-1 py-0.5" />
+                        <select value={addF.process_code || ''} onChange={(e) => setAddF((p) => ({ ...p, process_code: e.target.value }))} className="border border-cortex-line rounded px-1 py-0.5">
+                          <option value="">製程…</option><option value="COMMON">COMMON</option>{procs.map((pp) => <option key={pp.process_code} value={pp.process_code}>{PROC_LABEL[pp.process_code] || pp.process_code}</option>)}
+                        </select>
+                        <input value={addF.annual_usage_qty || ''} onChange={(e) => setAddF((p) => ({ ...p, annual_usage_qty: e.target.value }))} placeholder="年用量" className="w-16 border border-cortex-line rounded px-1 py-0.5 font-mono" />
+                        <input value={addF.unit_cost_usd || ''} onChange={(e) => setAddF((p) => ({ ...p, unit_cost_usd: e.target.value }))} placeholder="單價" className="w-16 border border-cortex-line rounded px-1 py-0.5 font-mono" />
+                        <button onClick={() => { addRow('consumable', addF); setAddKind(''); setAddF({}) }} className="px-1.5 py-0.5 bg-cortex-teal text-white rounded">加</button>
+                        <button onClick={() => { setAddKind(''); setAddF({}) }} className="text-cortex-muted">取消</button>
+                      </span>
+                    ) : <button onClick={() => { setAddKind('consumable'); setAddF({}) }} className="text-[10px] text-cortex-teal hover:underline">＋ 加耗材(建廠級主檔+綁本案)</button>}
+                  </td></tr>
                 </tbody>
               </table>
             </div>
