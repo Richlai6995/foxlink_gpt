@@ -17,7 +17,7 @@
 
 import { useLocation, useNavigate } from 'react-router-dom'
 import type { LucideIcon } from 'lucide-react'
-import {
+import { Factory,
   Briefcase, CheckCircle2, LayoutGrid, BookOpen, Sparkles,
   DollarSign, Server, GraduationCap,
   FileText, ListTodo, ShieldCheck, Bell, Plug, Settings,
@@ -123,6 +123,7 @@ export default function Sidebar() {
 
         <Section label="管理">
           <NavItem to="/projects-platform/admin/form-templates" icon={FileText} label="表單範本" />
+          <NavItem to="/projects-platform/admin/factory-cost-templates" icon={Factory} label="廠級成本範本" />
           <NavItem to="/projects-platform/admin/task-templates" icon={ListTodo} label="任務模板" />
           <NavItem to="/projects-platform/admin/confidential-policies" icon={ShieldCheck} label="機密策略" />
           <NavItem to="/projects-platform/admin/notification-rules" icon={Bell} label="通知規則" />

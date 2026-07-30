@@ -24,6 +24,7 @@ import Dashboard from './Dashboard/Dashboard'
 import AiAcceleration from './AiAccel/AiAcceleration'
 import KnowledgeBase from './KB/KnowledgeBase'
 import FormTemplates from './Admin/FormTemplates'
+import FactoryCostTemplates from './Admin/FactoryCostTemplates'
 import TaskTemplates from './Admin/TaskTemplates'
 import NotificationRules from './Admin/NotificationRules'
 import Connections from './Admin/Connections'
@@ -113,6 +114,7 @@ export default function ProjectsPlatformPage() {
           <Route path="approvals" element={<ApprovalsPage />} />
           <Route path="projects/:id" element={<WarRoom />} />
           <Route path="admin/form-templates" element={<FormTemplates />} />
+          <Route path="admin/factory-cost-templates" element={<FactoryCostTemplates />} />
           <Route path="admin/task-templates" element={<TaskTemplates />} />
           <Route path="admin/notification-rules" element={<NotificationRules />} />
           <Route path="admin/connections" element={<Connections />} />
