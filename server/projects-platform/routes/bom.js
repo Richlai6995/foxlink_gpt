@@ -520,9 +520,48 @@ const CS_PARAM_WHITELIST = {
   facility: { table: 'bom_cs_case_facility', keys: ['process_code'], fields: ['sqft', 'sqft_unit_cost_usd', 'apply_util'] },
   consumable: { table: 'bom_cs_case_consumable', keys: ['consumable_id', 'process_code'], fields: ['annual_usage_qty', 'unit_cost_override_usd'] },
 };
+// baseline 欄修正(SGA%/Profit%/DL wage…):baseline 共用多案 → copy-on-write(clone 含 IDL 年薪表)
+const BASELINE_FIELDS = new Set(['sga_pct', 'profit_pct', 'dl_wage_per_hr_usd', 'vat_rate_pct', 'oh_pct', 'annual_demand_default', 'loss_factor_pct', 'outbound_transportation_per_unit_usd']);
+async function _updateBaselineField(db, cfId, field, value) {
+  if (!BASELINE_FIELDS.has(field)) { const e = new Error(`baseline 欄不可修改: ${field}`); e.status = 400; throw e; }
+  const cfRow = await db.prepare(`SELECT baseline_id FROM bom_cs_case_factory WHERE case_factory_id=?`).get(cfId);
+  const blId = cfRow && Number(cfRow.baseline_id || Object.values(cfRow)[0]);
+  if (!blId) { const e = new Error('此廠未綁 baseline'); e.status = 400; throw e; }
+  const shared = await db.prepare(`SELECT COUNT(*) AS n FROM bom_cs_case_factory WHERE baseline_id=?`).get(blId);
+  let targetId = blId, cloned = false;
+  if (Number(Object.values(shared)[0]) > 1) {
+    // COW:clone baseline row(非 identity 欄動態列舉)+ IDL 年薪兩表 → cf 改指新 baseline
+    const cols = (await db.prepare(
+      `SELECT column_name FROM user_tab_cols WHERE table_name='BOM_FACTORY_BASELINE' AND column_name<>'BASELINE_ID' AND virtual_column='NO' AND hidden_column='NO' ORDER BY column_id`,
+    ).all()).map((r) => String(Object.values(r)[0]));
+    const colList = cols.join(',');
+    const selList = cols.map((c) => (c === 'VERSION_LABEL' ? `SUBSTR(NVL(version_label,'BL')||'-cf${cfId}',1,60)` : c)).join(',');
+    await db.prepare(`INSERT INTO bom_factory_baseline (${colList}) SELECT ${selList} FROM bom_factory_baseline WHERE baseline_id=?`).run(blId);
+    const nb = await db.prepare(`SELECT MAX(baseline_id) AS id FROM bom_factory_baseline`).get();
+    targetId = Number(Object.values(nb)[0]);
+    for (const t of ['bom_factory_idl_role', 'bom_factory_idl_linedep_wage']) {
+      const tc = (await db.prepare(
+        `SELECT column_name FROM user_tab_cols WHERE table_name=UPPER(?) AND column_name<>'BASELINE_ID' AND virtual_column='NO' AND hidden_column='NO' ORDER BY column_id`,
+      ).all(t)).map((r) => String(Object.values(r)[0])).join(',');
+      if (tc) await db.prepare(`INSERT INTO ${t} (baseline_id,${tc}) SELECT ${targetId},${tc} FROM ${t} WHERE baseline_id=?`).run(blId).catch(() => {});
+    }
+    await db.prepare(`UPDATE bom_cs_case_factory SET baseline_id=? WHERE case_factory_id=?`).run(targetId, cfId);
+    cloned = true;
+  }
+  await db.prepare(`UPDATE bom_factory_baseline SET ${field}=? WHERE baseline_id=?`).run(value, targetId);
+  return { ok: true, field, value, baselineId: targetId, cloned, note: cloned ? `baseline 原與他案共用 → 已複製為本案私有版(-cf${cfId})再修改;按重算生效` : '已存;按重算生效' };
+}
+
 router.put('/case/:caseFactoryId/cleansheet-param', asyncHandler(async (req, res) => {
   if (!canViewTrueCost(req)) return res.status(403).json({ error: '需完整成本視角(HOST/admin)' });
   const cf = reqId(req.params.caseFactoryId, res, 'caseFactoryId'); if (cf === null) return;
+  // baseline 欄走 COW 專用路徑
+  if (String(req.body.kind) === 'baseline') {
+    const value = req.body.value === '' || req.body.value == null ? null : Number(req.body.value);
+    if (value == null || !Number.isFinite(value)) return res.status(400).json({ error: 'baseline 欄需為數字' });
+    try { return res.json(await _updateBaselineField(getDb(), cf, String(req.body.field || ''), value)); }
+    catch (e) { return res.status(e.status || 500).json({ error: e.message }); }
+  }
   const def = CS_PARAM_WHITELIST[String(req.body.kind)];
   if (!def) return res.status(400).json({ error: `unknown kind: ${req.body.kind}` });
   const field = String(req.body.field || '');

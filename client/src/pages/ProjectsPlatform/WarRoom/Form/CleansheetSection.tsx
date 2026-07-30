@@ -60,6 +60,7 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
   const [locked, setLocked] = useState(false)
   const [err, setErr] = useState('')
   const [dirty, setDirty] = useState(false)
+  const [note, setNote] = useState('')
   const [computing, setComputing] = useState(false)
   // step trace 狀態
   const [step, setStep] = useState<'inputs' | 'idl' | 'equip' | 'cons' | 'compute'>('inputs')
@@ -93,8 +94,9 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
 
   async function saveParam(kind: string, field: string, keys: any, value: string) {
     try {
-      await api.put(token, `/bom/case/${activeCf}/cleansheet-param`, { kind, field, keys, value })
+      const r = await api.put<any>(token, `/bom/case/${activeCf}/cleansheet-param`, { kind, field, keys, value })
       setDirty(true)
+      if (r?.cloned) setNote(r.note); else setNote('')
       await loadAll(Number(activeCf))
     } catch (e: any) { setErr(e.message) }
   }
@@ -245,6 +247,7 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
         </div>
       </div>
       {err && <div className="text-[11px] text-red-600">{err}</div>}
+      {note && <div className="text-[11px] text-cortex-teal bg-cortex-cyan-bg/40 border border-cortex-teal/30 rounded px-2 py-1">ℹ️ {note}</div>}
       {!data && !err && <div className="text-[12px] text-cortex-muted"><Loader2 className="w-3.5 h-3.5 inline animate-spin" /> 載入 Cleansheet…</div>}
 
       {/* Baseline bar */}
@@ -255,10 +258,14 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
           {bl ? (
             <>
               <span>版本 <b className="font-mono">{bl.versionLabel || '—'}</b></span>
-              <span>DL wage <b className="font-mono">${nf(bl.dlWagePerHr)}/hr</b></span>
-              <span>SG&A <b className="font-mono">{nf((bl.sgaPct || 0) * 100, 1)}%</b></span>
-              <span>Profit <b className="font-mono">{nf((bl.profitPct || 0) * 100, 1)}%</b></span>
-              {annualDemand && <span>年量 <b className="font-mono">{Number(annualDemand).toLocaleString('en-US')}</b></span>}
+              <span className="flex items-center gap-1">DL wage <EditNum value={bl.dlWagePerHr} w="w-14" suffix="/hr"
+                onSave={(v) => saveParam('baseline', 'dl_wage_per_hr_usd', {}, v)} /></span>
+              <span className="flex items-center gap-1">SG&A <EditNum value={Number(((bl.sgaPct || 0) * 100).toFixed(2))} w="w-12" suffix="%"
+                onSave={(v) => saveParam('baseline', 'sga_pct', {}, String(Number(v) / 100))} /></span>
+              <span className="flex items-center gap-1">Profit <EditNum value={Number(((bl.profitPct || 0) * 100).toFixed(2))} w="w-12" suffix="%"
+                onSave={(v) => saveParam('baseline', 'profit_pct', {}, String(Number(v) / 100))} /></span>
+              <span className="flex items-center gap-1">年量 <EditNum value={bl.annualDemand} w="w-20"
+                onSave={(v) => saveParam('baseline', 'annual_demand_default', {}, v)} /></span>
             </>
           ) : <span>(未綁 baseline)</span>}
           {data.runId && <span className="ml-auto opacity-80">run#{data.runId} · {data.qty}</span>}
