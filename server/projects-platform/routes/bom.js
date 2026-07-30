@@ -594,6 +594,47 @@ router.put('/case/:caseFactoryId/cleansheet-param', asyncHandler(async (req, res
   res.json({ ok: true, kind: req.body.kind, field, value, note: '已存;按「④ 算成本 / 矩陣重算」後生效' });
 }));
 
+// ── R2:What-if 試算沙盒 ─────────────────────────────────────────────────────
+// GET /case/:cf/whatif — 沙盒狀態(active + 基準 breakdown)
+router.get('/case/:caseFactoryId/whatif', asyncHandler(async (req, res) => {
+  if (!canViewTrueCost(req)) return res.status(403).json({ error: '需完整成本視角' });
+  const cf = reqId(req.params.caseFactoryId, res, 'caseFactoryId'); if (cf === null) return;
+  res.json(await require('../services/bomWhatifService').status(getDb(), cf));
+}));
+
+// POST /case/:cf/whatif/start — 進沙盒(快照 + 記基準 run breakdown)(body: qty?)
+router.post('/case/:caseFactoryId/whatif/start', asyncHandler(async (req, res) => {
+  if (!canViewTrueCost(req)) return res.status(403).json({ error: '需完整成本視角' });
+  const cf = reqId(req.params.caseFactoryId, res, 'caseFactoryId'); if (cf === null) return;
+  const db = getDb();
+  // 基準 = 該 cf 最新 ready run(qty 口徑)
+  const qty = String(req.body.qty || 'BASE');
+  const runRow = await db.prepare(
+    `SELECT run_id FROM bom_cs_run WHERE case_factory_id=? AND status='ready' AND NVL(qty_scenario_code,'BASE')=? ORDER BY run_id DESC FETCH FIRST 1 ROWS ONLY`,
+  ).get(cf, qty).catch(() => null);
+  let base = null;
+  if (runRow) {
+    const rr = await engine.loadPersistedRun(db, Number(Object.values(runRow)[0])).catch(() => null);
+    base = rr ? rr.costBreakdown : null;
+  }
+  res.json(await require('../services/bomWhatifService').start(db, cf, { userId: req.user?.id || null, ensurePrivateBaseline: _ensurePrivateBaseline, baseBreakdown: base }));
+}));
+
+// POST /case/:cf/whatif/discard — 放棄(還原全部參數)
+router.post('/case/:caseFactoryId/whatif/discard', asyncHandler(async (req, res) => {
+  if (!canViewTrueCost(req)) return res.status(403).json({ error: '需完整成本視角' });
+  const cf = reqId(req.params.caseFactoryId, res, 'caseFactoryId'); if (cf === null) return;
+  try { res.json(await require('../services/bomWhatifService').discard(getDb(), cf)); }
+  catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+}));
+
+// POST /case/:cf/whatif/apply — 套用(保留現值 · caller 隨後正式 compute)
+router.post('/case/:caseFactoryId/whatif/apply', asyncHandler(async (req, res) => {
+  if (!canViewTrueCost(req)) return res.status(403).json({ error: '需完整成本視角' });
+  const cf = reqId(req.params.caseFactoryId, res, 'caseFactoryId'); if (cf === null) return;
+  res.json(await require('../services/bomWhatifService').apply(getDb(), cf));
+}));
+
 // ── R1:Qty scenario CRUD ─────────────────────────────────────────────────
 // PUT /case/:cf/qty-scenario {code, targetQty} — upsert(改量 or 新增情境)
 router.put('/case/:caseFactoryId/qty-scenario', asyncHandler(async (req, res) => {
@@ -1214,12 +1255,15 @@ router.post('/compute', asyncHandler(async (req, res) => {
   if (req.body.qtyScenarioCode) opts.qtyScenarioCode = req.body.qtyScenarioCode;
   if (Array.isArray(req.body.valueIds) && req.body.valueIds.length) opts.valueIds = req.body.valueIds.map(Number).filter(Boolean);  // B-2 config resolve
   if (req.body.force === true || req.body.force === 'true' || req.body.allowPending) opts.allowPending = true;
+  if (req.body.dryRun === true || req.body.dryRun === 'true') opts.persist = false;   // R2 沙盒試算:不落 run 歷史
   try {
     const out = await engine.computeCase(getDb(), opts);
-    // Stage Gate:首次/每次試算 → BOM_COST_REVIEW(冪等)
-    getDb().prepare(`SELECT case_id FROM bom_cs_case_factory WHERE case_factory_id=?`).get(caseFactoryId)
-      .then((r) => { const pid = r && Number(Object.values(r)[0]); if (pid) return stageSvc.autoAdvanceTo(getDb(), pid, 'BOM_COST_REVIEW', '成本試算'); }).catch(() => {});
-    res.json({ ok: true, runId: out.runId, costingModel: out.costingModel, costBreakdown: out.costBreakdown });
+    // Stage Gate:首次/每次試算 → BOM_COST_REVIEW(冪等 · dryRun 不推)
+    if (opts.persist !== false) {
+      getDb().prepare(`SELECT case_id FROM bom_cs_case_factory WHERE case_factory_id=?`).get(caseFactoryId)
+        .then((r) => { const pid = r && Number(Object.values(r)[0]); if (pid) return stageSvc.autoAdvanceTo(getDb(), pid, 'BOM_COST_REVIEW', '成本試算'); }).catch(() => {});
+    }
+    res.json({ ok: true, runId: out.runId || null, dryRun: opts.persist === false, costingModel: out.costingModel, costBreakdown: out.costBreakdown });
   } catch (e) {
     if (e.code === 'BOM_HAS_PENDING_PRICES') {
       return res.status(409).json({ error: e.message, code: e.code, pendingCount: e.pendingCount });

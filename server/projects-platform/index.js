@@ -170,6 +170,7 @@ async function runMigrations(db) {
       await require('./migrations/013t_negotiation')(db);            // 議價紀錄 bom_negotiation_round(P1)
       await require('./migrations/013u_nre_negotiated')(db);         // NRE 議價欄 unit_price_negotiated(v0.16 #7)
       await require('./migrations/013v_run_qty_scenario')(db);       // run 記 qty scenario(v0.16 #8 矩陣 qty 軸)
+      await require('./migrations/013w_whatif_snapshot')(db);        // What-if 沙盒快照(R2)
       console.log('[projects-platform] Cortex BOM/RBAC migrations (S0) ✓');
     } else {
       console.log('[projects-platform] Cortex BOM/RBAC migrations skipped (ENABLE_CORTEX_BOM != true)');

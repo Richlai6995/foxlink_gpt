@@ -68,6 +68,9 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
   const [zone, setZone] = useState<'A' | 'B' | 'C' | 'D' | 'F'>('A')
   const [reveal, setReveal] = useState(0)
   const [qtyMgr, setQtyMgr] = useState(false)
+  const [whatif, setWhatif] = useState<{ active: boolean; baseBreakdown?: any } | null>(null)
+  const [tryBd, setTryBd] = useState<any>(null)
+  const [tryBusy, setTryBusy] = useState(false)
   const [newQtyCode, setNewQtyCode] = useState(''); const [newQtyVal, setNewQtyVal] = useState('')
   const [addKind, setAddKind] = useState('')   // 'equipment'|'facility'|'consumable' 加列表單
   const [addF, setAddF] = useState<Record<string, string>>({})
@@ -92,6 +95,7 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
       ])
       setData(d1); setDetail(d2)
       if (d2.processes?.length && !d2.processes.some((p: any) => p.process_code === activeProc)) setActiveProc(d2.processes[0].process_code)
+      api.get<any>(token, `/bom/case/${cf}/whatif`).then(setWhatif).catch(() => setWhatif(null))
     } catch (e: any) { if (/403|視角/.test(e.message)) setLocked(true); else setErr(e.message) }
   }
   useEffect(() => { if (token && activeCf) { setData(null); setDetail(null); loadAll(Number(activeCf)) } }, [token, activeCf, qty])   // eslint-disable-line
@@ -102,6 +106,7 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
       setDirty(true)
       if (r?.cloned) setNote(r.note); else setNote('')
       await loadAll(Number(activeCf))
+      if (whatif?.active) dryRun()   // 沙盒中改參數 → 自動試算(不落歷史)
     } catch (e: any) { setErr(e.message) }
   }
   async function addRow(kind: string, fields: any) {
@@ -132,6 +137,38 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
       if (qty === code) setQty('BASE')
       const m = await api.get<any>(token, `/bom/project/${projectId}/matrix`).catch(() => null)
       if (m?.qtyScenarioDetails?.length) setQtys(m.qtyScenarioDetails)
+    } catch (e: any) { setErr(e.message) }
+  }
+  async function dryRun() {
+    setTryBusy(true); setErr('')
+    try {
+      const r = await api.post<any>(token, '/bom/compute', { caseFactoryId: activeCf, qtyScenarioCode: qty, force: true, dryRun: true })
+      setTryBd(r.costBreakdown)
+    } catch (e: any) { setErr(e.message) } finally { setTryBusy(false) }
+  }
+  async function whatifStart() {
+    setErr('')
+    try {
+      const r = await api.post<any>(token, `/bom/case/${activeCf}/whatif/start`, { qty })
+      setWhatif({ active: true, baseBreakdown: r.baseBreakdown })
+      setTryBd(null); setNote('🧪 已進入 What-if 沙盒:任意改參數 → 試算不落歷史;結束時選「套用」或「放棄還原」')
+    } catch (e: any) { setErr(e.message) }
+  }
+  async function whatifDiscard() {
+    if (!confirm('放棄沙盒?所有參數將還原到進入沙盒時的狀態。')) return
+    setErr('')
+    try {
+      await api.post(token, `/bom/case/${activeCf}/whatif/discard`, {})
+      setWhatif({ active: false }); setTryBd(null); setDirty(false); setNote('已還原全部參數')
+      await loadAll(Number(activeCf))
+    } catch (e: any) { setErr(e.message) }
+  }
+  async function whatifApply() {
+    setErr('')
+    try {
+      await api.post(token, `/bom/case/${activeCf}/whatif/apply`, {})
+      setWhatif({ active: false }); setTryBd(null); setNote('已套用 → 正式重算中…')
+      await recompute()
     } catch (e: any) { setErr(e.message) }
   }
   async function recompute() {
@@ -278,14 +315,61 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
           ))}
           <button onClick={() => setQtyMgr(!qtyMgr)} title="管理量情境(增刪改量)"
             className={`px-1.5 py-0.5 rounded text-[10px] border ${qtyMgr ? 'bg-amber-500 text-white border-amber-500' : 'bg-white border-cortex-line text-cortex-muted'}`}>⚙</button>
-          <button onClick={recompute} disabled={computing || !activeCf}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded text-[11px] text-white disabled:opacity-40 ${dirty ? 'bg-red-600 animate-pulse' : 'bg-cortex-navy'}`}>
-            {computing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} {dirty ? '參數已改 → 重算' : '🔄 Compute'}
+          {!whatif?.active && (
+            <button onClick={whatifStart} disabled={!activeCf} title="進入試算沙盒:任意改參數即時試算,不污染 run 歷史;可一鍵還原"
+              className="flex items-center gap-1 px-2.5 py-1 rounded text-[11px] border border-amber-400 text-amber-700 hover:bg-amber-50 disabled:opacity-40">
+              🧪 What-if
+            </button>
+          )}
+          <button onClick={whatif?.active ? dryRun : recompute} disabled={computing || tryBusy || !activeCf}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded text-[11px] text-white disabled:opacity-40 ${whatif?.active ? 'bg-amber-500' : dirty ? 'bg-red-600 animate-pulse' : 'bg-cortex-navy'}`}>
+            {(computing || tryBusy) ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+            {whatif?.active ? '🧪 試算(不落歷史)' : dirty ? '參數已改 → 重算' : '🔄 Compute'}
           </button>
         </div>
       </div>
       {err && <div className="text-[11px] text-red-600">{err}</div>}
       {note && <div className="text-[11px] text-cortex-teal bg-cortex-cyan-bg/40 border border-cortex-teal/30 rounded px-2 py-1">ℹ️ {note}</div>}
+      {whatif?.active && (() => {
+        const b = whatif.baseBreakdown, t = tryBd
+        const rows = [
+          ['材料(quote)', b?.material, t?.material],
+          ['MVA', b?.mva, t?.mva],
+          ['SG&A', b?.sga, t?.sga],
+          ['Profit', b?.profit, t?.profit],
+          ['Total / unit', b?.total, t?.total],
+        ]
+        return (
+          <div className="border-2 border-amber-400 bg-amber-50/60 rounded-lg p-2.5 space-y-1.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <b className="text-[12px] text-amber-800">🧪 What-if 沙盒(試算不落 run 歷史)</b>
+              <span className="text-[10px] text-amber-700">改任何參數自動試算;滿意「套用」/ 不滿意「放棄」一鍵還原</span>
+              <span className="ml-auto flex items-center gap-1.5">
+                <button onClick={whatifApply} className="px-2.5 py-1 bg-green-600 text-white rounded text-[11px] hover:opacity-90">✓ 套用並正式重算</button>
+                <button onClick={whatifDiscard} className="px-2.5 py-1 bg-red-500 text-white rounded text-[11px] hover:opacity-90">✗ 放棄(還原全部)</button>
+              </span>
+            </div>
+            <table className="text-[11px]">
+              <thead className="text-amber-700"><tr><th className="text-left pr-4"></th><th className="text-right pr-4">基準</th><th className="text-right pr-4">試算</th><th className="text-right">Δ</th></tr></thead>
+              <tbody>
+                {rows.map(([l, bv, tv]: any) => {
+                  const d = typeof bv === 'number' && typeof tv === 'number' ? tv - bv : null
+                  return (
+                    <tr key={l} className={l === 'Total / unit' ? 'font-bold border-t border-amber-300' : ''}>
+                      <td className="pr-4 py-0.5">{l}</td>
+                      <td className="pr-4 py-0.5 text-right font-mono">{m4(bv)}</td>
+                      <td className="pr-4 py-0.5 text-right font-mono">{tv != null ? m4(tv) : <span className="text-amber-600">(改參數後自動試算)</span>}</td>
+                      <td className={`py-0.5 text-right font-mono ${d == null ? '' : d > 0.00005 ? 'text-red-600 font-bold' : d < -0.00005 ? 'text-green-700 font-bold' : 'text-cortex-muted'}`}>
+                        {d == null ? '—' : `${d > 0 ? '+' : ''}${d.toFixed(4)}`}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )
+      })()}
       {qtyMgr && (
         <div className="border border-amber-300 bg-amber-50/50 rounded-lg p-2.5 text-[11px] space-y-1.5">
           <b className="text-amber-800">⚙ 量情境管理(競價改量直接在這改 → 重算)</b>
