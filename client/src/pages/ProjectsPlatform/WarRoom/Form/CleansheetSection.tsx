@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { ProjectDetail } from '../../api'
 import { api } from '../../api'
 import { useAuth } from '../../../../context/AuthContext'
@@ -50,7 +51,10 @@ function EditNum({ value, onSave, w = 'w-16', suffix }: { value: any; onSave: (v
 
 export default function CleansheetSection({ project }: { project: ProjectDetail }) {
   const { token } = useAuth() as any
+  const navigate = useNavigate()
   const projectId = project.id
+  const [tplProjectId, setTplProjectId] = useState<number | null>(null)
+  const isTpl = (project as any).project_code === 'CORTEX-COST-TPL'
   const [cases, setCases] = useState<CaseRow[]>([])
   const [activeCf, setActiveCf] = useState<number | ''>('')
   const [qtys, setQtys] = useState<{ code: string; targetQty: number | null }[]>([{ code: 'BASE', targetQty: null }])
@@ -83,6 +87,10 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
     }).catch(() => {})
     api.get<any>(token, `/bom/project/${projectId}/matrix`).then((m) => {
       if (m?.qtyScenarioDetails?.length) setQtys(m.qtyScenarioDetails)
+    }).catch(() => {})
+    api.get<{ templates: any[] }>(token, '/bom/provision/templates').then((r) => {
+      const t = (r.templates || []).find((x: any) => x.tplProjectId)
+      if (t?.tplProjectId) setTplProjectId(t.tplProjectId)
     }).catch(() => {})
   }, [token, projectId])
 
@@ -297,7 +305,13 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h3 className="text-lg font-bold text-cortex-ink">🧮 Cleansheet (MVA 計算)</h3>
-          <p className="text-[10px] text-cortex-muted">9 製程 × 9 cost component · 每一步輸入/公式可展開 · 參數可修正後重算</p>
+          <p className="text-[10px] text-cortex-muted">9 製程 × 9 cost component · 每一步輸入/公式可展開 · 參數可修正後重算
+            {!isTpl && tplProjectId && (
+              <button onClick={() => navigate(`/projects-platform/projects/${tplProjectId}`)}
+                title="開廠級範本專案(CORTEX-COST-TPL)— 同一套編輯器維護廠級基礎,影響之後新案"
+                className="ml-2 px-1.5 py-0.5 border border-amber-400 text-amber-700 rounded text-[10px] hover:bg-amber-50">⚙ 廠級範本維護</button>
+            )}
+          </p>
         </div>
         <div className="flex items-center gap-1.5 flex-wrap">
           {cases.map((c) => (
