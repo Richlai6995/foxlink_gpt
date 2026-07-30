@@ -336,7 +336,7 @@ router.get('/case/:caseFactoryId/cleansheet', asyncHandler(async (req, res) => {
   if (runRow) {
     runId = Number(runRow.run_id || Object.values(runRow)[0]);
     const cells = await db.prepare(
-      `SELECT process_code, component_code, cost_per_unit_usd, formula_text
+      `SELECT process_code, component_code, cost_per_unit_usd, formula_text, intermediate_json
          FROM bom_cs_run_cell WHERE run_id = ?`,
     ).all(runId).catch(() => []);
     const comps = [], procs = [], m = {};
@@ -347,7 +347,9 @@ router.get('/case/:caseFactoryId/cleansheet', asyncHandler(async (req, res) => {
       if (!comps.includes(co)) comps.push(co);
       if (!procs.includes(pr)) procs.push(pr);
       m[co] = m[co] || {};
-      m[co][pr] = { v, formula: r.formula_text || null };
+      let im = null;
+      try { const raw = r.intermediate_json; if (raw) im = JSON.parse(String(raw)); } catch (_) { /* noop */ }
+      m[co][pr] = { v, formula: r.formula_text || null, im };
     }
     // 排序:demo 順序(LABOR → EQUIP → FACILITY → OTHERS;SMT → ASSY → COMMON)
     const compOrder = ['DL_CPU', 'IDL_CPU', 'EQUIP_MRO', 'EQUIP_DEPR', 'IND_MAT', 'FACILITY', 'FREIGHT', 'VAT', 'LOSS'];
@@ -478,6 +480,61 @@ router.post('/strategy/ai-suggest', asyncHandler(async (req, res) => {
   let suggest = null;
   try { suggest = JSON.parse(String(r.text || '').replace(/^```json?\s*|\s*```$/g, '')); } catch (_) { suggest = { strategy_note: r.text }; }
   res.json({ ok: true, suggest, model: process.env.GEMINI_MODEL_PRO });
+}));
+
+// GET /case/:cf/cleansheet-detail — 參數層明細(製程/IDL/設備/廠房/耗材 · 可事後修正)
+router.get('/case/:caseFactoryId/cleansheet-detail', asyncHandler(async (req, res) => {
+  if (!canViewTrueCost(req)) return res.status(403).json({ error: '需完整成本視角(HOST/admin)' });
+  const cf = reqId(req.params.caseFactoryId, res, 'caseFactoryId'); if (cf === null) return;
+  const db = getDb();
+  const all = (sql, ...b) => db.prepare(sql).all(...b).catch(() => []);
+  const processes = await all(
+    `SELECT process_code, step_order, working_hours_per_day, days_per_week, shifts_per_day, takt_seconds, takt_source,
+            yield_pct, efficiency_pct, lines_installed, debug_lines_installed, dl_per_shift, debug_dl_per_shift,
+            functional_dl_per_shift, warehouse_dl_per_shift, line_leader_per_shift, line_leader_per_day,
+            technician_per_shift, technician_per_day, iqc_per_day, supervisor_per_day, weekly_output_override
+       FROM bom_cs_case_process WHERE case_factory_id = ? ORDER BY step_order, process_code`, cf);
+  const idl = await all(
+    `SELECT a.process_code, a.role_code, a.multiplier, r.display_name_zh_tw, r.category, r.weekly_rate_usd, r.annual_rate_usd
+       FROM bom_cs_case_idl_alloc a
+       JOIN bom_cs_case_factory c ON c.case_factory_id = a.case_factory_id
+       LEFT JOIN bom_factory_idl_role r ON r.baseline_id = c.baseline_id AND r.role_code = a.role_code
+      WHERE a.case_factory_id = ? ORDER BY a.role_code, a.process_code`, cf);
+  const equipment = await all(
+    `SELECT process_code, bucket, annual_cost_usd, apply_util, note FROM bom_cs_case_equip_area WHERE case_factory_id = ? ORDER BY process_code, bucket`, cf);
+  const facility = await all(
+    `SELECT process_code, sqft, sqft_unit_cost_usd, apply_util, note FROM bom_cs_case_facility WHERE case_factory_id = ? ORDER BY process_code`, cf);
+  const consumables = await all(
+    `SELECT cc.consumable_id, cc.process_code, cc.annual_usage_qty, cc.unit_cost_override_usd, cc.foxlink_part_no,
+            m.consumable_code, m.description, m.unit_cost_usd, m.unit_of_measure
+       FROM bom_cs_case_consumable cc LEFT JOIN bom_factory_consumable m ON m.consumable_id = cc.consumable_id
+      WHERE cc.case_factory_id = ? ORDER BY cc.process_code`, cf);
+  res.json({ caseFactoryId: cf, processes, idl, equipment, facility, consumables });
+}));
+
+// PUT /case/:cf/cleansheet-param — 事後修正單一參數(白名單表/欄)→ 改完按 ④ 重算生效
+const CS_PARAM_WHITELIST = {
+  process: { table: 'bom_cs_case_process', keys: ['process_code'], fields: ['working_hours_per_day', 'days_per_week', 'shifts_per_day', 'takt_seconds', 'yield_pct', 'efficiency_pct', 'lines_installed', 'debug_lines_installed', 'dl_per_shift', 'debug_dl_per_shift', 'functional_dl_per_shift', 'warehouse_dl_per_shift', 'line_leader_per_shift', 'line_leader_per_day', 'technician_per_shift', 'technician_per_day', 'iqc_per_day', 'supervisor_per_day', 'weekly_output_override'] },
+  idl: { table: 'bom_cs_case_idl_alloc', keys: ['process_code', 'role_code'], fields: ['multiplier'] },
+  equipment: { table: 'bom_cs_case_equip_area', keys: ['process_code', 'bucket'], fields: ['annual_cost_usd', 'apply_util'] },
+  facility: { table: 'bom_cs_case_facility', keys: ['process_code'], fields: ['sqft', 'sqft_unit_cost_usd', 'apply_util'] },
+  consumable: { table: 'bom_cs_case_consumable', keys: ['consumable_id', 'process_code'], fields: ['annual_usage_qty', 'unit_cost_override_usd'] },
+};
+router.put('/case/:caseFactoryId/cleansheet-param', asyncHandler(async (req, res) => {
+  if (!canViewTrueCost(req)) return res.status(403).json({ error: '需完整成本視角(HOST/admin)' });
+  const cf = reqId(req.params.caseFactoryId, res, 'caseFactoryId'); if (cf === null) return;
+  const def = CS_PARAM_WHITELIST[String(req.body.kind)];
+  if (!def) return res.status(400).json({ error: `unknown kind: ${req.body.kind}` });
+  const field = String(req.body.field || '');
+  if (!def.fields.includes(field)) return res.status(400).json({ error: `field 不可修改: ${field}` });
+  const keys = req.body.keys || {};
+  for (const k of def.keys) if (keys[k] == null || keys[k] === '') return res.status(400).json({ error: `key required: ${k}` });
+  const value = req.body.value === '' || req.body.value == null ? null : Number(req.body.value);
+  if (req.body.value !== '' && req.body.value != null && !Number.isFinite(value)) return res.status(400).json({ error: 'value 需為數字(或空=清除)' });
+  const where = ['case_factory_id = ?', ...def.keys.map((k) => `${k} = ?`)].join(' AND ');
+  const binds = [value, cf, ...def.keys.map((k) => keys[k])];
+  const r = await getDb().prepare(`UPDATE ${def.table} SET ${field} = ? WHERE ${where}`).run(...binds);
+  res.json({ ok: true, kind: req.body.kind, field, value, note: '已存;按「④ 算成本 / 矩陣重算」後生效' });
 }));
 
 // ── v0.16 #2 操作流程 checklist(26 步 · 自動判定 + 手動勾 + 附圖)────────────
