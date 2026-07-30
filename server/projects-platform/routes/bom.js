@@ -509,7 +509,10 @@ router.get('/case/:caseFactoryId/cleansheet-detail', asyncHandler(async (req, re
             m.consumable_code, m.description, m.unit_cost_usd, m.unit_of_measure
        FROM bom_cs_case_consumable cc LEFT JOIN bom_factory_consumable m ON m.consumable_id = cc.consumable_id
       WHERE cc.case_factory_id = ? ORDER BY cc.process_code`, cf);
-  res.json({ caseFactoryId: cf, processes, idl, equipment, facility, consumables });
+  const simplifiedLines = await all(
+    `SELECT line_code, component_code, line_group, cost_per_unit_usd, in_subtotal, sort_order
+       FROM bom_cs_case_simplified_line WHERE case_factory_id = ? ORDER BY sort_order, line_code`, cf);
+  res.json({ caseFactoryId: cf, processes, idl, equipment, facility, consumables, simplifiedLines });
 }));
 
 // PUT /case/:cf/cleansheet-param — 事後修正單一參數(白名單表/欄)→ 改完按 ④ 重算生效
@@ -519,6 +522,7 @@ const CS_PARAM_WHITELIST = {
   equipment: { table: 'bom_cs_case_equip_area', keys: ['process_code', 'bucket'], fields: ['annual_cost_usd', 'apply_util'] },
   facility: { table: 'bom_cs_case_facility', keys: ['process_code'], fields: ['sqft', 'sqft_unit_cost_usd', 'apply_util'] },
   consumable: { table: 'bom_cs_case_consumable', keys: ['consumable_id', 'process_code'], fields: ['annual_usage_qty', 'unit_cost_override_usd'] },
+  line: { table: 'bom_cs_case_simplified_line', keys: ['line_code', 'component_code'], fields: ['cost_per_unit_usd', 'in_subtotal', 'sort_order'] },
 };
 // baseline 欄修正(SGA%/Profit%/DL wage…):baseline 共用多案 → copy-on-write(clone 含 IDL 年薪表)
 const BASELINE_FIELDS = new Set(['sga_pct', 'profit_pct', 'dl_wage_per_hr_usd', 'vat_rate_pct', 'oh_pct', 'annual_demand_default', 'loss_factor_pct', 'outbound_transportation_per_unit_usd']);
@@ -678,6 +682,10 @@ router.post('/case/:caseFactoryId/cleansheet-row', asyncHandler(async (req, res)
       if (!f.process_code) return res.status(400).json({ error: 'process_code required' });
       await db.prepare(`INSERT INTO bom_cs_case_facility (case_factory_id, process_code, sqft, sqft_unit_cost_usd, apply_util, note) VALUES (?,?,?,?,?,?)`)
         .run(cf, String(f.process_code), numOr(f.sqft, 0), numOr(f.sqft_unit_cost_usd, 0), numOr(f.apply_util, 0), f.note || null);
+    } else if (kind === 'line') {
+      if (!f.line_code || !f.component_code) return res.status(400).json({ error: 'line_code + component_code required' });
+      await db.prepare(`INSERT INTO bom_cs_case_simplified_line (case_factory_id, line_code, component_code, line_group, cost_per_unit_usd, in_subtotal, sort_order) VALUES (?,?,?,?,?,?,?)`)
+        .run(cf, String(f.line_code).toUpperCase(), String(f.component_code).toUpperCase(), String(f.line_group || 'OTHER').toUpperCase(), numOr(f.cost_per_unit_usd, 0), numOr(f.in_subtotal, 1), numOr(f.sort_order, 999));
     } else if (kind === 'consumable') {
       // 新建 master(廠級)+ case row 一次完成;或帶 consumable_id 直接綁既有
       let cid = numOr(f.consumable_id);
@@ -706,6 +714,7 @@ router.delete('/case/:caseFactoryId/cleansheet-row', asyncHandler(async (req, re
   if (kind === 'equipment') await db.prepare(`DELETE FROM bom_cs_case_equip_area WHERE case_factory_id=? AND process_code=? AND bucket=?`).run(cf, String(k.process_code), String(k.bucket));
   else if (kind === 'facility') await db.prepare(`DELETE FROM bom_cs_case_facility WHERE case_factory_id=? AND process_code=?`).run(cf, String(k.process_code));
   else if (kind === 'consumable') await db.prepare(`DELETE FROM bom_cs_case_consumable WHERE case_factory_id=? AND consumable_id=? AND process_code=?`).run(cf, Number(k.consumable_id), String(k.process_code));
+  else if (kind === 'line') await db.prepare(`DELETE FROM bom_cs_case_simplified_line WHERE case_factory_id=? AND line_code=? AND component_code=?`).run(cf, String(k.line_code), String(k.component_code));
   else return res.status(400).json({ error: `unknown kind: ${kind}` });
   res.json({ ok: true, note: '已刪列;按重算生效' });
 }));

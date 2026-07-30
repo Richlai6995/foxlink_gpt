@@ -493,7 +493,44 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
               )}
               <div className="text-[9px] font-mono text-cortex-muted">↳ 寫入 bom_cs_case_process WHERE process_code='{activeProc}' · 改完按上方「重算」生效</div>
             </div>
-          ) : <div className="text-[11px] text-cortex-muted p-2">此廠為 SIMPLIFIED 模型:製程參數在「成本模型 Excel(SimplifiedLine 分頁)」維護,匯入即生效。</div>)}
+          ) : (
+            <div className="space-y-1.5">
+              <div className="text-[10px] text-cortex-muted">SIMPLIFIED 模型 · Line 結構(每列 = 一條成本線;金額直接編輯 · in_subtotal=1 計入小計)</div>
+              <table className="w-full text-[10px]">
+                <thead className="text-cortex-muted border-b border-cortex-line"><tr>
+                  <th className="text-left px-1.5 py-0.5">Line</th><th className="text-left px-1.5 py-0.5">Component</th>
+                  <th className="text-left px-1.5 py-0.5">Group</th><th className="text-right px-1.5 py-0.5">$/unit</th>
+                  <th className="text-center px-1.5 py-0.5">計入小計</th><th className="text-right px-1.5 py-0.5">排序</th><th className="w-6"></th>
+                </tr></thead>
+                <tbody>
+                  {(detail?.simplifiedLines || []).map((r: any, i: number) => (
+                    <tr key={i} className="border-b border-cortex-line/30">
+                      <td className="px-1.5 py-0.5 font-mono">{r.line_code}</td>
+                      <td className="px-1.5 py-0.5 font-mono">{r.component_code}</td>
+                      <td className="px-1.5 py-0.5"><span className="text-[8px] bg-cortex-bg border border-cortex-line rounded px-1">{r.line_group}</span></td>
+                      <td className="px-1.5 py-0.5 text-right"><EditNum value={r.cost_per_unit_usd} w="w-20" onSave={(v) => saveParam('line', 'cost_per_unit_usd', { line_code: r.line_code, component_code: r.component_code }, v)} /></td>
+                      <td className="px-1.5 py-0.5 text-center"><EditNum value={r.in_subtotal} w="w-8" onSave={(v) => saveParam('line', 'in_subtotal', { line_code: r.line_code, component_code: r.component_code }, v)} /></td>
+                      <td className="px-1.5 py-0.5 text-right"><EditNum value={r.sort_order} w="w-10" onSave={(v) => saveParam('line', 'sort_order', { line_code: r.line_code, component_code: r.component_code }, v)} /></td>
+                      <td className="px-1.5 py-0.5 text-center"><button onClick={() => delRow('line', { line_code: r.line_code, component_code: r.component_code })} className="text-red-400 hover:text-red-600">✕</button></td>
+                    </tr>
+                  ))}
+                  {!(detail?.simplifiedLines || []).length && <tr><td colSpan={7} className="px-2 py-2 text-center text-cortex-muted">無 line 資料(先匯入成本模型)</td></tr>}
+                  <tr><td colSpan={7} className="px-1.5 py-1">
+                    {addKind === 'line' ? (
+                      <span className="flex items-center gap-1 flex-wrap text-[10px]">
+                        <input value={addF.line_code || ''} onChange={(e) => setAddF((p) => ({ ...p, line_code: e.target.value }))} placeholder="LINE_CODE" className="w-28 border border-cortex-line rounded px-1 py-0.5 font-mono" />
+                        <input value={addF.component_code || ''} onChange={(e) => setAddF((p) => ({ ...p, component_code: e.target.value }))} placeholder="COMPONENT" className="w-24 border border-cortex-line rounded px-1 py-0.5 font-mono" />
+                        <input value={addF.line_group || ''} onChange={(e) => setAddF((p) => ({ ...p, line_group: e.target.value }))} placeholder="GROUP" className="w-20 border border-cortex-line rounded px-1 py-0.5 font-mono" />
+                        <input value={addF.cost_per_unit_usd || ''} onChange={(e) => setAddF((p) => ({ ...p, cost_per_unit_usd: e.target.value }))} placeholder="$/unit" className="w-16 border border-cortex-line rounded px-1 py-0.5 font-mono" />
+                        <button onClick={() => { addRow('line', addF); setAddKind(''); setAddF({}) }} className="px-1.5 py-0.5 bg-cortex-teal text-white rounded">加</button>
+                        <button onClick={() => { setAddKind(''); setAddF({}) }} className="text-cortex-muted">取消</button>
+                      </span>
+                    ) : <button onClick={() => { setAddKind('line'); setAddF({}) }} className="text-[10px] text-cortex-teal hover:underline">＋ 加 line</button>}
+                  </td></tr>
+                </tbody>
+              </table>
+            </div>
+          ))}
 
           {/* Step 2:IDL multiplier 熱力矩陣(multiplier 可編輯) */}
           {step === 'idl' && (idlRoles.length ? (
