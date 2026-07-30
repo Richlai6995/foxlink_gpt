@@ -18,7 +18,7 @@ import { useAuth } from '../../../../context/AuthContext'
 import { Download, Upload, Calculator, Loader2, CheckCircle2, AlertCircle, Info, Settings, Factory, Layers, ChevronDown, ChevronUp } from 'lucide-react'
 import BomItemsPanel from './BomItemsPanel'
 import { BomMetaCard, SourcingOverview } from './BomMetaCard'
-import BomFactoryCompare from './BomFactoryCompare'
+
 import BomVariantSetup from './BomVariantSetup'
 
 type CaseRow = { case_factory_id: number; project_id: number; factory_code: string; costing_model: string; status: string; project_code: string }
@@ -542,7 +542,11 @@ export default function BomSection({ project }: { project: ProjectDetail }) {
       {/* FM 多廠成本比較(≥2 廠才顯)+ 新增廠別 */}
       {hasCase && (
         <div className="space-y-2">
-          <BomFactoryCompare projectId={projectId} bomInstanceId={importResult?.bomInstanceId} factoryCount={cases.length} />
+          {/* v0.7 矩陣已升為獨立 section(🏭 多廠矩陣)*/}
+          <button onClick={() => window.dispatchEvent(new CustomEvent('cortex:goto-section', { detail: 'factory_matrix' }))}
+            className="w-full border border-dashed border-cortex-teal/50 rounded-lg py-2 text-[12px] text-cortex-teal hover:bg-cortex-cyan-bg/40">
+            🏭 多廠成本矩陣(Qty × PKG × 廠 · KPI / True / Margin)→ 前往獨立分頁
+          </button>
           {costModelTools}
         </div>
       )}

@@ -80,13 +80,19 @@ async function getMatrix(db, { projectId }) {
 
   // v0.16 #8:qty scenario 軸(distinct scenario code · BASE 排最前;無資料 → ['BASE'])
   let qtyScenarios = ['BASE'];
+  let qtyScenarioDetails = [{ code: 'BASE', targetQty: null }];
   if (factories.length) {
     const ph0 = factories.map(() => '?').join(',');
     const qs = await db.prepare(
-      `SELECT DISTINCT scenario_code FROM bom_cs_case_qty_scenario WHERE case_factory_id IN (${ph0})`,
+      `SELECT scenario_code, MAX(target_qty) AS tq FROM bom_cs_case_qty_scenario WHERE case_factory_id IN (${ph0}) GROUP BY scenario_code`,
     ).all(...factories.map((f) => f.caseFactoryId)).catch(() => []);
-    const codes = qs.map((r) => String(Object.values(r)[0])).filter(Boolean);
-    if (codes.length) qtyScenarios = ['BASE', ...codes.filter((c) => c !== 'BASE').sort()];
+    const det = qs.map((r) => ({ code: String(pick(r, 'scenario_code')), targetQty: pick(r, 'tq') != null ? num(pick(r, 'tq')) : null })).filter((x) => x.code);
+    if (det.length) {
+      const base = det.find((d) => d.code === 'BASE');
+      const rest = det.filter((d) => d.code !== 'BASE').sort((a, b) => (b.targetQty || 0) - (a.targetQty || 0));
+      qtyScenarioDetails = [base || { code: 'BASE', targetQty: null }, ...rest];
+      qtyScenarios = qtyScenarioDetails.map((d) => d.code);
+    }
   }
 
   // 快取:各 (cf, sig) 的 ready run + result(persistRun archive 保證每組合最多一筆 ready)
@@ -114,7 +120,7 @@ async function getMatrix(db, { projectId }) {
       };
     }
   }
-  return { projectId, factories, qtyScenarios, dimensions: dims.map((d) => ({ dimCode: d.dimCode, values: d.values.map((v) => v.valueCode) })), combos, cells };
+  return { projectId, factories, qtyScenarios, qtyScenarioDetails, dimensions: dims.map((d) => ({ dimCode: d.dimCode, dimensionId: d.id, values: d.values.map((v) => ({ id: v.id, code: v.valueCode })) })), combos, cells };
 }
 
 module.exports = { compareFactories, getMatrix };

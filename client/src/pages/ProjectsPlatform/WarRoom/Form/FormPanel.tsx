@@ -33,6 +33,7 @@ import CleansheetSection from './CleansheetSection'
 import MvaWorkflowSection from './MvaWorkflowSection'
 import MarginSection from './MarginSection'
 import StrategySection from './StrategySection'
+import FactoryMatrixV07 from './FactoryMatrixV07'
 
 type SectionId =
   | 'customer'
@@ -41,6 +42,7 @@ type SectionId =
   | 'variant'
   | 'nre'
   | 'packaging'
+  | 'factory_matrix'
   | 'cleansheet'
   | 'mva_workflow'
   | 'margin'
@@ -68,6 +70,7 @@ const SECTIONS: SectionDef[] = [
     visible: (p) => !!(p.data_payload as any)?.packaging?.items?.length,
     badge:   (p) => `${(p.data_payload as any)?.packaging?.items?.length || 0} 項` },
   { id: 'nre',       label: 'NRE 成本',  icon: '🔧', isNew: true, visible: () => true },
+  { id: 'factory_matrix', label: '多廠矩陣', icon: '🏭', isNew: true, visible: () => false },
   { id: 'cleansheet', label: 'Cleansheet', icon: '🧮', isNew: true, visible: () => false },
   { id: 'mva_workflow', label: 'MVA 操作流程', icon: '🛠️', isNew: true, visible: () => true },
   { id: 'margin', label: 'Margin Analysis', icon: '📈', isNew: true, visible: () => false },
@@ -86,9 +89,10 @@ const COMPLETION_MAP: Record<SectionId, string[]> = {
   variant: ['variant'],
   packaging: ['packaging'],
   nre: ['nre'],
+  factory_matrix: ['factory_matrix'],
   cleansheet: ['cleansheet'],
   mva_workflow: [],
-  margin: ['factory_matrix'],
+  margin: [],
   cost: ['cost'],
   strategy: ['strategy'],
   ai: [],
@@ -125,7 +129,7 @@ export default function FormPanel({ project }: { project: ProjectDetail }) {
     return t > 0 ? { f, t, pct: Math.round((f / t) * 100) } : null
   }
   // 真 BOM 專案:有顏色維度(completion.variant.total>0)→ CMF 變體段也顯示(v0.16 #3)
-  const visibleSections = SECTIONS.filter((s) => s.visible(project) || (s.id === 'variant' && (completion['variant']?.total || 0) > 0) || (s.id === 'packaging' && (completion['packaging']?.filled || 0) > 0) || (s.id === 'cleansheet' && (completion['cleansheet']?.total || 0) > 0) || (s.id === 'margin' && (completion['factory_matrix']?.filled || 0) > 0))
+  const visibleSections = SECTIONS.filter((s) => s.visible(project) || (s.id === 'variant' && (completion['variant']?.total || 0) > 0) || (s.id === 'packaging' && (completion['packaging']?.filled || 0) > 0) || (s.id === 'cleansheet' && (completion['cleansheet']?.total || 0) > 0) || (s.id === 'factory_matrix' && (completion['factory_matrix']?.total || 0) > 0) || (s.id === 'margin' && (completion['factory_matrix']?.filled || 0) > 0))
 
   return (
     <div className="grid grid-cols-[180px_1fr] divide-x divide-cortex-line min-h-[560px]">
@@ -189,6 +193,7 @@ export default function FormPanel({ project }: { project: ProjectDetail }) {
         {activeSection === 'variant'   && <VariantSection   project={project} />}
         {activeSection === 'packaging' && <PackagingSection project={project} />}
         {activeSection === 'nre'       && <NreRealSection   project={project} />}
+        {activeSection === 'factory_matrix' && <FactoryMatrixV07 project={project} />}
         {activeSection === 'cleansheet' && <CleansheetSection project={project} />}
         {activeSection === 'mva_workflow' && <MvaWorkflowSection />}
         {activeSection === 'margin'    && <MarginSection    project={project} />}

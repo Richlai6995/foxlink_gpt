@@ -404,6 +404,47 @@ router.get('/instances/:id/top-markup', asyncHandler(async (req, res) => {
   res.json({ count: rows.length, items: rows });
 }));
 
+// GET /project/:id/matrix-excel?qty= — 匯出 RFQ Cost Excel(v0.7 矩陣 · 一 sheet per 包裝)
+router.get('/project/:projectId/matrix-excel', asyncHandler(async (req, res) => {
+  const projectId = reqId(req.params.projectId, res, 'projectId'); if (projectId === null) return;
+  const qty = String(req.query.qty || 'BASE');
+  const withTrue = canViewTrueCost(req);
+  const XLSX = require('xlsx');
+  const mx = await compareSvc.getMatrix(getDb(), { projectId });
+  const dims = mx.dimensions || [];
+  const colorDim = dims.find((d) => /顏色|COLOR/i.test(d.dimCode));
+  const pkgDim = dims.find((d) => /包裝|PKG|PACK/i.test(d.dimCode));
+  const colors = colorDim && colorDim.values.length ? colorDim.values : [{ id: null, code: '' }];
+  const pkgList = pkgDim && pkgDim.values.length ? pkgDim.values : [{ id: null, code: 'ALL' }];
+  const p = await getDb().prepare(`SELECT project_code FROM projects WHERE id=?`).get(projectId).catch(() => null);
+  const code = (p && (p.project_code || Object.values(p)[0])) || projectId;
+  const wb = XLSX.utils.book_new();
+  for (const pk of pkgList) {
+    const sig = (cid) => [cid, pk.id].filter(Boolean).sort((a, b) => a - b).join(',');
+    const cell = (cf, cid) => mx.cells[`${cf.caseFactoryId}|${sig(cid)}|${qty}`] || null;
+    const head = ['', ...mx.factories.map((f) => `${f.factoryCode}(${f.costingModel})`)];
+    const rows = [head];
+    const push = (label, fn) => rows.push([label, ...mx.factories.map((f) => { const v = fn(f); return typeof v === 'number' ? Number(v.toFixed(6)) : ''; })]);
+    push('MVA', (f) => (cell(f, colors[0].id) || {}).mva);
+    for (const c of colors) push(`Material (Quote)${c.code ? ': ' + c.code : ''}`, (f) => (cell(f, c.id) || {}).material);
+    if (withTrue) for (const c of colors) push(`Material (True)${c.code ? ': ' + c.code : ''}`, (f) => (cell(f, c.id) || {}).materialTrue);
+    push('SG&A + Profit', (f) => { const x = cell(f, colors[0].id); return x ? (x.sga || 0) + (x.profit || 0) : undefined; });
+    push('NRE 攤提', (f) => (cell(f, colors[0].id) || {}).nreQuote);
+    for (const c of colors) push(`Total (Quote)${c.code ? ': ' + c.code : ''}`, (f) => (cell(f, c.id) || {}).total);
+    if (withTrue) {
+      for (const c of colors) push(`Total (True)${c.code ? ': ' + c.code : ''}`, (f) => (cell(f, c.id) || {}).totalTrue);
+      for (const c of colors) push(`Gross Margin %${c.code ? ': ' + c.code : ''}`, (f) => { const x = cell(f, c.id); return x && typeof x.marginPct === 'number' ? Number((x.marginPct * 100).toFixed(2)) : undefined; });
+    }
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [{ wch: 28 }, ...mx.factories.map(() => ({ wch: 16 }))];
+    XLSX.utils.book_append_sheet(wb, ws, String(pk.code || 'ALL').slice(0, 28));
+  }
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(`RFQ-Cost-${code}-${qty}.xlsx`)}"`);
+  res.send(buf);
+}));
+
 // POST /strategy/ai-suggest — 議價策略 AI 草稿(v0.16 #13 · Pro · 只回建議不落庫)
 router.post('/strategy/ai-suggest', asyncHandler(async (req, res) => {
   if (!canViewTrueCost(req)) return res.status(403).json({ error: '議價策略需完整成本視角' });
