@@ -639,6 +639,39 @@ router.post('/case/:caseFactoryId/whatif/apply', asyncHandler(async (req, res) =
   res.json(await require('../services/bomWhatifService').apply(getDb(), cf));
 }));
 
+// POST /case/:cf/reapply-template — 既有案「重套廠級範本」(不經 Excel · 覆蓋案級參數)
+router.post('/case/:caseFactoryId/reapply-template', asyncHandler(async (req, res) => {
+  if (!canViewTrueCost(req)) return res.status(403).json({ error: '需完整成本視角' });
+  const cf = reqId(req.params.caseFactoryId, res, 'caseFactoryId'); if (cf === null) return;
+  const srcCf = Number(req.body.sourceCaseFactoryId);
+  if (!srcCf) return res.status(400).json({ error: 'sourceCaseFactoryId required' });
+  const db = getDb();
+  // source 必須是範本(CORTEX-COST-TPL 底下)且 active
+  const src = await db.prepare(
+    `SELECT cf.case_factory_id, cf.factory_code, cf.costing_model, cf.baseline_id, cf.template_label
+       FROM bom_cs_case_factory cf JOIN projects p ON p.id = cf.case_id
+      WHERE cf.case_factory_id = ? AND p.project_code = 'CORTEX-COST-TPL'`,
+  ).get(srcCf).catch(() => null);
+  if (!src) return res.status(400).json({ error: 'source 不是廠級範本' });
+  const { CASE_TABLES, _tableCols } = require('../services/bomWhatifService');
+  for (const t of CASE_TABLES) {
+    const cols = await _tableCols(db, t.name, t.skipCols || []).catch(() => []);
+    const dataCols = cols.filter((c) => c !== 'CASE_FACTORY_ID');
+    await db.prepare(`DELETE FROM ${t.name} WHERE ${t.key} = ?`).run(cf);
+    if (dataCols.length) {
+      await db.prepare(
+        `INSERT INTO ${t.name} (case_factory_id, ${dataCols.join(',')}) SELECT ${cf}, ${dataCols.join(',')} FROM ${t.name} WHERE ${t.key} = ?`,
+      ).run(srcCf).catch(() => {});
+    }
+  }
+  await db.prepare(`UPDATE bom_cs_case_factory SET baseline_id = ?, costing_model = ? WHERE case_factory_id = ?`)
+    .run(Number(src.baseline_id || 0) || null, src.costing_model, cf);
+  res.json({
+    ok: true, from: { caseFactoryId: srcCf, label: src.template_label, factory: src.factory_code },
+    note: `案級參數已重置為範本「${src.template_label || src.factory_code}」最新狀態;按重算生效(之後再改仍為本案私有)`,
+  });
+}));
+
 // ── R1:Qty scenario CRUD ─────────────────────────────────────────────────
 // PUT /case/:cf/qty-scenario {code, targetQty} — upsert(改量 or 新增情境)
 router.put('/case/:caseFactoryId/qty-scenario', asyncHandler(async (req, res) => {

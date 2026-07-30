@@ -26,6 +26,12 @@ import TasksTab from './TasksTab'
 import MembersTab from './MembersTab'
 import BiTab from './BiTab'
 import FormPanel from './Form/FormPanel'
+import CleansheetSection from './Form/CleansheetSection'
+
+// 範本專案專用:只渲染 Cleansheet 維護(無 BOM/成本核算/議價/成員/聊天等一般專案功能)
+function FormPanelTplOnly({ project }: { project: any }) {
+  return <CleansheetSection project={project} />
+}
 import WarRoomHeaderActions from './WarRoomHeaderActions'
 import { useProjectsPlatformSocket } from '../../../hooks/useProjectsPlatformSocket'
 
@@ -112,6 +118,26 @@ export default function WarRoom() {
   const lc = LIFECYCLE_COLORS[project.lifecycle_status] || LIFECYCLE_COLORS.DRAFT
   const isConf = !!(project as any).is_confidential
 
+  // 廠級範本專案(CORTEX-COST-TPL):專用精簡維護視圖 — 只留 Cleansheet,不當一般專案操作
+  if ((project as any).project_code === 'CORTEX-COST-TPL') {
+    return (
+      <div className="bg-white rounded-lg border border-cortex-line shadow-cortex-sm overflow-hidden">
+        <div className="px-5 py-3 border-b border-amber-300 bg-amber-50 flex items-center gap-3 flex-wrap">
+          <button onClick={() => navigate('/projects-platform/admin/factory-cost-templates')}
+            className="text-amber-700 hover:text-amber-900 text-sm inline-flex items-center gap-1">
+            <ArrowLeft size={14} /> 回範本管理
+          </button>
+          <div className="h-4 w-px bg-amber-300" />
+          <span className="text-[15px] font-bold text-amber-800">⚙ 廠級成本範本維護</span>
+          <span className="text-[11px] text-amber-700">共用模板(國別 × BU × 模型)— 修改 = 廠級新狀態,影響之後新開的案;既有專案為開案快照,不受影響</span>
+        </div>
+        <div className="p-5">
+          <FormPanelTplOnly project={project} />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="bg-white rounded-lg border border-cortex-line shadow-cortex-sm overflow-hidden">
       {/* Project header */}
@@ -143,12 +169,6 @@ export default function WarRoom() {
       </div>
 
       {/* 8-Stage Ribbon */}
-      {(project as any).project_code === 'CORTEX-COST-TPL' && (
-        <div className="mb-2 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2 text-[12px] text-amber-800">
-          ⚙ <b>廠級成本基礎(範本庫專案)</b> — 這裡的每個廠別 = 一份廠級範本(國別×模型)。
-          在「報價 Form → 🧮 Cleansheet」直接修改參數 = 廠級新狀態,<b>影響之後新開的案</b>;既有專案為開案時快照,不受影響。
-        </div>
-      )}
       <StageRibbon stages={project.stages} />
 
       {/* Tabs */}

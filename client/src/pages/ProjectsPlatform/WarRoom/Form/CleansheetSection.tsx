@@ -54,6 +54,9 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
   const navigate = useNavigate()
   const projectId = project.id
   const [tplProjectId, setTplProjectId] = useState<number | null>(null)
+  const [tplList, setTplList] = useState<any[]>([])
+  const [reapplySel, setReapplySel] = useState<number | ''>('')
+  const [showReapply, setShowReapply] = useState(false)
   const isTpl = (project as any).project_code === 'CORTEX-COST-TPL'
   const [cases, setCases] = useState<CaseRow[]>([])
   const [activeCf, setActiveCf] = useState<number | ''>('')
@@ -89,6 +92,7 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
       if (m?.qtyScenarioDetails?.length) setQtys(m.qtyScenarioDetails)
     }).catch(() => {})
     api.get<{ templates: any[] }>(token, '/bom/provision/templates').then((r) => {
+      setTplList(r.templates || [])
       const t = (r.templates || []).find((x: any) => x.tplProjectId)
       if (t?.tplProjectId) setTplProjectId(t.tplProjectId)
     }).catch(() => {})
@@ -177,6 +181,17 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
       await api.post(token, `/bom/case/${activeCf}/whatif/apply`, {})
       setWhatif({ active: false }); setTryBd(null); setNote('已套用 → 正式重算中…')
       await recompute()
+    } catch (e: any) { setErr(e.message) }
+  }
+  async function reapplyTemplate() {
+    if (!reapplySel) return
+    const t = tplList.find((x) => x.caseFactoryId === reapplySel)
+    if (!confirm(`確定把本案(${data?.factoryCode})的成本參數重置為範本「${t?.templateLabel || t?.factoryCode}」最新狀態?\n本案現有的案級調整(製程/IDL/設備/耗材/量情境)會被覆蓋。`)) return
+    setErr('')
+    try {
+      const r = await api.post<any>(token, `/bom/case/${activeCf}/reapply-template`, { sourceCaseFactoryId: reapplySel })
+      setNote(r.note); setDirty(true); setShowReapply(false); setReapplySel('')
+      await loadAll(Number(activeCf))
     } catch (e: any) { setErr(e.message) }
   }
   async function recompute() {
@@ -329,6 +344,12 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
           ))}
           <button onClick={() => setQtyMgr(!qtyMgr)} title="管理量情境(增刪改量)"
             className={`px-1.5 py-0.5 rounded text-[10px] border ${qtyMgr ? 'bg-amber-500 text-white border-amber-500' : 'bg-white border-cortex-line text-cortex-muted'}`}>⚙</button>
+          {!isTpl && (
+            <button onClick={() => setShowReapply(!showReapply)} title="把本案參數重置為某廠級範本最新狀態(DB 直套 · 不經 Excel)"
+              className={`px-2 py-1 rounded text-[11px] border ${showReapply ? 'bg-cortex-navy text-white border-cortex-navy' : 'border-cortex-line text-cortex-muted hover:border-cortex-navy'}`}>
+              ⟲ 套範本
+            </button>
+          )}
           {!whatif?.active && (
             <button onClick={whatifStart} disabled={!activeCf} title="進入試算沙盒:任意改參數即時試算,不污染 run 歷史;可一鍵還原"
               className="flex items-center gap-1 px-2.5 py-1 rounded text-[11px] border border-amber-400 text-amber-700 hover:bg-amber-50 disabled:opacity-40">
@@ -344,6 +365,23 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
       </div>
       {err && <div className="text-[11px] text-red-600">{err}</div>}
       {note && <div className="text-[11px] text-cortex-teal bg-cortex-cyan-bg/40 border border-cortex-teal/30 rounded px-2 py-1">ℹ️ {note}</div>}
+      {showReapply && !isTpl && (
+        <div className="border border-cortex-navy/30 bg-cortex-bg/40 rounded-lg p-2.5 text-[11px] flex items-center gap-2 flex-wrap">
+          <b className="text-cortex-ink">⟲ 從廠級範本重新套用(覆蓋本案案級參數 · 不經 Excel):</b>
+          <select value={reapplySel} onChange={(e) => setReapplySel(e.target.value ? Number(e.target.value) : '')}
+            className="border border-cortex-line rounded px-1.5 py-0.5 text-[11px]">
+            <option value="">選範本…</option>
+            {tplList.map((t) => (
+              <option key={t.caseFactoryId} value={t.caseFactoryId}>
+                {t.factoryCode}{t.buCode ? `/${t.buCode}` : ''} · {t.costingModel === 'FULL_MVA' ? 'FULL' : 'SIMP'}{t.templateLabel ? ` · ${t.templateLabel}` : ''}
+              </option>
+            ))}
+          </select>
+          <button onClick={reapplyTemplate} disabled={!reapplySel}
+            className="px-2.5 py-1 bg-cortex-navy text-white rounded disabled:opacity-40">套用</button>
+          <span className="text-cortex-muted">套用後按重算生效;之後的修改仍為本案私有(不影響範本/他案)</span>
+        </div>
+      )}
       {whatif?.active && (() => {
         const b = whatif.baseBreakdown, t = tryBd
         const rows = [

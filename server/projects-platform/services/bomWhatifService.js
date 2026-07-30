@@ -102,4 +102,4 @@ async function apply(db, cfId) {
   return { ok: true, applied: true };
 }
 
-module.exports = { status, start, discard, apply };
+module.exports = { status, start, discard, apply, CASE_TABLES, _tableCols };
