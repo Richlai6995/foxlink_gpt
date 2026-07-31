@@ -435,7 +435,7 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
             {qtys.map((q) => (
               <span key={q.code} className="flex items-center gap-1">
                 <b className="font-mono">{q.code}</b>
-                <EditNum value={q.targetQty} w="w-20" onSave={(v) => saveQty(q.code, v)} />
+                <EditNum value={q.targetQty} w="w-20" suffix="pcs/yr" onSave={(v) => saveQty(q.code, v)} />
                 {q.code !== 'BASE' && <button onClick={() => delQty(q.code)} className="text-red-500 hover:text-red-700">✕</button>}
               </span>
             ))}
@@ -464,7 +464,7 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
                 onSave={(v) => saveParam('baseline', 'sga_pct', {}, String(Number(v) / 100))} /></span>
               <span className="flex items-center gap-1">Profit <EditNum value={Number(((bl.profitPct || 0) * 100).toFixed(2))} w="w-12" suffix="%"
                 onSave={(v) => saveParam('baseline', 'profit_pct', {}, String(Number(v) / 100))} /></span>
-              <span className="flex items-center gap-1">年量 <EditNum value={bl.annualDemand} w="w-20"
+              <span className="flex items-center gap-1">年量 <EditNum value={bl.annualDemand} w="w-20" suffix="pcs/yr"
                 onSave={(v) => saveParam('baseline', 'annual_demand_default', {}, v)} /></span>
             </>
           ) : <span>(未綁 baseline)</span>}
@@ -536,33 +536,33 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
               {curProc && (
                 <div className="grid md:grid-cols-2 gap-2">
                   {grpCard('⏱ Staffed Hours(班表)', '#0EA5E9', [
-                    { label: '日工時 hr', node: <EditNum value={curProc.working_hours_per_day} onSave={(v) => saveParam('process', 'working_hours_per_day', { process_code: activeProc }, v)} /> },
-                    { label: '週工作天', node: <EditNum value={curProc.days_per_week} onSave={(v) => saveParam('process', 'days_per_week', { process_code: activeProc }, v)} /> },
+                    { label: '日工時', node: <EditNum value={curProc.working_hours_per_day} suffix="hr/日" onSave={(v) => saveParam('process', 'working_hours_per_day', { process_code: activeProc }, v)} /> },
+                    { label: '週工作天', node: <EditNum value={curProc.days_per_week} suffix="天/週" onSave={(v) => saveParam('process', 'days_per_week', { process_code: activeProc }, v)} /> },
                     { label: '週工時(derived)', node: <b className="font-mono text-purple-700">{nf(curProc.working_hours_per_day * curProc.days_per_week, 0)} hr</b> },
-                    { label: '班次/日', node: <EditNum value={curProc.shifts_per_day} onSave={(v) => saveParam('process', 'shifts_per_day', { process_code: activeProc }, v)} /> },
+                    { label: '班次/日', node: <EditNum value={curProc.shifts_per_day} suffix="班" onSave={(v) => saveParam('process', 'shifts_per_day', { process_code: activeProc }, v)} /> },
                   ])}
                   {grpCard('⚡ Throughput(產出)', '#16A34A', [
-                    { label: 'TAKT (s)', node: <EditNum value={curProc.takt_seconds} onSave={(v) => saveParam('process', 'takt_seconds', { process_code: activeProc }, v)} /> },
+                    { label: 'TAKT', node: <EditNum value={curProc.takt_seconds} suffix="秒/pcs" onSave={(v) => saveParam('process', 'takt_seconds', { process_code: activeProc }, v)} /> },
                     { label: 'UPH(derived)', node: <b className="font-mono text-purple-700">{nf(uphOf(curProc), 1)}</b> },
-                    { label: 'Yield(0~1)', node: <EditNum value={curProc.yield_pct} onSave={(v) => saveParam('process', 'yield_pct', { process_code: activeProc }, v)} /> },
-                    { label: 'Efficiency(0~1)', node: <EditNum value={curProc.efficiency_pct} onSave={(v) => saveParam('process', 'efficiency_pct', { process_code: activeProc }, v)} /> },
+                    { label: 'Yield 良率', node: <EditNum value={curProc.yield_pct} suffix="(0~1)" onSave={(v) => saveParam('process', 'yield_pct', { process_code: activeProc }, v)} /> },
+                    { label: 'Efficiency 效率', node: <EditNum value={curProc.efficiency_pct} suffix="(0~1)" onSave={(v) => saveParam('process', 'efficiency_pct', { process_code: activeProc }, v)} /> },
                   ])}
                   {grpCard('👷 DL Config(4 類 / shift)', '#DC2626', [
-                    { label: 'DL / shift', node: <EditNum value={curProc.dl_per_shift} onSave={(v) => saveParam('process', 'dl_per_shift', { process_code: activeProc }, v)} /> },
-                    { label: 'Debug DL', node: <EditNum value={curProc.debug_dl_per_shift} onSave={(v) => saveParam('process', 'debug_dl_per_shift', { process_code: activeProc }, v)} /> },
-                    { label: 'Functional DL', node: <EditNum value={curProc.functional_dl_per_shift} onSave={(v) => saveParam('process', 'functional_dl_per_shift', { process_code: activeProc }, v)} /> },
-                    { label: 'Warehouse DL', node: <EditNum value={curProc.warehouse_dl_per_shift} onSave={(v) => saveParam('process', 'warehouse_dl_per_shift', { process_code: activeProc }, v)} /> },
+                    { label: 'DL / shift', node: <EditNum value={curProc.dl_per_shift} suffix="人/班" onSave={(v) => saveParam('process', 'dl_per_shift', { process_code: activeProc }, v)} /> },
+                    { label: 'Debug DL', node: <EditNum value={curProc.debug_dl_per_shift} suffix="人/班" onSave={(v) => saveParam('process', 'debug_dl_per_shift', { process_code: activeProc }, v)} /> },
+                    { label: 'Functional DL', node: <EditNum value={curProc.functional_dl_per_shift} suffix="人/班" onSave={(v) => saveParam('process', 'functional_dl_per_shift', { process_code: activeProc }, v)} /> },
+                    { label: 'Warehouse DL', node: <EditNum value={curProc.warehouse_dl_per_shift} suffix="人/班" onSave={(v) => saveParam('process', 'warehouse_dl_per_shift', { process_code: activeProc }, v)} /> },
                   ])}
                   {grpCard('👔 IDL Line-dep(線級)', '#7C3AED', [
-                    { label: 'Line Leader / shift', node: <EditNum value={curProc.line_leader_per_shift} onSave={(v) => saveParam('process', 'line_leader_per_shift', { process_code: activeProc }, v)} /> },
-                    { label: 'Technician / shift', node: <EditNum value={curProc.technician_per_shift} onSave={(v) => saveParam('process', 'technician_per_shift', { process_code: activeProc }, v)} /> },
-                    { label: 'IQC / day', node: <EditNum value={curProc.iqc_per_day} onSave={(v) => saveParam('process', 'iqc_per_day', { process_code: activeProc }, v)} /> },
-                    { label: 'Supervisor / day', node: <EditNum value={curProc.supervisor_per_day} onSave={(v) => saveParam('process', 'supervisor_per_day', { process_code: activeProc }, v)} /> },
+                    { label: 'Line Leader', node: <EditNum value={curProc.line_leader_per_shift} suffix="人/班" onSave={(v) => saveParam('process', 'line_leader_per_shift', { process_code: activeProc }, v)} /> },
+                    { label: 'Technician', node: <EditNum value={curProc.technician_per_shift} suffix="人/班" onSave={(v) => saveParam('process', 'technician_per_shift', { process_code: activeProc }, v)} /> },
+                    { label: 'IQC', node: <EditNum value={curProc.iqc_per_day} suffix="人/日" onSave={(v) => saveParam('process', 'iqc_per_day', { process_code: activeProc }, v)} /> },
+                    { label: 'Supervisor', node: <EditNum value={curProc.supervisor_per_day} suffix="人/日" onSave={(v) => saveParam('process', 'supervisor_per_day', { process_code: activeProc }, v)} /> },
                   ])}
                   {grpCard('📊 Volume / 線', '#CA8A04', [
-                    { label: '線數', node: <EditNum value={curProc.lines_installed} onSave={(v) => saveParam('process', 'lines_installed', { process_code: activeProc }, v)} /> },
-                    { label: 'Debug 線數', node: <EditNum value={curProc.debug_lines_installed} onSave={(v) => saveParam('process', 'debug_lines_installed', { process_code: activeProc }, v)} /> },
-                    { label: '週產出 override', node: <EditNum value={curProc.weekly_output_override} onSave={(v) => saveParam('process', 'weekly_output_override', { process_code: activeProc }, v)} w="w-20" /> },
+                    { label: '線數', node: <EditNum value={curProc.lines_installed} suffix="條" onSave={(v) => saveParam('process', 'lines_installed', { process_code: activeProc }, v)} /> },
+                    { label: 'Debug 線數', node: <EditNum value={curProc.debug_lines_installed} suffix="條" onSave={(v) => saveParam('process', 'debug_lines_installed', { process_code: activeProc }, v)} /> },
+                    { label: '週產出 override', node: <EditNum value={curProc.weekly_output_override} suffix="pcs/週" onSave={(v) => saveParam('process', 'weekly_output_override', { process_code: activeProc }, v)} w="w-20" /> },
                     { label: '年量(baseline)', node: <b className="font-mono">{annualDemand ? Number(annualDemand).toLocaleString('en-US') : '—'}</b> },
                   ])}
                 </div>
@@ -584,7 +584,7 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
                       <td className="px-1.5 py-0.5 font-mono">{r.line_code}</td>
                       <td className="px-1.5 py-0.5 font-mono">{r.component_code}</td>
                       <td className="px-1.5 py-0.5"><span className="text-[8px] bg-cortex-bg border border-cortex-line rounded px-1">{r.line_group}</span></td>
-                      <td className="px-1.5 py-0.5 text-right"><EditNum value={r.cost_per_unit_usd} w="w-20" onSave={(v) => saveParam('line', 'cost_per_unit_usd', { line_code: r.line_code, component_code: r.component_code }, v)} /></td>
+                      <td className="px-1.5 py-0.5 text-right"><EditNum value={r.cost_per_unit_usd} w="w-20" suffix="USD/unit" onSave={(v) => saveParam('line', 'cost_per_unit_usd', { line_code: r.line_code, component_code: r.component_code }, v)} /></td>
                       <td className="px-1.5 py-0.5 text-center"><EditNum value={r.in_subtotal} w="w-8" onSave={(v) => saveParam('line', 'in_subtotal', { line_code: r.line_code, component_code: r.component_code }, v)} /></td>
                       <td className="px-1.5 py-0.5 text-right"><EditNum value={r.sort_order} w="w-10" onSave={(v) => saveParam('line', 'sort_order', { line_code: r.line_code, component_code: r.component_code }, v)} /></td>
                       <td className="px-1.5 py-0.5 text-center"><button onClick={() => delRow('line', { line_code: r.line_code, component_code: r.component_code })} className="text-red-400 hover:text-red-600">✕</button></td>
@@ -627,7 +627,7 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
                     return (
                       <tr key={role} className="border-b border-cortex-line/30">
                         <td className="px-1.5 py-0.5 whitespace-nowrap sticky left-0 bg-white">{info?.display_name_zh_tw || role}<span className="text-cortex-muted font-mono ml-1 text-[8px]">{info?.category}</span></td>
-                        <td className="px-1.5 py-0.5 text-right"><EditNum value={info?.annual_rate_usd} w="w-16" onSave={(v) => saveParam('idl_role', 'annual_rate_usd', { role_code: role }, v)} /></td>
+                        <td className="px-1.5 py-0.5 text-right"><EditNum value={info?.annual_rate_usd} w="w-16" suffix="USD/yr" onSave={(v) => saveParam('idl_role', 'annual_rate_usd', { role_code: role }, v)} /></td>
                         {idlProcs.map((p) => {
                           const c = idlCell(role, p)
                           const v = c?.multiplier || 0
@@ -668,7 +668,7 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
                       <tr key={i} className="border-b border-cortex-line/30">
                         <td className="px-1.5 py-0.5">{PROC_LABEL[r.process_code] || r.process_code}</td>
                         <td className="px-1.5 py-0.5 font-mono">{r.bucket}</td>
-                        <td className="px-1.5 py-0.5 text-right"><EditNum value={r.annual_cost_usd} w="w-20" onSave={(v) => saveParam('equipment', 'annual_cost_usd', { process_code: r.process_code, bucket: r.bucket }, v)} /></td>
+                        <td className="px-1.5 py-0.5 text-right"><EditNum value={r.annual_cost_usd} w="w-20" suffix="USD/yr" onSave={(v) => saveParam('equipment', 'annual_cost_usd', { process_code: r.process_code, bucket: r.bucket }, v)} /></td>
                         <td className="px-1.5 py-0.5 text-center"><EditNum value={r.apply_util} w="w-10" onSave={(v) => saveParam('equipment', 'apply_util', { process_code: r.process_code, bucket: r.bucket }, v)} />
                           <button onClick={() => delRow('equipment', { process_code: r.process_code, bucket: r.bucket })} className="ml-1 text-red-400 hover:text-red-600">✕</button></td>
                       </tr>
@@ -701,8 +701,8 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
                     {(detail?.facility || []).map((r: any, i: number) => (
                       <tr key={i} className="border-b border-cortex-line/30">
                         <td className="px-1.5 py-0.5">{PROC_LABEL[r.process_code] || r.process_code}</td>
-                        <td className="px-1.5 py-0.5 text-right"><EditNum value={r.sqft} w="w-16" onSave={(v) => saveParam('facility', 'sqft', { process_code: r.process_code }, v)} /></td>
-                        <td className="px-1.5 py-0.5 text-right"><EditNum value={r.sqft_unit_cost_usd} w="w-16" onSave={(v) => saveParam('facility', 'sqft_unit_cost_usd', { process_code: r.process_code }, v)} /></td>
+                        <td className="px-1.5 py-0.5 text-right"><EditNum value={r.sqft} w="w-16" suffix="sqft" onSave={(v) => saveParam('facility', 'sqft', { process_code: r.process_code }, v)} /></td>
+                        <td className="px-1.5 py-0.5 text-right"><EditNum value={r.sqft_unit_cost_usd} w="w-16" suffix="USD/sqft/yr" onSave={(v) => saveParam('facility', 'sqft_unit_cost_usd', { process_code: r.process_code }, v)} /></td>
                         <td className="px-1.5 py-0.5 text-center"><EditNum value={r.apply_util} w="w-10" onSave={(v) => saveParam('facility', 'apply_util', { process_code: r.process_code }, v)} />
                           <button onClick={() => delRow('facility', { process_code: r.process_code })} className="ml-1 text-red-400 hover:text-red-600">✕</button></td>
                       </tr>
@@ -745,7 +745,7 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
                         <td className="px-1.5 py-0.5"><span className="font-mono text-[8px] text-cortex-muted">{r.consumable_code}</span> {r.description}</td>
                         <td className="px-1.5 py-0.5">{r.unit_of_measure || '—'}</td>
                         <td className="px-1.5 py-0.5">{PROC_LABEL[r.process_code] || r.process_code}</td>
-                        <td className="px-1.5 py-0.5 text-right"><EditNum value={r.annual_usage_qty} w="w-16" onSave={(v) => saveParam('consumable', 'annual_usage_qty', { consumable_id: r.consumable_id, process_code: r.process_code }, v)} /></td>
+                        <td className="px-1.5 py-0.5 text-right"><EditNum value={r.annual_usage_qty} w="w-16" suffix={`${r.unit_of_measure || 'EA'}/yr`} onSave={(v) => saveParam('consumable', 'annual_usage_qty', { consumable_id: r.consumable_id, process_code: r.process_code }, v)} /></td>
                         <td className="px-1.5 py-0.5 text-right"><EditNum value={r.unit_cost_override_usd ?? ''} w="w-16" onSave={(v) => saveParam('consumable', 'unit_cost_override_usd', { consumable_id: r.consumable_id, process_code: r.process_code }, v)} suffix={r.unit_cost_override_usd == null ? `(廠 $${nf(r.unit_cost_usd)})` : ''} /></td>
                         <td className="px-1.5 py-0.5 text-right font-mono">{m2(annual)}</td>
                         <td className="px-1.5 py-0.5 text-right font-mono">{annualDemand ? m4(annual / Number(annualDemand)) : '—'}
