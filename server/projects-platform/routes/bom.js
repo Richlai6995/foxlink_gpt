@@ -321,8 +321,10 @@ router.get('/case/:caseFactoryId/cleansheet', asyncHandler(async (req, res) => {
   const db = getDb();
   const cfRow = await db.prepare(
     `SELECT cf.case_factory_id, cf.factory_code, cf.costing_model, cf.baseline_id,
+            cf.template_label, cf.effective_from AS tpl_effective_from,
             b.version_label, b.effective_from, b.dl_wage_per_hr_usd, b.sga_pct, b.profit_pct,
-            b.oh_pct, b.vat_rate_pct, b.annual_demand_default, b.imported_by
+            b.oh_pct, b.vat_rate_pct, b.annual_demand_default, b.imported_by,
+            b.bg_code, b.bu_code, b.effective_to AS bl_effective_to
        FROM bom_cs_case_factory cf LEFT JOIN bom_factory_baseline b ON b.baseline_id = cf.baseline_id
       WHERE cf.case_factory_id = ?`,
   ).get(cf).catch(() => null);
@@ -374,7 +376,9 @@ router.get('/case/:caseFactoryId/cleansheet', asyncHandler(async (req, res) => {
       versionLabel: cfRow.version_label, effectiveFrom: cfRow.effective_from,
       dlWagePerHr: cfRow.dl_wage_per_hr_usd, sgaPct: cfRow.sga_pct, profitPct: cfRow.profit_pct,
       ohPct: cfRow.oh_pct, vatPct: cfRow.vat_rate_pct, annualDemand: cfRow.annual_demand_default,
+      bgCode: cfRow.bg_code, buCode: cfRow.bu_code, effectiveTo: cfRow.bl_effective_to,
     } : null,
+    meta: { templateLabel: cfRow.template_label, effectiveFrom: cfRow.tpl_effective_from },
     matrix, kpi,
   });
 }));

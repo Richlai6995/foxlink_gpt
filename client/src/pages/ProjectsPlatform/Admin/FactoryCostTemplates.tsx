@@ -43,6 +43,7 @@ export default function FactoryCostTemplates() {
   const [file, setFile] = useState<File | null>(null)
   const [label, setLabel] = useState('')
   const [factory, setFactory] = useState('')
+  const [q, setQ] = useState('')   // 列表搜尋(廠/BU/名稱/模型)
 
   async function load() {
     try { const r = await api.get<{ templates: Tpl[] }>(token, `/bom/provision/templates${showInactive ? '?includeInactive=1' : ''}`); setRows(r.templates || []) }
@@ -95,6 +96,10 @@ export default function FactoryCostTemplates() {
           <p className="text-[12px] text-cortex-muted mt-0.5">國別 × BU × 模型的共用成本基礎(DL/IDL/設備/廠房/製程/耗材)。開案由此 clone;既有案為快照不受影響。</p>
         </div>
         <div className="flex items-center gap-2 text-[11px]">
+          <span className="relative">
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 搜尋(廠/BU/名稱/模型)"
+              className="border border-cortex-line rounded px-2 py-1.5 w-52 text-[11px]" />
+          </span>
           <label className="flex items-center gap-1 cursor-pointer text-cortex-muted">
             <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} /> 含歷史版
           </label>
@@ -114,7 +119,7 @@ export default function FactoryCostTemplates() {
         <span className="font-bold text-cortex-ink">匯入新範本(Excel):</span>
         <input type="file" accept=".xlsx" onChange={(e) => setFile(e.target.files?.[0] || null)}
           className="text-[11px] file:mr-1.5 file:px-2 file:py-0.5 file:border-0 file:rounded file:bg-white file:cursor-pointer file:text-[11px]" />
-        <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="範本名稱(同名=新版本)" className="border border-cortex-line rounded px-2 py-1 w-48" />
+        <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="新範本命名(匯入用 · 同名=出新版)" className="border border-cortex-line rounded px-2 py-1 w-52" />
         <input value={factory} onChange={(e) => setFactory(e.target.value)} placeholder="廠別碼(空=用檔內)" className="border border-cortex-line rounded px-2 py-1 w-28" />
         <button onClick={importTpl} disabled={busy || !file}
           className="flex items-center gap-1 px-2.5 py-1 bg-cortex-teal text-white rounded hover:opacity-90 disabled:opacity-40">
@@ -137,7 +142,11 @@ export default function FactoryCostTemplates() {
             <th className="text-right px-2 py-1.5">動作</th>
           </tr></thead>
           <tbody>
-            {rows.map((t) => (
+            {rows.filter((t) => {
+              if (!q.trim()) return true
+              const s = q.trim().toLowerCase()
+              return [t.factoryCode, t.buCode, t.bgCode, t.templateLabel, t.costingModel].some((x) => (x || '').toLowerCase().includes(s))
+            }).map((t) => (
               <tr key={t.caseFactoryId} className={`border-b border-cortex-line/40 ${!t.isActive ? 'opacity-50' : ''}`}>
                 <td className="px-2 py-1.5 font-bold">{t.factoryCode}</td>
                 <td className="px-2 py-1.5">

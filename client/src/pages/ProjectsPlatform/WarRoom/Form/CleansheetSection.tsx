@@ -466,6 +466,24 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
         </div>
       )}
 
+      {/* TPL 範本 meta(名稱/BU/BG/生效/失效)— 編輯畫面內直接改 */}
+      {data && isTpl && (
+        <div className="border border-amber-300 bg-amber-50/50 rounded-lg p-2 text-[11px] flex items-center gap-3 flex-wrap">
+          <b className="text-amber-800">範本資訊:</b>
+          <span className="flex items-center gap-1">名稱 <EditNum value={(data as any).meta?.templateLabel || ''} w="w-40"
+            onSave={async (v) => { await api.put(token, `/bom/cost-model/template/${activeCf}/meta`, { templateLabel: v }); await loadAll(Number(activeCf)) }} /></span>
+          <span className="flex items-center gap-1">BU <EditNum value={data.baseline?.buCode || ''} w="w-16"
+            onSave={async (v) => { await api.put(token, `/bom/cost-model/template/${activeCf}/meta`, { buCode: v }); await loadAll(Number(activeCf)) }} /></span>
+          <span className="flex items-center gap-1">BG <EditNum value={data.baseline?.bgCode || ''} w="w-16"
+            onSave={async (v) => { await api.put(token, `/bom/cost-model/template/${activeCf}/meta`, { bgCode: v }); await loadAll(Number(activeCf)) }} /></span>
+          <span className="flex items-center gap-1">生效 <EditNum value={(data as any).meta?.effectiveFrom ? String((data as any).meta.effectiveFrom).slice(0, 10) : ''} w="w-24"
+            onSave={async (v) => { await api.put(token, `/bom/cost-model/template/${activeCf}/meta`, { effectiveFrom: v }); await loadAll(Number(activeCf)) }} /></span>
+          <span className="flex items-center gap-1">失效 <EditNum value={data.baseline?.effectiveTo ? String(data.baseline.effectiveTo).slice(0, 10) : ''} w="w-24"
+            onSave={async (v) => { await api.put(token, `/bom/cost-model/template/${activeCf}/meta`, { effectiveTo: v }); await loadAll(Number(activeCf)) }} /></span>
+          <span className="text-[9px] text-amber-700">(日期 YYYY-MM-DD · 空=清除)</span>
+        </div>
+      )}
+
       {/* KPI 4 卡 */}
       {kpi && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
