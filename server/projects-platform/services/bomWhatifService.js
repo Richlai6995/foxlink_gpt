@@ -19,6 +19,10 @@ const CASE_TABLES = [
   { name: 'bom_cs_case_qty_scenario', key: 'case_factory_id', skipCols: ['scenario_id'] },   // identity PK 排除
 ];
 
+// 快照經 JSON 後 DATE 變 ISO 字串;還原 bind 前轉回 Date(否則 Oracle DATE 欄 ORA-01861)
+const _revive = (v) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v) ? new Date(v) : v);
+const _reviveRow = (row) => row.map(_revive);
+
 async function _tableCols(db, table, skip = []) {
   const rows = await db.prepare(
     `SELECT column_name FROM user_tab_cols WHERE table_name=UPPER(?) AND virtual_column='NO' AND hidden_column='NO' ORDER BY column_id`,
@@ -77,17 +81,17 @@ async function discard(db, cfId) {
     if (!d) continue;
     await db.prepare(`DELETE FROM ${t.name} WHERE ${t.key}=?`).run(cfId);
     for (const row of d.rows) {
-      await db.prepare(`INSERT INTO ${t.name} (${d.cols.join(',')}) VALUES (${d.cols.map(() => '?').join(',')})`).run(...row);
+      await db.prepare(`INSERT INTO ${t.name} (${d.cols.join(',')}) VALUES (${d.cols.map(() => '?').join(',')})`).run(..._reviveRow(row));
     }
   }
   // baseline 欄 + idl_role 還原(cf 進沙盒時已私有 → 安全)
   if (snap.baseline && snap.baselineId) {
     const sets = snap.baseline.cols.map((c) => `${c}=?`).join(',');
-    await db.prepare(`UPDATE bom_factory_baseline SET ${sets} WHERE baseline_id=?`).run(...snap.baseline.row, snap.baselineId);
+    await db.prepare(`UPDATE bom_factory_baseline SET ${sets} WHERE baseline_id=?`).run(..._reviveRow(snap.baseline.row), snap.baselineId);
     if (snap.idlRoles?.rows) {
       await db.prepare(`DELETE FROM bom_factory_idl_role WHERE baseline_id=?`).run(snap.baselineId);
       for (const row of snap.idlRoles.rows) {
-        await db.prepare(`INSERT INTO bom_factory_idl_role (${snap.idlRoles.cols.join(',')}) VALUES (${snap.idlRoles.cols.map(() => '?').join(',')})`).run(...row);
+        await db.prepare(`INSERT INTO bom_factory_idl_role (${snap.idlRoles.cols.join(',')}) VALUES (${snap.idlRoles.cols.map(() => '?').join(',')})`).run(..._reviveRow(row));
       }
     }
   }
