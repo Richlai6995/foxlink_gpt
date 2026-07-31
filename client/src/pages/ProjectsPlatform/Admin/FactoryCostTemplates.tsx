@@ -163,7 +163,7 @@ export default function FactoryCostTemplates() {
                   <EditText value={t.effectiveTo ? String(t.effectiveTo).slice(0, 10) : ''} w="w-24" ph="失效(空=無)" onSave={(v) => saveMeta(t.caseFactoryId, { effectiveTo: v })} />
                 </td>
                 <td className="px-2 py-1.5 text-right whitespace-nowrap">
-                  <button onClick={() => tplProjectId && navigate(`/projects-platform/projects/${tplProjectId}`)} title="開編輯器(Cleansheet · 選對應廠 tab)"
+                  <button onClick={() => tplProjectId && navigate(`/projects-platform/projects/${tplProjectId}?cf=${t.caseFactoryId}`)} title="開編輯器(自動選到此範本)"
                     className="text-[11px] text-cortex-teal hover:underline mr-2">編輯</button>
                   <button onClick={() => dl(`/case/${t.caseFactoryId}/cost-model`, `cost-model-${t.factoryCode}-${t.templateLabel || t.costingModel}.xlsx`)} title="匯出 Excel"
                     className="text-cortex-muted hover:text-cortex-teal mr-2"><Download className="w-3.5 h-3.5 inline" /></button>

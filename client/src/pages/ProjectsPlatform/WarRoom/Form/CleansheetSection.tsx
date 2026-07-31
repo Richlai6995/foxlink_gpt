@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import type { ProjectDetail } from '../../api'
 import { api } from '../../api'
 import { useAuth } from '../../../../context/AuthContext'
@@ -52,6 +52,8 @@ function EditNum({ value, onSave, w = 'w-16', suffix }: { value: any; onSave: (v
 export default function CleansheetSection({ project }: { project: ProjectDetail }) {
   const { token } = useAuth() as any
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const urlCf = Number(searchParams.get('cf')) || null
   const projectId = project.id
   const [tplProjectId, setTplProjectId] = useState<number | null>(null)
   const [tplList, setTplList] = useState<any[]>([])
@@ -86,7 +88,11 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
     if (!token) return
     api.get<{ cases: CaseRow[] }>(token, `/bom/cases?projectId=${projectId}`).then((r) => {
       setCases(r.cases || [])
-      if (r.cases?.length) setActiveCf((p) => p || r.cases[0].case_factory_id)
+      if (r.cases?.length) {
+        // 管理頁「編輯」帶 ?cf= → 預選該範本;否則第一個
+        const pre = urlCf && r.cases.some((c) => c.case_factory_id === urlCf) ? urlCf : r.cases[0].case_factory_id
+        setActiveCf((p) => p || pre)
+      }
     }).catch(() => {})
     api.get<any>(token, `/bom/project/${projectId}/matrix`).then((m) => {
       if (m?.qtyScenarioDetails?.length) setQtys(m.qtyScenarioDetails)
