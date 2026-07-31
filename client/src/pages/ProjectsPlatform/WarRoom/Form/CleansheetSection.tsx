@@ -44,7 +44,7 @@ function EditNum({ value, onSave, w = 'w-16', suffix }: { value: any; onSave: (v
       <input value={v} onChange={(e) => setV(e.target.value)} disabled={busy}
         onBlur={async () => { if (v === (value == null ? '' : String(value))) return; setBusy(true); try { await onSave(v) } finally { setBusy(false) } }}
         className={`${w} border border-cortex-line rounded px-1 py-0.5 text-right font-mono text-[11px] bg-white text-cortex-ink focus:border-cortex-teal ${busy ? 'opacity-50' : ''}`} />
-      {suffix && <span className="text-[9px] text-cortex-muted">{suffix}</span>}
+      {suffix && <span className="text-[9px] opacity-80">{suffix}</span>}
     </span>
   )
 }
