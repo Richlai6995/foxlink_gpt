@@ -343,7 +343,7 @@ function ItemEnrich({ itemId, token, onChanged }: { itemId: number; token: strin
                         <label className="text-[10px] text-cortex-muted">Mfg P/N<br /><input value={eMfgPn} onChange={(e) => setEMfgPn(e.target.value)} className="border border-cortex-line rounded px-1 py-0.5 text-[11px] w-28 font-mono" /></label>
                         <label className="text-[10px] text-cortex-muted">幣別<br /><input value={eCur} onChange={(e) => setECur(e.target.value)} className="border border-cortex-line rounded px-1 py-0.5 text-[11px] w-12" /></label>
                         <label className="text-[10px] text-cortex-muted">true(原幣)<br /><input value={eTrue} onChange={(e) => setETrue(e.target.value)} className="border border-cortex-line rounded px-1 py-0.5 text-[11px] w-16 font-mono" /></label>
-                        <label className="text-[10px] text-cortex-muted">fx<br /><input value={eFx} onChange={(e) => setEFx(e.target.value)} className="border border-cortex-line rounded px-1 py-0.5 text-[11px] w-12 font-mono" /></label>
+                        <label className="text-[10px] text-cortex-muted" title="匯率:true(原幣) ÷ fx = true(USD);USD 填 1">匯率(→USD)<br /><input value={eFx} onChange={(e) => setEFx(e.target.value)} className="border border-cortex-line rounded px-1 py-0.5 text-[11px] w-12 font-mono" /></label>
                         <label className="text-[10px] text-cortex-muted">quote(USD)<br /><input value={eQuote} onChange={(e) => setEQuote(e.target.value)} className="border border-cortex-line rounded px-1 py-0.5 text-[11px] w-20 font-mono" /></label>
                         <button onClick={() => saveEdit(s.id)} disabled={busy} className="flex items-center gap-1 text-[11px] px-2 py-1 bg-cortex-teal text-white rounded hover:opacity-90 disabled:opacity-40"><Save className="w-3 h-3" />存</button>
                       </div>
@@ -370,7 +370,7 @@ function ItemEnrich({ itemId, token, onChanged }: { itemId: number; token: strin
                     </label>
                     <label className="text-[10px] text-cortex-muted">幣別<br /><input value={pCur} onChange={(e) => setPCur(e.target.value)} className="border border-cortex-line rounded px-1 py-0.5 text-[11px] w-14" /></label>
                     <label className="text-[10px] text-cortex-muted">true(原幣)<br /><input value={pTrue} onChange={(e) => setPTrue(e.target.value)} placeholder="1.42" className="border border-cortex-line rounded px-1 py-0.5 text-[11px] w-16 font-mono" /></label>
-                    <label className="text-[10px] text-cortex-muted">fx<br /><input value={pFx} onChange={(e) => setPFx(e.target.value)} className="border border-cortex-line rounded px-1 py-0.5 text-[11px] w-12 font-mono" /></label>
+                    <label className="text-[10px] text-cortex-muted" title="匯率:true(原幣) ÷ fx = true(USD);USD 填 1">匯率(→USD)<br /><input value={pFx} onChange={(e) => setPFx(e.target.value)} className="border border-cortex-line rounded px-1 py-0.5 text-[11px] w-12 font-mono" /></label>
                     <label className="text-[10px] text-cortex-muted">quote(USD)<br /><input value={pQuote} onChange={(e) => setPQuote(e.target.value)} placeholder="0.30" className="border border-cortex-line rounded px-1 py-0.5 text-[11px] w-20 font-mono" /></label>
                     <button onClick={() => addPrice(Number(f.id))} disabled={busy} className="flex items-center gap-1 text-[11px] px-2 py-1 bg-cortex-teal text-white rounded hover:opacity-90 disabled:opacity-40"><Plus className="w-3 h-3" />加報價</button>
                   </div>
