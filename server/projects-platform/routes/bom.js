@@ -639,6 +639,36 @@ router.post('/case/:caseFactoryId/whatif/apply', asyncHandler(async (req, res) =
   res.json(await require('../services/bomWhatifService').apply(getDb(), cf));
 }));
 
+// PUT /cost-model/template/:cfId/meta — 範本 meta 線上編輯(名稱/BU/BG/生效起訖)
+// (掛 /cost-model 前綴 → 既有非全視角 403 gate 自動生效)
+router.put('/cost-model/template/:cfId/meta', asyncHandler(async (req, res) => {
+  const cfId = reqId(req.params.cfId, res, 'cfId'); if (cfId === null) return;
+  const db = getDb();
+  const cfRow = await db.prepare(
+    `SELECT cf.baseline_id FROM bom_cs_case_factory cf JOIN projects p ON p.id = cf.case_id
+      WHERE cf.case_factory_id = ? AND p.project_code = 'CORTEX-COST-TPL'`,
+  ).get(cfId).catch(() => null);
+  if (!cfRow) return res.status(400).json({ error: '不是廠級範本' });
+  const blId = Number(Object.values(cfRow)[0]) || null;
+  const b = req.body || {};
+  const parseDate = (v) => {
+    if (v === '' || v == null) return null;
+    const d = new Date(String(v));
+    if (Number.isNaN(d.getTime())) { const e = new Error(`日期格式不對: ${v}(用 YYYY-MM-DD)`); e.status = 400; throw e; }
+    return d;
+  };
+  try {
+    if ('templateLabel' in b) await db.prepare(`UPDATE bom_cs_case_factory SET template_label=? WHERE case_factory_id=?`).run(b.templateLabel ? String(b.templateLabel).slice(0, 40) : null, cfId);
+    if ('effectiveFrom' in b) await db.prepare(`UPDATE bom_cs_case_factory SET effective_from=? WHERE case_factory_id=?`).run(parseDate(b.effectiveFrom), cfId);
+    if (blId) {
+      if ('bgCode' in b) await db.prepare(`UPDATE bom_factory_baseline SET bg_code=? WHERE baseline_id=?`).run(b.bgCode ? String(b.bgCode).slice(0, 40).toUpperCase() : null, blId);
+      if ('buCode' in b) await db.prepare(`UPDATE bom_factory_baseline SET bu_code=? WHERE baseline_id=?`).run(b.buCode ? String(b.buCode).slice(0, 40).toUpperCase() : null, blId);
+      if ('effectiveTo' in b) await db.prepare(`UPDATE bom_factory_baseline SET effective_to=? WHERE baseline_id=?`).run(parseDate(b.effectiveTo), blId);
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+}));
+
 // POST /case/:cf/reapply-template — 既有案「重套廠級範本」(不經 Excel · 覆蓋案級參數)
 router.post('/case/:caseFactoryId/reapply-template', asyncHandler(async (req, res) => {
   if (!canViewTrueCost(req)) return res.status(403).json({ error: '需完整成本視角' });

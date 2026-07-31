@@ -16,7 +16,19 @@ import { Factory, Loader2, Upload, Download, Pencil, Power } from 'lucide-react'
 
 type Tpl = {
   caseFactoryId: number; factoryCode: string; costingModel: string; templateLabel: string | null
-  isActive: number; effectiveFrom?: string; tplProjectId: number | null; bgCode: string | null; buCode: string | null
+  isActive: number; effectiveFrom?: string; effectiveTo?: string | null; tplProjectId: number | null; bgCode: string | null; buCode: string | null
+}
+
+// inline 編輯欄(blur 存)
+function EditText({ value, onSave, w = 'w-28', ph }: { value: any; onSave: (v: string) => Promise<void>; w?: string; ph?: string }) {
+  const [v, setV] = useState(value == null ? '' : String(value))
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { setV(value == null ? '' : String(value)) }, [value])
+  return (
+    <input value={v} onChange={(e) => setV(e.target.value)} disabled={busy} placeholder={ph}
+      onBlur={async () => { if (v === (value == null ? '' : String(value))) return; setBusy(true); try { await onSave(v) } finally { setBusy(false) } }}
+      className={`${w} border border-transparent hover:border-cortex-line focus:border-cortex-teal rounded px-1 py-0.5 text-[11px] bg-transparent ${busy ? 'opacity-50' : ''}`} />
+  )
 }
 
 export default function FactoryCostTemplates() {
@@ -53,6 +65,11 @@ export default function FactoryCostTemplates() {
       setFile(null); setLabel(''); setFactory('')
       await load()
     } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+  }
+  async function saveMeta(cfId: number, fields: Record<string, string>) {
+    setErr('')
+    try { await api.put(token, `/bom/cost-model/template/${cfId}/meta`, fields); await load() }
+    catch (e: any) { setErr(e.message) }
   }
   async function toggleActive(t: Tpl) {
     setBusy(true); setErr('')
@@ -116,20 +133,26 @@ export default function FactoryCostTemplates() {
           <thead className="text-cortex-muted border-b border-cortex-line"><tr>
             <th className="text-left px-2 py-1.5">廠</th><th className="text-left px-2 py-1.5">BU</th>
             <th className="text-left px-2 py-1.5">模型</th><th className="text-left px-2 py-1.5">範本名稱</th>
-            <th className="text-center px-2 py-1.5">狀態</th><th className="text-left px-2 py-1.5">生效</th>
+            <th className="text-center px-2 py-1.5">狀態</th><th className="text-left px-2 py-1.5">生效 / 失效</th>
             <th className="text-right px-2 py-1.5">動作</th>
           </tr></thead>
           <tbody>
             {rows.map((t) => (
               <tr key={t.caseFactoryId} className={`border-b border-cortex-line/40 ${!t.isActive ? 'opacity-50' : ''}`}>
                 <td className="px-2 py-1.5 font-bold">{t.factoryCode}</td>
-                <td className="px-2 py-1.5">{t.buCode || <span className="text-cortex-muted">—</span>}{t.bgCode ? <span className="text-[9px] text-cortex-muted ml-1">({t.bgCode})</span> : null}</td>
+                <td className="px-2 py-1.5">
+                  <EditText value={t.buCode} w="w-16" ph="BU" onSave={(v) => saveMeta(t.caseFactoryId, { buCode: v })} />
+                  <EditText value={t.bgCode} w="w-16" ph="BG" onSave={(v) => saveMeta(t.caseFactoryId, { bgCode: v })} />
+                </td>
                 <td className="px-2 py-1.5"><span className={`text-[10px] px-1.5 py-0.5 rounded ${t.costingModel === 'FULL_MVA' ? 'bg-indigo-50 text-indigo-700' : 'bg-teal-50 text-teal-700'}`}>{t.costingModel === 'FULL_MVA' ? 'FULL MVA' : 'SIMPLIFIED'}</span></td>
-                <td className="px-2 py-1.5">{t.templateLabel || <span className="text-cortex-muted">(未命名)</span>}</td>
+                <td className="px-2 py-1.5"><EditText value={t.templateLabel} w="w-40" ph="(未命名)" onSave={(v) => saveMeta(t.caseFactoryId, { templateLabel: v })} /></td>
                 <td className="px-2 py-1.5 text-center">
                   <span className={`text-[10px] px-1.5 py-0.5 rounded ${t.isActive ? 'bg-green-100 text-green-700' : 'bg-cortex-line text-cortex-muted'}`}>{t.isActive ? '現行' : '停用'}</span>
                 </td>
-                <td className="px-2 py-1.5 text-[10px] text-cortex-muted font-mono">{t.effectiveFrom ? String(t.effectiveFrom).slice(0, 10) : '—'}</td>
+                <td className="px-2 py-1.5 text-[10px] font-mono">
+                  <EditText value={t.effectiveFrom ? String(t.effectiveFrom).slice(0, 10) : ''} w="w-24" ph="生效 YYYY-MM-DD" onSave={(v) => saveMeta(t.caseFactoryId, { effectiveFrom: v })} />
+                  <EditText value={t.effectiveTo ? String(t.effectiveTo).slice(0, 10) : ''} w="w-24" ph="失效(空=無)" onSave={(v) => saveMeta(t.caseFactoryId, { effectiveTo: v })} />
+                </td>
                 <td className="px-2 py-1.5 text-right whitespace-nowrap">
                   <button onClick={() => tplProjectId && navigate(`/projects-platform/projects/${tplProjectId}`)} title="開編輯器(Cleansheet · 選對應廠 tab)"
                     className="text-[11px] text-cortex-teal hover:underline mr-2">編輯</button>

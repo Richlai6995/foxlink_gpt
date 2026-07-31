@@ -52,7 +52,7 @@ async function listTemplates(db, { includeInactive = false } = {}) {
   const rows = await db.prepare(
     `SELECT cf.case_factory_id, cf.factory_code, cf.costing_model, cf.baseline_id, cf.template_label,
             NVL(cf.is_active,1) AS is_active, cf.effective_from, p.project_code, p.id AS tpl_project_id,
-            b.bg_code, b.bu_code
+            b.bg_code, b.bu_code, b.effective_to AS bl_effective_to
        FROM bom_cs_case_factory cf JOIN projects p ON p.id = cf.case_id
        LEFT JOIN bom_factory_baseline b ON b.baseline_id = cf.baseline_id
       WHERE p.project_code = 'CORTEX-COST-TPL'${includeInactive ? '' : ' AND NVL(cf.is_active,1)=1'}
@@ -67,6 +67,7 @@ async function listTemplates(db, { includeInactive = false } = {}) {
     tplProjectId: Number(pick(r, 'tpl_project_id')) || null,
     bgCode: pick(r, 'bg_code') || null,
     buCode: pick(r, 'bu_code') || null,
+    effectiveTo: pick(r, 'bl_effective_to') || null,
     effectiveFrom: pick(r, 'effective_from') || null,
     projectCode: pick(r, 'project_code'),
   }));
