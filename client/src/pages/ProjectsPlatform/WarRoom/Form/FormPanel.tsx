@@ -195,7 +195,7 @@ export default function FormPanel({ project }: { project: ProjectDetail }) {
         {activeSection === 'nre'       && <NreRealSection   project={project} />}
         {activeSection === 'factory_matrix' && <FactoryMatrixV07 project={project} />}
         {activeSection === 'cleansheet' && <CleansheetSection project={project} />}
-        {activeSection === 'mva_workflow' && <MvaWorkflowSection />}
+        {activeSection === 'mva_workflow' && <MvaWorkflowSection project={project} />}
         {activeSection === 'margin'    && <MarginSection    project={project} />}
         {activeSection === 'strategy'  && <StrategySection  project={project} />}
         {activeSection === 'cost'      && <CostSection      project={project} />}

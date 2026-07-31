@@ -7,7 +7,10 @@
  * 靜態雙案整合手冊(MOUSE_STD vs WHOOP_WEARABLE),內容照 SD spec。
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import type { ProjectDetail } from '../../api'
+import { api } from '../../api'
+import { useAuth } from '../../../../context/AuthContext'
 
 type Prereq = { kind: 'doc' | 'data' | 'policy' | 'config' | 'permission'; name: string; detail: string }
 type Step = { num: string; name: string; who: string; sys: string; detail: string; mins: number | string }
@@ -200,7 +203,54 @@ const TOTAL_STEPS = PHASES.reduce((a, p) => a + p.steps.length, 0)
 const TOTAL_PREREQ = PHASES.reduce((a, p) => a + p.prereq.length, 0)
 const shortTitle = (t: string) => t.split(' (')[0]
 
-export default function MvaWorkflowSection() {
+// 每 Phase 對應平台功能:本案實況判定 + 前往目標
+const PHASE_LINK: Record<string, { target: string; targetLabel: string; judge: (st: any) => 'done' | 'warn' | 'todo'; hint: (st: any) => string }> = {
+  A: { target: 'ADMIN_TPL', targetLabel: '廠級成本範本(管理)', judge: (st) => (st.templates > 0 ? 'done' : 'todo'), hint: (st) => (st.templates > 0 ? `範本庫已建置(${st.templates} 套現行)` : '範本庫為空 → 先到管理頁匯入廠級標準') },
+  B: { target: 'ADMIN_TPL', targetLabel: '廠級成本範本(管理)', judge: (st) => (st.templates > 0 ? 'done' : 'todo'), hint: () => '月度維護:管理頁匯入同名新版 = 自動版本化(舊版停用保留)' },
+  C: { target: 'bom', targetLabel: 'BOM / 材料', judge: (st) => (st.cfs > 0 ? 'done' : 'todo'), hint: (st) => (st.cfs > 0 ? `本案已配 ${st.cfs} 個試算廠別` : '本案尚未建廠別 → BOM 區「＋廠別」或開案 Wizard') },
+  D: { target: 'cleansheet', targetLabel: 'Cleansheet', judge: (st) => (st.cleansheetDone ? 'done' : st.cfs > 0 ? 'warn' : 'todo'), hint: (st) => (st.cleansheetDone ? '案級參數已齊(baseline 全綁)' : '到 Cleansheet Step 1~4 檢查/調參') },
+  E: { target: 'cleansheet', targetLabel: 'Cleansheet · Compute', judge: (st) => (st.hasRun ? 'done' : 'todo'), hint: (st) => (st.hasRun ? '本案已有試算 run(可用 What-if 沙盒再試)' : '按 🔄 Compute 產生第一筆 run') },
+  F: { target: 'cost', targetLabel: '成本核算 · 定版', judge: (st) => (st.approved ? 'done' : st.submitted ? 'warn' : 'todo'), hint: (st) => (st.approved ? '已有官方版(APPROVED)' : st.submitted ? '送審中,待核准' : '成本核算 → 選廠送審') },
+  G: { target: 'cost', targetLabel: '成本核算 · 報價/議價', judge: (st) => (st.rounds > 0 ? 'done' : st.approved ? 'warn' : 'todo'), hint: (st) => (st.rounds > 0 ? `議價進行中(${st.rounds} 輪)· Margin 段看熱圖` : st.approved ? '可出報價單 PDF / 開始議價' : '先完成定版') },
+}
+const ST_BADGE: Record<string, { cls: string; label: string }> = {
+  done: { cls: 'bg-green-100 text-green-700', label: '✓ 本案已完成' },
+  warn: { cls: 'bg-amber-100 text-amber-700', label: '⏳ 進行中' },
+  todo: { cls: 'bg-cortex-line text-cortex-muted', label: '· 未開始' },
+}
+
+export default function MvaWorkflowSection({ project }: { project?: ProjectDetail }) {
+  const { token } = useAuth() as any
+  const [st, setSt] = useState<any>({ templates: 0, cfs: 0, cleansheetDone: false, hasRun: false, submitted: 0, approved: 0, rounds: 0 })
+  const [dbOpen, setDbOpen] = useState(false)
+  useEffect(() => {
+    if (!token || !project?.id) return
+    api.get<any>(token, '/bom/provision/templates').then((r) => setSt((p: any) => ({ ...p, templates: (r.templates || []).length }))).catch(() => {})
+    api.get<any>(token, `/bom/cases?projectId=${project.id}`).then((r) => setSt((p: any) => ({ ...p, cfs: (r.cases || []).length }))).catch(() => {})
+    api.get<any>(token, `/bom/form?projectId=${project.id}`).then((r) => {
+      const cm: any = {}; for (const c of r.completion || []) cm[c.key] = c
+      setSt((p: any) => ({
+        ...p,
+        cleansheetDone: (cm.cleansheet?.total || 0) > 0 && cm.cleansheet.filled >= cm.cleansheet.total,
+        hasRun: (cm.cost?.filled || 0) >= 1,
+      }))
+    }).catch(() => {})
+    api.get<any>(token, `/bom/quote?projectId=${project.id}`).then((q) => {
+      const vs = q?.versions || []
+      setSt((p: any) => ({ ...p, submitted: vs.filter((v: any) => v.status === 'SUBMITTED').length, approved: vs.filter((v: any) => v.status === 'APPROVED').length }))
+    }).catch(() => {})
+    api.get<any>(token, `/bom/negotiation?projectId=${project.id}`).then((n) => setSt((p: any) => ({ ...p, rounds: (n?.rounds || []).length }))).catch(() => {})
+  }, [token, project?.id])
+  const goto = (target: string) => {
+    if (target === 'ADMIN_TPL') { window.location.href = '/projects-platform/admin/factory-cost-templates'; return }
+    window.dispatchEvent(new CustomEvent('cortex:goto-section', { detail: target }))
+  }
+  async function dlHandbook() {
+    const res = await fetch('/api/projects/bom/mva-handbook', { headers: { Authorization: `Bearer ${token}` } })
+    if (!res.ok) { alert('手冊下載失敗'); return }
+    const blob = await res.blob(); const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = 'Cortex_MVA操作流程說明手冊_v4.pptx'; a.click(); URL.revokeObjectURL(url)
+  }
   const [code, setCode] = useState('A')
   const ph = PHASES.find((p) => p.code === code)!
   const idx = PHASES.findIndex((p) => p.code === code)
@@ -220,7 +270,7 @@ export default function MvaWorkflowSection() {
             <span className="ml-1 text-[8px] font-bold bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded align-middle">spec cleansheet-mva-sd v0.3</span>
           </p>
         </div>
-        <span className="text-[10px] text-cortex-muted">📑 完整版:docs/Cortex_MVA操作流程說明手冊(PPTX · 找 IT 取得)</span>
+        <button onClick={dlHandbook} className="text-[11px] px-2.5 py-1.5 border border-cortex-teal text-cortex-teal rounded hover:bg-cortex-cyan-bg">📑 下載 PPTX 手冊(v4)</button>
       </div>
 
       {/* 兩案差異 banner(靜態總覽) */}
@@ -273,6 +323,22 @@ export default function MvaWorkflowSection() {
           </div>
         </div>
         <div className="text-[12px] leading-relaxed bg-white rounded-md px-3 py-2 mt-2" style={{ borderLeft: `3px solid ${ph.color}` }}>{ph.summary}</div>
+        {/* 本案實況(手冊 → 導引):此 Phase 在本專案做到哪 + 一鍵前往 */}
+        {project && (() => {
+          const link = PHASE_LINK[ph.code]
+          if (!link) return null
+          const judge = ST_BADGE[link.judge(st)]
+          return (
+            <div className="flex items-center gap-2 flex-wrap mt-2 bg-white rounded-md px-3 py-2 border border-dashed" style={{ borderColor: ph.color }}>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${judge.cls}`}>{judge.label}</span>
+              <span className="text-[11px] text-cortex-ink">{link.hint(st)}</span>
+              <button onClick={() => goto(link.target)}
+                className="ml-auto text-[11px] px-2.5 py-1 rounded text-white hover:opacity-90" style={{ background: ph.color }}>
+                前往 {link.targetLabel} →
+              </button>
+            </div>
+          )
+        })()}
       </div>
 
       {/* Panel ① 素材 */}
@@ -342,17 +408,20 @@ export default function MvaWorkflowSection() {
         </div>
       </div>
 
-      {/* Panel ④ DB 表 */}
+      {/* Panel ④ DB 表(SD 設計對應 · 工程用 · 預設收起) */}
       <div className="bg-white border border-cortex-line rounded-lg p-3.5">
-        <div className="flex items-center gap-2 border-b border-cortex-line pb-2 mb-2.5">
+        <button onClick={() => setDbOpen(!dbOpen)} className="w-full flex items-center gap-2 text-left">
           <span>🗄️</span><b className="text-[13px] text-cortex-ink">④ 寫入 / 影響的 DB 表</b>
-          <span className="text-[10px] text-cortex-muted">本 Phase 結束後 · {ph.schemas.length} 張表的狀態被改</span>
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          {ph.schemas.map((t) => (
-            <span key={t} className="font-mono font-semibold rounded" style={{ fontSize: 11, background: `${ph.color}15`, color: ph.color, padding: '5px 10px', border: `1px solid ${ph.color}40` }}>{t}</span>
-          ))}
-        </div>
+          <span className="text-[10px] text-cortex-muted">SD 設計對應(工程 / EPM 查表用)· {ph.schemas.length} 張 · 點開</span>
+          <span className="ml-auto text-cortex-muted text-[11px]">{dbOpen ? '▲' : '▼'}</span>
+        </button>
+        {dbOpen && (
+          <div className="flex flex-wrap gap-1.5 mt-2.5 pt-2.5 border-t border-cortex-line">
+            {ph.schemas.map((t) => (
+              <span key={t} className="font-mono font-semibold rounded" style={{ fontSize: 11, background: `${ph.color}15`, color: ph.color, padding: '5px 10px', border: `1px solid ${ph.color}40` }}>{t}</span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* footer 導覽 */}

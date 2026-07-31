@@ -786,6 +786,16 @@ router.delete('/case/:caseFactoryId/cleansheet-row', asyncHandler(async (req, re
   res.json({ ok: true, note: '已刪列;按重算生效' });
 }));
 
+// GET /mva-handbook — MVA 操作流程 PPTX 手冊下載(docs/ 最新版 v4)
+router.get('/mva-handbook', asyncHandler(async (req, res) => {
+  const name = 'Cortex_MVA操作流程說明手冊_v4_Excel完整對齊版.pptx';
+  const p = path.join(__dirname, '../../../docs', name);
+  if (!fs.existsSync(p)) return res.status(404).json({ error: '手冊檔不存在(docs/)' });
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(name)}"`);
+  fs.createReadStream(p).pipe(res);
+}));
+
 // ── v0.16 #2 操作流程 checklist(26 步 · 自動判定 + 手動勾 + 附圖)────────────
 // GET /workflow/checklist?projectId=
 router.get('/workflow/checklist', asyncHandler(async (req, res) => {
