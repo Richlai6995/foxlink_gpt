@@ -387,6 +387,8 @@ router.get('/case/:caseFactoryId/cleansheet', asyncHandler(async (req, res) => {
 router.get('/instances/:id/top-markup', asyncHandler(async (req, res) => {
   const id = reqId(req.params.id, res); if (id === null) return;
   const limit = Math.min(Number(req.query.limit) || 10, 50);
+  const valueIds = String(req.query.valueIds || '').split(',').map(Number).filter(Boolean);
+  const ef = variantSvc.effectivityFilter(valueIds, 'i');
   const rows = await getDb().prepare(
     `SELECT sec.module_category, i.customer_item AS item_no, i.description, i.qty,
             ch.applied_price_usd AS quote_price, t.true_cost_usd, t.markup_pct,
@@ -403,10 +405,10 @@ router.get('/instances/:id/top-markup', asyncHandler(async (req, res) => {
          SELECT snapshot_id, MAX(true_cost_usd) AS true_cost_usd, MAX(markup_pct) AS markup_pct
            FROM bom_item_price_tier WHERE is_chosen = 1 GROUP BY snapshot_id
        ) t ON t.snapshot_id = ch.snap_id
-      WHERE sec.bom_instance_id = ? AND t.markup_pct IS NOT NULL AND t.markup_pct > 0
+      WHERE sec.bom_instance_id = ? AND t.markup_pct IS NOT NULL AND t.markup_pct > 0${ef.clause}
       ORDER BY (i.qty * (ch.applied_price_usd - t.true_cost_usd)) DESC
       FETCH FIRST ${limit} ROWS ONLY`,
-  ).all(id).catch(() => []);
+  ).all(id, ...ef.binds).catch(() => []);
   res.json({ count: rows.length, items: rows });
 }));
 
