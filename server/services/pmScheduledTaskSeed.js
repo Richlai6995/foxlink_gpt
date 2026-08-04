@@ -1333,8 +1333,8 @@ Westmetall markdaten.php 表格從上到下是「日期由新到舊」。Westmet
   return {
     name: '[PM] 全網金屬資料收集',
     schedule_type: 'daily',
-    schedule_hour: 6,
-    schedule_minute: 0,
+    schedule_hour: 8,
+    schedule_minute: 20,
     schedule_times_json: null,
     schedule_interval_hours: null,
     model: proModel,

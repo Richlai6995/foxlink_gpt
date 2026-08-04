@@ -240,8 +240,8 @@ export default function MetalsPage() {
           <div className="bg-white border rounded-lg overflow-hidden shrink-0">
             <div className="px-3 py-1.5 border-b bg-slate-50 flex items-center justify-between gap-2">
               <span className="text-xs font-bold text-slate-700">參考網站</span>
-              <span className="text-[10px] text-slate-500" title="每日台北時間 06:00 自動抓取(LME 收盤翻拍 + LBMA Fix + JM RSS + 台銀牌價)">
-                ⏰ 每日 06:00 更新(台北)
+              <span className="text-[10px] text-slate-500" title="每日台北時間 08:20 自動抓取(LME 收盤翻拍 + LBMA Fix + JM RSS + 台銀牌價)">
+                ⏰ 每日 08:20 更新(台北)
               </span>
             </div>
             <ul className="text-[11px] text-slate-600 px-3 py-2 space-y-1.5 overflow-x-auto">
