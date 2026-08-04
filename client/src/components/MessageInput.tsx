@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useImperativeHandle, forwardRef, useMemo } from 'react'
 import { Send, Paperclip, X, FileText, Image, Music, AlertCircle, Search, LayoutTemplate, Sparkles, Palette, Database, Loader2, Upload } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import { isEnterSubmit } from '../utils/keyboard'
 import TemplatePickerPopover from './templates/TemplatePickerPopover'
 import { DocTemplate, TemplateSchema } from '../types'
 import MicButton from './MicButton'
@@ -295,7 +296,7 @@ const MessageInput = forwardRef<MessageInputHandle, Props>(function MessageInput
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (isEnterSubmit(e)) {
       e.preventDefault()
       handleSubmit()
     }

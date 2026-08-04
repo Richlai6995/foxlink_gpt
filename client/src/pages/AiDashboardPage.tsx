@@ -8,6 +8,7 @@
  */
 import { useState, useEffect, useRef } from 'react'
 import { fmtTW } from '../lib/fmtTW'
+import { isEnterSubmit } from '../utils/keyboard'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   BarChart3, ChevronRight, ChevronDown, Send, RefreshCw,
@@ -939,7 +940,7 @@ export default function AiDashboardPage() {
                   value={question}
                   onChange={e => setQuestion(e.target.value)}
                   onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleQuerySse() }
+                    if (isEnterSubmit(e)) { e.preventDefault(); handleQuerySse() }
                   }}
                   disabled={loading || !!(multiOrgScope?.denied) || !!(orgScope as any)?.denied}
                 />

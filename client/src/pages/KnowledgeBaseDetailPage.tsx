@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { isEnterSubmit } from '../utils/keyboard'
 import KbImage from '../components/KbImage'
 import {
   ArrowLeft, Cpu, FileText, Settings, Share2, Search,
@@ -1481,7 +1482,7 @@ function SearchTab({ kb }: { kb: KnowledgeBase }) {
           <textarea
             value={query}
             onChange={(e) => setQuery(e.target.value.slice(0, 200))}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); search() } }}
+            onKeyDown={(e) => { if (isEnterSubmit(e)) { e.preventDefault(); search() } }}
             rows={5}
             placeholder={t('kb.search.placeholder')}
             className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"

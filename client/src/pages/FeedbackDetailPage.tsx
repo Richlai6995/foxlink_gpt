@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { isEnterSubmit } from '../utils/keyboard'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../context/AuthContext'
 import api from '../lib/api'
@@ -219,7 +220,7 @@ export default function FeedbackDetailPage() {
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (isEnterSubmit(e)) {
       e.preventDefault()
       if (id) sendStopTyping(Number(id))
       sendMessage()
