@@ -23,6 +23,7 @@ import PmReportSendModal from '../components/pm/PmReportSendModal'
 import PmMailingListsModal from '../components/pm/PmMailingListsModal'
 import MetalsShareInline from '../components/metals/MetalsShareInline'
 import ReactECharts from 'echarts-for-react'
+import { metalDisplay } from '../lib/metalDisplay'
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const ALL_METALS = [
@@ -343,7 +344,7 @@ function PriceBanner({ focusedSet, expanded, onToggleExpand }: { focusedSet: Set
           <span className="text-amber-600">缺:</span>
           {missingMetals.map(m => (
             <span key={m.code} className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px]">
-              {m.code} {m.as_of_date ? <span className="text-amber-500">({m.as_of_date.slice(5)})</span> : <span className="text-amber-500">(無)</span>}
+              {metalDisplay(m.code)} {m.as_of_date ? <span className="text-amber-500">({m.as_of_date.slice(5)})</span> : <span className="text-amber-500">(無)</span>}
             </span>
           ))}
           <span className="ml-auto text-amber-500">→ 顯示其他金屬以最近一筆替代</span>
@@ -361,7 +362,7 @@ function PriceBanner({ focusedSet, expanded, onToggleExpand }: { focusedSet: Set
             : (p.isStale ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50')
           return (
             <div key={p.code} className={`flex items-center gap-1 px-2 py-1 rounded border flex-shrink-0 ${cardCls}`} title={p.isStale ? `資料日期 ${p.as_of_date}(非今日,今日該金屬無新報價)` : undefined}>
-              <span className="font-bold text-slate-800 text-sm">{p.code}</span>
+              <span className="font-bold text-slate-800 text-sm">{metalDisplay(p.code)}</span>
               <span className="text-slate-500 text-[11px]">{p.name_zh}</span>
               <span className="text-slate-700 font-mono text-sm">
                 {p.hasData && p.price_usd != null && Number.isFinite(price)
@@ -1064,7 +1065,7 @@ export function NewsTab({ focusedSet, default24h, freshDefaults }: {
                 metals.includes(m.code) ? 'bg-blue-100 text-blue-700' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
               }`}>
                 <input type="checkbox" checked={metals.includes(m.code)} onChange={() => setMetalSel(m.code)} className="hidden" />
-                <span className="font-mono font-bold">{m.code}</span>
+                <span className="font-mono font-bold">{metalDisplay(m.code)}</span>
                 <span className="text-[11px]">{m.name}</span>
               </label>
             ))}
@@ -1235,7 +1236,7 @@ export function NewsFullContentModal({ newsId, onClose }: { newsId: number; onCl
                   <>
                     <span>·</span>
                     {data.news.related_metals.split(',').map(m => (
-                      <span key={m} className="px-1 py-0.5 rounded bg-blue-50 text-blue-700">{m.trim()}</span>
+                      <span key={m} className="px-1 py-0.5 rounded bg-blue-50 text-blue-700">{metalDisplay(m.trim())}</span>
                     ))}
                   </>
                 )}
@@ -1390,7 +1391,7 @@ export function NewsCard({ item, onTogglePin, onOpenFull }: { item: NewsItem; on
             {item.related_metals && (
               <div className="flex gap-1 flex-wrap">
                 {item.related_metals.split(',').map(m => (
-                  <span key={m} className="px-1 py-0.5 rounded text-[10px] bg-blue-50 text-blue-700">{m.trim()}</span>
+                  <span key={m} className="px-1 py-0.5 rounded text-[10px] bg-blue-50 text-blue-700">{metalDisplay(m.trim())}</span>
                 ))}
               </div>
             )}
@@ -1546,7 +1547,7 @@ function PriceHistoryTab({ focusedMetals }: { focusedMetals: string[] }) {
                   metals.includes(m.code) ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
                 }`}>
                   <input type="checkbox" checked={metals.includes(m.code)} onChange={() => toggleMetal(m.code)} className="hidden" />
-                  <span className="font-mono font-bold">{m.code}</span>
+                  <span className="font-mono font-bold">{metalDisplay(m.code)}</span>
                   <span>{m.name}</span>
                 </label>
               ))}
@@ -1589,7 +1590,7 @@ function PriceHistoryTab({ focusedMetals }: { focusedMetals: string[] }) {
                   {rows.map((r, i) => (
                     <tr key={i} className="hover:bg-blue-50/50">
                       <td className="px-2 py-1 font-mono">{r.as_of_date || r.AS_OF_DATE}</td>
-                      <td className="px-2 py-1 font-mono font-bold">{r.metal_code || r.METAL_CODE}</td>
+                      <td className="px-2 py-1 font-mono font-bold">{metalDisplay(r.metal_code || r.METAL_CODE)}</td>
                       <td className="px-2 py-1">{r.metal_name || r.METAL_NAME || '—'}</td>
                       <td className="px-2 py-1 text-right font-mono">{numFmt(r.original_price ?? r.ORIGINAL_PRICE)}</td>
                       <td className="px-2 py-1">{r.original_currency || r.ORIGINAL_CURRENCY || '—'}</td>
@@ -2382,7 +2383,7 @@ function PrefsModal({ prefs, onClose, onSaved }: { prefs: Prefs; onClose: () => 
                   focused.includes(m.code) ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
                 }`}>
                   <input type="checkbox" checked={focused.includes(m.code)} onChange={() => toggle(m.code)} />
-                  <span className="font-mono font-bold">{m.code}</span>
+                  <span className="font-mono font-bold">{metalDisplay(m.code)}</span>
                   <span className="text-slate-500">{m.name}</span>
                 </label>
               ))}

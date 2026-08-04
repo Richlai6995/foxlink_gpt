@@ -24,6 +24,7 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken } = require('./auth');
+const { metalDisplay, metalDisplayList } = require('../services/metalDisplay');
 
 // ── 復用 pmReview 的權限檢查(避免 import circular,本檔內 inline 一份)──
 function userGranteeTuples(user) {
@@ -200,7 +201,7 @@ router.get('/prices/export.csv', verifyToken, verifyPmUser, async (req, res) => 
     const headers = ['as_of_date','metal_code','metal_name','original_price','original_currency','original_unit','price_usd','unit','fx_rate_to_usd','day_change_pct','source','source_url','price_type','market','grade','lme_stock','stock_change','is_estimated','conversion_note','scraped_at'];
     const lines = [headers.join(',')];
     for (const r of rows) {
-      lines.push(headers.map(h => csvEscape(r[h])).join(','));
+      lines.push(headers.map(h => csvEscape(h === 'metal_code' ? metalDisplay(r[h]) : r[h])).join(','));
     }
     const csv = '﻿' + lines.join('\n');
 
@@ -781,7 +782,7 @@ router.get('/news/export.pdf', verifyToken, verifyPmUser, async (req, res) => {
 
     cjkFont(16).text('PM 新聞匯出', { align: 'center' });
     cjkFont(9).fillColor('#666').text(
-      `篩選:${req.query.metal ? '金屬=' + req.query.metal + '  ' : ''}${req.query.source ? '來源=' + req.query.source + '  ' : ''}${req.query.sentiment ? '情緒=' + req.query.sentiment + '  ' : ''}${req.query.from ? `${req.query.from} ~ ${req.query.to || '今'}  ` : ''}${req.query.q ? '關鍵字=' + req.query.q : ''}`,
+      `篩選:${req.query.metal ? '金屬=' + metalDisplayList(req.query.metal) + '  ' : ''}${req.query.source ? '來源=' + req.query.source + '  ' : ''}${req.query.sentiment ? '情緒=' + req.query.sentiment + '  ' : ''}${req.query.from ? `${req.query.from} ~ ${req.query.to || '今'}  ` : ''}${req.query.q ? '關鍵字=' + req.query.q : ''}`,
       { align: 'center' }
     );
     cjkFont(9).fillColor('#666').text(`共 ${rows.length} 筆 · 匯出於 ${new Date().toISOString().slice(0, 19)}`, { align: 'center' });
@@ -793,7 +794,7 @@ router.get('/news/export.pdf', verifyToken, verifyPmUser, async (req, res) => {
         /negative/i.test(r.sentiment_label || '') ? '#dc2626' : '#64748b';
       cjkFont(11).fillColor('#111').text(r.title || '(無標題)', { continued: false });
       cjkFont(8).fillColor(sentColor).text(`[${r.sentiment_label || '—'}]  `, { continued: true });
-      cjkFont(8).fillColor('#666').text(`${r.source || '—'} · ${r.dt ? String(r.dt).slice(0, 19) : '—'} · ${r.related_metals || '—'}`);
+      cjkFont(8).fillColor('#666').text(`${r.source || '—'} · ${r.dt ? String(r.dt).slice(0, 19) : '—'} · ${metalDisplayList(r.related_metals, ' ') || '—'}`);
       if (r.summary) cjkFont(9).fillColor('#333').text(String(r.summary));
       if (r.url) cjkFont(8).fillColor('#0066cc').text(String(r.url), { link: r.url, underline: true });
       doc.moveDown(0.6);

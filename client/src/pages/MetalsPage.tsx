@@ -20,6 +20,7 @@ import MetalsChart from '../components/metals/MetalsChart'
 import MetalsAiPanel from '../components/metals/MetalsAiPanel'
 import MetalsMacroPanel from '../components/metals/MetalsMacroPanel'
 import MetalsNewsPanel from '../components/metals/MetalsNewsPanel'
+import { metalDisplay } from '../lib/metalDisplay'
 
 const PRECIOUS = [
   { code: 'AU', name: '金' }, { code: 'AG', name: '銀' },
@@ -353,7 +354,7 @@ function PrefsModal({ prefs, onClose, onSaved }: { prefs: Prefs; onClose: () => 
                   focused.includes(m.code) ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
                 }`}>
                   <input type="checkbox" checked={focused.includes(m.code)} onChange={() => toggle(m.code)} />
-                  <span className="font-mono font-bold">{m.code}</span>
+                  <span className="font-mono font-bold">{metalDisplay(m.code)}</span>
                   <span className="text-slate-500">{m.name}</span>
                 </label>
               ))}
@@ -367,7 +368,7 @@ function PrefsModal({ prefs, onClose, onSaved }: { prefs: Prefs; onClose: () => 
                   focused.includes(m.code) ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
                 }`}>
                   <input type="checkbox" checked={focused.includes(m.code)} onChange={() => toggle(m.code)} />
-                  <span className="font-mono font-bold">{m.code}</span>
+                  <span className="font-mono font-bold">{metalDisplay(m.code)}</span>
                   <span className="text-slate-500">{m.name}</span>
                 </label>
               ))}

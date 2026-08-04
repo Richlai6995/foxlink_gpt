@@ -24,6 +24,7 @@ const express = require('express');
 const router = express.Router();
 const { verifyToken } = require('./auth');
 const { streamChat } = require('../services/gemini');
+const { metalDisplay } = require('../services/metalDisplay');
 
 const METAL_ZH_NAMES = {
   AU: '金', AG: '銀', PT: '鉑', PD: '鈀', RH: '銠',
@@ -580,7 +581,7 @@ router.post('/ai-analyze', verifyToken, verifyMetalsAccess, async (req, res) => 
 
     const priceContext = (todayPrices || []).map(r => {
       const code = r.metal_code || r.METAL_CODE;
-      return `${code}(${r.metal_name || r.METAL_NAME || METAL_ZH_NAMES[code] || code}): $${fmt(r.price_usd ?? r.PRICE_USD)} ${sign(r.day_change_pct ?? r.DAY_CHANGE_PCT)} (${r.as_of_date || r.AS_OF_DATE}, ${r.source || r.SOURCE || ''})`;
+      return `${metalDisplay(code)}(${r.metal_name || r.METAL_NAME || METAL_ZH_NAMES[code] || metalDisplay(code)}): $${fmt(r.price_usd ?? r.PRICE_USD)} ${sign(r.day_change_pct ?? r.DAY_CHANGE_PCT)} (${r.as_of_date || r.AS_OF_DATE}, ${r.source || r.SOURCE || ''})`;
     }).join('\n');
 
     const macroContext = (macroRows || []).map(r =>
@@ -921,8 +922,8 @@ router.get('/export.xlsx', verifyToken, verifyMetalsAccess, async (req, res) => 
         }
       }
       priceRows.push({
-        metal_code: code,
-        metal_name: r.metal_name || r.METAL_NAME || METAL_ZH_NAMES[code] || code,
+        metal_code: metalDisplay(code),
+        metal_name: r.metal_name || r.METAL_NAME || METAL_ZH_NAMES[code] || metalDisplay(code),
         group: groupOf(code),
         price_usd: Number.isFinite(latestPrice) ? latestPrice : null,
         as_of_date: r.as_of_date || r.AS_OF_DATE,

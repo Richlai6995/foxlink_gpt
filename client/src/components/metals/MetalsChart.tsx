@@ -13,6 +13,7 @@ import { Loader2, Maximize2, Minimize2, Sparkles, Minus, TrendingUp, Type, Trash
 import api from '../../lib/api'
 import { buildIndicatorSeries, type IndicatorKey, type PricePoint } from '../../lib/metalsIndicators'
 import { exportMetalsChartToXlsx } from '../../lib/metalsExportXlsx'
+import { metalDisplay } from '../../lib/metalDisplay'
 import MetalsTAPanel from './MetalsTAPanel'
 
 type DrawTool = 'none' | 'horizontal' | 'trendline' | 'text'
@@ -136,7 +137,7 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
   }
   const [editingAnn, setEditingAnn] = useState<Annotation | null>(null)
   const clearAllAnnotations = async () => {
-    if (!confirm(`清除 ${primaryMetal} 的所有標註?(無法復原)`)) return
+    if (!confirm(`清除 ${metalDisplay(primaryMetal)} 的所有標註?(無法復原)`)) return
     try {
       await api.delete('/metals/annotations', { params: { metal: primaryMetal } })
       await reloadAnnotations()
@@ -288,7 +289,7 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
 
     // 主金屬 series — 對齊 unionDates(category axis)
     const mainPriceSeries: any[] = [{
-      name: primaryMetal,
+      name: metalDisplay(primaryMetal),
       type: 'line',
       data: alignToCategory(primaryPoints),
       smooth: true,
@@ -303,7 +304,7 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
       const pts = seriesByMetal[code] || []
       const c = METAL_COLORS[code] || '#94a3b8'
       mainPriceSeries.push({
-        name: code,
+        name: metalDisplay(code),
         type: 'line',
         data: alignToCategory(pts),
         smooth: true,
@@ -481,14 +482,14 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
                     ? 'bg-white/80 text-slate-700 border border-slate-300'
                     : 'bg-white/60 text-slate-600 hover:bg-white border border-transparent'
               }`}
-              title={`${m.code} ${m.name}(右鍵疊加比較)`}
+              title={`${metalDisplay(m.code)} ${m.name}(右鍵疊加比較)`}
               onContextMenu={(e) => { e.preventDefault(); toggleOverlay(m.code) }}
-            >{m.code}</button>
+            >{metalDisplay(m.code)}</button>
           ))}
         </div>
         <span
           className="text-[10px] opacity-80 ml-2 px-1.5 py-0.5 rounded bg-white/60"
-          title={`DB 內 ${primaryMetal} 在此區間共 ${primaryPoints.length} 筆`}
+          title={`DB 內 ${metalDisplay(primaryMetal)} 在此區間共 ${primaryPoints.length} 筆`}
         >
           {primaryPoints.length} 筆 / {days} 天
         </span>
@@ -512,7 +513,7 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
               const allMetals = [primaryMetal, ...overlay]
               const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
               const rangeLabel = RANGE_LABEL[range]
-              const filename = `${title}_${allMetals.join('-')}_${rangeLabel}_${todayStr}.xlsx`
+              const filename = `${title}_${allMetals.map(metalDisplay).join('-')}_${rangeLabel}_${todayStr}.xlsx`
                 .replace(/[\\/:*?"<>|]/g, '_')  // Windows 檔名違法字元 → _
               await exportMetalsChartToXlsx({
                 filename,
@@ -661,7 +662,7 @@ export default function MetalsChart({ title, metals, primaryMetal, onPrimaryChan
         )}
         {primaryPoints.length === 0 && !loading ? (
           <div className="flex items-center justify-center h-full text-sm text-slate-400">
-            無 {primaryMetal} 資料(該區間無報價)
+            無 {metalDisplay(primaryMetal)} 資料(該區間無報價)
           </div>
         ) : (
           // key 變化強制 re-mount,確保 fullscreen 切換時 ECharts 重新算 layout

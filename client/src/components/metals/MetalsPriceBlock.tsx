@@ -6,6 +6,7 @@
  */
 import { Loader2 } from 'lucide-react'
 import { useMemo } from 'react'
+import { metalDisplay } from '../../lib/metalDisplay'
 
 interface PriceRow {
   metal_code: string
@@ -82,9 +83,9 @@ export default function MetalsPriceBlock({ title, rows, metalsAllowed, loading, 
                 isSelected ? (theme === 'precious' ? 'bg-emerald-50' : 'bg-amber-50') : 'hover:bg-slate-50'
               } ${noData ? 'opacity-50' : ''}`}
               style={{ gridTemplateColumns: '34px minmax(0,1fr) 56px 34px 42px 42px 42px' }}
-              title={`${code} ${r.source ? '來源: ' + r.source : ''}`}
+              title={`${metalDisplay(code)} ${r.source ? '來源: ' + r.source : ''}`}
             >
-              <span className="font-mono font-bold text-slate-800 text-left">{code}</span>
+              <span className="font-mono font-bold text-slate-800 text-left">{metalDisplay(code)}</span>
               <span className="text-[11px] text-slate-500 text-left truncate">{r.metal_name || ''}</span>
               <span className="font-mono text-slate-700 text-right tabular-nums">
                 {noData ? '—' : Number(r.price_usd).toLocaleString(undefined, { maximumFractionDigits: 2 })}

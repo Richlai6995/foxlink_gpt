@@ -16,6 +16,7 @@
  */
 
 const cards = require('./webexPmCards');
+const { metalDisplay } = require('./metalDisplay');
 
 // 4 大貴金屬 + 7 個關聯金屬(對應 pmDashboardSeed) — 統一 UPPERCASE
 const METAL_ALIASES = {
@@ -211,7 +212,7 @@ async function handleLatest({ webex, roomId, lang, metal }) {
     FETCH FIRST 1 ROWS ONLY
   `).get(metal);
   if (!row) {
-    await webex.sendMessage(roomId, lang.startsWith('zh') ? `⚠️ ${metal} 無資料` : `⚠️ No data for ${metal}`);
+    await webex.sendMessage(roomId, lang.startsWith('zh') ? `⚠️ ${metalDisplay(metal)} 無資料` : `⚠️ No data for ${metalDisplay(metal)}`);
     return;
   }
   const card = cards.buildSnapshotCard({
@@ -237,7 +238,7 @@ async function handleForecast({ webex, roomId, lang, metal }) {
   `).get(metal);
   const fcDate = latestForecastDate?.d ?? latestForecastDate?.D;
   if (!fcDate) {
-    await webex.sendMessage(roomId, lang.startsWith('zh') ? `⚠️ ${metal} 尚無預測資料` : `⚠️ No forecast for ${metal}`);
+    await webex.sendMessage(roomId, lang.startsWith('zh') ? `⚠️ ${metalDisplay(metal)} 尚無預測資料` : `⚠️ No forecast for ${metalDisplay(metal)}`);
     return;
   }
   const rows = await db.prepare(`
@@ -272,7 +273,7 @@ async function handleWhatIf({ webex, roomId, lang, metal, delta }) {
     WHERE UPPER(metal_code)=UPPER(?) ORDER BY as_of_date DESC FETCH FIRST 1 ROWS ONLY
   `).get(metal);
   if (!cur) {
-    await webex.sendMessage(roomId, lang.startsWith('zh') ? `⚠️ ${metal} 無資料` : `⚠️ No data for ${metal}`);
+    await webex.sendMessage(roomId, lang.startsWith('zh') ? `⚠️ ${metalDisplay(metal)} 無資料` : `⚠️ No data for ${metalDisplay(metal)}`);
     return;
   }
   const currentPrice = Number(cur.price_usd ?? cur.PRICE_USD);

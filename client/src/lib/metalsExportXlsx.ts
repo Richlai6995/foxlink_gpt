@@ -35,6 +35,10 @@ export interface ExportOpts {
   }
 }
 
+// 金屬代碼顯示轉換(第二字起小寫):AU→Au。僅用於 header / meta 顯示,
+// pointsByMetal 的 lookup key 一律維持傳入的大寫 code。
+const metalDisplay = (code: string) => code ? code.charAt(0).toUpperCase() + code.slice(1).toLowerCase() : ''
+
 export async function exportMetalsChartToXlsx(opts: ExportOpts): Promise<void> {
   // 動態 import,只在 user 按按鈕時才下載 ExcelJS bundle(~200KB)
   const ExcelJS = (await import('exceljs')).default
@@ -61,7 +65,7 @@ export async function exportMetalsChartToXlsx(opts: ExportOpts): Promise<void> {
 
   const dataSheet = wb.addWorksheet('原始資料', { views: [{ state: 'frozen', ySplit: 1 }] })
   // Header row
-  const header = ['日期', ...opts.metals.map(c => `${c} (USD)`)]
+  const header = ['日期', ...opts.metals.map(c => `${metalDisplay(c)} (USD)`)]
   const headerRow = dataSheet.addRow(header)
   headerRow.font = { bold: true }
   headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } }
@@ -107,7 +111,7 @@ export async function exportMetalsChartToXlsx(opts: ExportOpts): Promise<void> {
   metaSheet.addRow(['圖表標題', opts.metaInfo.title])
   metaSheet.addRow(['時間區間', opts.metaInfo.range])
   metaSheet.addRow(['天數', opts.metaInfo.days])
-  metaSheet.addRow(['金屬代碼', opts.metals.join(', ')])
+  metaSheet.addRow(['金屬代碼', opts.metals.map(metalDisplay).join(', ')])
   metaSheet.addRow(['資料筆數', sortedDates.length])
   metaSheet.addRow(['匯出時間', new Date(opts.metaInfo.exportedAt).toLocaleString('zh-TW')])
   metaSheet.getColumn(1).width = 14

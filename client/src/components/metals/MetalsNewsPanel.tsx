@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react'
 import { Newspaper, FileText, BarChart3, Loader2, ExternalLink, Maximize2, Paperclip, Download } from 'lucide-react'
 import api from '../../lib/api'
 import PmNewsExplorerModal from '../pm/PmNewsExplorerModal'
+import { metalDisplay } from '../../lib/metalDisplay'
 
 type Tab = 'news' | 'weekly' | 'monthly'
 
@@ -141,7 +142,7 @@ export default function MetalsNewsPanel({ viewDate, focusedMetals }: Props) {
                   </div>
                   <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mt-0.5">
                     {n.source && <span className="truncate max-w-[100px]">{n.source}</span>}
-                    {n.related_metals && <span className="font-mono text-slate-600">{n.related_metals}</span>}
+                    {n.related_metals && <span className="font-mono text-slate-600">{n.related_metals.split(',').map(c => metalDisplay(c.trim())).join(' ')}</span>}
                     {n.sentiment_label && (
                       <span className={`px-1 rounded text-[9px] ${
                         n.sentiment_label.includes('positive') ? 'bg-emerald-50 text-emerald-700'

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Database, Upload, Download, Plus, Edit3, Trash2, RefreshCw, X, BarChart3 } from 'lucide-react'
 import api from '../../lib/api'
+import { metalDisplay } from '../../lib/metalDisplay'
 
 interface BomRow {
   id: number
@@ -59,7 +60,7 @@ export default function PmBomPanel() {
   useEffect(() => { load() }, [])
 
   const remove = async (r: BomRow) => {
-    if (!confirm(`刪除 ${r.product_code} / ${r.metal_code}?`)) return
+    if (!confirm(`刪除 ${r.product_code} / ${metalDisplay(r.metal_code)}?`)) return
     try {
       await api.delete(`/pm-bom/${r.id}`)
       load()
@@ -128,7 +129,7 @@ export default function PmBomPanel() {
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
             {summary.map(s => (
               <div key={s.metal_code} className="bg-white border border-slate-200 rounded p-2 text-xs">
-                <div className="font-bold text-amber-700">{s.metal_code}</div>
+                <div className="font-bold text-amber-700">{metalDisplay(s.metal_code)}</div>
                 <div className="text-slate-600">{s.product_count} 個產品 / {s.product_line_count} 個產線</div>
                 <div className="text-slate-500 mt-1">月總用量:<span className="font-mono">{Number(s.total_monthly_grams || 0).toLocaleString()}</span> g</div>
               </div>
@@ -192,7 +193,7 @@ export default function PmBomPanel() {
                 <td className="px-2 py-1.5 font-mono text-slate-700">{r.product_code}</td>
                 <td className="px-2 py-1.5 text-slate-600 max-w-xs truncate">{r.product_name || '—'}</td>
                 <td className="px-2 py-1.5 text-slate-600">{r.product_line || '—'}</td>
-                <td className="px-2 py-1.5"><span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[10px] font-bold">{r.metal_code}</span></td>
+                <td className="px-2 py-1.5"><span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[10px] font-bold">{metalDisplay(r.metal_code)}</span></td>
                 <td className="px-2 py-1.5 text-right font-mono">{Number(r.content_gram).toFixed(3)}</td>
                 <td className="px-2 py-1.5 text-right font-mono text-slate-500">{r.monthly_volume?.toLocaleString() || '—'}</td>
                 <td className="px-2 py-1.5 text-slate-400 text-[10px]">{r.content_source || '—'}</td>

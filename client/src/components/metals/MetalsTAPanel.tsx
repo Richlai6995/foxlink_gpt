@@ -10,6 +10,7 @@
 import { Sparkles, RefreshCw, Loader2, X, AlertCircle } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import api from '../../lib/api'
+import { metalDisplay } from '../../lib/metalDisplay'
 
 const STORAGE_TOKEN_KEY = 'token'
 
@@ -178,7 +179,7 @@ export default function MetalsTAPanel({ isOpen, onClose, metal, days, viewDate, 
         <div className="flex items-center gap-2 px-4 py-3 border-b bg-gradient-to-r from-violet-50 to-purple-50 flex-shrink-0">
           <Sparkles size={16} className="text-violet-600" />
           <h3 className="text-sm font-bold text-slate-800">AI 技術分析(TA)</h3>
-          <span className="text-[10px] text-slate-500 ml-1">{metal} · {days}天 · {indicators.length || 0} 指標</span>
+          <span className="text-[10px] text-slate-500 ml-1">{metalDisplay(metal)} · {days}天 · {indicators.length || 0} 指標</span>
           <div className="ml-auto flex items-center gap-1">
             {/* 模型選擇 — 從 LLM 模型設定撈 chat 角色的全部模型 */}
             <select
@@ -210,7 +211,7 @@ export default function MetalsTAPanel({ isOpen, onClose, metal, days, viewDate, 
 
         {/* Context summary */}
         <div className="px-4 py-2 border-b bg-slate-50 text-[10px] text-slate-500 flex-shrink-0 flex flex-wrap gap-x-3 gap-y-0.5">
-          <span>金屬 <b className="font-mono text-slate-700">{metal}</b></span>
+          <span>金屬 <b className="font-mono text-slate-700">{metalDisplay(metal)}</b></span>
           <span>區間 <b className="text-slate-700">{days} 天</b></span>
           <span>結束日 <b className="font-mono text-slate-700">{viewDate || '今日'}</b></span>
           <span>指標 <b className="text-slate-700">{indicators.length ? indicators.join(', ') : '(無)'}</b></span>

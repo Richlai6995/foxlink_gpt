@@ -14,6 +14,8 @@
  * 所有 Card 都遵循 Adaptive Card 1.3 schema(Webex 支援的最高版本)。
  */
 
+const { metalDisplay } = require('./metalDisplay');
+
 const SPARK_CHARS = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
 
 /**
@@ -48,7 +50,7 @@ function fmtPrice(n) {
 function buildSnapshotCard({ metals, asOfDate, lang = 'zh-TW' }) {
   const isZh = lang.startsWith('zh');
   const facts = metals.map(m => ({
-    title: m.metal_code,
+    title: metalDisplay(m.metal_code),
     value: `${fmtPrice(m.price_usd)} USD  ${m.day_change_pct != null ? `(${fmtPct(m.day_change_pct)})` : ''}`,
   }));
 
@@ -79,7 +81,7 @@ function buildSnapshotCard({ metals, asOfDate, lang = 'zh-TW' }) {
     ],
     actions: metals.slice(0, 4).map(m => ({
       type: 'Action.Submit',
-      title: `${m.metal_code} ${isZh ? '預測' : 'Forecast'}`,
+      title: `${metalDisplay(m.metal_code)} ${isZh ? '預測' : 'Forecast'}`,
       data: { intent: 'pm_forecast', metal: m.metal_code },
     })),
     $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
@@ -95,7 +97,7 @@ function buildForecastCard({ metal, forecastRows, currentPrice, lang = 'zh-TW' }
       type: 'AdaptiveCard',
       version: '1.3',
       body: [
-        { type: 'TextBlock', text: `${metal} ${isZh ? '無預測資料' : 'no forecast available'}`, weight: 'Bolder' },
+        { type: 'TextBlock', text: `${metalDisplay(metal)} ${isZh ? '無預測資料' : 'no forecast available'}`, weight: 'Bolder' },
       ],
       $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
     };
@@ -123,7 +125,7 @@ function buildForecastCard({ metal, forecastRows, currentPrice, lang = 'zh-TW' }
     body: [
       {
         type: 'TextBlock',
-        text: `📈 ${metal} ${isZh ? '7 日預測' : '7-Day Forecast'}`,
+        text: `📈 ${metalDisplay(metal)} ${isZh ? '7 日預測' : '7-Day Forecast'}`,
         weight: 'Bolder', size: 'Medium', color: 'Accent',
       },
       currentPrice != null ? {
@@ -164,7 +166,7 @@ function buildWhatIfCard({ metal, delta, currentPrice, simulatedPrice, costImpac
     body: [
       {
         type: 'TextBlock',
-        text: `🧮 ${metal} What-if ${fmtPct(delta)}`,
+        text: `🧮 ${metalDisplay(metal)} What-if ${fmtPct(delta)}`,
         weight: 'Bolder', size: 'Medium', color: 'Accent',
       },
       {
