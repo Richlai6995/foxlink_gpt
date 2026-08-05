@@ -513,12 +513,12 @@ export function Step2History({ data, onChange }: StepProps) {
 // Step 3 — 機密設定
 // ────────────────────────────────────────────────────────────
 const CONFIDENTIAL_FIELDS_META: { key: string; label: string; defaultStrategy: 'TIER' | 'ALIAS' | 'MASK' | 'RANGE' | 'NONE'; aiReason: string }[] = [
-  { key: 'amount',         label: 'amount(報價金額)',         defaultStrategy: 'TIER',  aiReason: '高金額機密' },
-  { key: 'margin',         label: 'margin(毛利率)',           defaultStrategy: 'TIER',  aiReason: '毛利為機密' },
-  { key: 'cost_breakdown', label: 'cost_breakdown(成本明細)', defaultStrategy: 'TIER',  aiReason: '供應鏈機密' },
-  { key: 'customer_name',  label: 'customer_name(客戶名)',    defaultStrategy: 'ALIAS', aiReason: '非機密客戶' },
-  { key: 'quantity',       label: 'quantity(數量)',           defaultStrategy: 'RANGE', aiReason: '公開資訊' },
-  { key: 'due_date',       label: 'due_date(交期)',           defaultStrategy: 'NONE',  aiReason: '公開資訊' },
+  { key: 'amount',         label: 'amount(報價金額)',         defaultStrategy: 'TIER',  aiReason: '非成員看等級(Tier-A/M/L),不看實際金額' },
+  { key: 'margin',         label: 'margin(毛利率)',           defaultStrategy: 'TIER',  aiReason: '非成員看等級(Tier-H/M/L),不看實際 %' },
+  { key: 'cost_breakdown', label: 'cost_breakdown(成本明細)', defaultStrategy: 'TIER',  aiReason: '成本結構整段遮蔽(供應鏈機密常見)' },
+  { key: 'customer_name',  label: 'customer_name(客戶名)',    defaultStrategy: 'ALIAS', aiReason: '非成員看代號(A001),隱藏真實客戶' },
+  { key: 'quantity',       label: 'quantity(數量)',           defaultStrategy: 'RANGE', aiReason: '非成員看區間(100K~500K),不看精確量' },
+  { key: 'due_date',       label: 'due_date(交期)',           defaultStrategy: 'NONE',  aiReason: '通常不遮(排程協作需要)' },
 ]
 
 export function Step3Confidentiality({ data, onChange }: StepProps) {
@@ -528,15 +528,19 @@ export function Step3Confidentiality({ data, onChange }: StepProps) {
   return (
     <div>
       <StepBadge>STEP 2 / 6</StepBadge>
-      <h3 className="text-lg font-bold text-cortex-navy mb-1.5">機密設定 · AI 預判機密欄位</h3>
-      <div className="text-[11px] text-cortex-muted mb-3.5">基於 Apple 過往機密政策與料號類型,AI 已預勾下列欄位</div>
+      <h3 className="text-lg font-bold text-cortex-navy mb-1.5">機密設定</h3>
+      <div className="text-[11px] text-cortex-muted mb-3.5">一般案保持關閉直接下一步;機密案打開開關並勾選要遮罩的欄位(非成員依策略看 遮蔽/代號/區間)</div>
 
       {/* 機密 banner */}
       <div className="bg-gradient-to-br from-cortex-amber-bg to-amber-50 border border-amber-300 rounded-lg px-3.5 py-3 mb-3 flex items-center gap-2.5">
         <span className="text-lg">🔒</span>
         <div className="flex-1">
-          <div className="text-[12px] font-bold text-amber-900">標記為機密案 · is_confidential = ON</div>
-          <div className="text-[10px] text-amber-800 mt-0.5">3 個機密欄位將走 confidentialityMiddleware,非成員看 mask / alias / range</div>
+          <div className="text-[12px] font-bold text-amber-900">標記為機密案{data.isConfidential ? ' · 已開啟' : '(預設關閉)'}</div>
+          <div className="text-[10px] text-amber-800 mt-0.5">
+            {data.isConfidential
+              ? `${Object.values(data.confidentialFields).filter((x: any) => x.enabled).length} 個欄位將遮罩;非成員依策略看 遮蔽 / 代號 / 區間`
+              : '開啟後下方勾選的欄位對非成員遮罩;成員邀請時可個別授權'}
+          </div>
         </div>
         <label className="inline-flex items-center cursor-pointer">
           <input
@@ -553,7 +557,7 @@ export function Step3Confidentiality({ data, onChange }: StepProps) {
       {/* Fields table */}
       <div className="bg-white border border-cortex-line rounded-lg overflow-hidden">
         <div className="bg-cortex-bg px-3.5 py-2 grid grid-cols-[30px_2fr_1fr_2fr] gap-2.5 text-[10px] font-bold text-cortex-muted tracking-widest">
-          <div></div><div>欄位</div><div>策略</div><div>AI 判定理由</div>
+          <div></div><div>欄位</div><div>策略</div><div>遮罩效果說明</div>
         </div>
         {CONFIDENTIAL_FIELDS_META.map((f) => {
           const v = data.confidentialFields[f.key] || { enabled: false, strategy: f.defaultStrategy }
