@@ -5,7 +5,7 @@
  *           Sprint F 再接 real Gemini Flash
  */
 
-import { Fragment, useRef, useState } from 'react'
+import { useEffect, Fragment, useRef, useState } from 'react'
 import { Upload, CheckCircle2, AlertTriangle, Sparkles, MessageSquare, ListChecks, Bell, Pin, Clock, Loader2, FileText } from 'lucide-react'
 import type { WizardData } from './wizardState'
 import { useAuth } from '../../../context/AuthContext'
@@ -23,6 +23,62 @@ export function Step1Intake({ data, onChange }: StepProps) {
   const [uploading, setUploading] = useState(false)
   const [uploadErr, setUploadErr] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const tplRef = useRef<HTMLInputElement>(null)
+  // 2026-08 改版:客戶選單(帶入歷史 8 欄)+ 重複開案偵測 + 專案代碼唯一檢查
+  const [custList, setCustList] = useState<any[]>([])
+  const [similar, setSimilar] = useState<any[]>([])
+  const [codeExists, setCodeExists] = useState(false)
+  useEffect(() => {
+    if (!token) return
+    fetch('/api/projects/wizard/customers', { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json()).then((d) => setCustList(d.customers || [])).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token])
+  const precheck = async (partNo?: string, code?: string) => {
+    const q = new URLSearchParams()
+    if (partNo) q.set('partNo', partNo)
+    if (code) q.set('code', code)
+    if (![...q.keys()].length) return
+    try {
+      const r = await fetch(`/api/projects/wizard/precheck?${q}`, { headers: { Authorization: `Bearer ${token}` } }).then((x) => x.json())
+      if (partNo) setSimilar(r.similar || [])
+      if (code) setCodeExists(!!r.codeExists)
+    } catch { /* noop */ }
+  }
+  const pickCustomer = (name: string) => {
+    const c = custList.find((x) => x.name === name)
+    if (!c) { onChange({ customer: name } as any); return }
+    onChange({
+      customer: c.name, custAlias: c.custAlias || '', taxId: c.taxId || '',
+      paymentTerms: c.paymentTerms || '', shipAddress: c.shipAddress || '', contactName: c.contactName || '',
+    } as any)
+  }
+  const handleTemplate = async (file: File) => {
+    setUploadErr(null); setUploading(true)
+    try {
+      const fd = new FormData(); fd.append('file', file)
+      const res = await fetch('/api/projects/wizard/parse-intake', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd })
+      const j = await res.json()
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`)
+      const f = j.fields || {}
+      onChange({
+        ...(f.customer ? { customer: f.customer } : {}), ...(f.custAlias ? { custAlias: f.custAlias } : {}),
+        ...(f.projectCode ? { generatedProjectCode: f.projectCode } : {}),
+        ...(f.partNo ? { partNo: f.partNo } : {}), ...(f.quantity ? { quantity: f.quantity } : {}),
+        ...(f.dueDate ? { dueDate: f.dueDate } : {}), ...(f.kickoffNote ? { kickoffNote: f.kickoffNote } : {}),
+        ...(f.taxId ? { taxId: f.taxId } : {}), ...(f.paymentTerms ? { paymentTerms: f.paymentTerms } : {}),
+        ...(f.shipAddress ? { shipAddress: f.shipAddress } : {}), ...(f.contactName ? { contactName: f.contactName } : {}),
+      } as any)
+      if (f.partNo) precheck(f.partNo)
+      if (f.projectCode) precheck(undefined, f.projectCode)
+    } catch (e: any) { setUploadErr(e.message || String(e)) } finally { setUploading(false) }
+  }
+  const dlTemplate = async () => {
+    const res = await fetch('/api/projects/wizard/intake-template', { headers: { Authorization: `Bearer ${token}` } })
+    if (!res.ok) { setUploadErr('範本下載失敗'); return }
+    const blob = await res.blob(); const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = '開案資料範本.xlsx'; a.click(); URL.revokeObjectURL(url)
+  }
 
   // 是否已抽過(client 端判斷:看是否有 confidence 物件)
   const hasExtracted = !!data.rfqConfidence
@@ -82,7 +138,14 @@ export function Step1Intake({ data, onChange }: StepProps) {
     <div className="grid grid-cols-[1.5fr_1fr] gap-5">
       <div>
         <StepBadge>STEP 1 / 7</StepBadge>
-        <h3 className="text-lg font-bold text-cortex-navy mb-3.5">客戶來信 · RFQ 自動解析</h3>
+        <h3 className="text-lg font-bold text-cortex-navy mb-1">客戶信息</h3>
+        <p className="text-[11px] text-cortex-muted mb-3">三種來源:手填 / 客戶 RFQ AI 解析 / 標準範本 Excel(最可靠)· 全欄可修改</p>
+        <div className="flex items-center gap-2 mb-2 text-[11px]">
+          <button onClick={dlTemplate} className="px-2 py-1 border border-cortex-teal text-cortex-teal rounded hover:bg-cortex-cyan-bg">📥 下載開案資料範本</button>
+          <button onClick={() => tplRef.current?.click()} className="px-2 py-1 border border-cortex-teal text-cortex-teal rounded hover:bg-cortex-cyan-bg">📤 上傳填好的範本</button>
+          <input ref={tplRef} type="file" accept=".xlsx" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleTemplate(f); e.target.value = '' }} />
+          <span className="text-[10px] text-cortex-muted">或下方拖入客戶 RFQ 由 AI 解析</span>
+        </div>
 
         {/* Drag-drop area — 真檔案上傳 */}
         <div
@@ -144,11 +207,32 @@ export function Step1Intake({ data, onChange }: StepProps) {
           )}
         </div>
 
-        {/* AI prefilled fields */}
+        {/* 客戶信息欄位(手填 / AI 預填 / 範本帶入) */}
         <div className="bg-white border border-cortex-line rounded-lg p-3.5">
           <div className="text-[11px] text-cortex-muted font-bold tracking-widest mb-2.5">
-            AI 預填 · 業務 confirm 即可
-            {!hasExtracted && <span className="ml-2 text-amber-600 text-[10px] font-normal italic">(等檔案上傳)</span>}
+            客戶信息 · AI / 範本預填後 confirm 即可
+          </div>
+          {/* 客戶選單:老客戶帶入 8 欄 */}
+          <div className="flex items-center gap-2.5 mb-2 text-[12px]">
+            <div className="w-14 text-cortex-muted text-[11px]">老客戶</div>
+            <select value="" onChange={(e) => { if (e.target.value) pickCustomer(e.target.value) }}
+              className="flex-1 px-2 py-1 border border-cortex-line rounded text-[12px] bg-white text-cortex-ink">
+              <option value="">(選擇歷史客戶自動帶入資料,或直接下方手填)</option>
+              {custList.map((c) => <option key={c.name} value={c.name}>{c.name}{c.custAlias ? ` · ${c.custAlias}` : ''}(上次 {c.lastProject})</option>)}
+            </select>
+          </div>
+          {/* 客戶代碼 + 專案代碼 */}
+          <div className="flex items-center gap-2.5 mb-2 text-[12px]">
+            <div className="w-14 text-cortex-muted text-[11px]">客戶代碼</div>
+            <input value={data.custAlias || ''} onChange={(e) => onChange({ custAlias: e.target.value } as any)} placeholder="內部代碼 / 機密別名(如 A001-SS)"
+              className="flex-1 px-2 py-1 border border-cortex-line rounded text-[12px] font-mono bg-white text-cortex-ink focus:outline-none focus:border-cortex-cyan" />
+          </div>
+          <div className="flex items-center gap-2.5 mb-2 text-[12px]">
+            <div className="w-14 text-cortex-muted text-[11px]">專案代碼</div>
+            <input value={data.generatedProjectCode || ''} onChange={(e) => onChange({ generatedProjectCode: e.target.value } as any)}
+              onBlur={(e) => precheck(undefined, e.target.value)}
+              className={`flex-1 px-2 py-1 border rounded text-[12px] font-mono bg-white text-cortex-ink focus:outline-none ${codeExists ? 'border-red-400' : 'border-cortex-line focus:border-cortex-cyan'}`} />
+            {codeExists && <span className="text-[9px] text-red-600 font-bold">已存在!</span>}
           </div>
           {fields.map((f) => {
             const conf = data.rfqConfidence?.[f.cfKey] ?? 0
@@ -163,6 +247,7 @@ export function Step1Intake({ data, onChange }: StepProps) {
                   type="text"
                   value={(data as any)[f.key] ?? ''}
                   onChange={(e) => onChange({ [f.key]: e.target.value } as any)}
+                  onBlur={(e) => { if (f.key === 'partNo') precheck(e.target.value) }}
                   className="flex-1 px-2 py-1 border border-cortex-line rounded text-[12px] font-mono bg-white text-cortex-ink focus:outline-none focus:border-cortex-cyan"
                   placeholder={!hasExtracted ? '—' : ''}
                 />
@@ -173,6 +258,25 @@ export function Step1Intake({ data, onChange }: StepProps) {
             )
           })}
 
+          {/* 重複開案偵測 */}
+          {similar.length > 0 && (
+            <div className="bg-amber-50 border border-amber-300 rounded p-2 mb-2 text-[11px] text-amber-800">
+              ⚠ 同料號已有 {similar.length} 個專案:
+              {similar.map((sp) => (
+                <a key={sp.id} href={`/projects-platform/projects/${sp.id}`} target="_blank" rel="noreferrer" className="ml-1 underline font-mono">{sp.projectCode}</a>
+              ))}
+              <span className="block text-[10px] mt-0.5">確認是否重複開案;新一代/改版案可繼續。</span>
+            </div>
+          )}
+          {/* 開案說明(常駐) */}
+          <div className="text-[10px] text-cortex-muted mt-3 mb-1">🗒 開案說明</div>
+          <textarea
+            value={data.kickoffNote || ''}
+            onChange={(e) => onChange({ kickoffNote: e.target.value } as any)}
+            className="w-full px-2 py-1.5 border border-cortex-line rounded text-[11px] bg-white text-cortex-ink focus:outline-none focus:border-cortex-cyan resize-y"
+            rows={2}
+            placeholder="開案緣由 / 特殊需求 / 背景(會寫入專案與知識庫)"
+          />
           {/* 規格 / 備註(較長) */}
           {hasExtracted && (
             <>

@@ -18,6 +18,12 @@ export type WizardData = {
   rfqFilePath?: string         // server 端暫存路徑(extract-rfq 回來的)
   rfqMimeType?: string
   customer: string
+  custAlias: string
+  kickoffNote: string
+  taxId: string
+  paymentTerms: string
+  shipAddress: string
+  contactName: string
   partNo: string
   quantity: string
   dueDate: string
@@ -67,8 +73,14 @@ export type WizardData = {
 export const INITIAL_WIZARD: WizardData = {
   // Step 1
   rfqFileName: 'Apple_USB-C_RFQ.pdf',
-  customer: 'Apple Inc.',
-  partNo: 'APL-USB-C-2-PRO',
+  customer: '',
+  custAlias: '',
+  kickoffNote: '',
+  taxId: '',
+  paymentTerms: '',
+  shipAddress: '',
+  contactName: '',
+  partNo: '',
   quantity: '100,000',
   dueDate: '2026-08-15',
 

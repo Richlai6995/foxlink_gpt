@@ -82,7 +82,22 @@ export default function WizardModal({ open, onClose }: Props) {
         data_payload: {
           title: `${data.customer} · ${data.partNo}`,
           customer: data.customer,
+          customer_alias: data.custAlias || undefined,
+          kickoffNote: data.kickoffNote || undefined,
           partNo: data.partNo,
+          // Step1 客戶信息 → 直通報價 Form customer 段(免二次輸入 · 完成度直接有分)
+          form: {
+            customer: {
+              cust_name: data.customer || '',
+              cust_alias: data.custAlias || '',
+              tax_id: data.taxId || '',
+              po_number: '',
+              payment_terms: data.paymentTerms || '',
+              ship_address: data.shipAddress || '',
+              contact_name: data.contactName || '',
+              cust_code_erp: '',
+            },
+          },
           quantity: data.quantity,
           dueDate: data.dueDate,
           // Step 1 AI #1 RFQ extract 結果(Sprint J 補:寫 attach chunk 進 KB)
