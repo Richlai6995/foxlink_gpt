@@ -45,6 +45,7 @@ export type WizardData = {
   // Step 2
   selectedHistoryId: string | null
   recommendedPmName: string
+  recommendedPmUserId: number | null
   workflowTemplateCode: string  // QUOTE_DEFAULT or QUOTE_STANDARD
   estimatedCycleDays: number
   scheduleSanity: 'green' | 'amber' | 'red'
@@ -53,13 +54,19 @@ export type WizardData = {
   isConfidential: boolean
   confidentialFields: Record<string, { enabled: boolean; strategy: 'TIER' | 'ALIAS' | 'MASK' | 'RANGE' | 'NONE' }>
 
-  // Step 4
+  // Step 4(name = 顯示;UserId = users.id,null = 未連結系統帳號)
   salesName: string
+  salesUserId: number | null
   salesAssistantName: string
+  salesAssistantUserId: number | null
   dpmName: string
+  dpmUserId: number | null
   bpmName: string
+  bpmUserId: number | null
   mpmName: string
+  mpmUserId: number | null
   epmName: string
+  epmUserId: number | null
 
   // Step 5 — 模板就是 step 2 選的 workflowTemplateCode
 
@@ -84,9 +91,10 @@ export const INITIAL_WIZARD: WizardData = {
   quantity: '100,000',
   dueDate: '2026-08-15',
 
-  // Step 2
-  selectedHistoryId: 'QT-2025-0212',
-  recommendedPmName: 'Mike Wang',
+  // Step 2(歷史參考步已廢;推薦 PM 改真資料 = Step1 選老客戶時帶入)
+  selectedHistoryId: null,
+  recommendedPmName: '',
+  recommendedPmUserId: null,
   workflowTemplateCode: 'QUOTE_DEFAULT',
   estimatedCycleDays: 21,
   scheduleSanity: 'green',
@@ -102,13 +110,19 @@ export const INITIAL_WIZARD: WizardData = {
     due_date:         { enabled: false, strategy: 'NONE' },
   },
 
-  // Step 4
+  // Step 4(真使用者 — WizardModal 開啟時帶入當前 user;其餘用 UserPicker 選)
   salesName: '',          // 自動帶 = 當前 user
+  salesUserId: null,
   salesAssistantName: '',
-  dpmName: 'Mike Wang',
-  bpmName: 'Lisa-B',
-  mpmName: 'Tony Chou',
+  salesAssistantUserId: null,
+  dpmName: '',
+  dpmUserId: null,
+  bpmName: '',
+  bpmUserId: null,
+  mpmName: '',
+  mpmUserId: null,
   epmName: '',
+  epmUserId: null,
 
   // Step 6
   priorityScore: 6,

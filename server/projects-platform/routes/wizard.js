@@ -147,7 +147,7 @@ router.post('/parse-intake', xlsxUpload.single('file'), asyncHandler(async (req,
 router.get('/customers', asyncHandler(async (req, res) => {
   const db = require('../../database-oracle').db;
   const rows = await db.prepare(
-    `SELECT id, project_code, data_payload FROM projects
+    `SELECT id, project_code, data_payload, pm_user_id FROM projects
       WHERE project_code <> 'CORTEX-COST-TPL'
       ORDER BY id DESC FETCH FIRST 300 ROWS ONLY`,
   ).all().catch(() => []);
@@ -174,6 +174,7 @@ router.get('/customers', asyncHandler(async (req, res) => {
         shipAddress: fc.ship_address || null,
         contactName: fc.contact_name || null,
         lastProject: r.project_code || Object.values(r)[1],
+        lastPmUserId: Number(r.pm_user_id ?? Object.values(r)[3]) || null,
         projectCount: 0, _cycles: [],
       });
     }
@@ -182,11 +183,60 @@ router.get('/customers', asyncHandler(async (req, res) => {
     const d = cycleByPid.get(pid);
     if (Number.isFinite(d) && d >= 0) c._cycles.push(d);
   }
+  const pmIds = [...new Set([...seen.values()].map((c) => c.lastPmUserId).filter(Boolean))];
+  const pmName = new Map();
+  if (pmIds.length) {
+    const us = await db.prepare(
+      `SELECT id, username, name FROM users WHERE id IN (${pmIds.map(() => '?').join(',')})`,
+    ).all(...pmIds).catch(() => []);
+    for (const u of us) pmName.set(Number(u.id ?? Object.values(u)[0]), (u.name ?? Object.values(u)[2]) || (u.username ?? Object.values(u)[1]));
+  }
   const customers = [...seen.values()].map((c) => ({
     ...c, _cycles: undefined,
+    lastPmName: c.lastPmUserId ? (pmName.get(c.lastPmUserId) || null) : null,
     avgCycleDays: c._cycles.length ? Math.round(c._cycles.reduce((a, b) => a + b, 0) / c._cycles.length) : null,
   }));
   res.json({ customers });
+}));
+
+// GET /users?q= — Step3 PM/Team 使用者搜尋(active users + 在手 PM 案數供負載參考)
+router.get('/users', asyncHandler(async (req, res) => {
+  const db = require('../../database-oracle').db;
+  const q = String(req.query.q || '').trim();
+  let rows;
+  if (q) {
+    const like = `%${q}%`;
+    rows = await db.prepare(
+      `SELECT id, username, name, employee_id, dept_name FROM users
+        WHERE status = 'active'
+          AND (UPPER(username) LIKE UPPER(?) OR UPPER(name) LIKE UPPER(?) OR employee_id LIKE ?)
+        ORDER BY username FETCH FIRST 20 ROWS ONLY`,
+    ).all(like, like, like).catch(() => []);
+  } else {
+    rows = await db.prepare(
+      `SELECT id, username, name, employee_id, dept_name FROM users
+        WHERE status = 'active' ORDER BY id DESC FETCH FIRST 20 ROWS ONLY`,
+    ).all().catch(() => []);
+  }
+  const load = await db.prepare(
+    `SELECT pm_user_id, COUNT(*) AS n FROM projects
+      WHERE lifecycle_status IN ('DRAFT', 'ACTIVE') AND project_code <> 'CORTEX-COST-TPL'
+      GROUP BY pm_user_id`,
+  ).all().catch(() => []);
+  const loadBy = new Map(load.map((r) => [Number(r.pm_user_id ?? Object.values(r)[0]), Number(r.n ?? Object.values(r)[1])]));
+  res.json({
+    users: rows.map((u) => {
+      const id = Number(u.id ?? Object.values(u)[0]);
+      return {
+        id,
+        username: u.username ?? Object.values(u)[1],
+        name: (u.name ?? Object.values(u)[2]) || (u.username ?? Object.values(u)[1]),
+        employeeId: u.employee_id ?? Object.values(u)[3] ?? null,
+        deptName: u.dept_name ?? Object.values(u)[4] ?? null,
+        activePmCount: loadBy.get(id) || 0,
+      };
+    }),
+  });
 }));
 
 // GET /precheck?partNo=&code= — 重複開案偵測(同料號案)+ 專案代碼唯一檢查

@@ -51,6 +51,7 @@ export function Step1Intake({ data, onChange }: StepProps) {
     onChange({
       customer: c.name, custAlias: c.custAlias || '', taxId: c.taxId || '',
       paymentTerms: c.paymentTerms || '', shipAddress: c.shipAddress || '', contactName: c.contactName || '',
+      recommendedPmName: c.lastPmName || '', recommendedPmUserId: c.lastPmUserId || null,
     } as any)
   }
   const handleTemplate = async (file: File) => {
@@ -594,13 +595,80 @@ export function Step3Confidentiality({ data, onChange }: StepProps) {
 // Step 4 — PM/Team
 // ────────────────────────────────────────────────────────────
 const PM_ROLES = [
-  { key: 'dpm' as const, sub: 'DPM', label: 'Design PM',          desc: 'Design PM(主導)· AI 從歷史推薦' },
+  { key: 'dpm' as const, sub: 'DPM', label: 'Design PM',          desc: 'Design PM(主導)· 可套用上次合作 PM' },
   { key: 'bpm' as const, sub: 'BPM', label: 'Business PM',        desc: '對客戶 / Q&A / 提交' },
   { key: 'mpm' as const, sub: 'MPM', label: 'Manufacturing PM',   desc: '工廠端 / Cleansheet' },
   { key: 'epm' as const, sub: 'EPM', label: 'NPI Engineering PM', desc: 'NPI 工程細項' },
 ]
 
+// 真使用者搜尋選擇器:打字搜 users 表(姓名/工號/帳號),下拉附部門 + 在手 PM 案數
+function UserPicker({ token, value, userId, onPick, placeholder }: {
+  token: string
+  value: string
+  userId: number | null
+  onPick: (p: { id: number | null; name: string }) => void
+  placeholder?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [list, setList] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+  const timer = useRef<any>(null)
+  const boxRef = useRef<HTMLDivElement>(null)
+  const search = (q: string) => {
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = setTimeout(() => {
+      setLoading(true)
+      fetch(`/api/projects/wizard/users?q=${encodeURIComponent(q)}`, { headers: { Authorization: `Bearer ${token}` } })
+        .then((r) => r.json()).then((d) => setList(d.users || [])).catch(() => {})
+        .finally(() => setLoading(false))
+    }, 250)
+  }
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as any)) setOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [])
+  return (
+    <div ref={boxRef} className="relative">
+      <div className="flex items-center gap-1.5">
+        <input
+          value={value}
+          onChange={(e) => { onPick({ id: null, name: e.target.value }); search(e.target.value); setOpen(true) }}
+          onFocus={() => { search(value); setOpen(true) }}
+          placeholder={placeholder}
+          className="text-[12px] font-semibold text-cortex-ink bg-transparent focus:outline-none w-full border-b border-transparent focus:border-cortex-cyan"
+        />
+        {value && (
+          <button onClick={() => onPick({ id: null, name: '' })} className="text-cortex-muted hover:text-red-600 text-[12px] leading-none shrink-0" title="清除">×</button>
+        )}
+      </div>
+      {open && (
+        <div className="absolute z-30 left-0 right-0 top-full mt-1 bg-white border border-cortex-line rounded-lg shadow-lg max-h-52 overflow-auto">
+          {loading && <div className="px-3 py-2 text-[10px] text-cortex-muted">搜尋中…</div>}
+          {!loading && list.length === 0 && (
+            <div className="px-3 py-2 text-[10px] text-cortex-muted">無符合使用者 — 輸入姓名 / 工號 / 帳號搜尋</div>
+          )}
+          {!loading && list.map((u) => (
+            <button
+              key={u.id}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { onPick({ id: u.id, name: u.name }); setOpen(false) }}
+              className={`w-full text-left px-3 py-1.5 hover:bg-cortex-cyan-bg flex items-center justify-between gap-2 ${u.id === userId ? 'bg-cortex-cyan-bg/60' : ''}`}
+            >
+              <span className="text-[11px] font-semibold text-cortex-ink truncate">{u.name}</span>
+              <span className="text-[9px] text-cortex-muted whitespace-nowrap shrink-0">
+                {u.deptName ? `${u.deptName} · ` : ''}{u.employeeId || u.username} · 在手 {u.activePmCount} 案
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function Step4PmTeam({ data, onChange }: StepProps) {
+  const { token } = useAuth() as any
   return (
     <div className="grid grid-cols-[1.4fr_1fr] gap-5">
       <div>
@@ -613,26 +681,22 @@ export function Step4PmTeam({ data, onChange }: StepProps) {
           <div className="flex gap-2.5 items-center bg-red-50 border-l-[3px] border-red-600 px-3 py-2 rounded mb-1.5">
             <div className="w-7 h-7 rounded-full bg-gradient-to-br from-red-600 to-orange-600 text-white text-[11px] font-bold flex items-center justify-center">我</div>
             <div className="flex-1">
-              <input
-                value={data.salesName}
-                onChange={(e) => onChange({ salesName: e.target.value })}
-                placeholder="業務(主)"
-                className="text-[12px] font-bold text-cortex-ink bg-transparent focus:outline-none w-full"
-              />
-              <div className="text-[10px] text-cortex-muted">project.sales · HOST</div>
+              <div className="text-[12px] font-bold text-cortex-ink">{data.salesName || '(當前登入者)'}</div>
+              <div className="text-[10px] text-cortex-muted">project.sales · HOST = 開案人本人(自動帶入)</div>
             </div>
             <span className="text-[9px] bg-red-600 text-white px-1.5 py-0.5 rounded">業務(主)</span>
           </div>
           <div className="flex gap-2.5 items-center bg-orange-50 border-l-[3px] border-orange-500 px-3 py-2 rounded">
             <div className="w-7 h-7 rounded-full bg-gradient-to-br from-orange-500 to-orange-400 text-white text-[11px] font-bold flex items-center justify-center">助</div>
             <div className="flex-1">
-              <input
+              <UserPicker
+                token={token}
                 value={data.salesAssistantName}
-                onChange={(e) => onChange({ salesAssistantName: e.target.value })}
-                placeholder="業務助理(選填)"
-                className="text-[12px] font-bold text-cortex-ink bg-transparent focus:outline-none w-full"
+                userId={data.salesAssistantUserId}
+                placeholder="業務助理(選填 · 搜尋姓名/工號)"
+                onPick={(p) => onChange({ salesAssistantName: p.name, salesAssistantUserId: p.id })}
               />
-              <div className="text-[10px] text-cortex-muted">業務不在線時可代行 Stage Gate</div>
+              <div className="text-[10px] text-cortex-muted">業務不在線時可代行 Stage Gate;啟動時以 sales 角色加入成員</div>
             </div>
           </div>
         </div>
@@ -642,23 +706,35 @@ export function Step4PmTeam({ data, onChange }: StepProps) {
           <div className="text-[11px] font-bold text-cortex-muted tracking-widest mb-2.5">指派 4 種 PM</div>
           {PM_ROLES.map((pm, i) => {
             const nameKey = (pm.key + 'Name') as keyof WizardData
+            const idKey = (pm.key + 'UserId') as keyof WizardData
             const val = (data[nameKey] as string) || ''
+            const uid = (data[idKey] as number | null) ?? null
+            const showRec = pm.key === 'dpm' && !!data.recommendedPmUserId && !!data.recommendedPmName && data.recommendedPmName !== val
             return (
               <div key={pm.key} className={`grid grid-cols-[50px_1fr_auto] gap-2.5 items-center py-2 ${i > 0 ? 'border-t border-cortex-line' : ''}`}>
                 <span className="font-mono text-[10px] font-bold text-purple-700 bg-purple-100 px-1.5 py-1 rounded text-center">{pm.sub}</span>
                 <div>
-                  <input
+                  <UserPicker
+                    token={token}
                     value={val}
-                    onChange={(e) => onChange({ [nameKey]: e.target.value } as any)}
-                    placeholder={pm.key === 'epm' ? '(待邀請)' : pm.label}
-                    className="text-[12px] font-semibold text-cortex-ink bg-transparent focus:outline-none w-full border-b border-transparent focus:border-cortex-cyan"
+                    userId={uid}
+                    placeholder={`${pm.label}${pm.key === 'epm' ? '(選填)' : ''} · 搜尋姓名/工號`}
+                    onPick={(p) => onChange({ [nameKey]: p.name, [idKey]: p.id } as any)}
                   />
                   <div className="text-[10px] text-cortex-muted mt-0.5">{pm.desc}</div>
+                  {showRec && (
+                    <button
+                      onClick={() => onChange({ [nameKey]: data.recommendedPmName, [idKey]: data.recommendedPmUserId } as any)}
+                      className="mt-1 text-[9px] bg-cortex-cyan-bg text-cortex-teal px-1.5 py-0.5 rounded font-bold hover:bg-cortex-teal hover:text-white transition"
+                    >
+                      ⭐ 上次合作 DPM:{data.recommendedPmName} · 一鍵套用
+                    </button>
+                  )}
                 </div>
-                {pm.key === 'dpm' && val ? (
-                  <span className="text-[9px] bg-cortex-cyan-bg text-cortex-teal px-1.5 py-0.5 rounded font-bold whitespace-nowrap">⭐ AI 推薦</span>
-                ) : val ? (
+                {val && uid != null ? (
                   <span className="text-[9px] text-cortex-green font-bold whitespace-nowrap">✓ 已指派</span>
+                ) : val ? (
+                  <span className="text-[9px] text-amber-600 font-bold whitespace-nowrap" title="非系統帳號:啟動時不會加入專案成員,僅記錄名字">⚠ 未連結</span>
                 ) : (
                   <span className="text-[9px] text-cortex-muted whitespace-nowrap">待邀請</span>
                 )}
@@ -672,8 +748,24 @@ export function Step4PmTeam({ data, onChange }: StepProps) {
         <div className="text-[11px] text-cortex-cyan font-bold tracking-wide mb-2.5">
           <Sparkles size={11} className="inline -mt-px mr-1" /> 推薦來源
         </div>
-        <div className="text-[10px] text-cortex-text leading-relaxed mb-3.5">
-          基於 Step 2 抓到的 5 個歷史相似案,<strong>{data.recommendedPmName}</strong> 在其中 3 案是主 DPM,WIN 率 100%。
+        <div className="text-[10px] text-cortex-text leading-relaxed mb-3">
+          {data.recommendedPmName && data.recommendedPmUserId ? (
+            <>客戶 <strong>{data.customer || '—'}</strong> 最近一案的 DPM 是 <strong>{data.recommendedPmName}</strong>(真實歷史),左側可一鍵套用。</>
+          ) : (
+            <>Step 1 選「老客戶」後自動帶出該客戶上次合作的 DPM 供一鍵套用;新客戶直接搜尋指派。</>
+          )}
+        </div>
+        <div className="text-[10px] text-cortex-text leading-relaxed mb-3 bg-cortex-cyan-bg/40 rounded p-2">
+          下拉的「在手 N 案」= 該使用者目前擔任 PM 的進行中案量(DRAFT / ACTIVE),供負載平衡參考。
+        </div>
+        <div className="border-t border-dashed border-cortex-line pt-3 mb-3">
+          <div className="text-[10px] font-bold text-cortex-muted mb-2">啟動時自動生效</div>
+          <div className="text-[10px] text-cortex-text leading-relaxed">
+            • DPM → project.pm(Stage Gate 推進權限)<br />
+            • BPM / MPM / EPM → 成員(PM 角色 + 子角色)<br />
+            • 業務助理 → 成員(sales 角色,可代行 Gate)<br />
+            • 以上自動進 公告 / General 頻道
+          </div>
         </div>
         <div className="border-t border-dashed border-cortex-line pt-3">
           <div className="text-[10px] font-bold text-cortex-muted mb-2">PM Team 邏輯</div>

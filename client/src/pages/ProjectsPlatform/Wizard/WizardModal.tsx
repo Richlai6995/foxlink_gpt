@@ -39,6 +39,7 @@ export default function WizardModal({ open, onClose }: Props) {
   const [data, setData] = useState<WizardData>(() => ({
     ...INITIAL_WIZARD,
     salesName: user?.name || user?.username || '',
+    salesUserId: user?.id ?? null,
     generatedProjectCode: generateProjectCode('Q'),
   }))
   const [submitting, setSubmitting] = useState(false)
@@ -76,6 +77,8 @@ export default function WizardModal({ open, onClose }: Props) {
         project_code: data.generatedProjectCode,
         type_code: 'QUOTE',
         title: `${data.customer} · ${data.partNo}`,
+        pm_user_id: data.dpmUserId || undefined,
+        sales_user_id: data.salesUserId || undefined,
         bu_id: 1,
         importance: data.priorityScore >= 5 ? 'HIGH' : data.priorityScore >= 3 ? 'NORMAL' : 'LOW',
         urgency: data.priorityScore >= 5 ? 'HIGH' : data.priorityScore >= 3 ? 'NORMAL' : 'LOW',
@@ -116,12 +119,12 @@ export default function WizardModal({ open, onClose }: Props) {
           confidentialPolicies: data.confidentialFields,
           // Step 4
           pms: {
-            sales: data.salesName,
-            salesAssistant: data.salesAssistantName,
-            dpm: data.dpmName,
-            bpm: data.bpmName,
-            mpm: data.mpmName,
-            epm: data.epmName,
+            sales: data.salesName, salesUserId: data.salesUserId,
+            salesAssistant: data.salesAssistantName, salesAssistantUserId: data.salesAssistantUserId,
+            dpm: data.dpmName, dpmUserId: data.dpmUserId,
+            bpm: data.bpmName, bpmUserId: data.bpmUserId,
+            mpm: data.mpmName, mpmUserId: data.mpmUserId,
+            epm: data.epmName, epmUserId: data.epmUserId,
           },
           // Step 6
           priorityScore: data.priorityScore,
@@ -130,6 +133,24 @@ export default function WizardModal({ open, onClose }: Props) {
       // P1 報價設定:建案後自動 provision 廠別 / 變異軸 / NRE(單項失敗不擋進 WarRoom)
       const pid = r.project.id
       const warns: string[] = []
+      // Step 3 PM/Team:選了系統帳號的 → 啟動即加入成員(DPM/業務由 create 自動;單筆失敗不擋)
+      const invitees = [
+        { id: data.bpmUserId, role: 'PM', sub: 'BPM', label: 'BPM' },
+        { id: data.mpmUserId, role: 'PM', sub: 'MPM', label: 'MPM' },
+        { id: data.epmUserId, role: 'PM', sub: 'EPM', label: 'EPM' },
+        { id: data.salesAssistantUserId, role: 'sales', sub: null, label: '業務助理' },
+      ]
+      const invitedIds = new Set<number>([data.dpmUserId || 0, data.salesUserId || 0, user?.id || 0])
+      for (const iv of invitees) {
+        if (!iv.id || invitedIds.has(iv.id)) continue
+        invitedIds.add(iv.id)
+        try {
+          await api.post(token, `/projects/${pid}/members`, {
+            user_id: iv.id, role: iv.role, sub_role: iv.sub,
+            invited_by_pm_user_id: data.dpmUserId || undefined,
+          })
+        } catch (e: any) { warns.push(`成員 ${iv.label}:${e.message}`) }
+      }
       for (const tid of selTpl) {
         try { await api.post(token, '/bom/provision-case', { projectId: pid, sourceCaseFactoryId: tid }) }
         catch (e: any) { warns.push(`廠別範本 #${tid}:${e.message}`) }
