@@ -137,7 +137,7 @@ export function Step1Intake({ data, onChange }: StepProps) {
   return (
     <div className="grid grid-cols-[1.5fr_1fr] gap-5">
       <div>
-        <StepBadge>STEP 1 / 7</StepBadge>
+        <StepBadge>STEP 1 / 6</StepBadge>
         <h3 className="text-lg font-bold text-cortex-navy mb-1">客戶信息</h3>
         <p className="text-[11px] text-cortex-muted mb-3">三種來源:手填 / 客戶 RFQ AI 解析 / 標準範本 Excel(最可靠)· 全欄可修改</p>
         <div className="flex items-center gap-2 mb-2 text-[11px]">
@@ -258,6 +258,21 @@ export function Step1Intake({ data, onChange }: StepProps) {
             )
           })}
 
+          {/* 交期合理性紅綠燈(真資料:同客戶案 開案→送審 平均天數) */}
+          {(() => {
+            const c = custList.find((x) => x.name === data.customer)
+            if (!c?.avgCycleDays || !data.dueDate) return null
+            const sanity = computeScheduleSanity(_daysBetween(data.dueDate), c.avgCycleDays)
+            const cls = sanity.light === 'green' ? 'bg-green-50 border-green-300 text-green-800' :
+                        sanity.light === 'amber' ? 'bg-amber-50 border-amber-300 text-amber-800' :
+                                                   'bg-red-50 border-red-300 text-red-700'
+            return (
+              <div className={`border rounded p-2 mb-2 text-[11px] ${cls}`}>
+                {sanity.light === 'green' ? '🟢' : sanity.light === 'amber' ? '🟡' : '🔴'} 交期合理性:{sanity.message}
+                <span className="block text-[9px] opacity-70">歷史平均 = {c.name} 過往 {c.projectCount} 案(開案→送審)實算</span>
+              </div>
+            )
+          })()}
           {/* 重複開案偵測 */}
           {similar.length > 0 && (
             <div className="bg-amber-50 border border-amber-300 rounded p-2 mb-2 text-[11px] text-amber-800">
@@ -353,7 +368,7 @@ export function Step1Intake({ data, onChange }: StepProps) {
 }
 
 // ────────────────────────────────────────────────────────────
-// Step 2 — 歷史參考
+// Step 2 — 歷史參考(2026-08-05 廢除:假資料;真價值遷 Step1 交期紅綠燈 / Step4 PM 推薦 · 保留程式碼供參)
 // ────────────────────────────────────────────────────────────
 const MOCK_HISTORY = [
   { id: 'QT-2025-0212', cust: 'Apple', similar: 95, result: 'WIN',  margin: 'Tier-M', plant: '越南', cycle: 18, pm: 'Mike Wang' },
@@ -512,7 +527,7 @@ export function Step3Confidentiality({ data, onChange }: StepProps) {
   }
   return (
     <div>
-      <StepBadge>STEP 3 / 7</StepBadge>
+      <StepBadge>STEP 2 / 6</StepBadge>
       <h3 className="text-lg font-bold text-cortex-navy mb-1.5">機密設定 · AI 預判機密欄位</h3>
       <div className="text-[11px] text-cortex-muted mb-3.5">基於 Apple 過往機密政策與料號類型,AI 已預勾下列欄位</div>
 
@@ -585,7 +600,7 @@ export function Step4PmTeam({ data, onChange }: StepProps) {
   return (
     <div className="grid grid-cols-[1.4fr_1fr] gap-5">
       <div>
-        <StepBadge>STEP 4 / 7</StepBadge>
+        <StepBadge>STEP 3 / 6</StepBadge>
         <h3 className="text-lg font-bold text-cortex-navy mb-3.5">PM / Team 指派</h3>
 
         {/* HOST 業務 */}
@@ -687,7 +702,7 @@ const QUOTE_STAGES = [
 export function Step5Workflow(_props: StepProps) {
   return (
     <div>
-      <StepBadge>STEP 5 / 7</StepBadge>
+      <StepBadge>STEP 4 / 6</StepBadge>
       <h3 className="text-lg font-bold text-cortex-navy mb-1.5">流程模板 · QUOTE_STANDARD</h3>
       <div className="text-[11px] text-cortex-muted mb-3.5">
         8 stages 對齊 OIBG RFQ flow · AI 自動推算 dependency deadline · 全程約 21 天
@@ -754,7 +769,7 @@ function priorityColor(lvl: number): string {
 export function Step6Priority({ data, onChange }: StepProps) {
   return (
     <div>
-      <StepBadge>STEP 6 / 7</StepBadge>
+      <StepBadge>STEP 5 / 6</StepBadge>
       <h3 className="text-lg font-bold text-cortex-navy mb-1.5">重要 × 緊急 priority_score</h3>
       <div className="text-[11px] text-cortex-muted mb-3.5">
         AI 依客戶等級 + 案值 + 交期建議 score = 6,業務可手動覆寫
@@ -835,7 +850,7 @@ const STARTUP_ACTIONS = [
 export function Step7Confirm({ data }: StepProps) {
   return (
     <div>
-      <StepBadge>STEP 7 / 7</StepBadge>
+      <StepBadge>STEP 6 / 6</StepBadge>
       <h3 className="text-lg font-bold text-cortex-navy mb-3.5">確認與啟動</h3>
 
       <div className="bg-gradient-to-b from-cortex-cyan-bg to-white border border-cortex-cyan rounded-[10px] p-4 mb-3.5">

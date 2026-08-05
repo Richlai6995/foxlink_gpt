@@ -151,23 +151,42 @@ router.get('/customers', asyncHandler(async (req, res) => {
       WHERE project_code <> 'CORTEX-COST-TPL'
       ORDER BY id DESC FETCH FIRST 300 ROWS ONLY`,
   ).all().catch(() => []);
+  // 週期(真資料):開案 → SUBMIT_QUOTE stage DONE 的天數(給 Step1 交期紅綠燈)
+  const cyc = await db.prepare(
+    `SELECT p.id, ROUND(CAST(s.completed_at AS DATE) - CAST(p.created_at AS DATE)) AS days
+       FROM projects p JOIN project_stages s ON s.project_id = p.id
+      WHERE s.stage_code = 'SUBMIT_QUOTE' AND s.status = 'DONE'`,
+  ).all().catch(() => []);
+  const cycleByPid = new Map(cyc.map((r) => [Number(r.id || Object.values(r)[0]), Number(r.days ?? Object.values(r)[1])]));
   const seen = new Map();
   for (const r of rows) {
     let dp = {}; try { dp = JSON.parse(String(r.data_payload || Object.values(r)[2] || '{}')) || {}; } catch (_) { continue; }
     const fc = (dp.form && dp.form.customer) || {};
     const name = fc.cust_name || dp.customer;
-    if (!name || seen.has(name)) continue;
-    seen.set(name, {
-      name,
-      custAlias: fc.cust_alias || dp.customer_alias || null,
-      taxId: fc.tax_id || null,
-      paymentTerms: fc.payment_terms || null,
-      shipAddress: fc.ship_address || null,
-      contactName: fc.contact_name || null,
-      lastProject: r.project_code || Object.values(r)[1],
-    });
+    if (!name) continue;
+    const pid = Number(r.id || Object.values(r)[0]);
+    if (!seen.has(name)) {
+      seen.set(name, {
+        name,
+        custAlias: fc.cust_alias || dp.customer_alias || null,
+        taxId: fc.tax_id || null,
+        paymentTerms: fc.payment_terms || null,
+        shipAddress: fc.ship_address || null,
+        contactName: fc.contact_name || null,
+        lastProject: r.project_code || Object.values(r)[1],
+        projectCount: 0, _cycles: [],
+      });
+    }
+    const c = seen.get(name);
+    c.projectCount += 1;
+    const d = cycleByPid.get(pid);
+    if (Number.isFinite(d) && d >= 0) c._cycles.push(d);
   }
-  res.json({ customers: [...seen.values()] });
+  const customers = [...seen.values()].map((c) => ({
+    ...c, _cycles: undefined,
+    avgCycleDays: c._cycles.length ? Math.round(c._cycles.reduce((a, b) => a + b, 0) / c._cycles.length) : null,
+  }));
+  res.json({ customers });
 }));
 
 // GET /precheck?partNo=&code= — 重複開案偵測(同料號案)+ 專案代碼唯一檢查

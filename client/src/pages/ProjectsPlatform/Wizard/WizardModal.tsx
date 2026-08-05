@@ -23,7 +23,7 @@ import { TOKENS } from '../tokens'
 import WizardStepper from './WizardStepper'
 import { INITIAL_WIZARD, type WizardData, generateProjectCode } from './wizardState'
 import {
-  Step1Intake, Step2History, Step3Confidentiality, Step4PmTeam,
+  Step1Intake, Step3Confidentiality, Step4PmTeam,
   Step5Workflow, Step6Priority, Step7Confirm,
 } from './WizardSteps'
 
@@ -60,11 +60,11 @@ export default function WizardModal({ open, onClose }: Props) {
   const patch = (p: Partial<WizardData>) => setData((d) => ({ ...d, ...p }))
 
   const next = async () => {
-    if (step < 7) {
+    if (step < 6) {
       setStep(step + 1)
       return
     }
-    // Step 7 — 啟動
+    // 最終步 — 啟動
     setSubmitting(true)
     setErr(null)
     try {
@@ -189,10 +189,9 @@ export default function WizardModal({ open, onClose }: Props) {
         {/* Content — flex-1 + min-h-0 讓 overflow-y-auto 真的生效,footer 才不會被擠出 */}
         <div className="flex-1 min-h-0 overflow-y-auto p-5 bg-cortex-bg">
           {step === 1 && <Step1Intake          data={data} onChange={patch} />}
-          {step === 2 && <Step2History         data={data} onChange={patch} />}
-          {step === 3 && <Step3Confidentiality data={data} onChange={patch} />}
-          {step === 4 && <Step4PmTeam          data={data} onChange={patch} />}
-          {step === 5 && (
+          {step === 2 && <Step3Confidentiality data={data} onChange={patch} />}
+          {step === 3 && <Step4PmTeam          data={data} onChange={patch} />}
+          {step === 4 && (
             <>
               <Step5Workflow data={data} onChange={patch} />
               {/* P1 報價設定:廠別成本模型 / 變異軸 / NRE — 建案時自動帶好,免去 BOM 區拼裝 */}
@@ -242,8 +241,8 @@ export default function WizardModal({ open, onClose }: Props) {
               </div>
             </>
           )}
-          {step === 6 && <Step6Priority        data={data} onChange={patch} />}
-          {step === 7 && <Step7Confirm         data={data} onChange={patch} />}
+          {step === 5 && <Step6Priority        data={data} onChange={patch} />}
+          {step === 6 && <Step7Confirm         data={data} onChange={patch} />}
         </div>
 
         {err && (
@@ -261,13 +260,13 @@ export default function WizardModal({ open, onClose }: Props) {
           >
             ← 上一步
           </button>
-          <div className="text-[11px] text-cortex-muted">Step {step} / 7</div>
+          <div className="text-[11px] text-cortex-muted">Step {step} / 6</div>
           <button
             onClick={next}
             disabled={submitting}
             className="px-5 py-2 text-[13px] font-bold rounded-md transition inline-flex items-center gap-1.5 disabled:opacity-50 hover:brightness-110 shadow-cortex-sm"
             style={
-              step === 7
+              step === 6
                 ? { background: `linear-gradient(135deg, ${TOKENS.cyan}, ${TOKENS.teal})`, color: '#fff' }
                 : { background: TOKENS.cyan, color: TOKENS.navy }
             }
@@ -277,7 +276,7 @@ export default function WizardModal({ open, onClose }: Props) {
                 <Loader2 size={14} className="animate-spin" />
                 啟動中…
               </>
-            ) : step === 7 ? (
+            ) : step === 6 ? (
               <>
                 <Rocket size={14} /> ✓ 啟動專案
               </>
