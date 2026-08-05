@@ -962,8 +962,28 @@ export function Step7Confirm({ data }: StepProps) {
           </SummaryRow>
           <SummaryRow label="Multi-PM">
             <span className="text-cortex-ink text-[10px]">
-              DPM {data.dpmName || '—'} · BPM {data.bpmName || '—'} · MPM {data.mpmName || '—'} · EPM {data.epmName || '(待邀)'}
+              DPM {data.dpmName || '(你自己)'} · BPM {data.bpmName || '—'} · MPM {data.mpmName || '—'} · EPM {data.epmName || '—'}
             </span>
+            {(() => {
+              const missing = [
+                !data.bpmName && 'BPM', !data.mpmName && 'MPM', !data.epmName && 'EPM',
+              ].filter(Boolean) as string[]
+              const unlinked = [
+                data.dpmName && data.dpmUserId == null && `DPM「${data.dpmName}」`,
+                data.bpmName && data.bpmUserId == null && `BPM「${data.bpmName}」`,
+                data.mpmName && data.mpmUserId == null && `MPM「${data.mpmName}」`,
+                data.epmName && data.epmUserId == null && `EPM「${data.epmName}」`,
+                data.salesAssistantName && data.salesAssistantUserId == null && `助理「${data.salesAssistantName}」`,
+              ].filter(Boolean) as string[]
+              if (!missing.length && !unlinked.length && data.dpmName) return null
+              return (
+                <div className="mt-1 text-[9px] leading-relaxed">
+                  {!data.dpmName && <div className="text-cortex-muted">ℹ DPM 未指派 → 開案人自任 PM(Stage Gate 由你推進)</div>}
+                  {missing.length > 0 && <div className="text-amber-600">⚠ 未指派:{missing.join(' · ')}(可事後在 WarRoom 邀請)</div>}
+                  {unlinked.length > 0 && <div className="text-amber-600">⚠ 未連結帳號:{unlinked.join(' · ')} — 不會加入成員,僅記名字</div>}
+                </div>
+              )
+            })()}
           </SummaryRow>
           <SummaryRow label="Workflow / 週期">
             <span className="text-cortex-ink">{data.workflowTemplateCode}(8 stages)· {data.estimatedCycleDays} 天</span>

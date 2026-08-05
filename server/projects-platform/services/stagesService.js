@@ -53,12 +53,19 @@ async function advance(db, stageId, user, { notes } = {}) {
     throw new Error(`stage ${stage.stage_code} not active yet`);
   }
 
-  // Gate 權限(只 PM / sales / admin 能 gate)
+  // Gate 權限:主 PM / 業務 / 開案人 / admin;或 members 的 PM(BPM/MPM/EPM)/ sales(業務助理代行)角色
   const isAdmin = user.role === 'admin';
   const isPm = Number(stage.pm_user_id) === Number(user.id);
   const isSales = Number(stage.sales_user_id) === Number(user.id);
   const isCreator = Number(stage.created_by_user_id) === Number(user.id);
+  let isTeamGate = false;
   if (Number(stage.gate_required) === 1 && !isAdmin && !isPm && !isSales && !isCreator) {
+    const m = await db.prepare(
+      `SELECT id FROM project_members WHERE project_id = ? AND user_id = ? AND role IN ('PM', 'sales')`,
+    ).get(stage.project_id, Number(user.id)).catch(() => null);
+    isTeamGate = !!m;
+  }
+  if (Number(stage.gate_required) === 1 && !isAdmin && !isPm && !isSales && !isCreator && !isTeamGate) {
     throw new Error('only PM/sales/admin can advance a gated stage');
   }
 

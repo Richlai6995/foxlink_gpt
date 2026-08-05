@@ -132,6 +132,21 @@ router.post('/', requirePmOrAdmin, asyncHandler(async (req, res) => {
       }
     }
 
+    // ⭐ 通知被加入的人(自邀不通知;失敗不擋加人)
+    if (Number(user_id) !== Number(req.user.id)) {
+      try {
+        const userNotif = require('../../services/userNotificationService');
+        await userNotif.create(db, {
+          userId: Number(user_id),
+          type: 'project_member_added',
+          title: `你被加入專案 ${req.project.project_code}(${sub_role || role})`,
+          message: `${req.user.name || req.user.username} 邀請你加入,角色:${role}${sub_role ? ' / ' + sub_role : ''}`,
+          linkUrl: `/projects-platform/projects/${req.project.id}`,
+          payload: { projectId: req.project.id, role, sub_role: sub_role || null },
+        });
+      } catch (e) { console.warn('[members/invite] notify failed:', e.message); }
+    }
+
     res.status(201).json({ ok: true });
   } catch (e) {
     if (/UNIQUE constraint failed/.test(e.message)) {

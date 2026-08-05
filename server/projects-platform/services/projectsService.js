@@ -133,6 +133,29 @@ async function create(db, input) {
     await _addMember(db, projectId, creator_id, 'observer', creator_id);
   }
 
+  // ⭐ 被指派通知(開案人自己不通知;失敗不擋開案)
+  try {
+    const userNotif = require('../../services/userNotificationService');
+    if (Number(finalPmId) !== Number(creator_id)) {
+      await userNotif.create(db, {
+        userId: Number(finalPmId), type: 'project_pm_assigned',
+        title: `你被指派為 ${project_code} 的 PM(DPM)`,
+        message: `${title || project_code} 開案,你是主 PM,Stage Gate 由你推進`,
+        linkUrl: `/projects-platform/projects/${projectId}`,
+        payload: { projectId },
+      });
+    }
+    if (sales_user_id && Number(sales_user_id) !== Number(creator_id) && Number(sales_user_id) !== Number(finalPmId)) {
+      await userNotif.create(db, {
+        userId: Number(sales_user_id), type: 'project_member_added',
+        title: `你被設為 ${project_code} 的業務(HOST)`,
+        message: `${title || project_code} 開案`,
+        linkUrl: `/projects-platform/projects/${projectId}`,
+        payload: { projectId },
+      });
+    }
+  } catch (e) { console.warn('[projects/create] assign notify failed:', e.message); }
+
   // 6. Auto-create default channels(從 plugin metadata)
   await _createDefaultChannels(db, projectId, plugin, creator_id);
 
