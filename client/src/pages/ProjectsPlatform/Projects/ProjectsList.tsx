@@ -52,7 +52,11 @@ export default function ProjectsList() {
     setErr(null)
     try {
       const r = await api.get<{ projects: Project[] }>(token, '/projects?limit=200')
-      setProjects(r.projects || [])
+      // priority_score 高的置頂(Wizard 系統評/手動);同分維持 API 序(新案在前)
+      const sorted = (r.projects || []).slice().sort(
+        (a: any, b: any) => (Number(b.priority_score) || 0) - (Number(a.priority_score) || 0),
+      )
+      setProjects(sorted)
       // 並行批次拉 status summary(列表行下用 — ⭐ Status SUMMARY 三處之二)
       const ids = (r.projects || []).map((p) => p.id)
       if (ids.length > 0) {

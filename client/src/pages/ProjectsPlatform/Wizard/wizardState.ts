@@ -71,8 +71,9 @@ export type WizardData = {
 
   // Step 5 — 模板就是 step 2 選的 workflowTemplateCode
 
-  // Step 6
+  // 優先序(路線一:獨立步已砍 — 系統建議自動採用,確認頁可微調)
   priorityScore: number  // 1-6 by matrix
+  priorityTouched: boolean  // user 在確認頁手動調過 → 不再被系統建議覆蓋
 
   // Step 7 — 系統 generate
   generatedProjectCode: string
@@ -126,8 +127,9 @@ export const INITIAL_WIZARD: WizardData = {
   epmName: '',
   epmUserId: null,
 
-  // Step 6
+  // 優先序(自動 = 系統建議;手動調過才固定)
   priorityScore: 6,
+  priorityTouched: false,
 
   // Step 7
   generatedProjectCode: '',

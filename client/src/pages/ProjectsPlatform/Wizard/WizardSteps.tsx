@@ -140,7 +140,7 @@ export function Step1Intake({ data, onChange }: StepProps) {
   return (
     <div className="grid grid-cols-[1.5fr_1fr] gap-5">
       <div>
-        <StepBadge>STEP 1 / 6</StepBadge>
+        <StepBadge>STEP 1 / 5</StepBadge>
         <h3 className="text-lg font-bold text-cortex-navy mb-1">客戶信息</h3>
         <p className="text-[11px] text-cortex-muted mb-3">三種來源:手填 / 客戶 RFQ AI 解析 / 標準範本 Excel(最可靠)· 全欄可修改</p>
         <div className="flex items-center gap-2 mb-2 text-[11px]">
@@ -530,7 +530,7 @@ export function Step3Confidentiality({ data, onChange }: StepProps) {
   }
   return (
     <div>
-      <StepBadge>STEP 2 / 6</StepBadge>
+      <StepBadge>STEP 2 / 5</StepBadge>
       <h3 className="text-lg font-bold text-cortex-navy mb-1.5">機密設定</h3>
       <div className="text-[11px] text-cortex-muted mb-3.5">一般案保持關閉直接下一步;機密案打開開關並勾選要遮罩的欄位(非成員依策略看 遮蔽/代號/區間)</div>
 
@@ -674,7 +674,7 @@ export function Step4PmTeam({ data, onChange }: StepProps) {
   return (
     <div className="grid grid-cols-[1.4fr_1fr] gap-5">
       <div>
-        <StepBadge>STEP 3 / 6</StepBadge>
+        <StepBadge>STEP 3 / 5</StepBadge>
         <h3 className="text-lg font-bold text-cortex-navy mb-3.5">PM / Team 指派</h3>
 
         {/* HOST 業務 */}
@@ -813,7 +813,7 @@ export function Step5Workflow({ data, onChange }: StepProps) {
   const totalSlaH = tplStages.reduce((a, s) => a + (s.slaHours || 0), 0)
   return (
     <div>
-      <StepBadge>STEP 4 / 6</StepBadge>
+      <StepBadge>STEP 4 / 5</StepBadge>
       <h3 className="text-lg font-bold text-cortex-navy mb-1.5">流程模板 · {tpl?.code || 'QUOTE_DEFAULT'}</h3>
       <div className="text-[11px] text-cortex-muted mb-3.5">
         {tpl?.name || 'QUOTE 預設流程'} · {tplStages.length || 8} stages(真實範本 — 啟動時以同一份自動建立)· ⚖ GATE = 需 PM / 業務推進
@@ -881,8 +881,9 @@ function priorityColor(lvl: number): string {
   return 'bg-cortex-line-2 border-cortex-line text-cortex-muted'
 }
 
-export function Step6Priority({ data, onChange }: StepProps) {
-  // 系統建議(規則透明,非黑箱):緊急 = 交期壓力(對客戶真實歷史週期);重要 = 年量檻 + 老客戶加權
+// 系統建議 priority(規則透明):緊急 = 交期壓力(客戶真實歷史週期);重要 = 年量檻 + 老客戶加權
+// 路線一(2026-08-06):獨立步已砍 — 建議值自動採用,確認頁可微調
+export function computePrioritySuggestion(data: WizardData) {
   const qty = Number(String(data.quantity || '').replace(/[^\d]/g, '')) || 0
   const dueDays = _daysBetween(data.dueDate)
   const sanity = data.dueDate && data.custAvgCycleDays ? computeScheduleSanity(dueDays, data.custAvgCycleDays) : null
@@ -890,7 +891,12 @@ export function Step6Priority({ data, onChange }: StepProps) {
   const impRowRaw = qty >= 500000 ? 0 : qty >= 100000 ? 1 : 2
   const oldCust = (data.custProjectCount || 0) >= 3
   const impRow = oldCust && impRowRaw > 0 ? impRowRaw - 1 : impRowRaw
-  const sugg = PRIORITY_MATRIX[impRow][urgCol].score
+  return { score: PRIORITY_MATRIX[impRow][urgCol].score, impRow, urgCol, impRowRaw, oldCust, sanity, qty }
+}
+
+// (2026-08-06 廢除:獨立「重要緊急」步 — 路線一併入確認頁;保留程式碼供參,未掛載)
+export function Step6Priority({ data, onChange }: StepProps) {
+  const { score: sugg, impRow, urgCol, impRowRaw, oldCust, sanity, qty } = computePrioritySuggestion(data)
   return (
     <div>
       <StepBadge>STEP 5 / 6</StepBadge>
@@ -985,10 +991,16 @@ const STARTUP_ACTIONS = [
   { Icon: Clock,         t: '啟動 SLA 倒數',               d: 'Stage 1 SLA 4h 開始計時 · escalation chain ready' },
 ]
 
-export function Step7Confirm({ data }: StepProps) {
+export function Step7Confirm({ data, onChange }: StepProps) {
+  const [showAdj, setShowAdj] = useState(false)
+  const sugg = computePrioritySuggestion(data)
+  // 路線一:未手動調過 → priority 自動跟隨系統建議(交期/年量/客戶變了會重算)
+  useEffect(() => {
+    if (!data.priorityTouched && data.priorityScore !== sugg.score) onChange({ priorityScore: sugg.score })
+  }, [sugg.score, data.priorityTouched])
   return (
     <div>
-      <StepBadge>STEP 6 / 6</StepBadge>
+      <StepBadge>STEP 5 / 5</StepBadge>
       <h3 className="text-lg font-bold text-cortex-navy mb-3.5">確認與啟動</h3>
 
       <div className="bg-gradient-to-b from-cortex-cyan-bg to-white border border-cortex-cyan rounded-[10px] p-4 mb-3.5">
@@ -1036,8 +1048,34 @@ export function Step7Confirm({ data }: StepProps) {
           <SummaryRow label="機密 / 優先序">
             <span className="text-cortex-ink">
               {data.isConfidential ? '🔒 ON · ' : ''}
-              {Object.values(data.confidentialFields).filter(f => f.enabled).length} 欄位加密 · score 🟠 {data.priorityScore}
+              {Object.values(data.confidentialFields).filter(f => f.enabled).length} 欄位加密 · P{data.priorityScore}
+              <span className="text-[10px] text-cortex-muted ml-1">
+                {data.priorityTouched
+                  ? '(手動)'
+                  : `(${['高重', '中重', '低重'][sugg.impRow]} × ${['低急', '中急', '高急'][sugg.urgCol]} · 系統評)`}
+              </span>
+              <button onClick={() => setShowAdj(!showAdj)} className="ml-1.5 text-[10px] text-cortex-teal underline hover:text-cortex-navy">調整</button>
             </span>
+            {showAdj && (
+              <div className="mt-1.5">
+                <div className="text-[9px] text-cortex-muted mb-1">列=重要(高→低)· 欄=緊急(低→高);系統評:交期壓力 × 年量 × 客戶案數</div>
+                <div className="inline-grid grid-cols-3 gap-1">
+                  {PRIORITY_MATRIX.flatMap((row, ri) => row.map((cell, ci) => (
+                    <button
+                      key={`adj-${ri}-${ci}`}
+                      onClick={() => onChange({ priorityScore: cell.score, priorityTouched: true })}
+                      className={`w-8 h-8 rounded border text-[11px] font-bold font-mono transition ${
+                        data.priorityScore === cell.score
+                          ? 'bg-cortex-navy text-white border-cortex-navy'
+                          : priorityColor(cell.lvl) + ' hover:scale-105'
+                      } ${ri === sugg.impRow && ci === sugg.urgCol ? 'outline-dashed outline-1 outline-cortex-teal outline-offset-1' : ''}`}
+                    >
+                      {cell.score}
+                    </button>
+                  )))}
+                </div>
+              </div>
+            )}
           </SummaryRow>
         </div>
       </div>

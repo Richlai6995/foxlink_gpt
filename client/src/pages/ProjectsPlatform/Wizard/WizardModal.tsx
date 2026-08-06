@@ -24,7 +24,7 @@ import WizardStepper from './WizardStepper'
 import { INITIAL_WIZARD, type WizardData, generateProjectCode } from './wizardState'
 import {
   Step1Intake, Step3Confidentiality, Step4PmTeam,
-  Step5Workflow, Step6Priority, Step7Confirm,
+  Step5Workflow, Step7Confirm,
 } from './WizardSteps'
 
 type Props = {
@@ -61,7 +61,7 @@ export default function WizardModal({ open, onClose }: Props) {
   const patch = (p: Partial<WizardData>) => setData((d) => ({ ...d, ...p }))
 
   const next = async () => {
-    if (step < 6) {
+    if (step < 5) {
       setStep(step + 1)
       return
     }
@@ -263,8 +263,7 @@ export default function WizardModal({ open, onClose }: Props) {
               </div>
             </>
           )}
-          {step === 5 && <Step6Priority        data={data} onChange={patch} />}
-          {step === 6 && <Step7Confirm         data={data} onChange={patch} />}
+          {step === 5 && <Step7Confirm         data={data} onChange={patch} />}
         </div>
 
         {err && (
@@ -282,13 +281,13 @@ export default function WizardModal({ open, onClose }: Props) {
           >
             ← 上一步
           </button>
-          <div className="text-[11px] text-cortex-muted">Step {step} / 6</div>
+          <div className="text-[11px] text-cortex-muted">Step {step} / 5</div>
           <button
             onClick={next}
             disabled={submitting}
             className="px-5 py-2 text-[13px] font-bold rounded-md transition inline-flex items-center gap-1.5 disabled:opacity-50 hover:brightness-110 shadow-cortex-sm"
             style={
-              step === 6
+              step === 5
                 ? { background: `linear-gradient(135deg, ${TOKENS.cyan}, ${TOKENS.teal})`, color: '#fff' }
                 : { background: TOKENS.cyan, color: TOKENS.navy }
             }
@@ -298,7 +297,7 @@ export default function WizardModal({ open, onClose }: Props) {
                 <Loader2 size={14} className="animate-spin" />
                 啟動中…
               </>
-            ) : step === 6 ? (
+            ) : step === 5 ? (
               <>
                 <Rocket size={14} /> ✓ 啟動專案
               </>

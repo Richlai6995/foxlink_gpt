@@ -11,8 +11,7 @@ const STEPS = [
   { num: 2, label: '機密設定' },
   { num: 3, label: 'PM/Team' },
   { num: 4, label: '報價設定' },
-  { num: 5, label: '重要緊急' },
-  { num: 6, label: '確認啟動' },
+  { num: 5, label: '確認啟動' },
 ] as const
 
 type Props = {
