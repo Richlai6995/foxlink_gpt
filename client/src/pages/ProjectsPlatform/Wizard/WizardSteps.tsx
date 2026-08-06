@@ -53,6 +53,7 @@ export function Step1Intake({ data, onChange }: StepProps) {
       paymentTerms: c.paymentTerms || '', shipAddress: c.shipAddress || '', contactName: c.contactName || '',
       recommendedPmName: c.lastPmName || '', recommendedPmUserId: c.lastPmUserId || null,
       custAvgCycleDays: c.avgCycleDays ?? null,
+      custProjectCount: c.projectCount ?? null,
     } as any)
   }
   const handleTemplate = async (file: File) => {
@@ -881,12 +882,29 @@ function priorityColor(lvl: number): string {
 }
 
 export function Step6Priority({ data, onChange }: StepProps) {
+  // 系統建議(規則透明,非黑箱):緊急 = 交期壓力(對客戶真實歷史週期);重要 = 年量檻 + 老客戶加權
+  const qty = Number(String(data.quantity || '').replace(/[^\d]/g, '')) || 0
+  const dueDays = _daysBetween(data.dueDate)
+  const sanity = data.dueDate && data.custAvgCycleDays ? computeScheduleSanity(dueDays, data.custAvgCycleDays) : null
+  const urgCol = sanity ? (sanity.light === 'red' ? 2 : sanity.light === 'amber' ? 1 : 0) : 1
+  const impRowRaw = qty >= 500000 ? 0 : qty >= 100000 ? 1 : 2
+  const oldCust = (data.custProjectCount || 0) >= 3
+  const impRow = oldCust && impRowRaw > 0 ? impRowRaw - 1 : impRowRaw
+  const sugg = PRIORITY_MATRIX[impRow][urgCol].score
   return (
     <div>
       <StepBadge>STEP 5 / 6</StepBadge>
       <h3 className="text-lg font-bold text-cortex-navy mb-1.5">重要 × 緊急 priority_score</h3>
       <div className="text-[11px] text-cortex-muted mb-3.5">
-        AI 依客戶等級 + 案值 + 交期建議 score = 6,業務可手動覆寫
+        系統依 交期壓力(真歷史週期)+ 年量 + 客戶過往案數 建議 score = {sugg},可點任意格手動覆寫
+        {data.priorityScore !== sugg && (
+          <button
+            onClick={() => onChange({ priorityScore: sugg })}
+            className="ml-2 text-[10px] bg-cortex-cyan-bg text-cortex-teal px-1.5 py-0.5 rounded font-bold hover:bg-cortex-teal hover:text-white transition"
+          >
+            套用建議 {sugg}
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-[1.5fr_1fr] gap-5">
@@ -903,17 +921,20 @@ export function Step6Priority({ data, onChange }: StepProps) {
                 </div>
                 {row.map((cell, ci) => {
                   const selected = data.priorityScore === cell.score
+                  const isSugg = ri === impRow && ci === urgCol
                   return (
                     <button
                       key={`${ri}-${ci}`}
                       onClick={() => onChange({ priorityScore: cell.score })}
-                      className={`w-14 h-14 rounded-md border-2 text-[18px] font-extrabold font-mono transition ${
+                      title={isSugg ? '系統建議' : undefined}
+                      className={`relative w-14 h-14 rounded-md border-2 text-[18px] font-extrabold font-mono transition ${
                         selected
                           ? 'border-cortex-navy ring-2 ring-cortex-cyan bg-cortex-navy text-white scale-105'
                           : priorityColor(cell.lvl) + ' hover:scale-105'
-                      }`}
+                      } ${isSugg && !selected ? 'outline-dashed outline-2 outline-cortex-teal outline-offset-2' : ''}`}
                     >
                       {cell.score}
+                      {isSugg && <span className="absolute -top-2 -right-2 text-[8px] bg-cortex-teal text-white px-1 py-px rounded font-bold">建議</span>}
                     </button>
                   )
                 })}
@@ -927,21 +948,24 @@ export function Step6Priority({ data, onChange }: StepProps) {
 
         <div className="bg-white border border-cortex-line rounded-lg p-3.5">
           <div className="text-[10px] font-bold text-cortex-cyan tracking-wide mb-2.5">
-            <Sparkles size={10} className="inline -mt-px mr-1" /> AI 推薦理由
+            <Sparkles size={10} className="inline -mt-px mr-1" /> 系統建議理由(規則透明)
           </div>
           <div className="text-[11px] text-cortex-text leading-relaxed mb-3">
-            • 客戶 {data.customer} = Tier-1 戰略客戶<br />
-            • 案值 ~$1.2M USD = 高重要<br />
-            • 交期 60 天 ≈ 歷史平均 = 高急<br />
-            <strong className="text-cortex-red">→ score 6(高重 × 高急)</strong>
+            • 緊急:{sanity
+              ? `${sanity.message} → ${['低急', '中急', '高急'][urgCol]}`
+              : '未填交期或客戶無歷史週期 → 預設中急'}<br />
+            • 重要:年量 {qty ? `${qty.toLocaleString()} pcs` : '未填'}(≥50 萬高重 / ≥10 萬中重)→ {['高重', '中重', '低重'][impRowRaw]}<br />
+            • 客戶:{data.customer || '—'} 過往 {data.custProjectCount ?? 0} 案{oldCust ? ' ≥3 → 重要度升一級' : '(<3 案不加權)'}<br />
+            <strong className="text-cortex-red">→ 建議 score {sugg}({['高重', '中重', '低重'][impRow]} × {['低急', '中急', '高急'][urgCol]})</strong>
+            {data.priorityScore !== sugg && <span className="text-[10px] text-cortex-muted">;目前手動選 {data.priorityScore}</span>}
           </div>
 
           <div className="border-t border-dashed border-cortex-line pt-2.5">
-            <div className="text-[10px] font-bold text-cortex-muted mb-1.5">score ≥ 6 的影響</div>
+            <div className="text-[10px] font-bold text-cortex-muted mb-1.5">score 的實際作用</div>
             <div className="text-[10px] text-cortex-text leading-relaxed">
-              • 自動進主管 Watchlist<br />
-              • Escalation chain trigger 縮短<br />
-              • Bot 主動提醒頻率增加
+              • 寫入 projects.priority_score + importance / urgency<br />
+              • 專案列表卡片顯示 P{'{score}'} 優先徽章<br />
+              • score ≥ 5 → importance / urgency = HIGH
             </div>
           </div>
         </div>

@@ -63,6 +63,7 @@ async function create(db, input) {
     creator_id,
     pm_user_id,
     sales_user_id,
+    priority_score,
     data_payload,
     importance = 'NORMAL',
     urgency = 'NORMAL',
@@ -103,9 +104,9 @@ async function create(db, input) {
        is_confidential, confidential_fields,
        sales_user_id, pm_user_id, bu_id,
        lifecycle_status, status,
-       importance, urgency,
+       importance, urgency, priority_score,
        created_by_user_id
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', 'DRAFT', ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', 'DRAFT', ?, ?, ?, ?)`,
   ).run(
     project_code,
     Number(typeRow.id),
@@ -118,6 +119,7 @@ async function create(db, input) {
     bu_id,
     importance,
     urgency,
+    priority_score != null ? Number(priority_score) : null,
     creator_id,
   );
 

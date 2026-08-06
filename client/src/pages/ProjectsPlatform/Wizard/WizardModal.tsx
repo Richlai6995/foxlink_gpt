@@ -82,6 +82,7 @@ export default function WizardModal({ open, onClose }: Props) {
         bu_id: 1,
         importance: data.priorityScore >= 5 ? 'HIGH' : data.priorityScore >= 3 ? 'NORMAL' : 'LOW',
         urgency: data.priorityScore >= 5 ? 'HIGH' : data.priorityScore >= 3 ? 'NORMAL' : 'LOW',
+        priority_score: data.priorityScore,
         data_payload: {
           title: `${data.customer} · ${data.partNo}`,
           customer: data.customer,
