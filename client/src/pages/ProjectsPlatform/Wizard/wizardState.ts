@@ -46,8 +46,8 @@ export type WizardData = {
   selectedHistoryId: string | null
   recommendedPmName: string
   recommendedPmUserId: number | null
-  workflowTemplateCode: string  // QUOTE_DEFAULT or QUOTE_STANDARD
-  estimatedCycleDays: number
+  workflowTemplateCode: string  // 真範本 code(Step4 載入時回填,啟動 create 同源)
+  custAvgCycleDays: number | null  // 此客戶歷史平均 開案→送審 天數(Step1 選老客戶帶入;真資料)
   scheduleSanity: 'green' | 'amber' | 'red'
 
   // Step 3
@@ -96,7 +96,7 @@ export const INITIAL_WIZARD: WizardData = {
   recommendedPmName: '',
   recommendedPmUserId: null,
   workflowTemplateCode: 'QUOTE_DEFAULT',
-  estimatedCycleDays: 21,
+  custAvgCycleDays: null,
   scheduleSanity: 'green',
 
   // Step 3

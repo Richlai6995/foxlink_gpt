@@ -52,6 +52,7 @@ export function Step1Intake({ data, onChange }: StepProps) {
       customer: c.name, custAlias: c.custAlias || '', taxId: c.taxId || '',
       paymentTerms: c.paymentTerms || '', shipAddress: c.shipAddress || '', contactName: c.contactName || '',
       recommendedPmName: c.lastPmName || '', recommendedPmUserId: c.lastPmUserId || null,
+      custAvgCycleDays: c.avgCycleDays ?? null,
     } as any)
   }
   const handleTemplate = async (file: File) => {
@@ -408,9 +409,9 @@ function _daysBetween(dateStr: string): number {
 }
 
 export function Step2History({ data, onChange }: StepProps) {
-  // AI #32 真算 — 用 dueDate 跟 estimatedCycleDays
+  // AI #32 真算 — 用 dueDate 跟客戶歷史週期(元件已廢棄未掛載,僅保編譯)
   const customerDueDays = _daysBetween(data.dueDate)
-  const sanity = computeScheduleSanity(customerDueDays, data.estimatedCycleDays)
+  const sanity = computeScheduleSanity(customerDueDays, data.custAvgCycleDays ?? 21)
   return (
     <div className="grid grid-cols-[1.6fr_1fr] gap-5">
       <div>
@@ -477,7 +478,7 @@ export function Step2History({ data, onChange }: StepProps) {
 
         <div className="bg-cortex-bg p-2.5 rounded mb-3">
           <div className="text-[10px] font-bold text-cortex-muted mb-1">預估完成週期</div>
-          <div className="text-[18px] font-extrabold text-cortex-ink font-mono">{data.estimatedCycleDays} 天</div>
+          <div className="text-[18px] font-extrabold text-cortex-ink font-mono">{data.custAvgCycleDays ?? '—'} 天</div>
         </div>
 
         <div
@@ -784,44 +785,59 @@ export function Step4PmTeam({ data, onChange }: StepProps) {
 // ────────────────────────────────────────────────────────────
 // Step 5 — 流程模板
 // ────────────────────────────────────────────────────────────
-const QUOTE_STAGES = [
-  { num: 1, name: 'Receive RFQ',         sla: '4h',       who: '業務 → DPM',     gate: true,  parallel: false },
-  { num: 2, name: 'Q&A Collect',         sla: '24h',      who: 'DPM + Team',     gate: false, parallel: false },
-  { num: 3, name: 'Q&A Feedback',        sla: '8h',       who: 'BPM 對客戶',     gate: false, parallel: false },
-  { num: 4, name: 'BOM 提供',            sla: '24-72h',   who: 'EE + ME',        gate: false, parallel: false },
-  { num: 5, name: '並行 Collect',         sla: 'parallel', who: 'MPM + DPM 同時', gate: false, parallel: true },
-  { num: 6, name: 'BOM Cost Review',     sla: '8h',       who: '集合會議',       gate: true,  parallel: false },
-  { num: 7, name: 'RFQ Cost Review',     sla: '16h',      who: '算毛利',         gate: true,  parallel: false },
-  { num: 8, name: 'Submit Final Quote',  sla: '4h',       who: 'BPM 發',         gate: true,  parallel: false },
-]
+// stage_code → 顯示名 / 負責角色中文(資料本體來自 GET /wizard/workflow-template,與啟動建 stages 同源)
+const STAGE_NAME_ZH: Record<string, string> = {
+  RECEIVE_RFQ: '接收 RFQ', Q_AND_A_COLLECT: 'Q&A 收集', Q_AND_A_FEEDBACK: 'Q&A 回覆客戶',
+  BOM_PROVIDE: 'BOM 提供', PARALLEL_COLLECT: '並行收集', BOM_COST_REVIEW: 'BOM Cost Review',
+  RFQ_COST_REVIEW: 'RFQ Cost Review', SUBMIT_QUOTE: '送出報價',
+}
+const STAGE_WHO_ZH: Record<string, string> = {
+  sales: '業務', DPM: 'DPM', BPM: 'BPM', MPM: 'MPM', EPM: 'EPM',
+  engineering: 'EE + ME', ANY: 'MPM + DPM 並行',
+}
 
-export function Step5Workflow(_props: StepProps) {
+export function Step5Workflow({ data, onChange }: StepProps) {
+  const { token } = useAuth() as any
+  const [tpl, setTpl] = useState<{ code: string; name: string | null } | null>(null)
+  const [tplStages, setTplStages] = useState<any[]>([])
+  useEffect(() => {
+    fetch('/api/projects/wizard/workflow-template?type=QUOTE', { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.template) { setTpl(d.template); onChange({ workflowTemplateCode: d.template.code }) }
+        setTplStages(d.stages || [])
+      })
+      .catch(() => {})
+  }, [])
+  const totalSlaH = tplStages.reduce((a, s) => a + (s.slaHours || 0), 0)
   return (
     <div>
       <StepBadge>STEP 4 / 6</StepBadge>
-      <h3 className="text-lg font-bold text-cortex-navy mb-1.5">流程模板 · QUOTE_STANDARD</h3>
+      <h3 className="text-lg font-bold text-cortex-navy mb-1.5">流程模板 · {tpl?.code || 'QUOTE_DEFAULT'}</h3>
       <div className="text-[11px] text-cortex-muted mb-3.5">
-        8 stages 對齊 OIBG RFQ flow · AI 自動推算 dependency deadline · 全程約 21 天
+        {tpl?.name || 'QUOTE 預設流程'} · {tplStages.length || 8} stages(真實範本 — 啟動時以同一份自動建立)· ⚖ GATE = 需 PM / 業務推進
       </div>
 
       <div className="grid grid-cols-4 gap-2.5">
-        {QUOTE_STAGES.map((st) => {
-          const accent = st.gate ? 'border-cortex-amber bg-cortex-amber-bg' : st.parallel ? 'border-cortex-cyan bg-cortex-cyan-bg' : 'border-cortex-teal bg-white'
-          const stageBadgeColor = st.gate ? 'bg-cortex-amber' : st.parallel ? 'bg-cortex-cyan' : 'bg-cortex-teal'
+        {tplStages.length === 0 && <div className="col-span-4 text-[11px] text-cortex-muted py-4 text-center">載入流程範本中…</div>}
+        {tplStages.map((st) => {
+          const parallel = st.code === 'PARALLEL_COLLECT'
+          const accent = st.gate ? 'border-cortex-amber bg-cortex-amber-bg' : parallel ? 'border-cortex-cyan bg-cortex-cyan-bg' : 'border-cortex-teal bg-white'
+          const stageBadgeColor = st.gate ? 'bg-cortex-amber' : parallel ? 'bg-cortex-cyan' : 'bg-cortex-teal'
           return (
-            <div key={st.num} className={`border rounded-md p-2.5 ${accent}`}>
+            <div key={st.code} className={`border rounded-md p-2.5 ${accent}`}>
               <div className="flex items-center justify-between mb-1.5">
                 <span className={`font-mono text-[9px] font-bold text-white px-1.5 py-0.5 rounded ${stageBadgeColor}`}>
-                  STAGE {st.num}
+                  STAGE {st.order}
                 </span>
                 {st.gate && <span className="text-[9px] text-amber-900 font-bold">⚖ GATE</span>}
-                {st.parallel && <span className="text-[9px] text-cortex-teal font-bold">⚡ 並行</span>}
+                {parallel && <span className="text-[9px] text-cortex-teal font-bold">⚡ 並行</span>}
               </div>
-              <div className="text-[11px] font-bold text-cortex-navy mb-0.5 leading-tight">{st.name}</div>
-              <div className={`text-[10px] font-mono font-bold ${st.gate ? 'text-amber-700' : st.parallel ? 'text-cortex-teal' : 'text-cortex-teal'}`}>
-                {st.sla}
+              <div className="text-[11px] font-bold text-cortex-navy mb-0.5 leading-tight">{STAGE_NAME_ZH[st.code] || st.code}</div>
+              <div className={`text-[10px] font-mono font-bold ${st.gate ? 'text-amber-700' : 'text-cortex-teal'}`}>
+                {st.slaHours != null ? `${st.slaHours}h` : '—'}
               </div>
-              <div className="text-[9px] text-cortex-muted mt-0.5">{st.who}</div>
+              <div className="text-[9px] text-cortex-muted mt-0.5">{STAGE_WHO_ZH[st.role] || st.role || '—'}</div>
             </div>
           )
         })}
@@ -829,14 +845,16 @@ export function Step5Workflow(_props: StepProps) {
 
       <div className="bg-gradient-to-br from-cortex-navy to-cortex-teal text-white rounded-lg px-4 py-3 mt-3.5">
         <div className="text-[10px] font-bold text-cortex-cyan tracking-wide mb-1.5">
-          <Sparkles size={10} className="inline -mt-px mr-1" /> AI 自動算 Dependency Deadlines
+          <Clock size={10} className="inline -mt-px mr-1" /> 週期參考(真實資料)
         </div>
-        <div className="text-[11px] text-cortex-cyan-bg leading-relaxed font-mono space-y-0.5">
-          <div>• Schedule update (DPM, QA response+1day)</div>
-          <div>• RET Plan and Cost (RET, QA response+3days)</div>
-          <div>• EE BOM cost (採購, EE BOM+3days)</div>
-          <div>• Internal BOM review (DPM, EE BOM Cost+1day)</div>
-          <div>• Cleansheet send to VP (MPM, EE BOM Cost+1day)</div>
+        <div className="text-[11px] text-cortex-cyan-bg leading-relaxed space-y-0.5">
+          <div>• SLA 節點合計:{totalSlaH ? `${totalSlaH}h ≈ ${(totalSlaH / 24).toFixed(1)} 天(純作業工時,不含等待)` : '載入中…'}</div>
+          <div>
+            • 此客戶歷史週期:{data.custAvgCycleDays
+              ? `開案 → 送出報價 平均 ${data.custAvgCycleDays} 天(${data.customer} 過往案實算)`
+              : '無(新客戶或尚無完成案)— Step 1 選老客戶後自動帶入'}
+          </div>
+          <div>• Gate 節點(⚖)推進需 DPM / 業務 / 助理 / BPM·MPM·EPM 成員;逾 SLA 會在 WarRoom 標紅提醒</div>
         </div>
       </div>
     </div>
@@ -986,7 +1004,10 @@ export function Step7Confirm({ data }: StepProps) {
             })()}
           </SummaryRow>
           <SummaryRow label="Workflow / 週期">
-            <span className="text-cortex-ink">{data.workflowTemplateCode}(8 stages)· {data.estimatedCycleDays} 天</span>
+            <span className="text-cortex-ink">
+              {data.workflowTemplateCode}
+              {data.custAvgCycleDays ? ` · 此客戶歷史平均 ${data.custAvgCycleDays} 天` : ''}
+            </span>
           </SummaryRow>
           <SummaryRow label="機密 / 優先序">
             <span className="text-cortex-ink">

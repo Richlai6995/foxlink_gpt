@@ -239,6 +239,35 @@ router.get('/users', asyncHandler(async (req, res) => {
   });
 }));
 
+// GET /workflow-template?type=QUOTE — Step4 顯示真流程範本(啟動時 create 會用同一份建 stages)
+router.get('/workflow-template', asyncHandler(async (req, res) => {
+  const db = require('../../database-oracle').db;
+  const typeCode = String(req.query.type || 'QUOTE');
+  const t = await db.prepare(
+    `SELECT wt.id, wt.code, wt.name_i18n
+       FROM workflow_templates wt
+       JOIN project_types pt ON pt.default_workflow_template_id = wt.id
+      WHERE pt.type_code = ?`,
+  ).get(typeCode).catch(() => null);
+  if (!t) return res.json({ template: null, stages: [] });
+  const rows = await db.prepare(
+    `SELECT stage_code, stage_order, sla_hours, required_role, gate_required
+       FROM workflow_template_stages WHERE template_id = ? ORDER BY stage_order`,
+  ).all(Number(t.id ?? Object.values(t)[0])).catch(() => []);
+  let name = null;
+  try { name = JSON.parse(String(t.name_i18n ?? Object.values(t)[2] ?? '{}'))['zh-TW'] || null; } catch (_) { /* noop */ }
+  res.json({
+    template: { id: Number(t.id ?? Object.values(t)[0]), code: t.code ?? Object.values(t)[1], name },
+    stages: rows.map((s) => ({
+      code: s.stage_code ?? Object.values(s)[0],
+      order: Number(s.stage_order ?? Object.values(s)[1]),
+      slaHours: (s.sla_hours ?? Object.values(s)[2]) != null ? Number(s.sla_hours ?? Object.values(s)[2]) : null,
+      role: s.required_role ?? Object.values(s)[3] ?? null,
+      gate: Number(s.gate_required ?? Object.values(s)[4]) === 1,
+    })),
+  });
+}));
+
 // GET /precheck?partNo=&code= — 重複開案偵測(同料號案)+ 專案代碼唯一檢查
 router.get('/precheck', asyncHandler(async (req, res) => {
   const db = require('../../database-oracle').db;

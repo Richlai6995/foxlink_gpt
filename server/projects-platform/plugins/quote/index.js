@@ -58,13 +58,13 @@ module.exports = {
 
   // Workflow stages(對齊 §18.1.5 8 stages)
   default_workflow_stages: [
-    { code: 'RECEIVE_RFQ',     order: 1, sla_hours: 4,  required_role: 'sales' },
+    { code: 'RECEIVE_RFQ',     order: 1, sla_hours: 4,  required_role: 'sales', gate_required: 1 },
     { code: 'Q_AND_A_COLLECT', order: 2, sla_hours: 24, required_role: 'DPM' },
     { code: 'Q_AND_A_FEEDBACK',order: 3, sla_hours: 8,  required_role: 'BPM' },
     { code: 'BOM_PROVIDE',     order: 4, sla_hours: 72, required_role: 'engineering' },
     { code: 'PARALLEL_COLLECT',order: 5, sla_hours: 48, required_role: 'ANY' },
-    { code: 'BOM_COST_REVIEW', order: 6, sla_hours: 8,  required_role: 'DPM' },
-    { code: 'RFQ_COST_REVIEW', order: 7, sla_hours: 16, required_role: 'DPM' },
-    { code: 'SUBMIT_QUOTE',    order: 8, sla_hours: 4,  required_role: 'BPM' },
+    { code: 'BOM_COST_REVIEW', order: 6, sla_hours: 8,  required_role: 'DPM', gate_required: 1 },
+    { code: 'RFQ_COST_REVIEW', order: 7, sla_hours: 16, required_role: 'DPM', gate_required: 1 },
+    { code: 'SUBMIT_QUOTE',    order: 8, sla_hours: 4,  required_role: 'BPM', gate_required: 1 },
   ],
 };
