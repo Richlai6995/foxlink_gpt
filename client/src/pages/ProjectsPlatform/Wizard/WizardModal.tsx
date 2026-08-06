@@ -192,7 +192,7 @@ export default function WizardModal({ open, onClose }: Props) {
         >
           <div className="flex items-center gap-2">
             <Rocket size={16} className="text-cortex-cyan" />
-            <span className="font-bold text-[15px]">⭐ 開案 Wizard · 6 步驟</span>
+            <span className="font-bold text-[15px]">⭐ 開案 Wizard · 5 步驟</span>
             <span className="text-[10px] font-bold tracking-widest text-cortex-cyan bg-cortex-cyan/10 px-2 py-0.5 rounded">
               30min → 5min
             </span>
