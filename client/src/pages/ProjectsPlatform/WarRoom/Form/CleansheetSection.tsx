@@ -78,6 +78,7 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
   const [reveal, setReveal] = useState(0)
   const [qtyMgr, setQtyMgr] = useState(false)
   const [whatif, setWhatif] = useState<{ active: boolean; baseBreakdown?: any } | null>(null)
+  const [cfgWeights, setCfgWeights] = useState<any[]>([])   // B-4 Config 加成加權
   const [tryBd, setTryBd] = useState<any>(null)
   const [tryBusy, setTryBusy] = useState(false)
   const [newQtyCode, setNewQtyCode] = useState(''); const [newQtyVal, setNewQtyVal] = useState('')
@@ -114,9 +115,23 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
       setData(d1); setDetail(d2)
       if (d2.processes?.length && !d2.processes.some((p: any) => p.process_code === activeProc)) setActiveProc(d2.processes[0].process_code)
       api.get<any>(token, `/bom/case/${cf}/whatif`).then(setWhatif).catch(() => setWhatif(null))
+      api.get<any>(token, `/bom/case/${cf}/config-weights`).then((r) => setCfgWeights(r.weights || [])).catch(() => setCfgWeights([]))
     } catch (e: any) { if (/403|視角/.test(e.message)) setLocked(true); else setErr(e.message) }
   }
   useEffect(() => { if (token && activeCf) { setData(null); setDetail(null); loadAll(Number(activeCf)) } }, [token, activeCf, qty])   // eslint-disable-line
+
+  // B-4 Config 加成加權(OH/SGA/Profit per-變異值 乘數)
+  async function saveWeight(valueId: number, field: 'ohMult' | 'sgaMult' | 'profitMult', value: string) {
+    const cur = cfgWeights.find((w) => w.valueId === valueId) || {}
+    const body: any = { valueId, ohMult: cur.ohMult ?? 1, sgaMult: cur.sgaMult ?? 1, profitMult: cur.profitMult ?? 1 }
+    body[field] = value === '' ? 1 : Number(value)
+    try {
+      await api.put<any>(token, `/bom/case/${activeCf}/config-weights`, body)
+      setDirty(true)
+      await loadAll(Number(activeCf))
+      if (whatif?.active) dryRun()   // 沙盒中改乘數 → 自動試算
+    } catch (e: any) { setErr(e.message) }
+  }
 
   async function saveParam(kind: string, field: string, keys: any, value: string) {
     try {
@@ -605,6 +620,34 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
                   </td></tr>
                 </tbody>
               </table>
+
+              {/* B-4 Config 加成加權(WHOOP SOT §1.2:Suit OH×2.72 / SGA×2.04)*/}
+              <div className="mt-2 border-t border-dashed border-cortex-line pt-1.5">
+                <div className="text-[10px] text-cortex-muted mb-1">
+                  ⚙ Config 加成加權 — OH / SG&A / Profit 對「產品配置」的乘數(預設 ×1 = 不加權;算該配置成本時自動套用)· 改完按「重算」生效
+                </div>
+                {cfgWeights.length === 0 ? (
+                  <div className="text-[10px] text-cortex-muted px-1">專案無變異軸 → 無配置可加權(先在 BOM 區建立變異軸)</div>
+                ) : (
+                  <table className="text-[10px]">
+                    <thead className="text-cortex-muted border-b border-cortex-line"><tr>
+                      <th className="text-left px-1.5 py-0.5">配置值</th><th className="text-left px-1.5 py-0.5">維度</th>
+                      <th className="text-right px-1.5 py-0.5">OH ×</th><th className="text-right px-1.5 py-0.5">SG&A ×</th><th className="text-right px-1.5 py-0.5">Profit ×</th>
+                    </tr></thead>
+                    <tbody>
+                      {cfgWeights.map((w) => (
+                        <tr key={w.valueId} className={`border-b border-cortex-line/30 ${(w.ohMult !== 1 || w.sgaMult !== 1 || w.profitMult !== 1) ? 'bg-cortex-amber-bg/40' : ''}`}>
+                          <td className="px-1.5 py-0.5 font-mono font-bold">{w.valueCode}</td>
+                          <td className="px-1.5 py-0.5 text-cortex-muted">{w.dimCode}</td>
+                          <td className="px-1.5 py-0.5 text-right"><EditNum value={w.ohMult} w="w-14" onSave={(v) => saveWeight(w.valueId, 'ohMult', v)} /></td>
+                          <td className="px-1.5 py-0.5 text-right"><EditNum value={w.sgaMult} w="w-14" onSave={(v) => saveWeight(w.valueId, 'sgaMult', v)} /></td>
+                          <td className="px-1.5 py-0.5 text-right"><EditNum value={w.profitMult} w="w-14" onSave={(v) => saveWeight(w.valueId, 'profitMult', v)} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
             </div>
           ))}
 

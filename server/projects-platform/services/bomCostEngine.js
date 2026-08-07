@@ -79,6 +79,7 @@ async function loadCaseInputs(db, caseFactoryId) {
     smtRule:      await all(`SELECT * FROM bom_factory_smt_point_rule WHERE baseline_id = ?`, baselineId),
     macroProcess: await all(`SELECT * FROM bom_cs_case_macro_process WHERE case_factory_id = ?`, caseFactoryId),
     // 共用
+    configWeights: await all(`SELECT * FROM bom_cs_case_config_weight WHERE case_factory_id = ?`, caseFactoryId),  // B-4 加成加權
     qtyScenarios: await all(`SELECT * FROM bom_cs_case_qty_scenario WHERE case_factory_id = ?`, caseFactoryId),
     procCatalog:  await all(`SELECT process_code, process_group FROM bom_process_catalog`),
   };
@@ -252,9 +253,9 @@ function computeSimplifiedMva(inputs, ctx) {
   }
   if (bomMat != null) { subtotal += num(bomMat); add('MATERIAL', 'MATERIAL', num(bomMat), false, { source: 'bom_rollup' }); }
 
-  const oh = subtotal * num(ctx.ohPct);
+  const oh = subtotal * num(ctx.ohPct) * (ctx.ohMult || 1);
   const transport = num(ctx.transportPerUnit);
-  add('COMMON', 'OVERHEAD_4PCT', oh, true, { base: subtotal, pct: ctx.ohPct });
+  add('COMMON', 'OVERHEAD_4PCT', oh, true, { base: subtotal, pct: ctx.ohPct, mult: ctx.ohMult || 1 });
   add('COMMON', 'TRANSPORTATION', transport, true);
 
   // SIMPLIFIED 的 mva 語意 = OH + Transport(見 S1 plan 決策 A · run_result.mva 落此)
@@ -371,6 +372,17 @@ async function computeCase(db, opts = {}) {
     return baseSc ? num(pick(baseSc, 'target_qty')) : num(pick(baseline, 'annual_demand_default'));
   })();
 
+  // B-4:config 加成加權(WHOOP SOT §1.2)— 本次 config valueIds 命中的乘數列連乘;無 config/無列 = ×1
+  let ohMult = 1, sgaMult = 1, profitMult = 1;
+  {
+    const vidSet = new Set((valueIds || []).map(Number).filter(Boolean));
+    for (const w of (inputs.configWeights || [])) {
+      if (!vidSet.has(num(pick(w, 'value_id')))) continue;
+      const g = (k) => { const v = pick(w, k); return v != null ? num(v) : 1; };
+      ohMult *= g('oh_mult'); sgaMult *= g('sga_mult'); profitMult *= g('profit_mult');
+    }
+  }
+
   // process_code → process_group(SMT/BB/FATP · DL 分組公式用)
   const procGroup = {};
   (inputs.procCatalog || []).forEach((p) => { procGroup[pick(p, 'process_code')] = pick(p, 'process_group'); });
@@ -384,6 +396,7 @@ async function computeCase(db, opts = {}) {
     baselineInboundFreight: num(pick(baseline, 'inbound_freight_annual')),
     sqftUnitCost: SQFT_UNIT_COST_DEFAULT, // TODO baseline.floor_cost_per_sqft
     ohPct: num(pick(baseline, 'oh_pct')),                                  // SIMPLIFIED OH%
+    ohMult,                                                                // B-4 config 加權(OH)
     transportPerUnit: num(pick(baseline, 'outbound_transportation_per_unit_usd')), // SIMPLIFIED 運輸/unit
     idlRoles: inputs.idlRoles, idlAlloc: inputs.idlAlloc, idlLinedep: inputs.idlLinedep,
     equipArea: inputs.equipArea, facility: inputs.facility,
@@ -404,8 +417,8 @@ async function computeCase(db, opts = {}) {
   const mvaTotal = mva.mvaTotal;
   const sgaBase = resolveBaseRef(baseline, 'sga', { motherboard, mva: mvaTotal, bomSubtotal });
   const profitBase = resolveBaseRef(baseline, 'profit', { motherboard, mva: mvaTotal, bomSubtotal });
-  const sga = sgaBase * num(pick(baseline, 'sga_pct'));
-  const profit = profitBase * num(pick(baseline, 'profit_pct'));
+  const sga = sgaBase * num(pick(baseline, 'sga_pct')) * sgaMult;         // B-4 config 加權
+  const profit = profitBase * num(pick(baseline, 'profit_pct')) * profitMult;
   const productTotal = materialUsd + mvaTotal + sga + profit;        // 產品 unit cost(不含 NRE)
   const productTotalTrue = materialTrue + mvaTotal + sga + profit;
 

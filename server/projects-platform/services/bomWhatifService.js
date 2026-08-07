@@ -17,6 +17,7 @@ const CASE_TABLES = [
   { name: 'bom_cs_case_facility', key: 'case_factory_id' },
   { name: 'bom_cs_case_consumable', key: 'case_factory_id' },
   { name: 'bom_cs_case_qty_scenario', key: 'case_factory_id', skipCols: ['scenario_id'] },   // identity PK 排除
+  { name: 'bom_cs_case_config_weight', key: 'case_factory_id', skipCols: ['weight_id'] },    // B-4 加成加權
 ];
 
 // 快照經 JSON 後 DATE 變 ISO 字串;還原 bind 前轉回 Date(否則 Oracle DATE 欄 ORA-01861)

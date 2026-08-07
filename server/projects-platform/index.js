@@ -172,6 +172,7 @@ async function runMigrations(db) {
       await require('./migrations/013v_run_qty_scenario')(db);       // run 記 qty scenario(v0.16 #8 矩陣 qty 軸)
       await require('./migrations/013w_whatif_snapshot')(db);        // What-if 沙盒快照(R2)
       await require('./migrations/013x_quote_stage_gates')(db);      // QUOTE stage 1/6/7/8 gate_required=1(Wizard Step4)
+      await require('./migrations/013y_config_weight')(db);          // B-4 config 加成加權(OH/SGA/Profit per-變異值 乘數)
       console.log('[projects-platform] Cortex BOM/RBAC migrations (S0) ✓');
     } else {
       console.log('[projects-platform] Cortex BOM/RBAC migrations skipped (ENABLE_CORTEX_BOM != true)');
