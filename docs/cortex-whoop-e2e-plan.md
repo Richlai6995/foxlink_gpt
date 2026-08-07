@@ -3,7 +3,14 @@
 > **目標**:拿真實專案 `WHOOP_Gen4 MP quotation book_ for AI.xlsx` 從**開新專案**走完整報價流程
 > (開案 → BOM → 採購詢價 → 成本試算 → 定版),驗證系統,並對標 `Cortex_互動Demo_v0.12.html`
 > 逐步補完原先規劃的流程。
-> **日期**:2026-07-17 · **狀態**:規劃(W0 待開工)
+> **日期**:2026-07-17 規劃 · **狀態:2026-08-07 盤點 — W0~W4 全部完成,本計畫歸檔**
+>
+> **完成佐證**(2026-08-07 DB 實查):
+> - **W0** Sample = `tmp/cortex-demo/whoop-bom-demo.xlsx`(292 列 · 8 板+5 包裝 · 4 筆留空給採購)+ `whoop-cost-model-SIMPLIFIED.xlsx`(VN · NRE 隨檔)
+> - **W1** ① 多板 import:canonical v2 每分頁/半成品一 section(§3.1 已被 7423b12 canonical 匯入解決)② SIMPLIFIED 材料 line BOM rollup 動態:`bomCostEngine.computeSimplifiedMva` W1b(`ctx.bomMaterial` 非 null → 材料走 rollup,常數 MATERIAL line 跳過;PROCESS/LOSS 仍用 line)
+> - **W3** 端到端案 `CORTEX-W3-WHOOP`(5 包裝 config 各自 run · 假價校準版)+ demo 匯入案 `Q-2026-1245`;範本 cf87 **TTL = 89.554 = golden 精確**
+> - **W4+** gap 全清(P1 + Wizard 7→5 步改版)— 見 [cortex-roadmap.md](cortex-roadmap.md)
+> - **未做 → 移 roadmap P3**:B-4 OH/SGA/Profit per-config 加權(SOT §1.2 Suit ×2.72/×2.04)→ 5 pack 變體 TTL golden(71/74.8/73.7/73.425/74.8)尚未逐 config 對驗,是 B-4 的驗收基準
 
 ---
 

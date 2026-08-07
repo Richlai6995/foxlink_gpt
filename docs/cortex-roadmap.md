@@ -38,11 +38,13 @@
 | 範本庫管理頁 | 列表(含歷史版)/檢視參數/停用啟用/下載,取代散在 BOM 區的小按鈕 |
 | Profile 管理 UI(U2) | 進階轉檔 profile CRUD + AI 輔助對映(丟 raw Excel 自動猜欄位) |
 
-### P3 — 深化(有資料依據,不急)
+### P3 — 深化(2026-08-07 A 盤點後:B-4 + per-factory 料價 提為 active 下一步)
+> A(WHOOP e2e)盤點結果 = W0~W4 全完成([cortex-whoop-e2e-plan.md](cortex-whoop-e2e-plan.md) 已歸檔);成本正確性(B)接棒。
+
 | 項 | Scope |
 |---|---|
-| B-4 config 加權 | WHOOP OH×2.72/SGA×2.04 per-包裝 加權(SOT §1.2) |
-| per-factory 料價 | EE 兩組 U/P(to/out of China)→ 料價隨廠別(SOT §2.3) |
+| **B-4 config 加權(next)** | WHOOP OH×2.72/SGA×2.04 per-包裝 加權(SOT §1.2);驗收 = 5 pack 變體 TTL golden 71/74.8/73.7/73.425/74.8 |
+| **per-factory 料價(next)** | EE 兩組 U/P(to/out of China)→ 料價隨廠別(SOT §2.3) |
 | B-6 ERP 帶價 | 採購 PO 歷史自動建議單價(SD §3.2.4) |
 | EPM 角色權限 | 範本庫維護從 admin 細化到 EPM 角色(接 012 RBAC) |
 | i18n | BOM/成本模型 UI 三語(現全 zh-TW hardcode) |
