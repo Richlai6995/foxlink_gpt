@@ -43,7 +43,7 @@
 
 | 項 | Scope |
 |---|---|
-| **B-4 config 加權(next)** | WHOOP OH×2.72/SGA×2.04 per-包裝 加權(SOT §1.2);驗收 = 5 pack 變體 TTL golden 71/74.8/73.7/73.425/74.8 |
+| **B-4 config 加權** ✅ c6334fa(2026-08-07) | 013y `bom_cs_case_config_weight`(cf×變異值→OH/SGA/Profit 乘數 · provision/What-if 納入)· engine config 命中連乘 · API GET/PUT config-weights · Cleansheet SIMP「⚙ Config 加成加權」表。驗:cf87 迴歸 89.5537 精確 + Suit 2.72/2.04/2.04 手算全 OK。**5 pack TTL golden(71/74.8/…)逐 config 對驗待 demo 案假價校準後補** |
 | **per-factory 料價(next)** | EE 兩組 U/P(to/out of China)→ 料價隨廠別(SOT §2.3) |
 | B-6 ERP 帶價 | 採購 PO 歷史自動建議單價(SD §3.2.4) |
 | EPM 角色權限 | 範本庫維護從 admin 細化到 EPM 角色(接 012 RBAC) |
