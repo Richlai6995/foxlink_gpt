@@ -983,12 +983,13 @@ export function Step6Priority({ data, onChange }: StepProps) {
 // ────────────────────────────────────────────────────────────
 // Step 7 — 確認啟動
 // ────────────────────────────────────────────────────────────
+// 2026-08-07 核實:只列啟動時系統真的會做的事(假承諾已滅:RACI 自動指派/dependency deadline/Webex+Email 三通道/Pin 公告已讀回執/escalation chain)
 const STARTUP_ACTIONS = [
-  { Icon: MessageSquare, t: '建立 7 個 channels',         d: 'announcement / general / qa-customer / engineering / sourcing / factory / cost-review' },
-  { Icon: ListChecks,    t: '建立 8 stages 任務',          d: '依 RACI 表自動指派 A/R · dependency deadline 自動推算' },
-  { Icon: Bell,          t: '通知所有相關人員',             d: 'Webex 群組 + 站內 Badge + Email 三通道' },
-  { Icon: Pin,           t: '#announcement Pin 啟動訊息', d: '業務發布「專案啟動」公告 + 已讀回執' },
-  { Icon: Clock,         t: '啟動 SLA 倒數',               d: 'Stage 1 SLA 4h 開始計時 · escalation chain ready' },
+  { Icon: MessageSquare, t: '建立 7 個 channels',            d: 'announcement / general / qa-customer / engineering / sourcing / factory / cost-review' },
+  { Icon: ListChecks,    t: '建立 8 stages + 啟動 SLA 倒數', d: 'QUOTE_DEFAULT 範本 · 第一階「接收 RFQ」進 ACTIVE,SLA 4h 開始計時(逾時 WarRoom 標紅)' },
+  { Icon: Bell,          t: '通知被指派成員',                d: 'DPM / BPM / MPM / EPM / 業務助理 → 站內鈴鐺通知 + 自動加入成員與 公告 / General 頻道' },
+  { Icon: Pin,           t: '報價設定自動 provision',        d: 'Step 4 勾選的廠別成本模型 clone 進案 + 變異軸建立 + NRE 模式帶入' },
+  { Icon: Clock,         t: '客戶信息直通報價 Form',         d: '客戶 8 欄寫入報價 Form(完成度即時有分)· priority 寫入主檔(列表置頂)' },
 ]
 
 export function Step7Confirm({ data, onChange }: StepProps) {
