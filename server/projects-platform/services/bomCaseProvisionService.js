@@ -24,7 +24,7 @@ const CASE_CHILD_TABLES = [
   'bom_cs_case_smt_point',
   'bom_cs_case_macro_process',
   'bom_cs_case_qty_scenario',
-  'bom_cs_case_config_weight',   // B-4 加成加權(範本層通常無 dims → 空拷無害)
+  'bom_cs_case_line_config',     // B-4' line×config 用量倍率(範本層通常無 dims → 空拷無害)
 ];
 
 /** 通用 clone:INSERT..SELECT 一張 case 表(排除 identity/virtual 欄 · 把 case_factory_id 換成 newCf)*/

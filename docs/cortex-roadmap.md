@@ -43,7 +43,7 @@
 
 | 項 | Scope |
 |---|---|
-| **B-4 config 加權** ✅ c6334fa(2026-08-07) | 013y `bom_cs_case_config_weight`(cf×變異值→OH/SGA/Profit 乘數 · provision/What-if 納入)· engine config 命中連乘 · API GET/PUT config-weights · Cleansheet SIMP「⚙ Config 加成加權」表。驗:cf87 迴歸 89.5537 精確 + Suit 2.72/2.04/2.04 手算全 OK。**5 pack TTL golden(71/74.8/…)逐 config 對驗待 demo 案假價校準後補** |
+| **B-4' line×config 用量倍率** ✅(2026-08-10 · 取代誤讀的乘數版) | **誤讀更正**(user 真 Excel 截圖):2.72 是金額(=Suit subtotal $68×4%,公式 `=G23*K24`)非乘數;OH/SGA/Profit = 各 config subtotal × 共用 %,無加權機制。乘數版(c6334fa/013y)已撤(013y 改 DROP)。**真需求** = WHOOP row 14~22 line 用量倍率:013z `bom_cs_case_line_config`(cf×line×配置值→倍率 · 0=不做/0.05/1.7=yield 差 · provision/What-if 納入)· engine line 金額×倍率 → subtotal per-config → 加成自動隨動 · API GET/PUT line-config(×1 自動刪列)· Cleansheet SIMP「⚙ Line × 配置 用量倍率」矩陣。驗:cf87 迴歸 89.5537 + Battery 情境(0/0.05/1.7)subtotal/OH/SGA 手算精確 + Retail 隔離。SOT §1.2 已同步更正 |
 | **per-factory 料價(next)** | EE 兩組 U/P(to/out of China)→ 料價隨廠別(SOT §2.3) |
 | B-6 ERP 帶價 | 採購 PO 歷史自動建議單價(SD §3.2.4) |
 | EPM 角色權限 | 範本庫維護從 admin 細化到 EPM 角色(接 012 RBAC) |

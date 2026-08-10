@@ -31,7 +31,7 @@
 
 ### 1.2 成本模型(Summary 分頁 = configurable BOM 本體)
 
-Summary 每列 = 一個成本元素,**欄 = 包裝方式**,格值 = **乘數/數量**(選料 + 加權):
+Summary 每列 = 一個成本元素,**欄 = 包裝方式**;材料/製程列的格值 = **用量倍率**(0/1 選料 · yield 差異如 0.05/1.7),加成列(OH/SGA/Profit)的格值 = **金額**(= 該欄 subtotal × 共用 %):
 
 ```
 NO BOM        Category                cost      Retail  WhiteBoxSuit ...
@@ -53,7 +53,7 @@ NO BOM        Category                cost      Retail  WhiteBoxSuit ...
 14             SMT Yield loss           0.226799
 15             FATP Yield Loss(4%)      3.113774
    subtotal                           80.95792
-16 加工加成    Over-head                3.238325   1       2.72  ← OH per-config 加權!
+16 加工加成    Over-head                3.238325   1       2.72  ← 金額!= 各欄 subtotal×4%(2026-08-10 更正:非乘數)
 17             SG&A                     2.428744   1       2.04
 18             Profit                   2.428744   1       2.04
 19             Transportation           0.500000
@@ -63,7 +63,7 @@ NO BOM        Category                cost      Retail  WhiteBoxSuit ...
 **要點**
 - **材料 = Σ 模組(EE 板×6 + ME:STRAP/Battery + 耗材)+ Package + Process**。
 - **5 種包裝方式**用乘數欄選料:`Retail / WhiteBox-Suit / WhiteBox-Strap / WhiteBox-Battery / WhiteBox-Strap+Battery`。STRAP/Battery 是否計入、選哪個 Package 列,由該欄 0/1 決定。
-- **OH/SGA/Profit 可 per-config 加權**(Suit 欄 OH×2.72 / SGA×2.04)→ 成本層也吃 config,不是純結構。
+- **OH/SGA/Profit = 各 config 自己的 subtotal × 共用 %(4%/3%/3%)** — 2026-08-10 更正:Suit 欄 2.72/2.04 是金額(=68×4%/68×3%,公式 `=G23*K24`),**不是乘數**;成本隨 config 是因為 subtotal 隨 config(材料選料 + 製程線用量倍率),加成公式全 config 共用。真正 per-config 的結構 = 材料/製程「line × config 用量倍率」(row 14~22,例 Battery:Board glue+ATE=0 / SMT Yield=0.05 / FATP Yield=1.7)→ 系統實作 `bom_cs_case_line_config`(013z)。
 - 加成基準:OH 4% / SGA 3% / Profit 3%(對 subtotal),Transport 固定 0.5。
 - **顏色**:WHOOP 單色(無顏色維度)。
 
@@ -153,7 +153,7 @@ PKG BOM_Retail  → PKG 半成品,全料 tag 包裝=Retail
 |---|---|---|
 | costing_model | SIMPLIFIED_WEARABLE | FULL_MVA |
 | 材料 | Σ模組 + 耗材 + Package + Process | EE+ME+PKG |
-| 加工 | OH4%+SGA3%+Profit3%+Transport(可 per-config 加權) | MVA(隨廠)+ SG&A&Profit 固定 |
+| 加工 | OH4%+SGA3%+Profit3%+Transport(% 全 config 共用;subtotal 隨 config) | MVA(隨廠)+ SG&A&Profit 固定 |
 | 顏色 | 無 | Black/White |
 | 包裝 | 5 種 | 6 版(TW/Amber/FSC…) |
 
@@ -164,7 +164,7 @@ PKG BOM_Retail  → PKG 半成品,全料 tag 包裝=Retail
 1. **變異 = 料層 effectivity**(不是整份複製):EE 有色差 → 半成品層不夠,必料層。
 2. **匯入 = 從模組分頁組 super-BOM**:profile 每分頁帶 `{module, effectivity:{dim:value}}`。
 3. **成本呈現分模組**:沿用 rollup `byCategory`(EE/ME/PKG)。
-4. **OH/SGA/Profit 可吃 config**(WHOOP ×2.72)→ 進階 phase,v1 先全域。
+4. **製程/loss line 可吃 config 用量倍率**(WHOOP row 14~22;Battery glue=0/yield 0.05/1.7)→ 013z `bom_cs_case_line_config` 已實作(2026-08-10);加成 % 全 config 共用不加權(2.72 是金額的誤讀已更正)。
 5. **對比矩陣**:「多廠對比」要一般化成 **config × 廠別**(對齊 Rival3 Unit Cost 那張表)。
 6. Golden 回歸基準:WHOOP 89.5537、Rival3 CN Black 11.123 / White 11.338。
 

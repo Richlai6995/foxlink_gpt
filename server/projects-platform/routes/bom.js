@@ -571,60 +571,60 @@ async function _updateIdlRoleRate(db, cfId, roleCode, value) {
   return { ok: true, roleCode, value, baselineId, cloned, note: cloned ? `baseline 已複製為本案私有版再改年薪;按重算生效` : '年薪已存;按重算生效' };
 }
 
-// ── B-4 Config 加成加權(OH/SGA/Profit per-變異值 乘數 · WHOOP SOT §1.2)──────────
-// GET:專案變異值 × 既有乘數(無列 = 1);PUT:upsert 單值三乘數 → ④ 重算生效
-router.get('/case/:caseFactoryId/config-weights', asyncHandler(async (req, res) => {
+// ── B-4' Line × Config 用量倍率(WHOOP 真表 row 14~22 · 2026-08-10 取代誤讀的乘數版)──
+// 每條 SIMPLIFIED line 對每個配置值可設倍率:0=該配置不做此線、0.05/1.7=yield 差異;無列=×1。
+// subtotal = Σ(line 金額 × 倍率)→ OH/SGA/Profit = subtotal × %(自動 per-config,無需加權)。
+router.get('/case/:caseFactoryId/line-config', asyncHandler(async (req, res) => {
   const cf = reqId(req.params.caseFactoryId, res, 'caseFactoryId'); if (cf === null) return;
   const db = getDb();
   const row = await db.prepare(`SELECT case_id FROM bom_cs_case_factory WHERE case_factory_id = ?`).get(cf);
   if (!row) return res.status(404).json({ error: 'case_factory not found' });
   const projectId = Number(row.case_id ?? Object.values(row)[0]);
   const values = await db.prepare(
-    `SELECT v.id, v.value_code, v.value_name, d.dim_code
+    `SELECT v.id, v.value_code, d.dim_code
        FROM bom_variant_value v JOIN bom_variant_dimension d ON d.id = v.dimension_id
       WHERE d.project_id = ? ORDER BY d.sort_order, v.sort_order`,
   ).all(projectId).catch(() => []);
-  const wRows = await db.prepare(
-    `SELECT value_id, oh_mult, sga_mult, profit_mult FROM bom_cs_case_config_weight WHERE case_factory_id = ?`,
+  const mRows = await db.prepare(
+    `SELECT line_code, component_code, value_id, multiplier FROM bom_cs_case_line_config WHERE case_factory_id = ?`,
   ).all(cf).catch(() => []);
-  const wBy = new Map(wRows.map((w) => [Number(w.value_id ?? Object.values(w)[0]), w]));
   res.json({
-    weights: values.map((v) => {
-      const w = wBy.get(Number(v.id)) || {};
-      return {
-        valueId: Number(v.id), dimCode: v.dim_code, valueCode: v.value_code, valueName: v.value_name || null,
-        ohMult: w.oh_mult != null ? Number(w.oh_mult) : 1,
-        sgaMult: w.sga_mult != null ? Number(w.sga_mult) : 1,
-        profitMult: w.profit_mult != null ? Number(w.profit_mult) : 1,
-      };
-    }),
+    values: values.map((v) => ({ valueId: Number(v.id), valueCode: v.value_code, dimCode: v.dim_code })),
+    mults: mRows.map((m) => ({
+      lineCode: m.line_code, componentCode: m.component_code,
+      valueId: Number(m.value_id), multiplier: Number(m.multiplier),
+    })),
   });
 }));
 
-router.put('/case/:caseFactoryId/config-weights', asyncHandler(async (req, res) => {
-  if (!canViewTrueCost(req)) return res.status(403).json({ error: '加成加權維護需完整成本視角(HOST/admin)' });
+router.put('/case/:caseFactoryId/line-config', asyncHandler(async (req, res) => {
+  if (!canViewTrueCost(req)) return res.status(403).json({ error: 'Line 倍率維護需完整成本視角(HOST/admin)' });
   const cf = reqId(req.params.caseFactoryId, res, 'caseFactoryId'); if (cf === null) return;
+  const lineCode = String(req.body.lineCode || '').trim();
+  const componentCode = String(req.body.componentCode || '').trim();
   const valueId = Number(req.body.valueId);
-  if (!valueId) return res.status(400).json({ error: 'valueId required' });
-  const m = (k) => {
-    const v = req.body[k];
-    if (v == null || v === '') return 1;
-    const n = Number(v);
-    return Number.isFinite(n) && n > 0 ? n : null;
-  };
-  const oh = m('ohMult'), sga = m('sgaMult'), profit = m('profitMult');
-  if (oh == null || sga == null || profit == null) return res.status(400).json({ error: '乘數需為 > 0 的數字' });
+  if (!lineCode || !componentCode || !valueId) return res.status(400).json({ error: 'lineCode/componentCode/valueId required' });
+  const raw = req.body.multiplier;
+  const mult = raw == null || raw === '' ? 1 : Number(raw);
+  if (!Number.isFinite(mult) || mult < 0) return res.status(400).json({ error: '倍率需為 ≥ 0 的數字(0 = 該配置不做此線)' });
   const db = getDb();
-  const ex = await db.prepare(`SELECT weight_id FROM bom_cs_case_config_weight WHERE case_factory_id = ? AND value_id = ?`).get(cf, valueId);
+  const ex = await db.prepare(
+    `SELECT line_config_id FROM bom_cs_case_line_config WHERE case_factory_id = ? AND line_code = ? AND component_code = ? AND value_id = ?`,
+  ).get(cf, lineCode, componentCode, valueId);
   if (ex) {
+    if (mult === 1) {
+      await db.prepare(`DELETE FROM bom_cs_case_line_config WHERE case_factory_id = ? AND line_code = ? AND component_code = ? AND value_id = ?`)
+        .run(cf, lineCode, componentCode, valueId);   // ×1 = 預設 → 刪列保持乾淨
+    } else {
+      await db.prepare(
+        `UPDATE bom_cs_case_line_config SET multiplier = ?, updated_at = SYSTIMESTAMP
+          WHERE case_factory_id = ? AND line_code = ? AND component_code = ? AND value_id = ?`,
+      ).run(mult, cf, lineCode, componentCode, valueId);
+    }
+  } else if (mult !== 1) {
     await db.prepare(
-      `UPDATE bom_cs_case_config_weight SET oh_mult = ?, sga_mult = ?, profit_mult = ?, updated_at = SYSTIMESTAMP
-        WHERE case_factory_id = ? AND value_id = ?`,
-    ).run(oh, sga, profit, cf, valueId);
-  } else {
-    await db.prepare(
-      `INSERT INTO bom_cs_case_config_weight (case_factory_id, value_id, oh_mult, sga_mult, profit_mult) VALUES (?, ?, ?, ?, ?)`,
-    ).run(cf, valueId, oh, sga, profit);
+      `INSERT INTO bom_cs_case_line_config (case_factory_id, line_code, component_code, value_id, multiplier) VALUES (?, ?, ?, ?, ?)`,
+    ).run(cf, lineCode, componentCode, valueId, mult);
   }
   res.json({ ok: true });
 }));
