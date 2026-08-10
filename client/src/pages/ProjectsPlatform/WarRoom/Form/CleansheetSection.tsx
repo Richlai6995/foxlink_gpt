@@ -491,10 +491,14 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
               <span>版本 <b className="font-mono">{bl.versionLabel || '—'}</b></span>
               <span className="flex items-center gap-1">DL wage <EditNum value={bl.dlWagePerHr} w="w-14" suffix="/hr"
                 onSave={(v) => saveParam('baseline', 'dl_wage_per_hr_usd', {}, v)} /></span>
+              <span className="flex items-center gap-1">OH <EditNum value={Number(((bl.ohPct || 0) * 100).toFixed(2))} w="w-12" suffix="%"
+                onSave={(v) => saveParam('baseline', 'oh_pct', {}, String(Number(v) / 100))} /></span>
               <span className="flex items-center gap-1">SG&A <EditNum value={Number(((bl.sgaPct || 0) * 100).toFixed(2))} w="w-12" suffix="%"
                 onSave={(v) => saveParam('baseline', 'sga_pct', {}, String(Number(v) / 100))} /></span>
               <span className="flex items-center gap-1">Profit <EditNum value={Number(((bl.profitPct || 0) * 100).toFixed(2))} w="w-12" suffix="%"
                 onSave={(v) => saveParam('baseline', 'profit_pct', {}, String(Number(v) / 100))} /></span>
+              <span className="flex items-center gap-1">Transport <EditNum value={bl.transportPerUnit} w="w-14" suffix="$/unit"
+                onSave={(v) => saveParam('baseline', 'outbound_transportation_per_unit_usd', {}, v)} /></span>
               <span className="flex items-center gap-1">年量 <EditNum value={bl.annualDemand} w="w-20" suffix="pcs/yr"
                 onSave={(v) => saveParam('baseline', 'annual_demand_default', {}, v)} /></span>
             </>
@@ -631,6 +635,9 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
                           {isYield ? (
                             <td className="px-1.5 py-0.5 text-right whitespace-nowrap">
                               <EditNum value={Math.round(((Number(r.yield_pct) || 0) * 100) * 10000) / 10000} w="w-14" suffix="%" onSave={(v) => saveYield(r, { calcMode: 'YIELD_PCT', yieldPct: (Number(v) || 0) / 100, basis: basisArr })} />
+                              <span className="ml-1 font-mono text-[9px] text-cortex-teal" title="最近一次重算的算出值(基數 × %;隨當時 config)">
+                                {r.computed_usd != null ? `= ${Number(r.computed_usd).toFixed(4)}` : '(重算後顯示值)'}
+                              </span>
                               <button onClick={() => setBasisOpen(basisOpen === lineKey ? null : lineKey)} className="ml-1 text-[9px] text-cortex-teal underline whitespace-nowrap">基數({basisArr.length})</button>
                             </td>
                           ) : (

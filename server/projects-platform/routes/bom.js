@@ -324,6 +324,7 @@ router.get('/case/:caseFactoryId/cleansheet', asyncHandler(async (req, res) => {
             cf.template_label, cf.effective_from AS tpl_effective_from,
             b.version_label, b.effective_from, b.dl_wage_per_hr_usd, b.sga_pct, b.profit_pct,
             b.oh_pct, b.vat_rate_pct, b.annual_demand_default, b.imported_by,
+            b.outbound_transportation_per_unit_usd,
             b.bg_code, b.bu_code, b.effective_to AS bl_effective_to
        FROM bom_cs_case_factory cf LEFT JOIN bom_factory_baseline b ON b.baseline_id = cf.baseline_id
       WHERE cf.case_factory_id = ?`,
@@ -376,6 +377,7 @@ router.get('/case/:caseFactoryId/cleansheet', asyncHandler(async (req, res) => {
       versionLabel: cfRow.version_label, effectiveFrom: cfRow.effective_from,
       dlWagePerHr: cfRow.dl_wage_per_hr_usd, sgaPct: cfRow.sga_pct, profitPct: cfRow.profit_pct,
       ohPct: cfRow.oh_pct, vatPct: cfRow.vat_rate_pct, annualDemand: cfRow.annual_demand_default,
+      transportPerUnit: cfRow.outbound_transportation_per_unit_usd,
       bgCode: cfRow.bg_code, buCode: cfRow.bu_code, effectiveTo: cfRow.bl_effective_to,
     } : null,
     meta: { templateLabel: cfRow.template_label, effectiveFrom: cfRow.tpl_effective_from },
@@ -519,6 +521,17 @@ router.get('/case/:caseFactoryId/cleansheet-detail', asyncHandler(async (req, re
     `SELECT line_code, component_code, line_group, cost_per_unit_usd, in_subtotal, sort_order,
             calc_mode, yield_pct, yield_basis_json
        FROM bom_cs_case_simplified_line WHERE case_factory_id = ? ORDER BY sort_order, line_code`, cf);
+  // YIELD_PCT 核對:附最新 ready run 的 per-line 算出值(trace.amount;隨最近一次重算的 config)
+  const lastRun = (await all(`SELECT run_id FROM bom_cs_run WHERE case_factory_id = ? AND status = 'ready' ORDER BY run_id DESC FETCH FIRST 1 ROWS ONLY`, cf))[0];
+  if (lastRun) {
+    const runCells = await all(`SELECT intermediate_json FROM bom_cs_run_cell WHERE run_id = ?`, Number(lastRun.run_id ?? Object.values(lastRun)[0]));
+    const byLine = {};
+    for (const c of runCells) {
+      let arr = []; try { arr = JSON.parse(String(c.intermediate_json ?? Object.values(c)[0] ?? '[]')) || []; } catch (_) { /* noop */ }
+      for (const t of (Array.isArray(arr) ? arr : [arr])) if (t && t.line_code && t.amount != null) byLine[t.line_code] = Number(t.amount);
+    }
+    for (const l of simplifiedLines) if (byLine[l.line_code] != null) l.computed_usd = byLine[l.line_code];
+  }
   res.json({ caseFactoryId: cf, processes, idl, equipment, facility, consumables, simplifiedLines });
 }));
 

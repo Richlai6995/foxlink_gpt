@@ -263,7 +263,7 @@ function computeSimplifiedMva(inputs, ctx) {
       const base = basis.reduce((a, k) => a + (effAmt.get(k) || 0), 0);
       const pct = num(pick(ln, 'yield_pct'));
       v = base * pct * mult;
-      trace = { line_code: lineCode, mode, base, pct, basis, ...(mult !== 1 ? { mult } : {}) };
+      trace = { line_code: lineCode, mode, base, pct, basis, amount: v, ...(mult !== 1 ? { mult } : {}) };
     } else {
       if (bomMat != null && grp === 'MATERIAL') continue;   // 有 BOM → 材料改 rollup,不用常數材料 line
       v = num(pick(ln, 'cost_per_unit_usd')) * mult;
