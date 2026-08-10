@@ -516,7 +516,8 @@ router.get('/case/:caseFactoryId/cleansheet-detail', asyncHandler(async (req, re
        FROM bom_cs_case_consumable cc LEFT JOIN bom_factory_consumable m ON m.consumable_id = cc.consumable_id
       WHERE cc.case_factory_id = ? ORDER BY cc.process_code`, cf);
   const simplifiedLines = await all(
-    `SELECT line_code, component_code, line_group, cost_per_unit_usd, in_subtotal, sort_order
+    `SELECT line_code, component_code, line_group, cost_per_unit_usd, in_subtotal, sort_order,
+            calc_mode, yield_pct, yield_basis_json
        FROM bom_cs_case_simplified_line WHERE case_factory_id = ? ORDER BY sort_order, line_code`, cf);
   res.json({ caseFactoryId: cf, processes, idl, equipment, facility, consumables, simplifiedLines });
 }));
