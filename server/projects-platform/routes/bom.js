@@ -629,6 +629,33 @@ router.put('/case/:caseFactoryId/line-config', asyncHandler(async (req, res) => 
   res.json({ ok: true });
 }));
 
+// ── loss 線 % 化(013aa):calc_mode / yield_pct / 勾選基數 ───────────────────────
+// PUT { lineCode, componentCode, calcMode: 'AMOUNT'|'YIELD_PCT', yieldPct?, basis?: string[] }
+router.put('/case/:caseFactoryId/line-yield', asyncHandler(async (req, res) => {
+  if (!canViewTrueCost(req)) return res.status(403).json({ error: 'Line 模式維護需完整成本視角(HOST/admin)' });
+  const cf = reqId(req.params.caseFactoryId, res, 'caseFactoryId'); if (cf === null) return;
+  const lineCode = String(req.body.lineCode || '').trim();
+  const componentCode = String(req.body.componentCode || '').trim();
+  const calcMode = String(req.body.calcMode || 'AMOUNT');
+  if (!lineCode || !componentCode) return res.status(400).json({ error: 'lineCode/componentCode required' });
+  if (!['AMOUNT', 'YIELD_PCT'].includes(calcMode)) return res.status(400).json({ error: 'calcMode 需為 AMOUNT | YIELD_PCT' });
+  let yieldPct = null, basisJson = null;
+  if (calcMode === 'YIELD_PCT') {
+    const p = Number(req.body.yieldPct);
+    if (!Number.isFinite(p) || p < 0) return res.status(400).json({ error: 'yieldPct 需為 ≥ 0 的小數(0.005 = 0.5%)' });
+    yieldPct = p;
+    const basis = Array.isArray(req.body.basis) ? req.body.basis.map((x) => String(x)).filter(Boolean) : [];
+    basisJson = JSON.stringify(basis);
+  }
+  const db = getDb();
+  const r = await db.prepare(
+    `UPDATE bom_cs_case_simplified_line SET calc_mode = ?, yield_pct = ?, yield_basis_json = ?
+      WHERE case_factory_id = ? AND line_code = ? AND component_code = ?`,
+  ).run(calcMode, yieldPct, basisJson, cf, lineCode, componentCode);
+  if (!r || !Number(r.changes)) return res.status(404).json({ error: 'line not found' });
+  res.json({ ok: true });
+}));
+
 router.put('/case/:caseFactoryId/cleansheet-param', asyncHandler(async (req, res) => {
   if (!canViewTrueCost(req)) return res.status(403).json({ error: '需完整成本視角(HOST/admin)' });
   const cf = reqId(req.params.caseFactoryId, res, 'caseFactoryId'); if (cf === null) return;

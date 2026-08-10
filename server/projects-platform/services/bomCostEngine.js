@@ -242,17 +242,37 @@ function computeSimplifiedMva(inputs, ctx) {
 
   // W1b:有 BOM(ctx.bomMaterial 非 null)→ 材料 line 改用 BOM rollup,跳過常數 MATERIAL line;PROCESS/LOSS 仍用 line
   // B-4':每條 line 金額 × 該 config 的用量倍率(lineMults 無列 = ×1;0 = 該 config 不做此線)
+  // YIELD_PCT(013aa):loss 線 = Σ(勾選線的生效額)× yield_pct × 倍率;按 sort_order 順算,只能取到排前面的線
   const bomMat = ctx.bomMaterial;
   const lineMults = ctx.lineMults || new Map();
+  const effAmt = new Map();   // line_code → 本 config 生效額(供 YIELD_PCT 基數勾選)
+  if (bomMat != null) {
+    effAmt.set('BOM_MATERIAL_ALL', num(bomMat));
+    for (const [cat, amt] of Object.entries(ctx.bomByCategory || {})) effAmt.set(`BOM_MATERIAL_${cat}`, num(amt));
+  }
   let subtotal = 0;
   for (const ln of (inputs.simplifiedLines || [])) {
-    const mult = lineMults.get(`${pick(ln, 'line_code')}||${pick(ln, 'component_code')}`) ?? 1;
-    const v = num(pick(ln, 'cost_per_unit_usd')) * mult;
+    const lineCode = pick(ln, 'line_code');
+    const mult = lineMults.get(`${lineCode}||${pick(ln, 'component_code')}`) ?? 1;
     const grp = pick(ln, 'line_group') || 'MATERIAL';
-    if (bomMat != null && grp === 'MATERIAL') continue;   // 有 BOM → 材料改 rollup,不用常數材料 line
+    const mode = pick(ln, 'calc_mode') || 'AMOUNT';
+    let v, trace;
+    if (mode === 'YIELD_PCT') {
+      let basis = [];
+      try { basis = JSON.parse(String(pick(ln, 'yield_basis_json') || '[]')) || []; } catch (_) { /* noop */ }
+      const base = basis.reduce((a, k) => a + (effAmt.get(k) || 0), 0);
+      const pct = num(pick(ln, 'yield_pct'));
+      v = base * pct * mult;
+      trace = { line_code: lineCode, mode, base, pct, basis, ...(mult !== 1 ? { mult } : {}) };
+    } else {
+      if (bomMat != null && grp === 'MATERIAL') continue;   // 有 BOM → 材料改 rollup,不用常數材料 line
+      v = num(pick(ln, 'cost_per_unit_usd')) * mult;
+      trace = { line_code: lineCode, ...(mult !== 1 ? { mult } : {}) };
+    }
+    effAmt.set(lineCode, v);
     if (num(pick(ln, 'in_subtotal'))) subtotal += v;
     // 明細 cell(不進 mva · 屬 material_true 的組成)
-    add(grp, pick(ln, 'component_code') || 'MATERIAL', v, false, { line_code: pick(ln, 'line_code'), ...(mult !== 1 ? { mult } : {}) });
+    add(grp, pick(ln, 'component_code') || 'MATERIAL', v, false, trace);
   }
   if (bomMat != null) { subtotal += num(bomMat); add('MATERIAL', 'MATERIAL', num(bomMat), false, { source: 'bom_rollup' }); }
 
@@ -351,7 +371,7 @@ async function computeCase(db, opts = {}) {
 
   // material(FULL 的 motherboard)優先序:BOM rollup(bomInstanceId · B-2)> 參數 > baseline.motherboard_cost_ref
   //   rollup 是獨立 service(解耦)· 現 EE、匯入 ME/PKG 後自動含全材料(對 Unit Cost Material Cost)
-  let materialFromBom = null, materialTrueFromBom = null;
+  let materialFromBom = null, materialTrueFromBom = null, bomByCategory = null;
   if (bomInstanceId) {
     const roll = await require('./bomMaterialRollup').rollupMaterial(db, bomInstanceId, { valueIds });   // B-2 config resolve
     // B-5a 兩階段:有未詢價(PENDING)料件 → 材料不完整,擋算成本;帶 opts.allowPending 才放行
@@ -363,6 +383,7 @@ async function computeCase(db, opts = {}) {
     }
     materialFromBom = num(roll.materialUsd);
     materialTrueFromBom = roll.materialTrueUsd != null ? num(roll.materialTrueUsd) : null;  // true/quote 雙軌
+    bomByCategory = roll.byCategory || null;   // YIELD_PCT 虛擬基數項(BOM_MATERIAL_EE/ME/PKG)
   }
   const motherboard = materialFromBom != null ? materialFromBom
     : (motherboardCostUsd != null ? num(motherboardCostUsd) : num(pick(baseline, 'motherboard_cost_ref')));
@@ -395,6 +416,7 @@ async function computeCase(db, opts = {}) {
   const ctx = {
     qtyScenarioCode, motherboard, annualDemand, procGroup,
     bomMaterial: materialFromBom,   // W1b:SIMPLIFIED 有 BOM 時材料改用 rollup(null=無 BOM 用常數 line)
+    bomByCategory,                  // YIELD_PCT 勾選虛擬項(BOM_MATERIAL_ALL/EE/ME/PKG)
     dlWage: num(pick(baseline, 'dl_wage_per_hr_usd')),
     baselineVat: num(pick(baseline, 'vat_rate_pct')),
     baselineLoss: num(pick(baseline, 'loss_factor_pct')),

@@ -8,7 +8,7 @@
  * 整包內部成本 → server 403 gate;PARTICIPANT 顯鎖定卡。
  */
 
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import type { ProjectDetail } from '../../api'
 import { api } from '../../api'
@@ -119,6 +119,19 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
     } catch (e: any) { if (/403|視角/.test(e.message)) setLocked(true); else setErr(e.message) }
   }
   useEffect(() => { if (token && activeCf) { setData(null); setDetail(null); loadAll(Number(activeCf)) } }, [token, activeCf, qty])   // eslint-disable-line
+
+  const [basisOpen, setBasisOpen] = useState<string | null>(null)   // yield 基數勾選面板(lineKey)
+  // 013aa:loss 線 % 化(calcMode/yieldPct/勾選基數)
+  async function saveYield(r: any, body: { calcMode: string; yieldPct?: number; basis?: string[] }) {
+    try {
+      await api.put<any>(token, `/bom/case/${activeCf}/line-yield`, {
+        lineCode: r.line_code, componentCode: r.component_code, ...body,
+      })
+      setDirty(true)
+      await loadAll(Number(activeCf))
+      if (whatif?.active) dryRun()
+    } catch (e: any) { setErr(e.message) }
+  }
 
   // B-4' Line × Config 用量倍率(0 = 該配置不做此線;無列 = ×1)
   function lineMultOf(lineCode: string, componentCode: string, valueId: number): number {
@@ -597,17 +610,64 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
                   <th className="text-center px-1.5 py-0.5">計入小計</th><th className="text-right px-1.5 py-0.5">排序</th><th className="w-6"></th>
                 </tr></thead>
                 <tbody>
-                  {(detail?.simplifiedLines || []).map((r: any, i: number) => (
-                    <tr key={i} className="border-b border-cortex-line/30">
-                      <td className="px-1.5 py-0.5 font-mono">{r.line_code}</td>
-                      <td className="px-1.5 py-0.5 font-mono">{r.component_code}</td>
-                      <td className="px-1.5 py-0.5"><span className="text-[8px] bg-cortex-bg border border-cortex-line rounded px-1">{r.line_group}</span></td>
-                      <td className="px-1.5 py-0.5 text-right"><EditNum value={r.cost_per_unit_usd} w="w-20" suffix="USD/unit" onSave={(v) => saveParam('line', 'cost_per_unit_usd', { line_code: r.line_code, component_code: r.component_code }, v)} /></td>
-                      <td className="px-1.5 py-0.5 text-center"><EditNum value={r.in_subtotal} w="w-8" onSave={(v) => saveParam('line', 'in_subtotal', { line_code: r.line_code, component_code: r.component_code }, v)} /></td>
-                      <td className="px-1.5 py-0.5 text-right"><EditNum value={r.sort_order} w="w-10" onSave={(v) => saveParam('line', 'sort_order', { line_code: r.line_code, component_code: r.component_code }, v)} /></td>
-                      <td className="px-1.5 py-0.5 text-center"><button onClick={() => delRow('line', { line_code: r.line_code, component_code: r.component_code })} className="text-red-400 hover:text-red-600">✕</button></td>
-                    </tr>
-                  ))}
+                  {(detail?.simplifiedLines || []).map((r: any, i: number) => {
+                    const isYield = r.calc_mode === 'YIELD_PCT'
+                    const lineKey = `${r.line_code}||${r.component_code}`
+                    let basisArr: string[] = []
+                    try { basisArr = JSON.parse(r.yield_basis_json || '[]') || [] } catch { /* noop */ }
+                    return (
+                      <Fragment key={`sl-${i}`}>
+                        <tr className="border-b border-cortex-line/30">
+                          <td className="px-1.5 py-0.5 font-mono">{r.line_code}</td>
+                          <td className="px-1.5 py-0.5 font-mono">{r.component_code}</td>
+                          <td className="px-1.5 py-0.5 whitespace-nowrap">
+                            <span className="text-[8px] bg-cortex-bg border border-cortex-line rounded px-1">{r.line_group}</span>
+                            <button
+                              onClick={() => saveYield(r, isYield ? { calcMode: 'AMOUNT' } : { calcMode: 'YIELD_PCT', yieldPct: Number(r.yield_pct) || 0.04, basis: basisArr })}
+                              title={isYield ? '目前 = 基數×%(點擊切回直接填金額)' : '切成 基數×% 動態算(yield loss 線用;材料/製程變了 loss 自動跟動)'}
+                              className={`ml-1 text-[8px] px-1 rounded border align-middle ${isYield ? 'bg-cortex-teal text-white border-cortex-teal' : 'border-cortex-line text-cortex-muted hover:border-cortex-teal hover:text-cortex-teal'}`}
+                            >%</button>
+                          </td>
+                          {isYield ? (
+                            <td className="px-1.5 py-0.5 text-right whitespace-nowrap">
+                              <EditNum value={Math.round(((Number(r.yield_pct) || 0) * 100) * 10000) / 10000} w="w-14" suffix="%" onSave={(v) => saveYield(r, { calcMode: 'YIELD_PCT', yieldPct: (Number(v) || 0) / 100, basis: basisArr })} />
+                              <button onClick={() => setBasisOpen(basisOpen === lineKey ? null : lineKey)} className="ml-1 text-[9px] text-cortex-teal underline whitespace-nowrap">基數({basisArr.length})</button>
+                            </td>
+                          ) : (
+                            <td className="px-1.5 py-0.5 text-right"><EditNum value={r.cost_per_unit_usd} w="w-20" suffix="USD/unit" onSave={(v) => saveParam('line', 'cost_per_unit_usd', { line_code: r.line_code, component_code: r.component_code }, v)} /></td>
+                          )}
+                          <td className="px-1.5 py-0.5 text-center"><EditNum value={r.in_subtotal} w="w-8" onSave={(v) => saveParam('line', 'in_subtotal', { line_code: r.line_code, component_code: r.component_code }, v)} /></td>
+                          <td className="px-1.5 py-0.5 text-right"><EditNum value={r.sort_order} w="w-10" onSave={(v) => saveParam('line', 'sort_order', { line_code: r.line_code, component_code: r.component_code }, v)} /></td>
+                          <td className="px-1.5 py-0.5 text-center"><button onClick={() => delRow('line', { line_code: r.line_code, component_code: r.component_code })} className="text-red-400 hover:text-red-600">✕</button></td>
+                        </tr>
+                        {isYield && basisOpen === lineKey && (
+                          <tr className="border-b border-cortex-line/30 bg-cortex-bg/70">
+                            <td colSpan={7} className="px-2 py-1.5">
+                              <div className="text-[9px] text-cortex-muted mb-1">
+                                勾選納入 yield loss 基數的成本線:loss = Σ(勾選線在當前配置的生效額)× {(((Number(r.yield_pct) || 0) * 100)).toFixed(2)}%。
+                                只能取「排序在此線之前」的線;有 BOM 的案材料請勾 BOM_MATERIAL_* 項(常數材料線被 rollup 取代)。
+                              </div>
+                              <div className="flex flex-wrap gap-x-3 gap-y-1">
+                                {[...(detail?.simplifiedLines || []).filter((x: any) => !(x.line_code === r.line_code && x.component_code === r.component_code)).map((x: any) => x.line_code), 'BOM_MATERIAL_ALL', 'BOM_MATERIAL_EE', 'BOM_MATERIAL_ME', 'BOM_MATERIAL_PKG'].map((code: string) => (
+                                  <label key={code} className="inline-flex items-center gap-1 text-[9px] font-mono cursor-pointer hover:text-cortex-teal">
+                                    <input
+                                      type="checkbox"
+                                      checked={basisArr.includes(code)}
+                                      onChange={(e) => {
+                                        const next = e.target.checked ? [...basisArr, code] : basisArr.filter((x) => x !== code)
+                                        saveYield(r, { calcMode: 'YIELD_PCT', yieldPct: Number(r.yield_pct) || 0, basis: next })
+                                      }}
+                                    />
+                                    {code.startsWith('BOM_MATERIAL') ? <span className="text-cortex-teal">{code}</span> : code}
+                                  </label>
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    )
+                  })}
                   {!(detail?.simplifiedLines || []).length && <tr><td colSpan={7} className="px-2 py-2 text-center text-cortex-muted">無 line 資料(先匯入成本模型)</td></tr>}
                   <tr><td colSpan={7} className="px-1.5 py-1">
                     {addKind === 'line' ? (
@@ -647,7 +707,7 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
                               {r.line_code}
                               {r.line_group === 'MATERIAL' && <span className="ml-1 text-[8px] text-cortex-muted">(有 BOM 時由 rollup 取代)</span>}
                             </td>
-                            <td className="px-1.5 py-0.5 text-right font-mono text-cortex-muted">{Number(r.cost_per_unit_usd || 0).toFixed(3)}</td>
+                            <td className="px-1.5 py-0.5 text-right font-mono text-cortex-muted">{r.calc_mode === 'YIELD_PCT' ? 'auto(%)' : Number(r.cost_per_unit_usd || 0).toFixed(3)}</td>
                             {lineCfg.values.map((v) => {
                               const m = lineMultOf(r.line_code, r.component_code, v.valueId)
                               return (
