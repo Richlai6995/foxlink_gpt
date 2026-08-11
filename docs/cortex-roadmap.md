@@ -51,6 +51,12 @@
 | EPM 角色權限 | 範本庫維護從 admin 細化到 EPM 角色(接 012 RBAC) |
 | i18n | BOM/成本模型 UI 三語(現全 zh-TW hardcode) |
 
+### 候選佇列(2026-08-11 詳述並拍板順序:1→3→2→4)
+1. **demo 假價校準 5 pack 結構化** ✅(2026-08-11):W3 案(cf83)板級縮放到 89.554 表 golden(Harvard Main/Bird Main/Strap/Battery/PKG Retail→3)· STRAP/Battery 料 effectivity(013ae 一料多值:STRAP 缺 WB-Batt、Battery 缺 WB-Strap)· consumable 線 group=CONSUM(免被 BOM skip,1.14 計回)· WB-Batt 倍率(glue×0/SMTyield×0.05/FATPyield×1.7)· loss 線 YIELD_PCT(SMT 0.3682% 基數 EE+SMT、FATP 4% 累積)。5 config compute=獨立手算精確:Retail 90.11/Suit 92.80/Strap 85.10/Batt 80.33/StrapBatt 88.80;相對序對齊 golden 表(Suit>StrapBatt>Strap>Batt;golden Retail=71 為表內 1/1/1 定額異常口徑,不對此值)。Harvard tier true 補縮(ratio 1.57→0.96)
+2. price_region 管理 UI(小 · next)
+3. 區域價隨檔匯入(U/P@區 欄)
+4. R4 goal-seek(壓軸)
+
 ### 收尾小項
 - Wizard 確認頁 STARTUP_ACTIONS 逐項核實(7 channels/RACI 指派/Webex 三通道/Pin 公告/SLA 倒數 — 部分為假承諾,對照啟動實況改寫)
 - **範本庫 TW 參數未差異化**(2026-08-06 發現:TW·FULL DL=4.95 與 CN 全同、CN/TW SIMP 全同;僅 VN 有差異化 → 選 TW 比價無意義。需真實 TW 參數維護進「管理→廠級成本範本」)
