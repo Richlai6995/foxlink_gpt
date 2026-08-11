@@ -155,7 +155,9 @@ async function listDimensions(db, projectId) {
 }
 
 /**
- * resolve 過濾 SQL 片段:料件被含 iff 它每個 tag 的 value_id 都在 selectedValueIds 內。
+ * resolve 過濾 SQL 片段(013ae 起支援一料一維多 tag):
+ * 料件被含 iff 對每個「它有 tag 的維度」,該維 tags 與 selectedValueIds 有交集(∃ tag ∈ 選中)。
+ * 單值資料(舊 PK 時代)行為不變:唯一 tag ∈ 選中 → 含;∉ → 排。
  * selectedValueIds 空 → 不過濾(向下相容 · 無 config = 全含)。
  * 回 { clause, binds };clause 直接接在 WHERE 後(itemAlias.id 需可見)。
  */
@@ -164,7 +166,10 @@ function effectivityFilter(selectedValueIds, itemAlias = 'i') {
   if (!ids.length) return { clause: '', binds: [] };
   const ph = ids.map(() => '?').join(',');
   return {
-    clause: ` AND NOT EXISTS (SELECT 1 FROM bom_item_effectivity e WHERE e.bom_item_id = ${itemAlias}.id AND e.value_id NOT IN (${ph}))`,
+    clause: ` AND NOT EXISTS (
+      SELECT 1 FROM bom_item_effectivity e WHERE e.bom_item_id = ${itemAlias}.id
+      GROUP BY e.dimension_id
+      HAVING SUM(CASE WHEN e.value_id IN (${ph}) THEN 1 ELSE 0 END) = 0)`,
     binds: ids,
   };
 }
