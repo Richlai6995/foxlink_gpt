@@ -31,7 +31,10 @@ async function rollupMaterial(db, bomInstanceId, opts = {}) {
   //   兩者差 = 料件層 markup(SD §19:利潤主要藏這)· B-5a template 料 true=quote(無 markup)
   // B-2 super-BOM:opts.valueIds(config 選中的值)→ 只 rollup resolve 後的料(無 tag 恆含 · 空=全含)
   const ef = require('./bomVariantService').effectivityFilter(opts.valueIds, 'i');
-  const binds = [bomInstanceId];
+  // 013ad per-region 料價:chosen snapshot 有該區覆寫價 → 用之;無列 fallback 主價(= 現行為)
+  //   regionCode 由 computeCase 依 cf 廠別 → bom_factory.price_region ?? factory_code 解析
+  const regionBind = String(opts.regionCode || '_NONE_');
+  const binds = [regionBind, bomInstanceId];
   if (opts.sectionCategory) binds.push(opts.sectionCategory);
   binds.push(...ef.binds);
   const rows = await all(
@@ -46,10 +49,11 @@ async function rollupMaterial(db, bomInstanceId, opts = {}) {
        JOIN bom_section  sec ON sec.id = c.bom_section_id
        LEFT JOIN (
          SELECT s.bom_item_id,
-                s.applied_price_usd AS quote_price,
-                NVL(MAX(t.true_cost_usd), s.applied_price_usd) AS true_cost
+                NVL(MAX(rp.unit_price_usd), s.applied_price_usd) AS quote_price,
+                NVL(MAX(rp.true_cost_usd), NVL(MAX(t.true_cost_usd), NVL(MAX(rp.unit_price_usd), s.applied_price_usd))) AS true_cost
            FROM bom_item_price_snapshot s
            LEFT JOIN bom_item_price_tier t ON t.snapshot_id = s.id AND t.is_chosen = 1
+           LEFT JOIN bom_item_price_region rp ON rp.snapshot_id = s.id AND rp.region_code = ?
           WHERE s.is_chosen = 1
           GROUP BY s.bom_item_id, s.applied_price_usd
        ) ch ON ch.bom_item_id = i.id

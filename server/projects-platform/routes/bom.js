@@ -1453,6 +1453,34 @@ router.put('/items/:itemId/price/:snapshotId', asyncHandler(async (req, res) => 
   res.json({ ok: true, ...out });
 }));
 
+// PUT /items/:itemId/region-price — per-區域 料價 upsert(013ad · SOT §2.3)
+//   body: { snapshotId, regionCode, unitPrice?, trueCost? };unitPrice 與 trueCost 都空 = 刪該區覆寫
+router.put('/items/:itemId/region-price', asyncHandler(async (req, res) => {
+  const id = reqId(req.params.itemId, res, 'itemId'); if (id === null) return;
+  const snapshotId = Number(req.body.snapshotId);
+  const regionCode = String(req.body.regionCode || '').trim().toUpperCase();
+  if (!snapshotId || !regionCode) return res.status(400).json({ error: 'snapshotId + regionCode required' });
+  const db = getDb();
+  const own = await db.prepare(`SELECT id FROM bom_item_price_snapshot WHERE id = ? AND bom_item_id = ?`).get(snapshotId, id);
+  if (!own) return res.status(404).json({ error: 'snapshot not found for this item' });
+  const numOr = (v) => (v == null || v === '' ? null : (Number.isFinite(Number(v)) ? Number(v) : undefined));
+  const up = numOr(req.body.unitPrice), tc = numOr(req.body.trueCost);
+  if (up === undefined || tc === undefined) return res.status(400).json({ error: '價格需為數字或空' });
+  if (up == null && tc == null) {
+    await db.prepare(`DELETE FROM bom_item_price_region WHERE snapshot_id = ? AND region_code = ?`).run(snapshotId, regionCode);
+    return res.json({ ok: true, removed: true });
+  }
+  const ex = await db.prepare(`SELECT region_price_id FROM bom_item_price_region WHERE snapshot_id = ? AND region_code = ?`).get(snapshotId, regionCode);
+  if (ex) {
+    await db.prepare(`UPDATE bom_item_price_region SET unit_price_usd = ?, true_cost_usd = ?, updated_at = SYSTIMESTAMP WHERE snapshot_id = ? AND region_code = ?`)
+      .run(up, tc, snapshotId, regionCode);
+  } else {
+    await db.prepare(`INSERT INTO bom_item_price_region (snapshot_id, region_code, unit_price_usd, true_cost_usd) VALUES (?, ?, ?, ?)`)
+      .run(snapshotId, regionCode, up, tc);
+  }
+  res.json({ ok: true });
+}));
+
 // DELETE /items/:itemId/price/:snapshotId — 刪一筆報價
 router.delete('/items/:itemId/price/:snapshotId', asyncHandler(async (req, res) => {
   const id = reqId(req.params.itemId, res, 'itemId'); if (id === null) return;

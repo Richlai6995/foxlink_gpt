@@ -246,6 +246,8 @@ function ItemEnrich({ itemId, token, onChanged }: { itemId: number; token: strin
   const [pTrue, setPTrue] = useState(''); const [pFx, setPFx] = useState('1'); const [pQuote, setPQuote] = useState('')
   // 編輯既有報價
   const [editSnap, setEditSnap] = useState<number | null>(null)
+  const [regionEdit, setRegionEdit] = useState<number | null>(null)   // 013ad 區域價編輯中 snapshot
+  const [rgRegion, setRgRegion] = useState(''); const [rgPrice, setRgPrice] = useState(''); const [rgTrue, setRgTrue] = useState('')
   const [eVendor, setEVendor] = useState(''); const [eMfgPn, setEMfgPn] = useState(''); const [eCur, setECur] = useState('USD')
   const [eTrue, setETrue] = useState(''); const [eFx, setEFx] = useState('1'); const [eQuote, setEQuote] = useState('')
   // 加 FLK 候選
@@ -346,6 +348,34 @@ function ItemEnrich({ itemId, token, onChanged }: { itemId: number; token: strin
                         <label className="text-[10px] text-cortex-muted" title="匯率:true(原幣) ÷ fx = true(USD);USD 填 1">匯率(→USD)<br /><input value={eFx} onChange={(e) => setEFx(e.target.value)} className="border border-cortex-line rounded px-1 py-0.5 text-[11px] w-12 font-mono" /></label>
                         <label className="text-[10px] text-cortex-muted">quote(USD)<br /><input value={eQuote} onChange={(e) => setEQuote(e.target.value)} className="border border-cortex-line rounded px-1 py-0.5 text-[11px] w-20 font-mono" /></label>
                         <button onClick={() => saveEdit(s.id)} disabled={busy} className="flex items-center gap-1 text-[11px] px-2 py-1 bg-cortex-teal text-white rounded hover:opacity-90 disabled:opacity-40"><Save className="w-3 h-3" />存</button>
+                      </div>
+                    )}
+                    {(chosen || (s.regionPrices || []).length > 0 || regionEdit === Number(s.id)) && (
+                      <div className="flex items-center gap-1.5 flex-wrap border-t border-cortex-line/40 px-2 py-1 bg-cortex-bg/30 text-[10px]">
+                        <span className="text-cortex-muted" title="不同生產廠區的交貨價(to/out of China 泛化;CN/VN/TW/US/IN…)。算某廠成本時自動用該廠對應區價;沒設的區 fallback 主價">🌐 區域價</span>
+                        {(s.regionPrices || []).map((rp: any) => (
+                          <span key={rp.region_code} className="inline-flex items-center gap-1 bg-white border border-cortex-line rounded px-1 py-0.5 font-mono">
+                            <b>{rp.region_code}</b> {money(rp.unit_price_usd)}{rp.true_cost_usd != null ? ` / t ${money(rp.true_cost_usd)}` : ''}
+                            <button
+                              onClick={() => act(() => api.put(token, `/bom/items/${itemId}/region-price`, { snapshotId: s.id, regionCode: rp.region_code, unitPrice: null, trueCost: null }))}
+                              disabled={busy} className="text-cortex-muted hover:text-red-500"
+                            >×</button>
+                          </span>
+                        ))}
+                        {regionEdit === Number(s.id) ? (
+                          <span className="inline-flex items-center gap-1 flex-wrap">
+                            <input value={rgRegion} onChange={(e) => setRgRegion(e.target.value)} placeholder="區(VN/US/IN)" className="border border-cortex-line rounded px-1 py-0.5 w-20 font-mono" />
+                            <input value={rgPrice} onChange={(e) => setRgPrice(e.target.value)} placeholder="quote USD" className="border border-cortex-line rounded px-1 py-0.5 w-20 font-mono" />
+                            <input value={rgTrue} onChange={(e) => setRgTrue(e.target.value)} placeholder="true(選填)" className="border border-cortex-line rounded px-1 py-0.5 w-20 font-mono" />
+                            <button
+                              onClick={() => { act(() => api.put(token, `/bom/items/${itemId}/region-price`, { snapshotId: s.id, regionCode: rgRegion, unitPrice: rgPrice, trueCost: rgTrue || null })); setRegionEdit(null); setRgRegion(''); setRgPrice(''); setRgTrue('') }}
+                              disabled={busy || !rgRegion || !rgPrice} className="px-1.5 py-0.5 bg-cortex-teal text-white rounded disabled:opacity-40"
+                            >存</button>
+                            <button onClick={() => setRegionEdit(null)} className="text-cortex-muted hover:text-cortex-ink">取消</button>
+                          </span>
+                        ) : (
+                          <button onClick={() => setRegionEdit(Number(s.id))} className="text-cortex-teal hover:underline">＋ 區域價</button>
+                        )}
                       </div>
                     )}
                   </div>

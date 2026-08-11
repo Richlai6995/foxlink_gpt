@@ -47,6 +47,13 @@ async function getItemDetail(db, itemId) {
          FROM bom_item_price_tier WHERE snapshot_id IN (${snapIds.map(() => '?').join(',')}) ORDER BY snapshot_id, tier_seq`,
     ).all(...snapIds).catch(() => []);
     for (const t of tiers) { const o = byId[num(pick(t, 'snapshot_id'))]; if (o) o.tiers.push(lc(t)); }
+    // 013ad per-region 料價:每 snapshot 附區域覆寫價
+    snapOut.forEach((o) => { o.regionPrices = []; });
+    const rps = await db.prepare(
+      `SELECT snapshot_id, region_code, unit_price_usd, true_cost_usd
+         FROM bom_item_price_region WHERE snapshot_id IN (${snapIds.map(() => '?').join(',')}) ORDER BY region_code`,
+    ).all(...snapIds).catch(() => []);
+    for (const rp of rps) { const o = byId[num(pick(rp, 'snapshot_id'))]; if (o) o.regionPrices.push(lc(rp)); }
   }
   // 分層組裝:flk → vendors + snapshots(flk_id NULL 的舊資料歸 final)
   let flks = flkRows.map(lc).map((f) => ({

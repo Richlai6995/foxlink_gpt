@@ -407,7 +407,15 @@ async function computeCase(db, opts = {}) {
   //   rollup 是獨立 service(解耦)· 現 EE、匯入 ME/PKG 後自動含全材料(對 Unit Cost Material Cost)
   let materialFromBom = null, materialTrueFromBom = null, bomByCategory = null;
   if (bomInstanceId) {
-    const roll = await require('./bomMaterialRollup').rollupMaterial(db, bomInstanceId, { valueIds });   // B-2 config resolve
+    // 013ad per-region 料價:廠別 → price_region(NULL = factory_code 自身)→ rollup 抓對應區覆寫價
+    const fcode = pick(inputs.caseFactory, 'factory_code');
+    let regionCode = fcode;
+    try {
+      const fr = await db.prepare(`SELECT price_region FROM bom_factory WHERE factory_code = ?`).get(fcode);
+      const pr = fr ? (fr.price_region ?? Object.values(fr)[0]) : null;
+      if (pr) regionCode = String(pr);
+    } catch (_) { /* noop */ }
+    const roll = await require('./bomMaterialRollup').rollupMaterial(db, bomInstanceId, { valueIds, regionCode });   // B-2 config + 013ad region
     // B-5a 兩階段:有未詢價(PENDING)料件 → 材料不完整,擋算成本;帶 opts.allowPending 才放行
     if (num(roll.pendingCount) > 0 && !opts.allowPending) {
       const e = new Error(`BOM_HAS_PENDING_PRICES: ${roll.pendingCount} 筆料件尚未詢價(材料不完整)`);
