@@ -18,6 +18,7 @@ const CASE_TABLES = [
   { name: 'bom_cs_case_consumable', key: 'case_factory_id' },
   { name: 'bom_cs_case_qty_scenario', key: 'case_factory_id', skipCols: ['scenario_id'] },   // identity PK 排除
   { name: 'bom_cs_case_line_config', key: 'case_factory_id', skipCols: ['line_config_id'] }, // B-4' line×config 倍率
+  { name: 'bom_cs_case_macro_station', key: 'case_factory_id', skipCols: ['station_id'] },   // 製程站(M1;macro_id 跨表引用 → 快照還原同 cf 內安全)
 ];
 
 // 快照經 JSON 後 DATE 變 ISO 字串;還原 bind 前轉回 Date(否則 Oracle DATE 欄 ORA-01861)

@@ -103,6 +103,19 @@ async function provisionCase(db, { projectId, sourceCaseFactoryId, variantKey = 
 
   const cloned = {};
   for (const t of CASE_CHILD_TABLES) cloned[t.replace('bom_cs_case_', '')] = await cloneCaseTable(db, t, sourceCaseFactoryId, newCf);
+  // 製程站(M1):macro_id 需重映到新 cf 的段(by macro_code)→ 不能走通用 clone
+  try {
+    await db.prepare(
+      `INSERT INTO bom_cs_case_macro_station
+         (case_factory_id, macro_id, station_code, name, sfc, num_stations, uph, yield_pct, work_time_sec, dl_headcount, sort_order)
+       SELECT ?, mpNew.macro_id, ms.station_code, ms.name, ms.sfc, ms.num_stations, ms.uph, ms.yield_pct, ms.work_time_sec, ms.dl_headcount, ms.sort_order
+         FROM bom_cs_case_macro_station ms
+         JOIN bom_cs_case_macro_process mpOld ON mpOld.macro_id = ms.macro_id
+         JOIN bom_cs_case_macro_process mpNew ON mpNew.case_factory_id = ? AND mpNew.macro_code = mpOld.macro_code
+        WHERE ms.case_factory_id = ?`,
+    ).run(newCf, newCf, sourceCaseFactoryId);
+    cloned.macro_station = true;
+  } catch (e) { console.warn('[provision] clone macro_station:', e.message); }
   return { caseFactoryId: newCf, factoryCode, costingModel: model, reused: false, cloned };
 }
 

@@ -519,8 +519,20 @@ router.get('/case/:caseFactoryId/cleansheet-detail', asyncHandler(async (req, re
       WHERE cc.case_factory_id = ? ORDER BY cc.process_code`, cf);
   const simplifiedLines = await all(
     `SELECT line_code, component_code, line_group, cost_per_unit_usd, in_subtotal, sort_order,
-            calc_mode, yield_pct, yield_basis_json
+            calc_mode, yield_pct, yield_basis_json, macro_code
        FROM bom_cs_case_simplified_line WHERE case_factory_id = ? ORDER BY sort_order, line_code`, cf);
+  // 製程計算(段→站)+ SMT 點數(M1)
+  const macroProcess = await all(
+    `SELECT macro_id, macro_code, name, num_stations, work_time_sec, dl_headcount, uph, process_yield_pct
+       FROM bom_cs_case_macro_process WHERE case_factory_id = ? ORDER BY macro_code`, cf);
+  const macroStations = await all(
+    `SELECT station_id, macro_id, station_code, name, sfc, num_stations, uph, yield_pct, work_time_sec, dl_headcount, sort_order
+       FROM bom_cs_case_macro_station WHERE case_factory_id = ? ORDER BY sort_order, station_code`, cf);
+  const smtPoints = await all(
+    `SELECT board_code, category_code, pcs, transfer_point FROM bom_cs_case_smt_point WHERE case_factory_id = ? ORDER BY board_code, category_code`, cf);
+  const smtMeta = (await all(
+    `SELECT b.smt_point_unit_price, b.dl_wage_per_hr_usd FROM bom_factory_baseline b
+       JOIN bom_cs_case_factory c ON c.baseline_id = b.baseline_id WHERE c.case_factory_id = ?`, cf))[0] || {};
   // YIELD_PCT 核對:附最新 ready run 的 per-line 算出值(trace.amount;隨最近一次重算的 config)
   const lastRun = (await all(`SELECT run_id FROM bom_cs_run WHERE case_factory_id = ? AND status = 'ready' ORDER BY run_id DESC FETCH FIRST 1 ROWS ONLY`, cf))[0];
   if (lastRun) {
@@ -532,7 +544,10 @@ router.get('/case/:caseFactoryId/cleansheet-detail', asyncHandler(async (req, re
     }
     for (const l of simplifiedLines) if (byLine[l.line_code] != null) l.computed_usd = byLine[l.line_code];
   }
-  res.json({ caseFactoryId: cf, processes, idl, equipment, facility, consumables, simplifiedLines });
+  res.json({ caseFactoryId: cf, processes, idl, equipment, facility, consumables, simplifiedLines,
+    macroProcess, macroStations, smtPoints,
+    smtPointUnitPrice: smtMeta.smt_point_unit_price != null ? Number(smtMeta.smt_point_unit_price) : null,
+    dlWagePerHr: smtMeta.dl_wage_per_hr_usd != null ? Number(smtMeta.dl_wage_per_hr_usd) : null });
 }));
 
 // PUT /case/:cf/cleansheet-param — 事後修正單一參數(白名單表/欄)→ 改完按 ④ 重算生效
@@ -543,9 +558,12 @@ const CS_PARAM_WHITELIST = {
   facility: { table: 'bom_cs_case_facility', keys: ['process_code'], fields: ['sqft', 'sqft_unit_cost_usd', 'apply_util'] },
   consumable: { table: 'bom_cs_case_consumable', keys: ['consumable_id', 'process_code'], fields: ['annual_usage_qty', 'unit_cost_override_usd'] },
   line: { table: 'bom_cs_case_simplified_line', keys: ['line_code', 'component_code'], fields: ['cost_per_unit_usd', 'in_subtotal', 'sort_order'] },
+  macro: { table: 'bom_cs_case_macro_process', keys: ['macro_code'], fields: ['uph', 'dl_headcount', 'work_time_sec', 'num_stations', 'process_yield_pct'] },
+  station: { table: 'bom_cs_case_macro_station', keys: ['station_id'], fields: ['num_stations', 'uph', 'yield_pct', 'work_time_sec', 'dl_headcount', 'sort_order'] },
+  smt: { table: 'bom_cs_case_smt_point', keys: ['board_code', 'category_code'], fields: ['pcs', 'transfer_point'] },
 };
 // baseline 欄修正(SGA%/Profit%/DL wage…):baseline 共用多案 → copy-on-write(clone 含 IDL 年薪表)
-const BASELINE_FIELDS = new Set(['sga_pct', 'profit_pct', 'dl_wage_per_hr_usd', 'vat_rate_pct', 'oh_pct', 'annual_demand_default', 'loss_factor_pct', 'outbound_transportation_per_unit_usd']);
+const BASELINE_FIELDS = new Set(['sga_pct', 'profit_pct', 'dl_wage_per_hr_usd', 'vat_rate_pct', 'oh_pct', 'annual_demand_default', 'loss_factor_pct', 'outbound_transportation_per_unit_usd', 'smt_point_unit_price']);
 /** COW:確保 cf 的 baseline 為本案私有(共用 → clone 含 IDL 兩表)· 回 {baselineId, cloned} */
 async function _ensurePrivateBaseline(db, cfId) {
   const cfRow = await db.prepare(`SELECT baseline_id FROM bom_cs_case_factory WHERE case_factory_id=?`).get(cfId);
@@ -643,8 +661,8 @@ router.put('/case/:caseFactoryId/line-config', asyncHandler(async (req, res) => 
   res.json({ ok: true });
 }));
 
-// ── loss 線 % 化(013aa):calc_mode / yield_pct / 勾選基數 ───────────────────────
-// PUT { lineCode, componentCode, calcMode: 'AMOUNT'|'YIELD_PCT', yieldPct?, basis?: string[] }
+// ── line 計算模式(013aa/013ab):AMOUNT | YIELD_PCT | MACRO | SMT_POINTS ────────────
+// PUT { lineCode, componentCode, calcMode, yieldPct?, basis?: string[], macroCode? }
 router.put('/case/:caseFactoryId/line-yield', asyncHandler(async (req, res) => {
   if (!canViewTrueCost(req)) return res.status(403).json({ error: 'Line 模式維護需完整成本視角(HOST/admin)' });
   const cf = reqId(req.params.caseFactoryId, res, 'caseFactoryId'); if (cf === null) return;
@@ -652,8 +670,10 @@ router.put('/case/:caseFactoryId/line-yield', asyncHandler(async (req, res) => {
   const componentCode = String(req.body.componentCode || '').trim();
   const calcMode = String(req.body.calcMode || 'AMOUNT');
   if (!lineCode || !componentCode) return res.status(400).json({ error: 'lineCode/componentCode required' });
-  if (!['AMOUNT', 'YIELD_PCT'].includes(calcMode)) return res.status(400).json({ error: 'calcMode 需為 AMOUNT | YIELD_PCT' });
-  let yieldPct = null, basisJson = null;
+  if (!['AMOUNT', 'YIELD_PCT', 'MACRO', 'SMT_POINTS'].includes(calcMode)) {
+    return res.status(400).json({ error: 'calcMode 需為 AMOUNT | YIELD_PCT | MACRO | SMT_POINTS' });
+  }
+  let yieldPct = null, basisJson = null, macroCode = null;
   if (calcMode === 'YIELD_PCT') {
     const p = Number(req.body.yieldPct);
     if (!Number.isFinite(p) || p < 0) return res.status(400).json({ error: 'yieldPct 需為 ≥ 0 的小數(0.005 = 0.5%)' });
@@ -661,11 +681,14 @@ router.put('/case/:caseFactoryId/line-yield', asyncHandler(async (req, res) => {
     const basis = Array.isArray(req.body.basis) ? req.body.basis.map((x) => String(x)).filter(Boolean) : [];
     basisJson = JSON.stringify(basis);
   }
+  if (calcMode === 'MACRO') {
+    macroCode = String(req.body.macroCode || '').trim() || null;   // 可先切模式後選段
+  }
   const db = getDb();
   const r = await db.prepare(
-    `UPDATE bom_cs_case_simplified_line SET calc_mode = ?, yield_pct = ?, yield_basis_json = ?
+    `UPDATE bom_cs_case_simplified_line SET calc_mode = ?, yield_pct = ?, yield_basis_json = ?, macro_code = ?
       WHERE case_factory_id = ? AND line_code = ? AND component_code = ?`,
-  ).run(calcMode, yieldPct, basisJson, cf, lineCode, componentCode);
+  ).run(calcMode, yieldPct, basisJson, macroCode, cf, lineCode, componentCode);
   if (!r || !Number(r.changes)) return res.status(404).json({ error: 'line not found' });
   res.json({ ok: true });
 }));
@@ -854,6 +877,18 @@ router.post('/case/:caseFactoryId/cleansheet-row', asyncHandler(async (req, res)
       if (!f.line_code || !f.component_code) return res.status(400).json({ error: 'line_code + component_code required' });
       await db.prepare(`INSERT INTO bom_cs_case_simplified_line (case_factory_id, line_code, component_code, line_group, cost_per_unit_usd, in_subtotal, sort_order) VALUES (?,?,?,?,?,?,?)`)
         .run(cf, String(f.line_code).toUpperCase(), String(f.component_code).toUpperCase(), String(f.line_group || 'OTHER').toUpperCase(), numOr(f.cost_per_unit_usd, 0), numOr(f.in_subtotal, 1), numOr(f.sort_order, 999));
+    } else if (kind === 'macro') {
+      if (!f.macro_code) return res.status(400).json({ error: 'macro_code required' });
+      await db.prepare(`INSERT INTO bom_cs_case_macro_process (case_factory_id, macro_code, name, num_stations, work_time_sec, dl_headcount, uph, process_yield_pct) VALUES (?,?,?,?,?,?,?,?)`)
+        .run(cf, String(f.macro_code).toUpperCase(), f.name || null, numOr(f.num_stations), numOr(f.work_time_sec), numOr(f.dl_headcount, 0), numOr(f.uph), numOr(f.process_yield_pct));
+    } else if (kind === 'station') {
+      if (!f.macro_id || !f.station_code) return res.status(400).json({ error: 'macro_id + station_code required' });
+      await db.prepare(`INSERT INTO bom_cs_case_macro_station (case_factory_id, macro_id, station_code, name, sfc, num_stations, uph, yield_pct, work_time_sec, dl_headcount, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(cf, Number(f.macro_id), String(f.station_code), f.name || null, f.sfc || null, numOr(f.num_stations, 1), numOr(f.uph), numOr(f.yield_pct, 1), numOr(f.work_time_sec), numOr(f.dl_headcount, 1), numOr(f.sort_order, 999));
+    } else if (kind === 'smt') {
+      if (!f.board_code || !f.category_code) return res.status(400).json({ error: 'board_code + category_code required' });
+      await db.prepare(`INSERT INTO bom_cs_case_smt_point (case_factory_id, board_code, category_code, pcs, transfer_point) VALUES (?,?,?,?,?)`)
+        .run(cf, String(f.board_code), String(f.category_code).toUpperCase(), numOr(f.pcs, 0), numOr(f.transfer_point, 0));
     } else if (kind === 'consumable') {
       // 新建 master(廠級)+ case row 一次完成;或帶 consumable_id 直接綁既有
       let cid = numOr(f.consumable_id);
@@ -883,6 +918,9 @@ router.delete('/case/:caseFactoryId/cleansheet-row', asyncHandler(async (req, re
   else if (kind === 'facility') await db.prepare(`DELETE FROM bom_cs_case_facility WHERE case_factory_id=? AND process_code=?`).run(cf, String(k.process_code));
   else if (kind === 'consumable') await db.prepare(`DELETE FROM bom_cs_case_consumable WHERE case_factory_id=? AND consumable_id=? AND process_code=?`).run(cf, Number(k.consumable_id), String(k.process_code));
   else if (kind === 'line') await db.prepare(`DELETE FROM bom_cs_case_simplified_line WHERE case_factory_id=? AND line_code=? AND component_code=?`).run(cf, String(k.line_code), String(k.component_code));
+  else if (kind === 'macro') await db.prepare(`DELETE FROM bom_cs_case_macro_process WHERE case_factory_id=? AND macro_code=?`).run(cf, String(k.macro_code));
+  else if (kind === 'station') await db.prepare(`DELETE FROM bom_cs_case_macro_station WHERE case_factory_id=? AND station_id=?`).run(cf, Number(k.station_id));
+  else if (kind === 'smt') await db.prepare(`DELETE FROM bom_cs_case_smt_point WHERE case_factory_id=? AND board_code=? AND category_code=?`).run(cf, String(k.board_code), String(k.category_code));
   else return res.status(400).json({ error: `unknown kind: ${kind}` });
   res.json({ ok: true, note: '已刪列;按重算生效' });
 }));

@@ -78,6 +78,10 @@ async function loadCaseInputs(db, caseFactoryId) {
     smtPoint:     await all(`SELECT * FROM bom_cs_case_smt_point WHERE case_factory_id = ?`, caseFactoryId),
     smtRule:      await all(`SELECT * FROM bom_factory_smt_point_rule WHERE baseline_id = ?`, baselineId),
     macroProcess: await all(`SELECT * FROM bom_cs_case_macro_process WHERE case_factory_id = ?`, caseFactoryId),
+    macroStations: await all(
+      `SELECT ms.*, mp.macro_code FROM bom_cs_case_macro_station ms
+         JOIN bom_cs_case_macro_process mp ON mp.macro_id = ms.macro_id
+        WHERE mp.case_factory_id = ? ORDER BY ms.sort_order, ms.station_code`, caseFactoryId),
     // 共用
     lineConfig: await all(`SELECT * FROM bom_cs_case_line_config WHERE case_factory_id = ?`, caseFactoryId),  // B-4' line×config 倍率
     qtyScenarios: await all(`SELECT * FROM bom_cs_case_qty_scenario WHERE case_factory_id = ?`, caseFactoryId),
@@ -264,6 +268,36 @@ function computeSimplifiedMva(inputs, ctx) {
       const pct = num(pick(ln, 'yield_pct'));
       v = base * pct * mult;
       trace = { line_code: lineCode, mode, base, pct, basis, amount: v, ...(mult !== 1 ? { mult } : {}) };
+    } else if (mode === 'MACRO') {
+      // 段→站製程試算:有站 = Σ 站(DL × wage / UPH;UPH 空用 工時制 DL × sec/3600 × wage);無站 = 段級同式
+      const mcode = pick(ln, 'macro_code');
+      const wage = num(ctx.dlWage);
+      const stCost = (row) => {
+        const dl = num(pick(row, 'dl_headcount')), uph = num(pick(row, 'uph')), wt = num(pick(row, 'work_time_sec'));
+        return uph > 0 ? (dl * wage / uph) : (dl * (wt / 3600) * wage);
+      };
+      const stations = (ctx.macroStations || []).filter((s) => pick(s, 'macro_code') === mcode);
+      let cost = 0;
+      if (stations.length) { for (const st of stations) cost += stCost(st); }
+      else {
+        const m = (ctx.macroProcess || []).find((x) => pick(x, 'macro_code') === mcode);
+        if (m) cost = stCost(m);
+      }
+      v = cost * mult;
+      trace = { line_code: lineCode, mode, macro_code: mcode || null, stations: stations.length, wage, amount: v, ...(mult !== 1 ? { mult } : {}) };
+    } else if (mode === 'SMT_POINTS') {
+      // 點數制:Σ(板×類別 transfer_point × 單價);單價 = per-category rule > baseline 預設
+      const ruleBy = new Map((ctx.smtRule || []).map((r) => [String(pick(r, 'category_code')), num(pick(r, 'unit_price_usd'))]));
+      const defP = num(ctx.smtPointUnitPrice);
+      let cost = 0, pts = 0;
+      for (const sp of (ctx.smtPoint || [])) {
+        const tp = num(pick(sp, 'transfer_point'));
+        const rp = ruleBy.get(String(pick(sp, 'category_code')));
+        cost += tp * (rp > 0 ? rp : defP);
+        pts += tp;
+      }
+      v = cost * mult;
+      trace = { line_code: lineCode, mode, points: pts, unit_price_default: defP, amount: v, ...(mult !== 1 ? { mult } : {}) };
     } else {
       if (bomMat != null && grp === 'MATERIAL') continue;   // 有 BOM → 材料改 rollup,不用常數材料 line
       v = num(pick(ln, 'cost_per_unit_usd')) * mult;
@@ -423,11 +457,14 @@ async function computeCase(db, opts = {}) {
     baselineInboundFreight: num(pick(baseline, 'inbound_freight_annual')),
     sqftUnitCost: SQFT_UNIT_COST_DEFAULT, // TODO baseline.floor_cost_per_sqft
     ohPct: num(pick(baseline, 'oh_pct')),                                  // SIMPLIFIED OH%
+    smtPointUnitPrice: num(pick(baseline, 'smt_point_unit_price')),        // SMT 點數制預設單價(rule 無值時用)
     lineMults,                                                             // B-4' line×config 倍率(SIMPLIFIED line 用)
     transportPerUnit: num(pick(baseline, 'outbound_transportation_per_unit_usd')), // SIMPLIFIED 運輸/unit
     idlRoles: inputs.idlRoles, idlAlloc: inputs.idlAlloc, idlLinedep: inputs.idlLinedep,
     equipArea: inputs.equipArea, facility: inputs.facility,
     caseConsum: inputs.caseConsum, consumMaster: inputs.consumMaster,
+    macroProcess: inputs.macroProcess, macroStations: inputs.macroStations,   // MACRO 製程試算(M2)
+    smtPoint: inputs.smtPoint, smtRule: inputs.smtRule,                       // SMT 點數制(M2)
   };
 
   // 單一 top-level 分流(非散落 if · 各 model 呼叫共用 helper)

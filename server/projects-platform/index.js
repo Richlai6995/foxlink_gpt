@@ -175,6 +175,7 @@ async function runMigrations(db) {
       await require('./migrations/013y_config_weight')(db);          // 【收回】B-4 乘數誤讀 → DROP(見 013z)
       await require('./migrations/013z_line_config')(db);            // B-4' 製程線 per-config 用量倍率(真需求)
       await require('./migrations/013aa_line_yield')(db);            // loss 線 % 化(calc_mode/yield_pct/勾選基數)
+      await require('./migrations/013ab_macro_station')(db);         // 製程段→站彈性化(M1:站表 + line 綁段)
       console.log('[projects-platform] Cortex BOM/RBAC migrations (S0) ✓');
     } else {
       console.log('[projects-platform] Cortex BOM/RBAC migrations skipped (ENABLE_CORTEX_BOM != true)');

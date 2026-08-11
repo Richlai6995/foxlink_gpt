@@ -122,8 +122,9 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
 
   const [basisOpen, setBasisOpen] = useState<string | null>(null)   // yield 基數勾選面板(lineKey)
   const [wfOpen, setWfOpen] = useState<string | null>(null)         // waterfall 展開列
+  const [macroOpen, setMacroOpen] = useState<number | null>(null)   // 製程段展開(站表)
   // 013aa:loss 線 % 化(calcMode/yieldPct/勾選基數)
-  async function saveYield(r: any, body: { calcMode: string; yieldPct?: number; basis?: string[] }) {
+  async function saveYield(r: any, body: { calcMode: string; yieldPct?: number; basis?: string[]; macroCode?: string }) {
     try {
       await api.put<any>(token, `/bom/case/${activeCf}/line-yield`, {
         lineCode: r.line_code, componentCode: r.component_code, ...body,
@@ -627,11 +628,22 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
                           <td className="px-1.5 py-0.5 font-mono">{r.component_code}</td>
                           <td className="px-1.5 py-0.5 whitespace-nowrap">
                             <span className="text-[8px] bg-cortex-bg border border-cortex-line rounded px-1">{r.line_group}</span>
-                            <button
-                              onClick={() => saveYield(r, isYield ? { calcMode: 'AMOUNT' } : { calcMode: 'YIELD_PCT', yieldPct: Number(r.yield_pct) || 0.04, basis: basisArr })}
-                              title={isYield ? '目前 = 基數×%(點擊切回直接填金額)' : '切成 基數×% 動態算(yield loss 線用;材料/製程變了 loss 自動跟動)'}
-                              className={`ml-1 text-[8px] px-1 rounded border align-middle ${isYield ? 'bg-cortex-teal text-white border-cortex-teal' : 'border-cortex-line text-cortex-muted hover:border-cortex-teal hover:text-cortex-teal'}`}
-                            >%</button>
+                            <select
+                              value={r.calc_mode || 'AMOUNT'}
+                              onChange={(e) => {
+                                const m = e.target.value
+                                if (m === 'YIELD_PCT') saveYield(r, { calcMode: m, yieldPct: Number(r.yield_pct) || 0.04, basis: basisArr })
+                                else if (m === 'MACRO') saveYield(r, { calcMode: m, macroCode: r.macro_code || '' })
+                                else saveYield(r, { calcMode: m })
+                              }}
+                              title="計算模式:$手填金額 / %=Σ勾選基數×% / 段站=製程試算 ΣDL×wage÷UPH / SMT點=Σ點數×單價"
+                              className="ml-1 text-[8px] border border-cortex-line rounded px-0.5 py-px align-middle bg-white text-cortex-ink"
+                            >
+                              <option value="AMOUNT">$手填</option>
+                              <option value="YIELD_PCT">%基數</option>
+                              <option value="MACRO">段站</option>
+                              <option value="SMT_POINTS">SMT點</option>
+                            </select>
                           </td>
                           {isYield ? (
                             <td className="px-1.5 py-0.5 text-right whitespace-nowrap">
@@ -640,6 +652,26 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
                                 {r.computed_usd != null ? `= ${Number(r.computed_usd).toFixed(4)}` : '(重算後顯示值)'}
                               </span>
                               <button onClick={() => setBasisOpen(basisOpen === lineKey ? null : lineKey)} className="ml-1 text-[9px] text-cortex-teal underline whitespace-nowrap">基數({basisArr.length})</button>
+                            </td>
+                          ) : r.calc_mode === 'MACRO' ? (
+                            <td className="px-1.5 py-0.5 text-right whitespace-nowrap">
+                              <select
+                                value={r.macro_code || ''}
+                                onChange={(e) => saveYield(r, { calcMode: 'MACRO', macroCode: e.target.value })}
+                                className="text-[9px] border border-cortex-line rounded px-0.5 py-px bg-white text-cortex-ink"
+                              >
+                                <option value="">選段…</option>
+                                {(detail?.macroProcess || []).map((mp: any) => <option key={mp.macro_id} value={mp.macro_code}>{mp.macro_code}</option>)}
+                              </select>
+                              <span className="ml-1 font-mono text-[9px] text-cortex-teal" title="Σ 站(DL × DL wage ÷ UPH);最近一次重算值">
+                                {r.computed_usd != null ? `= ${Number(r.computed_usd).toFixed(4)}` : '(重算後顯示)'}
+                              </span>
+                            </td>
+                          ) : r.calc_mode === 'SMT_POINTS' ? (
+                            <td className="px-1.5 py-0.5 text-right whitespace-nowrap">
+                              <span className="font-mono text-[9px] text-cortex-teal" title="Σ(轉換點數 × 單價/點);最近一次重算值">
+                                {r.computed_usd != null ? `= ${Number(r.computed_usd).toFixed(4)}` : 'Σ點數×單價(重算後顯示)'}
+                              </span>
                             </td>
                           ) : (
                             <td className="px-1.5 py-0.5 text-right"><EditNum value={r.cost_per_unit_usd} w="w-20" suffix="USD/unit" onSave={(v) => saveParam('line', 'cost_per_unit_usd', { line_code: r.line_code, component_code: r.component_code }, v)} /></td>
@@ -692,6 +724,92 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
                 </tbody>
               </table>
 
+              {/* 製程計算(段→站)+ SMT 點數(M1)*/}
+              <div className="mt-2 border-t border-dashed border-cortex-line pt-1.5">
+                <div className="text-[10px] text-cortex-muted mb-1">
+                  ⚙ 製程計算(段 → 站)— line 模式選「段站」後綁段;段成本 = Σ 站(DL × DL wage ÷ UPH;無 UPH 用 工時秒÷3600×wage);無站用段級參數。
+                  DL wage = <b className="font-mono">{detail?.dlWagePerHr ?? '—'}</b>/hr(baseline)
+                </div>
+                {(detail?.macroProcess || []).map((mp: any) => (
+                  <div key={mp.macro_id} className="border border-cortex-line/60 rounded mb-1">
+                    <div className="flex items-center gap-2 px-2 py-1 text-[10px] flex-wrap">
+                      <button onClick={() => setMacroOpen(macroOpen === mp.macro_id ? null : mp.macro_id)} className="font-mono text-cortex-teal">{macroOpen === mp.macro_id ? '▾' : '▸'}</button>
+                      <b className="font-mono">{mp.macro_code}</b><span className="text-cortex-muted">{mp.name}</span>
+                      <span className="ml-auto flex items-center gap-2 flex-wrap">
+                        <span className="flex items-center gap-1">UPH <EditNum value={mp.uph} w="w-14" onSave={(v) => saveParam('macro', 'uph', { macro_code: mp.macro_code }, v)} /></span>
+                        <span className="flex items-center gap-1">DL <EditNum value={mp.dl_headcount} w="w-10" suffix="人" onSave={(v) => saveParam('macro', 'dl_headcount', { macro_code: mp.macro_code }, v)} /></span>
+                        <span className="flex items-center gap-1">工時 <EditNum value={mp.work_time_sec} w="w-12" suffix="秒" onSave={(v) => saveParam('macro', 'work_time_sec', { macro_code: mp.macro_code }, v)} /></span>
+                        <span className="flex items-center gap-1">Yield <EditNum value={mp.process_yield_pct} w="w-12" suffix="0~1" onSave={(v) => saveParam('macro', 'process_yield_pct', { macro_code: mp.macro_code }, v)} /></span>
+                        <button onClick={() => delRow('macro', { macro_code: mp.macro_code })} className="text-red-400 hover:text-red-600">✕</button>
+                      </span>
+                    </div>
+                    {macroOpen === mp.macro_id && (
+                      <div className="px-2 pb-1.5 overflow-x-auto">
+                        <table className="text-[9.5px] w-full">
+                          <thead className="text-cortex-muted"><tr>
+                            <th className="text-left px-1">站</th><th className="text-left px-1">名稱</th><th className="text-right px-1">站數</th>
+                            <th className="text-right px-1">UPH</th><th className="text-right px-1">Yield</th><th className="text-right px-1">工時 s</th><th className="text-right px-1">DL</th><th></th>
+                          </tr></thead>
+                          <tbody>
+                            {(detail?.macroStations || []).filter((st: any) => st.macro_id === mp.macro_id).map((st: any) => (
+                              <tr key={st.station_id} className="border-t border-cortex-line/30">
+                                <td className="px-1 font-mono whitespace-nowrap">{st.station_code}</td>
+                                <td className="px-1 text-cortex-muted max-w-[200px] truncate">{st.name}</td>
+                                <td className="px-1 text-right"><EditNum value={st.num_stations} w="w-10" onSave={(v) => saveParam('station', 'num_stations', { station_id: st.station_id }, v)} /></td>
+                                <td className="px-1 text-right"><EditNum value={st.uph} w="w-14" onSave={(v) => saveParam('station', 'uph', { station_id: st.station_id }, v)} /></td>
+                                <td className="px-1 text-right"><EditNum value={st.yield_pct} w="w-10" onSave={(v) => saveParam('station', 'yield_pct', { station_id: st.station_id }, v)} /></td>
+                                <td className="px-1 text-right"><EditNum value={st.work_time_sec} w="w-12" onSave={(v) => saveParam('station', 'work_time_sec', { station_id: st.station_id }, v)} /></td>
+                                <td className="px-1 text-right"><EditNum value={st.dl_headcount} w="w-10" onSave={(v) => saveParam('station', 'dl_headcount', { station_id: st.station_id }, v)} /></td>
+                                <td className="px-1"><button onClick={() => delRow('station', { station_id: st.station_id })} className="text-red-400 hover:text-red-600">✕</button></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <div className="mt-1 flex gap-1 items-center text-[9.5px] flex-wrap">
+                          <input value={addF[`st_${mp.macro_id}_code`] || ''} onChange={(e) => setAddF((p) => ({ ...p, [`st_${mp.macro_id}_code`]: e.target.value }))} placeholder="站代碼(B301)" className="w-24 border border-cortex-line rounded px-1 py-0.5 font-mono" />
+                          <input value={addF[`st_${mp.macro_id}_name`] || ''} onChange={(e) => setAddF((p) => ({ ...p, [`st_${mp.macro_id}_name`]: e.target.value }))} placeholder="站名(選填)" className="w-44 border border-cortex-line rounded px-1 py-0.5" />
+                          <button onClick={() => { addRow('station', { macro_id: mp.macro_id, station_code: addF[`st_${mp.macro_id}_code`], name: addF[`st_${mp.macro_id}_name`] }); setAddF((p) => ({ ...p, [`st_${mp.macro_id}_code`]: '', [`st_${mp.macro_id}_name`]: '' })) }} className="px-1.5 py-0.5 bg-cortex-teal text-white rounded">＋ 加站</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+                <div className="flex gap-1 items-center text-[10px] mb-2 flex-wrap">
+                  <input value={addF.macro_code || ''} onChange={(e) => setAddF((p) => ({ ...p, macro_code: e.target.value }))} placeholder="段代碼(如 FATP_M)" className="w-32 border border-cortex-line rounded px-1 py-0.5 font-mono" />
+                  <input value={addF.macro_name || ''} onChange={(e) => setAddF((p) => ({ ...p, macro_name: e.target.value }))} placeholder="段名(選填)" className="w-44 border border-cortex-line rounded px-1 py-0.5" />
+                  <button onClick={() => { addRow('macro', { macro_code: addF.macro_code, name: addF.macro_name }); setAddF((p) => ({ ...p, macro_code: '', macro_name: '' })) }} className="px-1.5 py-0.5 bg-cortex-teal text-white rounded">＋ 加段</button>
+                </div>
+                <div className="text-[10px] text-cortex-muted mb-1 flex items-center gap-1 flex-wrap">
+                  ⚙ SMT 點數(line 模式選「SMT點」)— 成本 = Σ(轉換點數 × 單價/點);單價/點
+                  <EditNum value={detail?.smtPointUnitPrice} w="w-16" suffix="$/pt" onSave={(v) => saveParam('baseline', 'smt_point_unit_price', {}, v)} />
+                </div>
+                {(detail?.smtPoints || []).length > 0 && (
+                  <table className="text-[9.5px]">
+                    <thead className="text-cortex-muted"><tr>
+                      <th className="text-left px-1">板</th><th className="text-left px-1">類別</th><th className="text-right px-1">PCS</th><th className="text-right px-1">轉換點數</th><th></th>
+                    </tr></thead>
+                    <tbody>
+                      {(detail?.smtPoints || []).map((sp: any, i: number) => (
+                        <tr key={`sp-${i}`} className="border-t border-cortex-line/30">
+                          <td className="px-1 font-mono whitespace-nowrap">{sp.board_code}</td>
+                          <td className="px-1 font-mono">{sp.category_code}</td>
+                          <td className="px-1 text-right"><EditNum value={sp.pcs} w="w-10" onSave={(v) => saveParam('smt', 'pcs', { board_code: sp.board_code, category_code: sp.category_code }, v)} /></td>
+                          <td className="px-1 text-right"><EditNum value={sp.transfer_point} w="w-14" onSave={(v) => saveParam('smt', 'transfer_point', { board_code: sp.board_code, category_code: sp.category_code }, v)} /></td>
+                          <td className="px-1"><button onClick={() => delRow('smt', { board_code: sp.board_code, category_code: sp.category_code })} className="text-red-400 hover:text-red-600">✕</button></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                <div className="mt-1 flex gap-1 items-center text-[9.5px] flex-wrap">
+                  <input value={addF.smt_board || ''} onChange={(e) => setAddF((p) => ({ ...p, smt_board: e.target.value }))} placeholder="板代碼" className="w-28 border border-cortex-line rounded px-1 py-0.5 font-mono" />
+                  <input value={addF.smt_cat || ''} onChange={(e) => setAddF((p) => ({ ...p, smt_cat: e.target.value }))} placeholder="類別(C/P R U…)" className="w-24 border border-cortex-line rounded px-1 py-0.5 font-mono" />
+                  <input value={addF.smt_pcs || ''} onChange={(e) => setAddF((p) => ({ ...p, smt_pcs: e.target.value }))} placeholder="PCS" className="w-12 border border-cortex-line rounded px-1 py-0.5" />
+                  <input value={addF.smt_tp || ''} onChange={(e) => setAddF((p) => ({ ...p, smt_tp: e.target.value }))} placeholder="點數" className="w-14 border border-cortex-line rounded px-1 py-0.5" />
+                  <button onClick={() => { addRow('smt', { board_code: addF.smt_board, category_code: addF.smt_cat, pcs: addF.smt_pcs, transfer_point: addF.smt_tp }); setAddF((p) => ({ ...p, smt_board: '', smt_cat: '', smt_pcs: '', smt_tp: '' })) }} className="px-1.5 py-0.5 bg-cortex-teal text-white rounded">＋ 加列</button>
+                </div>
+              </div>
+
               {/* B-4' Line × 配置 用量倍率(WHOOP 真表 row 14~22;例 Battery:glue=0 / SMT yield=0.05 / FATP yield=1.7)*/}
               <div className="mt-2 border-t border-dashed border-cortex-line pt-1.5">
                 <div className="text-[10px] text-cortex-muted mb-1">
@@ -715,7 +833,7 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
                               {r.line_code}
                               {r.line_group === 'MATERIAL' && <span className="ml-1 text-[8px] text-cortex-muted">(有 BOM 時由 rollup 取代)</span>}
                             </td>
-                            <td className="px-1.5 py-0.5 text-right font-mono text-cortex-muted">{r.calc_mode === 'YIELD_PCT' ? 'auto(%)' : Number(r.cost_per_unit_usd || 0).toFixed(3)}</td>
+                            <td className="px-1.5 py-0.5 text-right font-mono text-cortex-muted">{['YIELD_PCT', 'MACRO', 'SMT_POINTS'].includes(r.calc_mode) ? 'auto' : Number(r.cost_per_unit_usd || 0).toFixed(3)}</td>
                             {lineCfg.values.map((v) => {
                               const m = lineMultOf(r.line_code, r.component_code, v.valueId)
                               return (
