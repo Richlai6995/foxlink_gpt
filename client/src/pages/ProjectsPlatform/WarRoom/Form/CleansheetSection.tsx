@@ -121,6 +121,7 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
   useEffect(() => { if (token && activeCf) { setData(null); setDetail(null); loadAll(Number(activeCf)) } }, [token, activeCf, qty])   // eslint-disable-line
 
   const [basisOpen, setBasisOpen] = useState<string | null>(null)   // yield 基數勾選面板(lineKey)
+  const [wfOpen, setWfOpen] = useState<string | null>(null)         // waterfall 展開列
   // 013aa:loss 線 % 化(calcMode/yieldPct/勾選基數)
   async function saveYield(r: any, body: { calcMode: string; yieldPct?: number; basis?: string[] }) {
     try {
@@ -1015,21 +1016,96 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
         </div>
       )}
 
-      {/* Final TC waterfall */}
-      {kpi && (
+      {/* Final TC waterfall — SIMPLIFIED 拆 OH/Transport;各列 ▸ 可展開明細 */}
+      {kpi && (() => {
+        const isSimp = String(data?.costingModel || '').startsWith('SIMPLIFIED')
+        const mxc = (data?.matrix?.cells || {}) as any
+        const cellOf = (comp: string, proc: string) => mxc?.[comp]?.[proc]
+        const transportV = cellOf('TRANSPORTATION', 'COMMON')?.v ?? (bl?.transportPerUnit || 0)
+        const ohV = cellOf('OVERHEAD_4PCT', 'COMMON')?.v ?? Math.max(0, (kpi.mvaTotal || 0) - transportV)
+        const matCell = cellOf('MATERIAL', 'MATERIAL')
+        const matFromBom = Array.isArray(matCell?.im) && matCell.im.some((t: any) => t?.source === 'bom_rollup')
+        const toggle = (k: string) => setWfOpen(wfOpen === k ? null : k)
+        const Chev = ({ k }: { k: string }) => (
+          <button onClick={() => toggle(k)} className="mr-1 text-cortex-muted hover:text-cortex-teal font-mono text-[10px] align-middle">{wfOpen === k ? '▾' : '▸'}</button>
+        )
+        const SubRow = ({ label, v, note }: { label: string; v: any; note?: string }) => (
+          <tr className="border-b border-cortex-line/20 bg-cortex-bg/50 text-[10px]">
+            <td className="pl-9 pr-3 py-0.5 text-cortex-muted">{label}{note ? <span className="ml-1.5 text-[9px] opacity-75">{note}</span> : null}</td>
+            <td className="px-3 py-0.5 text-right font-mono text-cortex-muted">{v == null ? '—' : m4(Number(v))}</td>
+          </tr>
+        )
+        const lines = (detail?.simplifiedLines || []) as any[]
+        const lineVal = (l: any) => (l.calc_mode === 'YIELD_PCT' ? l.computed_usd : l.cost_per_unit_usd)
+        return (
         <div className="border border-cortex-line rounded-lg overflow-hidden">
           <div className="px-3 py-1.5 text-[11px] font-bold text-cortex-ink bg-cortex-bg/40 border-b border-cortex-line">Final TC Waterfall</div>
           <table className="w-full text-[11px]">
             <tbody>
-              <tr className="border-b border-cortex-line/30"><td className="px-3 py-1">Material(from BOM · 對客報價)</td><td className="px-3 py-1 text-right font-mono">{m4(kpi.material)}</td></tr>
-              <tr className="border-b border-cortex-line/30"><td className="px-3 py-1 text-cortex-teal font-bold">+ MVA(9 製程合計)</td><td className="px-3 py-1 text-right font-mono font-bold text-cortex-teal">{m4(kpi.mvaTotal)}</td></tr>
-              <tr className="border-b border-cortex-line/30"><td className="px-3 py-1">+ SG&A({nf((bl?.sgaPct || 0) * 100, 1)}%)</td><td className="px-3 py-1 text-right font-mono">{m4(kpi.sga)}</td></tr>
-              <tr className="border-b border-cortex-line/30"><td className="px-3 py-1">+ Profit({nf((bl?.profitPct || 0) * 100, 1)}%)</td><td className="px-3 py-1 text-right font-mono">{m4(kpi.profit)}</td></tr>
+              <tr className="border-b border-cortex-line/30">
+                <td className="px-3 py-1"><Chev k="mat" />{isSimp ? 'Subtotal(材料+製程+損耗 · 對客報價)' : 'Material(from BOM · 對客報價)'}</td>
+                <td className="px-3 py-1 text-right font-mono">{m4(kpi.material)}</td>
+              </tr>
+              {wfOpen === 'mat' && isSimp && (
+                <>
+                  <SubRow label={matFromBom ? '材料合計(BOM rollup · 隨 config 選料)' : '材料合計(常數材料線)'} v={matCell?.v} />
+                  {lines.filter((l) => l.line_group !== 'MATERIAL').map((l) => (
+                    <SubRow key={`wf-${l.line_code}`} label={l.line_code}
+                      note={l.calc_mode === 'YIELD_PCT' ? `= 基數 × ${(((Number(l.yield_pct) || 0) * 100)).toFixed(2)}%` : `${l.line_group} 線`}
+                      v={lineVal(l)} />
+                  ))}
+                </>
+              )}
+              {wfOpen === 'mat' && !isSimp && (
+                <SubRow label={matFromBom ? 'BOM rollup(隨 config 選料 · 已詢價合計)' : 'motherboard 參考價(無 BOM)'} v={kpi.material} />
+              )}
+              {isSimp ? (
+                <>
+                  <tr className="border-b border-cortex-line/30">
+                    <td className="px-3 py-1 text-cortex-teal font-bold"><Chev k="oh" />+ Over-head({nf((bl?.ohPct || 0) * 100, 1)}%)</td>
+                    <td className="px-3 py-1 text-right font-mono font-bold text-cortex-teal">{m4(ohV)}</td>
+                  </tr>
+                  {wfOpen === 'oh' && <SubRow label={`= Subtotal ${m4(kpi.material)} × ${nf((bl?.ohPct || 0) * 100, 1)}%`} note="(config 有倍率時 trace 另計)" v={ohV} />}
+                  <tr className="border-b border-cortex-line/30">
+                    <td className="px-3 py-1 text-cortex-teal font-bold"><Chev k="tr" />+ Transportation(固定)</td>
+                    <td className="px-3 py-1 text-right font-mono font-bold text-cortex-teal">{m4(transportV)}</td>
+                  </tr>
+                  {wfOpen === 'tr' && <SubRow label="= baseline 固定 $/unit(OIA pick up)" v={transportV} />}
+                </>
+              ) : (
+                <>
+                  <tr className="border-b border-cortex-line/30">
+                    <td className="px-3 py-1 text-cortex-teal font-bold"><Chev k="mva" />+ MVA(9 製程合計)</td>
+                    <td className="px-3 py-1 text-right font-mono font-bold text-cortex-teal">{m4(kpi.mvaTotal)}</td>
+                  </tr>
+                  {wfOpen === 'mva' && (data?.matrix?.processes || []).map((p: string) => {
+                    const s = (data?.matrix?.components || []).reduce((a: number, co: string) => a + (cellOf(co, p)?.v || 0), 0)
+                    return s ? <SubRow key={`wf-p-${p}`} label={p} v={s} /> : null
+                  })}
+                </>
+              )}
+              <tr className="border-b border-cortex-line/30">
+                <td className="px-3 py-1"><Chev k="sga" />+ SG&A({nf((bl?.sgaPct || 0) * 100, 1)}%)</td>
+                <td className="px-3 py-1 text-right font-mono">{m4(kpi.sga)}</td>
+              </tr>
+              {wfOpen === 'sga' && <SubRow label={`= base ${(bl?.sgaPct ? m4(kpi.sga / bl.sgaPct) : '—')} × ${nf((bl?.sgaPct || 0) * 100, 1)}%`} v={kpi.sga} />}
+              <tr className="border-b border-cortex-line/30">
+                <td className="px-3 py-1"><Chev k="pf" />+ Profit({nf((bl?.profitPct || 0) * 100, 1)}%)</td>
+                <td className="px-3 py-1 text-right font-mono">{m4(kpi.profit)}</td>
+              </tr>
+              {wfOpen === 'pf' && <SubRow label={`= base ${(bl?.profitPct ? m4(kpi.profit / bl.profitPct) : '—')} × ${nf((bl?.profitPct || 0) * 100, 1)}%`} v={kpi.profit} />}
+              {(() => {
+                const nreV = (kpi.total || 0) - (kpi.material || 0) - (kpi.mvaTotal || 0) - (kpi.sga || 0) - (kpi.profit || 0)
+                return nreV > 0.0001 ? (
+                  <tr className="border-b border-cortex-line/30"><td className="px-3 py-1 text-cortex-muted">+ NRE 攤提 / unit(AMORTIZED)</td><td className="px-3 py-1 text-right font-mono text-cortex-muted">{m4(nreV)}</td></tr>
+                ) : null
+              })()}
               <tr className="font-bold bg-cortex-cyan-bg/40"><td className="px-3 py-1.5">= Total Cost / unit</td><td className="px-3 py-1.5 text-right font-mono text-[13px] text-cortex-teal">{m4(kpi.total)}</td></tr>
             </tbody>
           </table>
         </div>
-      )}
+        )
+      })()}
       <div className="text-[10px] text-cortex-muted">參數修改即寫入案級表(bom_cs_case_*),按 🔄 Compute 重算 → 主矩陣 / 矩陣快取 / 成本核算同步更新 · 對照 §多廠矩陣 同 run 快取</div>
     </div>
   )
