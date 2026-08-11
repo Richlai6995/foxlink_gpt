@@ -21,6 +21,9 @@ const pick = (row, name) => { if (!row) return undefined; const lc = String(name
 const SHEETS = [
   { sheet: 'Baseline',       table: 'bom_factory_baseline',          scope: 'baseline', single: true },
   { sheet: 'SimplifiedLine', table: 'bom_cs_case_simplified_line',   scope: 'case' },
+  { sheet: 'MacroProcess',   table: 'bom_cs_case_macro_process',     scope: 'case' },     // 製程段(M3 · SIMPLIFIED 選填)
+  { sheet: 'MacroStation',   special: 'macroStation' },  // 製程站(M3 · MACRO_CODE → macro_id 映射)
+  { sheet: 'SmtPoint',       table: 'bom_cs_case_smt_point',         scope: 'case' },     // SMT 點數(M3 · SIMPLIFIED 選填)
   { sheet: 'QtyScenario',    table: 'bom_cs_case_qty_scenario',      scope: 'case' },
   { sheet: 'Process',        table: 'bom_cs_case_process',           scope: 'case' },
   { sheet: 'IDL-Alloc',      table: 'bom_cs_case_idl_alloc',         scope: 'case' },     // 案級 IDL 分攤(FULL MVA 的 IDL_CPU)
@@ -40,8 +43,9 @@ const REQUIRED = {
 };
 // Consumable 合併欄(master:code/desc/單價/單位/預設製程 + case:製程/年用量/單價override)
 const CONSUMABLE_COLS = ['CONSUMABLE_CODE', 'DESCRIPTION', 'FOXLINK_PART_NO', 'UNIT_COST_USD', 'UNIT_OF_MEASURE', 'DEFAULT_PROCESS_CODE', 'PROCESS_CODE', 'ANNUAL_USAGE_QTY', 'UNIT_COST_OVERRIDE_USD'];
+const MACRO_STATION_COLS = ['MACRO_CODE', 'STATION_CODE', 'NAME', 'SFC', 'NUM_STATIONS', 'UPH', 'YIELD_PCT', 'WORK_TIME_SEC', 'DL_HEADCOUNT', 'SORT_ORDER'];
 // 不進 Excel 的欄(PK/FK/稽核)· 匯入時也不吃
-const SKIP_COLS = new Set(['ID', 'BASELINE_ID', 'CASE_FACTORY_ID', 'SCENARIO_ID', 'LINE_ID', 'TIER_ID', 'CREATED_AT', 'UPDATED_AT', 'CREATED_BY', 'UPDATED_BY', 'AI_CACHE_ID']);
+const SKIP_COLS = new Set(['ID', 'BASELINE_ID', 'CASE_FACTORY_ID', 'SCENARIO_ID', 'LINE_ID', 'TIER_ID', 'CREATED_AT', 'UPDATED_AT', 'CREATED_BY', 'UPDATED_BY', 'AI_CACHE_ID', 'MACRO_ID', 'SMT_POINT_ID', 'STATION_ID']);
 // Baseline 薪資換算輔助欄(拍板§5:月薪 → 時薪;引擎不改)
 const WAGE_HELPERS = ['月薪(當地幣)', '薪資匯率', '週工作天', '日工時'];
 
@@ -156,6 +160,17 @@ async function exportCostModel(db, caseFactoryId) {
     if (s.special === 'nreConfig') {
       const r = await db.prepare(`SELECT nre_mode, nre_amortize_qty, amortize_side FROM bom_nre_config WHERE project_id=?`).get(projId).catch(() => null);
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([NRE_CFG_COLS, r ? NRE_CFG_COLS.map((c) => { const v = pick(r, c); return v == null ? '' : v; }) : []]), s.sheet);
+      continue;
+    }
+    if (s.special === 'macroStation') {
+      const rows = await db.prepare(
+        `SELECT mp.macro_code, ms.station_code, ms.name, ms.sfc, ms.num_stations, ms.uph, ms.yield_pct, ms.work_time_sec, ms.dl_headcount, ms.sort_order
+           FROM bom_cs_case_macro_station ms JOIN bom_cs_case_macro_process mp ON mp.macro_id = ms.macro_id
+          WHERE ms.case_factory_id = ? ORDER BY mp.macro_code, ms.sort_order, ms.station_code`,
+      ).all(caseFactoryId).catch(() => []);
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(
+        [MACRO_STATION_COLS, ...rows.map((r) => MACRO_STATION_COLS.map((c) => { const v = pick(r, c); return v == null ? '' : v; }))],
+      ), s.sheet);
       continue;
     }
     if (s.special === 'consumable') {
@@ -436,6 +451,27 @@ async function importCostModel(db, { filePath, projectId, factoryCode: fcOverrid
         else await db.prepare(`INSERT INTO bom_nre_config (project_id, nre_mode, nre_amortize_qty, amortize_side) VALUES (?,?,?,?)`).run(projectId, mode, qty, side);
         counts[s.sheet] = 1;
       }
+      continue;
+    }
+    if (s.special === 'macroStation') {
+      // MACRO_CODE → macro_id(段須先由 MacroProcess 分頁建立;新 cf 空表直插)
+      let n = 0;
+      for (const r of data) {
+        const mcode = str(pick(r, 'MACRO_CODE')); const scode = str(pick(r, 'STATION_CODE'));
+        if (!mcode || !scode) continue;
+        const mp = await db.prepare(
+          `SELECT macro_id FROM bom_cs_case_macro_process WHERE case_factory_id=? AND UPPER(macro_code)=UPPER(?)`,
+        ).get(caseFactoryId, mcode).catch(() => null);
+        if (!mp) { warnings.push(`MacroStation:段 ${mcode} 不存在(MacroProcess 分頁未定義)→ 站 ${scode} 跳過`); continue; }
+        await db.prepare(
+          `INSERT INTO bom_cs_case_macro_station (case_factory_id, macro_id, station_code, name, sfc, num_stations, uph, yield_pct, work_time_sec, dl_headcount, sort_order)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+        ).run(caseFactoryId, num(Object.values(mp)[0]), scode, str(pick(r, 'NAME')), str(pick(r, 'SFC')),
+          num(pick(r, 'NUM_STATIONS')) ?? 1, num(pick(r, 'UPH')), num(pick(r, 'YIELD_PCT')) ?? 1,
+          num(pick(r, 'WORK_TIME_SEC')), num(pick(r, 'DL_HEADCOUNT')) ?? 1, num(pick(r, 'SORT_ORDER')) ?? ((n + 1) * 10));
+        n += 1;
+      }
+      counts[s.sheet] = n;
       continue;
     }
     if (s.special === 'consumable') {
