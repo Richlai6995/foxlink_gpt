@@ -45,6 +45,7 @@
 |---|---|
 | **B-4' line×config 用量倍率** ✅(2026-08-10 · 取代誤讀的乘數版) | **誤讀更正**(user 真 Excel 截圖):2.72 是金額(=Suit subtotal $68×4%,公式 `=G23*K24`)非乘數;OH/SGA/Profit = 各 config subtotal × 共用 %,無加權機制。乘數版(c6334fa/013y)已撤(013y 改 DROP)。**真需求** = WHOOP row 14~22 line 用量倍率:013z `bom_cs_case_line_config`(cf×line×配置值→倍率 · 0=不做/0.05/1.7=yield 差 · provision/What-if 納入)· engine line 金額×倍率 → subtotal per-config → 加成自動隨動 · API GET/PUT line-config(×1 自動刪列)· Cleansheet SIMP「⚙ Line × 配置 用量倍率」矩陣。驗:cf87 迴歸 89.5537 + Battery 情境(0/0.05/1.7)subtotal/OH/SGA 手算精確 + Retail 隔離。SOT §1.2 已同步更正 |
 | **Yield loss 勾選式 % 化** ✅ 8e270dd(2026-08-10) | user 真表公式佐證(SMT loss=I6×0.5% / FATP=SUM(勾選欄)×5%):013aa calc_mode('AMOUNT'\|'YIELD_PCT')+yield_pct+yield_basis_json;engine effAmt 逐線累積(含倍率生效額+BOM_MATERIAL_* 虛擬項)· 勾選集合全案一份,per-config 差異由 013z 倍率自動(Battery:Harvard 系倍率 0 → 基數 77.8→32.2)· UI「%」切換+基數勾選面板。驗:golden 3.1138 精確重現。**製程線(SMT/glue/FATP)接製程試算(smt_point/macro_process 表在但空)= 未做,列 backlog** |
+| **製程 MVA 段→站彈性化 M1+M2** ✅ 0e40936(2026-08-11) | 對齊真表(FATP/SMA+BFT=段→站、SMT cost=點數制):013ab 站表+line.macro_code;calc_mode 再擴 MACRO(Σ站 DL×wage÷UPH,無站用段級)/SMT_POINTS(Σ點×單價);UI 四模式下拉+段站/SMT 編輯子區;provision 站表 macro_id 重映 clone。驗:段 2.1067/站混合 0.038034/SMT 0.5733 全精確。**M3 隨檔匡入(製程段站/SMT 分頁)+ M4 WHOOP 真參數落資料 = 待做** |
 | **per-factory 料價(next)** | EE 兩組 U/P(to/out of China)→ 料價隨廠別(SOT §2.3) |
 | B-6 ERP 帶價 | 採購 PO 歷史自動建議單價(SD §3.2.4) |
 | EPM 角色權限 | 範本庫維護從 admin 細化到 EPM 角色(接 012 RBAC) |
