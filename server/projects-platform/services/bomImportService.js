@@ -176,6 +176,11 @@ function resolveTplHeader(rawHeaders) {
   rawHeaders.forEach((h, i) => {
     const s = String(h == null ? '' : h).trim().toLowerCase();
     if (!s) return;
+    // 013ad 區域價欄(需先於 u/p contains 判斷)
+    const rp = s.match(/^(?:unit ?price|u\/p|單價)\s*@\s*([a-z0-9_]{2,20})$/);
+    if (rp) { (map.regionPrice = map.regionPrice || {})[rp[1].toUpperCase()] = i; return; }
+    const rt = s.match(/^(?:true|t\/c|真價)\s*@\s*([a-z0-9_]{2,20})$/);
+    if (rt) { (map.regionTrue = map.regionTrue || {})[rt[1].toUpperCase()] = i; return; }
     if (s === 'category' || s.includes('類別')) map.category = i;
     else if (s.includes('item no') || s.includes('item#') || s === 'item') map.itemNo = i;
     else if (s.includes('description') || s.includes('描述')) map.desc = i;
@@ -217,9 +222,17 @@ async function _insertBomRow(db, catId, seq, f, variantKey) {
     const snap = await run(
       `INSERT INTO bom_item_price_snapshot (bom_item_id, bom_item_flk_id, period_months, strategy_used, price_avg_usd, applied_price_usd, po_line_count, vendor_count, is_chosen)
        VALUES (?, ?, 0, 'TEMPLATE', ?, ?, 0, 0, 1)`, itemId, flkId, num(f.price), num(f.price));
+    const snapId = Number(snap.lastInsertRowid);
     await run(
       `INSERT INTO bom_item_price_tier (snapshot_id, tier_seq, source_currency, true_cost_source, fx_rate, quote_price_usd, is_chosen)
-       VALUES (?, 1, 'USD', ?, 1, ?, 1)`, Number(snap.lastInsertRowid), num(f.price), num(f.price));
+       VALUES (?, 1, 'USD', ?, 1, ?, 1)`, snapId, num(f.price), num(f.price));
+    // 013ad 區域價(U/P@區 欄)
+    for (const [rc, rp] of Object.entries(f.regionPrices || {})) {
+      await run(
+        `INSERT INTO bom_item_price_region (snapshot_id, region_code, unit_price_usd, true_cost_usd) VALUES (?, ?, ?, ?)`,
+        snapId, rc, rp, (f.regionTrue || {})[rc] ?? null,
+      );
+    }
   } else {
     await run(
       `INSERT INTO bom_item_price_snapshot (bom_item_id, bom_item_flk_id, period_months, strategy_used, applied_price_usd, po_line_count, vendor_count, is_chosen)
@@ -276,6 +289,13 @@ async function _insertBomItemV2(db, catId, seq, g, variantKey) {
           `INSERT INTO bom_item_price_tier (snapshot_id, tier_seq, source_currency, true_cost_source, fx_rate, quote_price_usd, is_chosen)
            VALUES (?, 1, 'USD', ?, 1, ?, 1)`, snapId, num(v.price), num(v.price),
         );
+        // 013ad 區域價(U/P@區 欄)→ bom_item_price_region
+        for (const [rc, rp] of Object.entries(v.regionPrices || {})) {
+          await run(
+            `INSERT INTO bom_item_price_region (snapshot_id, region_code, unit_price_usd, true_cost_usd) VALUES (?, ?, ?, ?)`,
+            snapId, rc, rp, (v.regionTrue || {})[rc] ?? null,
+          );
+        }
         if (chosenSnapId == null && flkId === finalFlkId) chosenSnapId = snapId;   // 主料首價 = 採用
       }
     }
@@ -430,6 +450,8 @@ async function importMultiBoardBom(db, opts = {}) {
         desc: H.desc != null ? str(row[H.desc]) : null, fpn: H.fpn != null ? str(row[H.fpn]) : null,
         remark: H.remark != null ? str(row[H.remark]) : null,
         vendor: H.vendor != null ? str(row[H.vendor]) : null, mfgPn: H.mfgPn != null ? str(row[H.mfgPn]) : null,
+        regionPrices: (() => { const o = {}; for (const [rc, idx] of Object.entries(H.regionPrice || {})) { const v = row[idx]; if (isNum(v)) o[rc] = num(v); } return Object.keys(o).length ? o : null; })(),
+        regionTrue: (() => { const o = {}; for (const [rc, idx] of Object.entries(H.regionTrue || {})) { const v = row[idx]; if (isNum(v)) o[rc] = num(v); } return Object.keys(o).length ? o : null; })(),
       };
       const res = await _insertBomRow(db, catId, seq, f, variantKey);
       itemCount += 1; if (res.priced) pricedCount += 1; else pendingCount += 1; if (res.mfg) mfgCount += 1;
@@ -501,7 +523,7 @@ async function importCanonicalBom(db, opts = {}) {
     }
     if (!g.subAssemblyPn && cr.subAssemblyPn) g.subAssemblyPn = cr.subAssemblyPn;
     if (!g.category && cr.category) g.category = cr.category;
-    const vend = (cr.vendor || cr.mfgPn || cr.unitPrice != null) ? { vendor: cr.vendor, mfgPn: cr.mfgPn, price: cr.unitPrice } : null;
+    const vend = (cr.vendor || cr.mfgPn || cr.unitPrice != null) ? { vendor: cr.vendor, mfgPn: cr.mfgPn, price: cr.unitPrice, regionPrices: cr.regionPrices || null, regionTrue: cr.regionTrue || null } : null;
     const last = g.flks[g.flks.length - 1];
     let f = null;
     if (cr.fpn) { f = g._byFpn[cr.fpn]; if (!f) { f = g._byFpn[cr.fpn] = { fpn: cr.fpn, desc: cr.desc || g.desc, vendors: [] }; g.flks.push(f); } }

@@ -23,6 +23,12 @@ function resolveCanonicalHeader(hdr) {
   (hdr || []).forEach((h, i) => {
     const s = String(h == null ? '' : h).trim().toLowerCase();
     if (!s) return;
+    // 013ad 區域價欄(U/P@VN、單價@US = 該區 quote;TRUE@VN、T/C@VN = 該區 true)
+    //   必須先於主價欄判斷 —— 否則被 includes('u/p') 誤吃成主價
+    const rp = s.match(/^(?:unit ?price|u\/p|單價)\s*@\s*([a-z0-9_]{2,20})$/);
+    if (rp) { (m.regionPrice = m.regionPrice || {})[rp[1].toUpperCase()] = i; return; }
+    const rt = s.match(/^(?:true|t\/c|真價)\s*@\s*([a-z0-9_]{2,20})$/);
+    if (rt) { (m.regionTrue = m.regionTrue || {})[rt[1].toUpperCase()] = i; return; }
     // v2 注意順序:半成品料號 先於 半成品;模組 先於 分類(category)
     if (s.includes('半成品料號') || s.includes('sub-assy p/n') || s.includes('sub assy p/n') || s.includes('subassembly p/n')) m.subAssemblyPn = i;
     else if (s.includes('sub-assembly') || s.includes('sub assembly') || s.includes('半成品') || s === 'board' || s.includes('assembly name')) m.subAssembly = i;
@@ -134,6 +140,9 @@ function canonRow(subAssembly, module, row, c, effectivity = []) {
     qty: num(g('qty')), unitPrice: isNum(g('unitPrice')) ? num(g('unitPrice')) : null,
     vendor: str(g('vendor')), mfgPn: str(g('mfgPn')), remark: str(g('remark')),
     effectivity: Array.isArray(effectivity) ? effectivity : [],
+    // 013ad 區域價(header @區 欄 → {REGION: 價};空 = null)
+    regionPrices: (() => { const o = {}; for (const [rc, idx] of Object.entries(c.regionPrice || {})) { const v = row[idx]; if (isNum(v)) o[rc] = num(v); } return Object.keys(o).length ? o : null; })(),
+    regionTrue: (() => { const o = {}; for (const [rc, idx] of Object.entries(c.regionTrue || {})) { const v = row[idx]; if (isNum(v)) o[rc] = num(v); } return Object.keys(o).length ? o : null; })(),
   };
 }
 
