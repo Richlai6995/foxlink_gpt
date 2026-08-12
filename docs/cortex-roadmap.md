@@ -53,7 +53,7 @@
 
 ### 候選佇列(2026-08-11 詳述並拍板順序:1→3→2→4)
 1. **demo 假價校準 5 pack 結構化** ✅(2026-08-11):W3 案(cf83)板級縮放到 89.554 表 golden(Harvard Main/Bird Main/Strap/Battery/PKG Retail→3)· STRAP/Battery 料 effectivity(013ae 一料多值:STRAP 缺 WB-Batt、Battery 缺 WB-Strap)· consumable 線 group=CONSUM(免被 BOM skip,1.14 計回)· WB-Batt 倍率(glue×0/SMTyield×0.05/FATPyield×1.7)· loss 線 YIELD_PCT(SMT 0.3682% 基數 EE+SMT、FATP 4% 累積)。5 config compute=獨立手算精確:Retail 90.11/Suit 92.80/Strap 85.10/Batt 80.33/StrapBatt 88.80;相對序對齊 golden 表(Suit>StrapBatt>Strap>Batt;golden Retail=71 為表內 1/1/1 定額異常口徑,不對此值)。Harvard tier true 補縮(ratio 1.57→0.96)
-2. price_region 管理 UI(小 · next)
+2. price_region 管理 UI ✅(2026-08-12):GET/PUT /bom/factories price-region + 廠級範本頁「🌐 廠別 → 價格區域」表(空=廠碼自身;TW 填 CN = 共用 to-China 價)
 3. 區域價隨檔匯入(U/P@區 欄)
 4. R4 goal-seek(壓軸)
 
