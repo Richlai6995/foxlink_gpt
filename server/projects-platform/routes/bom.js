@@ -137,6 +137,33 @@ router.get('/summary', asyncHandler(async (req, res) => {
 
 // ── §9.4 開案自動建 case_factory(從範本 clone)──────────────────────────────
 // GET /provision/templates — 列可選成本模型範本(廠 / model)
+// ── 廠別 → 價格區域 映射(013ad · 管理頁)──────────────────────────────────
+router.get('/factories', asyncHandler(async (req, res) => {
+  const rows = await getDb().prepare(
+    `SELECT factory_code, factory_name, price_region, is_active FROM bom_factory ORDER BY factory_code`,
+  ).all().catch(() => []);
+  res.json({
+    factories: rows.map((r) => ({
+      factoryCode: r.factory_code ?? Object.values(r)[0],
+      factoryName: r.factory_name ?? Object.values(r)[1] ?? null,
+      priceRegion: r.price_region ?? Object.values(r)[2] ?? null,
+      isActive: Number(r.is_active ?? Object.values(r)[3] ?? 1),
+    })),
+  });
+}));
+
+router.put('/factories/:code/price-region', asyncHandler(async (req, res) => {
+  if (!canViewTrueCost(req)) return res.status(403).json({ error: '廠別價格區域維護需完整成本視角(HOST/admin)' });
+  const code = String(req.params.code || '').trim();
+  const raw = String(req.body.priceRegion || '').trim().toUpperCase();
+  const val = raw || null;   // 空 = 清除 → 該廠用廠碼自身當價區
+  const r = await getDb().prepare(
+    `UPDATE bom_factory SET price_region = ?, updated_at = SYSTIMESTAMP WHERE factory_code = ?`,
+  ).run(val, code);
+  if (!r || !Number(r.changes)) return res.status(404).json({ error: 'factory not found' });
+  res.json({ ok: true, priceRegion: val });
+}));
+
 router.get('/provision/templates', asyncHandler(async (req, res) => {
   // C-2:確保範本庫存在 + fixture seed(冪等);C-3:?includeInactive=1 查歷史版
   try { await require('../services/bomCostModelService').ensureTemplateLibrary(getDb()); } catch (e) { /* 庫建失敗仍回列表 */ }

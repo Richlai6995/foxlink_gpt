@@ -44,8 +44,10 @@ export default function FactoryCostTemplates() {
   const [label, setLabel] = useState('')
   const [factory, setFactory] = useState('')
   const [q, setQ] = useState('')   // 列表搜尋(廠/BU/名稱/模型)
+  const [factories, setFactories] = useState<any[]>([])   // 013ad 廠別→價格區域
 
   async function load() {
+    api.get<{ factories: any[] }>(token, '/bom/factories').then((r) => setFactories(r.factories || [])).catch(() => {})
     try { const r = await api.get<{ templates: Tpl[] }>(token, `/bom/provision/templates${showInactive ? '?includeInactive=1' : ''}`); setRows(r.templates || []) }
     catch (e: any) { setErr(e.message); setRows([]) }
   }
@@ -179,6 +181,37 @@ export default function FactoryCostTemplates() {
       <div className="text-[10px] text-cortex-muted">
         「編輯」= 開範本專案(CORTEX-COST-TPL)WarRoom → 🧮 Cleansheet 選對應廠 tab 直接改參數(影響之後新案);
         同名 Excel 再匯入 = 產生新版本並自動停用舊版;BU 由 Excel Baseline 分頁 BG_CODE/BU_CODE 帶入。
+      </div>
+
+      {/* 013ad 廠別 → 價格區域映射 */}
+      <div className="border border-cortex-line rounded-lg p-3 mt-3">
+        <div className="text-[12px] font-bold text-cortex-navy mb-1">🌐 廠別 → 價格區域(per-區域料價)</div>
+        <div className="text-[10px] text-cortex-muted mb-2">
+          料件的「區域價」按此映射生效:算某廠成本時,材料用該廠對應價區的覆寫價(沒設該區價的料 fallback 主價)。
+          <b>空 = 用廠碼自身當價區</b>;要共用一組價就填同一個區碼 —— 例:TW 填 <span className="font-mono">CN</span> = TW 廠用 to-China 價。
+        </div>
+        <table className="text-[11px]">
+          <thead className="text-cortex-muted border-b border-cortex-line"><tr>
+            <th className="text-left px-2 py-1">廠別</th><th className="text-left px-2 py-1">名稱</th>
+            <th className="text-left px-2 py-1">價格區域</th><th className="text-left px-2 py-1">生效價區</th>
+          </tr></thead>
+          <tbody>
+            {factories.map((f) => (
+              <tr key={f.factoryCode} className={`border-b border-cortex-line/40 ${!f.isActive ? 'opacity-50' : ''}`}>
+                <td className="px-2 py-1 font-bold font-mono">{f.factoryCode}</td>
+                <td className="px-2 py-1 text-cortex-muted">{f.factoryName || '—'}</td>
+                <td className="px-2 py-1">
+                  <EditText value={f.priceRegion} w="w-24" ph="(空=自身)" onSave={async (v) => {
+                    await api.put(token, `/bom/factories/${f.factoryCode}/price-region`, { priceRegion: v })
+                    await load()
+                  }} />
+                </td>
+                <td className="px-2 py-1 font-mono text-cortex-teal">{f.priceRegion || f.factoryCode}</td>
+              </tr>
+            ))}
+            {!factories.length && <tr><td colSpan={4} className="px-2 py-2 text-center text-cortex-muted text-[10px]">無廠別主檔(匯入成本模型時自動建立)</td></tr>}
+          </tbody>
+        </table>
       </div>
     </div>
   )
