@@ -28,7 +28,7 @@
 | R1.5 | 廠級基礎維護頁 | 「⚙ 廠級基礎維護」入口 → 開 CORTEX-COST-TPL WarRoom(amber banner)→ Cleansheet 編輯器直編範本 cf;templates 回 tplProjectId/bg/bu;chips 顯 BU | ✅ 3ef8d37 |
 | R2 | What-if 試算沙盒 | 013w snapshot;start(私有化+快照+基準)→ 改參數 auto dryRun(persist:false)→ 對比表 Δ 紅綠 → 套用(正式重算)/放棄(全還原) | ✅ 7a1455b |
 | R3 | SIMPLIFIED line 編輯 | Step 1(SIMP 廠)= line 表(金額/in_subtotal/排序 編輯 + 加刪列);kind=line param/row API | ✅ |
-| R4 | Goal-seek 反推 | 目標價 → 反推 料價降幅/Profit%/量;等成本架構穩定(最後做) | 📌 backlog |
+| R4 | Goal-seek 反推 | 目標價 → 反推 料價降幅/Profit%/量;等成本架構穩定(最後做) | ✅ 2026-08-13(見候選佇列 4) |
 
 三層定位(拍板):L1 廠級基礎(範本庫=國別×BU×模型,維護 UI 直編)→ L2 開案 clone 案級快照 → L3 案級線上調(COW 隔離)。既有案永不受廠級改動影響。
 
@@ -55,7 +55,7 @@
 1. **demo 假價校準 5 pack 結構化** ✅(2026-08-11):W3 案(cf83)板級縮放到 89.554 表 golden(Harvard Main/Bird Main/Strap/Battery/PKG Retail→3)· STRAP/Battery 料 effectivity(013ae 一料多值:STRAP 缺 WB-Batt、Battery 缺 WB-Strap)· consumable 線 group=CONSUM(免被 BOM skip,1.14 計回)· WB-Batt 倍率(glue×0/SMTyield×0.05/FATPyield×1.7)· loss 線 YIELD_PCT(SMT 0.3682% 基數 EE+SMT、FATP 4% 累積)。5 config compute=獨立手算精確:Retail 90.11/Suit 92.80/Strap 85.10/Batt 80.33/StrapBatt 88.80;相對序對齊 golden 表(Suit>StrapBatt>Strap>Batt;golden Retail=71 為表內 1/1/1 定額異常口徑,不對此值)。Harvard tier true 補縮(ratio 1.57→0.96)
 2. price_region 管理 UI ✅(2026-08-12):GET/PUT /bom/factories price-region + 廠級範本頁「🌐 廠別 → 價格區域」表(空=廠碼自身;TW 填 CN = 共用 to-China 價)
 3. 區域價隨檔匯入 ✅ 0c4f07b(2026-08-12):U/P@VN/單價@US/TRUE@VN 欄名慣例(@攔截先於 u/p contains)· canonical+標準範本兩路徑 · 範本說明補第 8 點 · 端到端驗 rollup CN 2.70/VN 2.97 精確
-4. R4 goal-seek(壓軸)
+4. R4 goal-seek ✅(2026-08-13):engine materialScale + POST /case/:cf/goal-seek 四路徑(PROFIT 解析/MATERIAL 兩點法+top8 料件/QTY 枚舉/COMBO)+ Cleansheet「🎯 目標價」面板(PROFIT 可套用到 What-if 沙盒)。驗:cf83 Retail 目標 89 → 3%→1.64%/-1.33%/組合 全對手算
 
 ### 收尾小項
 - Wizard 確認頁 STARTUP_ACTIONS 逐項核實(7 channels/RACI 指派/Webex 三通道/Pin 公告/SLA 倒數 — 部分為假承諾,對照啟動實況改寫)
