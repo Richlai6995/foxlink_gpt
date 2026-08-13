@@ -1526,6 +1526,101 @@ router.put('/items/:itemId/choose', asyncHandler(async (req, res) => {
   res.json({ ok: true, ...out });
 }));
 
+// ── R4 Goal-seek 目標價反推(2026-08-13)────────────────────────────────────────
+// POST /case/:cf/goal-seek {targetTotal, bomInstanceId?, valueIds?, qtyScenarioCode?}
+// 四路徑:PROFIT(解析解)/ MATERIAL(兩點法 + top-N 料件)/ QTY(量情境枚舉)/ COMBO(Profit 減半差距 + 料價補足)
+router.post('/case/:caseFactoryId/goal-seek', asyncHandler(async (req, res) => {
+  if (!canViewTrueCost(req)) return res.status(403).json({ error: '目標價反推需完整成本視角(HOST/admin)' });
+  const cf = reqId(req.params.caseFactoryId, res, 'caseFactoryId'); if (cf === null) return;
+  const target = Number(req.body.targetTotal);
+  if (!Number.isFinite(target) || target <= 0) return res.status(400).json({ error: 'targetTotal 需為 > 0 數字' });
+  const db = getDb();
+  const engine = require('../services/bomCostEngine');
+  const base = { caseFactoryId: cf, persist: false, allowPending: true };
+  if (req.body.bomInstanceId) base.bomInstanceId = Number(req.body.bomInstanceId);
+  else {
+    // fallback:案最新 BOM instance(Cleansheet 端免傳;無 BOM 案 = undefined → 常數線口徑)
+    const bi = await db.prepare(
+      `SELECT id FROM bom_instance WHERE project_id = (SELECT case_id FROM bom_cs_case_factory WHERE case_factory_id = ?) ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`,
+    ).get(cf).catch(() => null);
+    if (bi) base.bomInstanceId = Number(bi.id ?? Object.values(bi)[0]);
+  }
+  if (Array.isArray(req.body.valueIds) && req.body.valueIds.length) base.valueIds = req.body.valueIds.map(Number).filter(Boolean);
+  if (req.body.qtyScenarioCode) base.qtyScenarioCode = req.body.qtyScenarioCode;
+
+  const r0 = await engine.computeCase(db, base);
+  const cb0 = r0.costBreakdown;
+  const T0 = cb0.total;
+  const gap = T0 - target;
+  const paths = [];
+
+  // 1) PROFIT:total 線性於 profit 金額 → newProfitAmt = profit - gap;newPct = pct × newAmt/amt
+  const blRow = await db.prepare(
+    `SELECT b.profit_pct FROM bom_factory_baseline b JOIN bom_cs_case_factory c ON c.baseline_id = b.baseline_id WHERE c.case_factory_id = ?`,
+  ).get(cf).catch(() => null);
+  const profitPct = blRow ? Number(blRow.profit_pct ?? Object.values(blRow)[0]) || 0 : 0;
+  if (cb0.profit > 0) {
+    const newAmt = cb0.profit - gap;
+    const newPct = profitPct * (newAmt / cb0.profit);
+    paths.push({ kind: 'PROFIT', currentPct: profitPct, newPct, newProfitAmt: newAmt, feasible: newPct >= 0 });
+  }
+
+  // 2) MATERIAL 兩點法:材料 ×0.9 dryRun → 線性解統一降幅
+  const r9 = await engine.computeCase(db, { ...base, materialScale: 0.9 });
+  const dT = T0 - r9.costBreakdown.total;   // 材料降 10% 的 total 降幅
+  let material = null;
+  if (dT > 0.000001) {
+    const reducePct = (gap / dT) * 10;   // 需要的材料統一降幅 %
+    material = { kind: 'MATERIAL', reducePct, sensitivity: dT, feasible: reducePct <= 100, topItems: [] };
+    if (base.bomInstanceId && reducePct > 0) {
+      const ef = require('../services/bomVariantService').effectivityFilter(base.valueIds, 'i');
+      const items = await db.prepare(
+        `SELECT * FROM (
+           SELECT i.fpn, i.description, i.qty, s.applied_price_usd AS price, i.qty * s.applied_price_usd AS ext
+             FROM bom_item i
+             JOIN bom_category c ON c.id = i.bom_category_id
+             JOIN bom_section sec ON sec.id = c.bom_section_id
+             JOIN bom_item_price_snapshot s ON s.bom_item_id = i.id AND s.is_chosen = 1
+            WHERE sec.bom_instance_id = ? AND s.applied_price_usd IS NOT NULL${ef.clause}
+            ORDER BY i.qty * s.applied_price_usd DESC
+         ) WHERE ROWNUM <= 8`,
+      ).all(base.bomInstanceId, ...ef.binds).catch(() => []);
+      material.topItems = items.map((it) => ({
+        fpn: it.fpn ?? Object.values(it)[0], desc: it.description ?? Object.values(it)[1],
+        qty: Number(it.qty ?? Object.values(it)[2]), price: Number(it.price ?? Object.values(it)[3]),
+        ext: Number(it.ext ?? Object.values(it)[4]),
+        targetPrice: Number(it.price ?? Object.values(it)[3]) * (1 - reducePct / 100),
+      }));
+    }
+    paths.push(material);
+  }
+
+  // 3) QTY:量情境枚舉(≤6 個 · 各 dryRun)
+  const scRows = await db.prepare(
+    `SELECT scenario_code FROM bom_cs_case_qty_scenario WHERE case_factory_id = ? ORDER BY is_baseline DESC, target_qty`,
+  ).all(cf).catch(() => []);
+  const qtyPath = { kind: 'QTY', scenarios: [] };
+  for (const sc of scRows.slice(0, 6)) {
+    const code = sc.scenario_code ?? Object.values(sc)[0];
+    try {
+      const rq = await engine.computeCase(db, { ...base, qtyScenarioCode: code });
+      qtyPath.scenarios.push({ code, total: rq.costBreakdown.total, meets: rq.costBreakdown.total <= target });
+    } catch (_) { /* skip */ }
+  }
+  if (qtyPath.scenarios.length > 1) paths.push(qtyPath);
+
+  // 4) COMBO:Profit 承擔一半 gap(不低於 0)+ 料價補剩餘(兩點法)
+  if (cb0.profit > 0 && dT > 0.000001 && gap > 0) {
+    const profitCut = Math.min(gap / 2, cb0.profit);
+    const comboPct = profitPct * ((cb0.profit - profitCut) / cb0.profit);
+    const restGap = gap - profitCut;
+    const comboReduce = (restGap / dT) * 10;
+    paths.push({ kind: 'COMBO', newProfitPct: comboPct, materialReducePct: comboReduce, feasible: comboPct >= 0 && comboReduce <= 100 });
+  }
+
+  res.json({ target, current: { total: T0, material: cb0.material, mva: cb0.mva, sga: cb0.sga, profit: cb0.profit, nre: cb0.nreAmort || 0, subtotal: cb0.subtotal }, gap, paths });
+}));
+
 // POST /compute — computeCase(persist)· B-5a:有未詢價料件回 409(帶 force=true 才放行)
 router.post('/compute', asyncHandler(async (req, res) => {
   const caseFactoryId = Number(req.body.caseFactoryId);

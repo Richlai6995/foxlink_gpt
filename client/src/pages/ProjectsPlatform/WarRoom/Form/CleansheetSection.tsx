@@ -123,7 +123,26 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
   const [basisOpen, setBasisOpen] = useState<string | null>(null)   // yield 基數勾選面板(lineKey)
   const [wfOpen, setWfOpen] = useState<string | null>(null)         // waterfall 展開列
   const [macroOpen, setMacroOpen] = useState<number | null>(null)   // 製程段展開(站表)
+  const [gsOpen, setGsOpen] = useState(false)                       // R4 goal-seek 面板
+  const [gsTarget, setGsTarget] = useState('')
+  const [gsBusy, setGsBusy] = useState(false)
+  const [gsResult, setGsResult] = useState<any>(null)
   // 013aa:loss 線 % 化(calcMode/yieldPct/勾選基數)
+  // R4 goal-seek:目標價 → 反推路徑(dryRun 口徑 = Cleansheet 基準;BOM instance 由後端 fallback)
+  async function runGoalSeek() {
+    const t = Number(gsTarget)
+    if (!Number.isFinite(t) || t <= 0) { setErr('目標價需為 > 0 數字'); return }
+    setGsBusy(true); setErr(''); setGsResult(null)
+    try {
+      const r = await api.post<any>(token, `/bom/case/${activeCf}/goal-seek`, { targetTotal: t })
+      setGsResult(r)
+    } catch (e: any) { setErr(e.message) } finally { setGsBusy(false) }
+  }
+  async function applyProfitToSandbox(newPct: number) {
+    if (!whatif?.active) { setErr('請先啟動 🧪 What-if 沙盒再套用(避免直接動正式參數)'); return }
+    await saveParam('baseline', 'profit_pct', {}, String(newPct))
+  }
+
   async function saveYield(r: any, body: { calcMode: string; yieldPct?: number; basis?: string[]; macroCode?: string }) {
     try {
       await api.put<any>(token, `/bom/case/${activeCf}/line-yield`, {
@@ -389,6 +408,11 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
               ⟲ 套範本
             </button>
           )}
+          <button onClick={() => setGsOpen(!gsOpen)} disabled={!activeCf}
+            title="目標價反推:輸入客戶目標價 → 反推 降Profit / 降料價 top-N / 衝量 / 組合 四條達標路徑"
+            className={`flex items-center gap-1 px-2.5 py-1 rounded text-[11px] border disabled:opacity-40 ${gsOpen ? 'bg-cortex-teal text-white border-cortex-teal' : 'border-cortex-teal text-cortex-teal hover:bg-cortex-cyan-bg/40'}`}>
+            🎯 目標價
+          </button>
           {!whatif?.active && (
             <button onClick={whatifStart} disabled={!activeCf} title="進入試算沙盒:任意改參數即時試算,不污染 run 歷史;可一鍵還原"
               className="flex items-center gap-1 px-2.5 py-1 rounded text-[11px] border border-amber-400 text-amber-700 hover:bg-amber-50 disabled:opacity-40">
@@ -404,6 +428,89 @@ export default function CleansheetSection({ project }: { project: ProjectDetail 
       </div>
       {err && <div className="text-[11px] text-red-600">{err}</div>}
       {note && <div className="text-[11px] text-cortex-teal bg-cortex-cyan-bg/40 border border-cortex-teal/30 rounded px-2 py-1">ℹ️ {note}</div>}
+
+      {/* R4 🎯 目標價反推 */}
+      {gsOpen && (
+        <div className="border border-cortex-teal/50 rounded-lg p-3 bg-cortex-cyan-bg/20 space-y-2">
+          <div className="flex items-center gap-2 flex-wrap text-[11px]">
+            <b className="text-cortex-navy">🎯 目標價反推</b>
+            <span className="text-cortex-muted">(口徑 = 本廠 Cleansheet 基準 · dryRun 不落歷史)</span>
+            <input value={gsTarget} onChange={(e) => setGsTarget(e.target.value)} placeholder="客戶目標 Total USD"
+              className="border border-cortex-line rounded px-2 py-1 w-36 font-mono text-[11px]" />
+            <button onClick={runGoalSeek} disabled={gsBusy || !gsTarget}
+              className="px-2.5 py-1 bg-cortex-teal text-white rounded text-[11px] disabled:opacity-40">
+              {gsBusy ? <Loader2 className="w-3 h-3 inline animate-spin" /> : '反推'}
+            </button>
+            {gsResult && (
+              <span className="font-mono text-[11px]">
+                現況 <b>{Number(gsResult.current.total).toFixed(4)}</b> → 目標 <b className="text-cortex-teal">{Number(gsResult.target).toFixed(4)}</b>
+                (差 <b className={gsResult.gap > 0 ? 'text-red-600' : 'text-cortex-green'}>{Number(gsResult.gap).toFixed(4)}</b>)
+              </span>
+            )}
+          </div>
+          {gsResult && gsResult.gap <= 0 && <div className="text-[11px] text-cortex-green">✅ 現況已達標,不需調整。</div>}
+          {gsResult && gsResult.gap > 0 && (
+            <div className="grid md:grid-cols-2 gap-2">
+              {gsResult.paths.map((p2: any, i: number) => (
+                <div key={i} className={`border rounded-lg p-2.5 text-[11px] bg-white ${p2.feasible === false ? 'border-red-300 opacity-70' : 'border-cortex-line'}`}>
+                  {p2.kind === 'PROFIT' && (
+                    <>
+                      <div className="font-bold text-cortex-navy mb-1">路徑 A · 降 Profit</div>
+                      <div>Profit {Number(p2.currentPct * 100).toFixed(2)}% → <b className="font-mono">{Number(p2.newPct * 100).toFixed(2)}%</b>
+                        {!p2.feasible && <span className="text-red-600 ml-1">(需為負 → 單靠 Profit 達不到)</span>}
+                      </div>
+                      {p2.feasible && (
+                        <button onClick={() => applyProfitToSandbox(p2.newPct)}
+                          title={whatif?.active ? '把 Profit% 寫進沙盒(baseline COW)後自動試算' : '先啟動 What-if 沙盒'}
+                          className="mt-1.5 px-2 py-0.5 rounded border border-amber-400 text-amber-700 text-[10px] hover:bg-amber-50">
+                          🧪 套用到沙盒試算
+                        </button>
+                      )}
+                    </>
+                  )}
+                  {p2.kind === 'MATERIAL' && (
+                    <>
+                      <div className="font-bold text-cortex-navy mb-1">路徑 B · 降料價(採購談判目標)</div>
+                      <div>材料全體需降 <b className="font-mono">{Number(p2.reducePct).toFixed(2)}%</b>
+                        <span className="text-cortex-muted">(敏感度:料 -10% → total -{Number(p2.sensitivity).toFixed(2)})</span></div>
+                      {p2.topItems?.length > 0 && (
+                        <table className="mt-1 w-full text-[10px]">
+                          <thead className="text-cortex-muted"><tr><th className="text-left">金額 top 料件</th><th className="text-right">現價</th><th className="text-right">目標價</th></tr></thead>
+                          <tbody>
+                            {p2.topItems.slice(0, 5).map((it: any) => (
+                              <tr key={it.fpn} className="border-t border-cortex-line/30">
+                                <td className="font-mono truncate max-w-[140px]" title={it.desc}>{it.fpn}</td>
+                                <td className="text-right font-mono">{Number(it.price).toFixed(4)}</td>
+                                <td className="text-right font-mono text-cortex-teal">{Number(it.targetPrice).toFixed(4)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </>
+                  )}
+                  {p2.kind === 'QTY' && (
+                    <>
+                      <div className="font-bold text-cortex-navy mb-1">路徑 C · 衝量(量情境)</div>
+                      {p2.scenarios.map((s2: any) => (
+                        <div key={s2.code} className="font-mono">
+                          {s2.code}:{Number(s2.total).toFixed(4)} {s2.meets ? <span className="text-cortex-green">✅ 達標</span> : <span className="text-cortex-muted">未達</span>}
+                        </div>
+                      ))}
+                    </>
+                  )}
+                  {p2.kind === 'COMBO' && (
+                    <>
+                      <div className="font-bold text-cortex-navy mb-1">路徑 D · 組合(Profit 承擔一半 + 料價補足)</div>
+                      <div>Profit → <b className="font-mono">{Number(p2.newProfitPct * 100).toFixed(2)}%</b> 且 材料降 <b className="font-mono">{Number(p2.materialReducePct).toFixed(2)}%</b></div>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {showReapply && !isTpl && (
         <div className="border border-cortex-navy/30 bg-cortex-bg/40 rounded-lg p-2.5 text-[11px] flex items-center gap-2 flex-wrap">
           <b className="text-cortex-ink">⟲ 從廠級範本重新套用(覆蓋本案案級參數 · 不經 Excel):</b>

@@ -300,7 +300,8 @@ function computeSimplifiedMva(inputs, ctx) {
       trace = { line_code: lineCode, mode, points: pts, unit_price_default: defP, amount: v, ...(mult !== 1 ? { mult } : {}) };
     } else {
       if (bomMat != null && grp === 'MATERIAL') continue;   // 有 BOM → 材料改 rollup,不用常數材料 line
-      v = num(pick(ln, 'cost_per_unit_usd')) * mult;
+      const mScale = grp === 'MATERIAL' && ctx.materialScale !== 1 ? (ctx.materialScale || 1) : 1;
+      v = num(pick(ln, 'cost_per_unit_usd')) * mult * mScale;
       trace = { line_code: lineCode, ...(mult !== 1 ? { mult } : {}) };
     }
     effAmt.set(lineCode, v);
@@ -394,7 +395,7 @@ async function persistRun(db, { caseFactoryId, factoryCode, costingModel, cells,
  * S1b:FULL_MVA 全鏈(移植 demo)· SIMPLIFIED 仍 stub(S1c)· persist 留 S1c。
  */
 async function computeCase(db, opts = {}) {
-  const { caseFactoryId, qtyScenarioCode, motherboardCostUsd, bomInstanceId, valueIds, persist = true } = opts;
+  const { caseFactoryId, qtyScenarioCode, motherboardCostUsd, bomInstanceId, valueIds, persist = true, materialScale = 1 } = opts;   // materialScale:goal-seek 反推試算用(材料統一打折)
   if (!caseFactoryId) throw new Error('bomCostEngine.computeCase: caseFactoryId required');
 
   const inputs = await loadCaseInputs(db, caseFactoryId);
@@ -427,8 +428,13 @@ async function computeCase(db, opts = {}) {
     materialTrueFromBom = roll.materialTrueUsd != null ? num(roll.materialTrueUsd) : null;  // true/quote 雙軌
     bomByCategory = roll.byCategory || null;   // YIELD_PCT 虛擬基數項(BOM_MATERIAL_EE/ME/PKG)
   }
-  const motherboard = materialFromBom != null ? materialFromBom
+  let motherboard = materialFromBom != null ? materialFromBom
     : (motherboardCostUsd != null ? num(motherboardCostUsd) : num(pick(baseline, 'motherboard_cost_ref')));
+  if (materialScale !== 1) {
+    motherboard *= materialScale;
+    if (materialFromBom != null) materialFromBom *= materialScale;
+    if (materialTrueFromBom != null) materialTrueFromBom *= materialScale;
+  }
   const annualDemand = (() => {
     if (qtyScenarioCode) {
       const sc = inputs.qtyScenarios.find((s) => pick(s, 'scenario_code') === qtyScenarioCode);
@@ -458,6 +464,7 @@ async function computeCase(db, opts = {}) {
   const ctx = {
     qtyScenarioCode, motherboard, annualDemand, procGroup,
     bomMaterial: materialFromBom,   // W1b:SIMPLIFIED 有 BOM 時材料改用 rollup(null=無 BOM 用常數 line)
+    materialScale,                  // goal-seek:SIMPLIFIED 常數材料線也吃折扣
     bomByCategory,                  // YIELD_PCT 勾選虛擬項(BOM_MATERIAL_ALL/EE/ME/PKG)
     dlWage: num(pick(baseline, 'dl_wage_per_hr_usd')),
     baselineVat: num(pick(baseline, 'vat_rate_pct')),
