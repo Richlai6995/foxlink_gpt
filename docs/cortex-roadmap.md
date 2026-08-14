@@ -57,6 +57,9 @@
 3. 區域價隨檔匯入 ✅ 0c4f07b(2026-08-12):U/P@VN/單價@US/TRUE@VN 欄名慣例(@攔截先於 u/p contains)· canonical+標準範本兩路徑 · 範本說明補第 8 點 · 端到端驗 rollup CN 2.70/VN 2.97 精確
 4. R4 goal-seek ✅(2026-08-13):engine materialScale + POST /case/:cf/goal-seek 四路徑(PROFIT 解析/MATERIAL 兩點法+top8 料件/QTY 枚舉/COMBO)+ Cleansheet「🎯 目標價」面板(PROFIT 可套用到 What-if 沙盒)。驗:cf83 Retail 目標 89 → 3%→1.64%/-1.33%/組合 全對手算
 
+### 上傳 Excel 範本全面對版 ✅ 029887b(2026-08-14)
+本階段新欄/新邏輯(效用多值/區域價/四種計算模式/段站/SMT 點數)全範本審計:BOM 下載範本重寫統一格式 v2(舊三分頁與 canonical 主路徑不一致;補 半成品/適用/變異軸分頁/U-P@VN 示範欄)· cost-model FIELD_META+SHEET_GUIDE 補 MacroProcess/MacroStation/SmtPoint 三頁與 SimplifiedLine 新欄/Baseline SMT 單價 · demo 包重產(whoop-cost-model=cf83 現況 16 分頁含 120 真站、standard 空白 ×2、bom-template-v2、region-price-test)· Wizard intake 範本無需動 · MAPPED profile 不支援 @區 = 已知限制(留 P2)。
+
 ### 收尾小項
 - Wizard 確認頁 STARTUP_ACTIONS 逐項核實(7 channels/RACI 指派/Webex 三通道/Pin 公告/SLA 倒數 — 部分為假承諾,對照啟動實況改寫)
 - **範本庫 TW 參數未差異化**(2026-08-06 發現:TW·FULL DL=4.95 與 CN 全同、CN/TW SIMP 全同;僅 VN 有差異化 → 選 TW 比價無意義。需真實 TW 參數維護進「管理→廠級成本範本」)
