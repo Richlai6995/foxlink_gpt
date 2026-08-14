@@ -1536,15 +1536,10 @@ router.post('/case/:caseFactoryId/goal-seek', asyncHandler(async (req, res) => {
   if (!Number.isFinite(target) || target <= 0) return res.status(400).json({ error: 'targetTotal 需為 > 0 數字' });
   const db = getDb();
   const engine = require('../services/bomCostEngine');
+  // 計算口徑與 Cleansheet「Compute」鈕完全一致:caller 沒帶 bomInstanceId 就不帶
+  //(帶了 = BOM rollup 口徑;沒帶 = 常數線口徑 — 否則現況數字對不上 Waterfall,user 會混亂)
   const base = { caseFactoryId: cf, persist: false, allowPending: true };
   if (req.body.bomInstanceId) base.bomInstanceId = Number(req.body.bomInstanceId);
-  else {
-    // fallback:案最新 BOM instance(Cleansheet 端免傳;無 BOM 案 = undefined → 常數線口徑)
-    const bi = await db.prepare(
-      `SELECT id FROM bom_instance WHERE project_id = (SELECT case_id FROM bom_cs_case_factory WHERE case_factory_id = ?) ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`,
-    ).get(cf).catch(() => null);
-    if (bi) base.bomInstanceId = Number(bi.id ?? Object.values(bi)[0]);
-  }
   if (Array.isArray(req.body.valueIds) && req.body.valueIds.length) base.valueIds = req.body.valueIds.map(Number).filter(Boolean);
   if (req.body.qtyScenarioCode) base.qtyScenarioCode = req.body.qtyScenarioCode;
 
@@ -1572,7 +1567,15 @@ router.post('/case/:caseFactoryId/goal-seek', asyncHandler(async (req, res) => {
   if (dT > 0.000001) {
     const reducePct = (gap / dT) * 10;   // 需要的材料統一降幅 %
     material = { kind: 'MATERIAL', reducePct, sensitivity: dT, feasible: reducePct <= 100, topItems: [] };
-    if (base.bomInstanceId && reducePct > 0) {
+    // top 料件清單:計算口徑外的參考資訊 — 沒帶 instance 也用案最新 BOM 查(僅列清單)
+    let listInstance = base.bomInstanceId || null;
+    if (!listInstance) {
+      const bi = await db.prepare(
+        `SELECT id FROM bom_instance WHERE project_id = (SELECT case_id FROM bom_cs_case_factory WHERE case_factory_id = ?) ORDER BY id DESC FETCH FIRST 1 ROWS ONLY`,
+      ).get(cf).catch(() => null);
+      if (bi) listInstance = Number(bi.id ?? Object.values(bi)[0]);
+    }
+    if (listInstance && reducePct > 0) {
       const ef = require('../services/bomVariantService').effectivityFilter(base.valueIds, 'i');
       const items = await db.prepare(
         `SELECT * FROM (
@@ -1584,7 +1587,7 @@ router.post('/case/:caseFactoryId/goal-seek', asyncHandler(async (req, res) => {
             WHERE sec.bom_instance_id = ? AND s.applied_price_usd IS NOT NULL${ef.clause}
             ORDER BY i.qty * s.applied_price_usd DESC
          ) WHERE ROWNUM <= 8`,
-      ).all(base.bomInstanceId, ...ef.binds).catch(() => []);
+      ).all(listInstance, ...ef.binds).catch(() => []);
       material.topItems = items.map((it) => ({
         fpn: it.fpn ?? Object.values(it)[0], desc: it.description ?? Object.values(it)[1],
         qty: Number(it.qty ?? Object.values(it)[2]), price: Number(it.price ?? Object.values(it)[3]),
