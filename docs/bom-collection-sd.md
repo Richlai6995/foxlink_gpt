@@ -1,10 +1,39 @@
 # BOM 資料收集模組 · 細部規格設計書(SD)
 
-> **狀態**:**v0.3 修訂稿**(對齊 spec v0.5 §11.3.5 + §11.3.8 · 加 Multi-Factory Cost Matrix DB schema)
-> **日期**:2026-05-30
+> **狀態**:**v0.4 修訂稿**(USER 2026-06-06 拍板 3 新需求 · 對齊 Rival 3 Gen2 BOM xlsx Unit Cost sheet 結構)
+> **日期**:2026-06-06
 > **適用**:Cortex 通用專案管理平台 · QUOTE plugin · BOM 收集子模組
 > **下游**:Claude Code 實作
-> **相關文件**:[`factory-matrix-schema-sd.md`](./factory-matrix-schema-sd.md) — Multi-Factory Cost Matrix 4 表 schema 獨立深入文件 · 跟本 SD 一起開工
+> **相關文件**:[`factory-matrix-schema-sd.md`](./factory-matrix-schema-sd.md) · [`cleansheet-mva-sd.md`](./cleansheet-mva-sd.md) v0.3+ · [`Cortex_互動Demo_v0.7.html`](./Cortex_互動Demo_v0.7.html)
+
+---
+
+## v0.3 → v0.4 改動摘要(2026-06-06)
+
+USER 看完 Excel `Rival 3 Gen2 uni bom_*.xlsx` Unit Cost sheet 拍板新增 3 個維度:
+
+| # | 議題 | 規格決定 |
+|---|---|---|
+| 1 | **Markup 填法** | Direct: 採購填 `true_cost` + `quote_price` 兩欄(對應 Excel 左右兩半結構)|
+| 2 | **Markup 設定位置** | 混合:category 預設 markup % + 子料個別 override |
+| 3 | **Qty Tier 數量** | 不限,每案配 N 個 scenario(SteelSeries 設 2 個:Low / High) |
+| 4 | **PKG Version 數量** | 不限,每案配 N 個 PKG 版本(SteelSeries 設 2 個:商包 / 工包) |
+| 5 | **True Cost 權限** | 新增 `view_true_cost` 權限 layer(比 Quote 更機密) |
+| 6 | **議價版本歷史** | `bom_cs_run.status='archived'` 軟刪保留 · demo 顯示 latest |
+| 7 | **mfg + tier 關係** | `mfg.selected` 仍存在,每個 selected mfg 下 chosen snapshot 可有 N 個 tier |
+
+### 章節改動
+
+| # | 章節 | 改動 |
+|---|---|---|
+| 1 | §2.4(改)| `bom_item_price_snapshot` 拆 `bom_item_price_tier` 子表(qty_min/max + true_cost + quote_price + markup auto-compute) |
+| 2 | §2.5(新)| `bom_category_markup_default` — category-level 預設 markup %(Mfg category × markup 模板)|
+| 3 | §17(新)| **多 PKG 版本架構**(`bom_cs_case_pkg`,N 個 PKG / case_factory) |
+| 4 | §18(新)| **Qty Scenario 架構**(`bom_cs_case_qty_scenario`,N 個 scenario / case_factory) |
+| 5 | §19(新)| **True Cost vs Quote Markup 模型**(計算公式 / margin auto-compute / per-item view) |
+| 6 | §20(新)| **權限擴充**:`view_true_cost` layer · 與既有 4 層資料政策關係 |
+| 7 | §16.4(改)| BOM lock propagate 改為 fact table `bom_cs_run_result` 寫入 N × variant × qty × pkg 個列(不再單一 cell)|
+| 8 | §15 | TBD 清單擴充 15 → 18 項 |
 
 ---
 
@@ -1328,3 +1357,440 @@ P3 (週 10-12):
 — End of SD v0.2 —
 
 Cortex 規劃小組 · 2026-05-27 · 對齊 spec v0.5 · 整合 Cortex 既有 `ai_data_polic*` / `multiOrgService` / `database-oracle.js` Oracle 23 AI schema
+
+---
+
+## 17. ⭐ 多 PKG 版本架構(v0.4 新增 · 對齊 Excel `PKG BOM 20240223/0308/0618/0731/1023/1119` 多 sheet 結構)
+
+### 17.1 背景
+
+USER 在 SteelSeries Rival 3 案 xlsx 中觀察到:同案有 6 個 PKG BOM sheet(對應不同時間 / 不同地區 / 不同包裝目的)。同時 Unit Cost sheet row 16 顯示**每個 quote 版本可引用不同 PKG sheet**:
+
+```excel
+D16 ← 'PKG BOM 20241023_Amber'!M32    (CN 商包, $0.83/set)
+E16 ← 'PKG BOM 20241119-TW'!M32       (TW 改良包裝, $0.94/set)
+J16 ← 'PKG BOM 20240731_with FSC'!L36 (FSC 認證包裝)
+M16 ← 'PKG BOM 20240618_with FSC'!L35 (早期 FSC)
+P16 ← 'PKG BOM 20240308_with FSC'!N35 (最早版本)
+```
+
+業務情境:
+- **商包 (Retail Packaging)** = 完整零售包裝(gift box + inner pad + PIG + ...,16 items)
+- **工包 (Bulk Packaging)** = 工業 / 替換零件包裝(master carton + label only,3-5 items)
+- 客戶可能要報「**商包跟工包兩種**」價格給對應通路 / 替換零件市場
+
+### 17.2 Schema
+
+```sql
+-- 案級 PKG 版本表(一案多 PKG 版本並存)
+CREATE TABLE bom_cs_case_pkg (
+  pkg_id               NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  case_factory_id      NUMBER REFERENCES bom_cs_case_factory(case_factory_id) ON DELETE CASCADE,
+  pkg_code             VARCHAR2(40) NOT NULL,        -- 'RETAIL' / 'BULK' / 'CUSTOM_AAPL'
+  pkg_label_zh_tw      VARCHAR2(100),                -- '商包' / '工包' / 'Apple 特規'
+  pkg_label_en         VARCHAR2(100),                -- 'Retail Packaging' / 'Bulk Packaging'
+  effective_at         DATE,
+  source_xlsx_sheet    VARCHAR2(200),                -- 'PKG BOM 20241023_Amber'
+  items_count          NUMBER,                       -- 16(商包)/ 3(工包)
+  -- Roll-up
+  total_cost_true_usd  NUMBER(15,6),
+  total_cost_quote_usd NUMBER(15,6),
+  markup_pct_avg       NUMBER(8,4),                  -- 自動算
+  -- 是否為主視角(預設選的那版)
+  is_primary           NUMBER(1) DEFAULT 0,
+  -- 適用情境(可選 multi)
+  channel_applies_json CLOB,                         -- ['retail','online'] / ['spare_parts','b2b']
+  notes                CLOB,
+  created_at           TIMESTAMP DEFAULT SYSTIMESTAMP,
+  updated_at           TIMESTAMP DEFAULT SYSTIMESTAMP
+);
+
+CREATE INDEX bom_cs_case_pkg_cf_ix ON bom_cs_case_pkg (case_factory_id, pkg_code);
+
+-- PKG 內子料表(每 PKG 版本獨立 items)
+CREATE TABLE bom_cs_case_pkg_item (
+  pkg_item_id         NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  pkg_id              NUMBER REFERENCES bom_cs_case_pkg(pkg_id) ON DELETE CASCADE,
+  item_seq            NUMBER,                        -- 1, 2, 3 ...
+  item_name           VARCHAR2(200),                 -- 'Gift Box', 'Inner Pad', 'Master Carton'
+  spec                CLOB,
+  qty_per_unit        NUMBER,
+  unit_of_measure     VARCHAR2(20),
+  vendor_id           NUMBER,                        -- FK to mfg
+  -- True Cost(對應 §19)
+  source_currency     VARCHAR2(3),
+  true_cost_source    NUMBER(15,6),                  -- e.g. 1.42 RMB
+  fx_rate             NUMBER(15,6),                  -- 7.1
+  true_cost_usd       NUMBER(15,6),                  -- = source / fx
+  -- Quote Price(對應 §19)
+  quote_price_usd     NUMBER(15,6),
+  markup_pct          NUMBER(8,4) GENERATED ALWAYS AS ((quote_price_usd - true_cost_usd) / NULLIF(true_cost_usd, 0)) VIRTUAL,
+  -- ERP 對齊(可選)
+  erp_item_id         VARCHAR2(40),
+  -- Meta
+  lead_time_days      NUMBER,
+  remark              VARCHAR2(500),
+  is_sustainable      NUMBER(1) DEFAULT 0            -- 2025 零塑 / FSC flag
+);
+
+CREATE INDEX bom_cs_case_pkg_item_pkg_ix ON bom_cs_case_pkg_item (pkg_id, item_seq);
+```
+
+### 17.3 範例資料(SteelSeries 案)
+
+```sql
+-- 案 CASE-148 × CN factory × 兩個 PKG 版本
+INSERT INTO bom_cs_case_pkg VALUES (1, 1148, 'RETAIL', '商包', 'Retail Packaging',
+  DATE '2024-10-23', 'PKG BOM 20241023_Amber', 16,
+  0.7060, 0.8281, 0.1728, 1, '["retail","online"]', NULL, ...);
+
+INSERT INTO bom_cs_case_pkg VALUES (2, 1148, 'BULK', '工包', 'Bulk Packaging',
+  DATE '2024-10-23', 'PKG BOM 20241023_Amber (subset)', 3,
+  0.1820, 0.2700, 0.4835, 0, '["spare_parts","b2b"]', NULL, ...);
+
+-- 商包 16 items: 從既有 v0.5 demo 帶入
+-- 工包 3 items: 簡化版
+INSERT INTO bom_cs_case_pkg_item VALUES (..., 1, 1, 'Master Carton', '5~6 retail box / carton', 1, 'PCS',
+  '富立印刷', 'RMB', 2.13, 7.10, 0.30, 0.45, ...);
+INSERT INTO bom_cs_case_pkg_item VALUES (..., 1, 2, 'SN Label', '50×50mm · art paper', 1, 'PCS',
+  '三泰標籤', 'RMB', 0.04, 7.10, 0.005, 0.01, ...);
+INSERT INTO bom_cs_case_pkg_item VALUES (..., 1, 3, 'Pallet Material', 'V20 三規', 0.05, 'PCS',
+  '環球棧板', 'USD', 0.45, 1.00, 0.45, 0.80, ...);
+```
+
+### 17.4 UI 設計
+
+`§packaging` 從單版改成 **N tab 結構**:
+
+```
+┌─ 包裝 BOM ─────────────────────────────────────────────────┐
+│  [ 商包 16 items · $0.83 ★ ] [ 工包 3 items · $0.18 ] [+] │
+│                                                            │
+│  ▼ 當前展示:商包                                          │
+│   No  Name             Qty  True  Quote  Markup  Vendor    │
+│    1  Gift Box          1   0.20  0.30    52%   富立印刷   │
+│    2  Inner Pad         1   0.08  0.12    50%   富立印刷   │
+│    ...                                                     │
+│                                                            │
+│   Total: True $0.71 · Quote $0.83 · Markup avg 17%        │
+└────────────────────────────────────────────────────────────┘
+```
+
+`§factory_matrix` 改成可切 PKG:
+
+```
+   PKG: [商包 ★] [工包]    Qty: [Low] [High ★]    [Show True ◯]
+```
+
+---
+
+## 18. ⭐ Qty Scenario 架構(v0.4 新增 · 對齊 Excel `D9 / F9` 不同地區不同批量結構)
+
+### 18.1 背景
+
+USER 在 Excel `Unit Cost!D9 / F9` 觀察到:
+- `D9: Quote Based Quantity: 418Kpcs/year` (CN/VN, 全球)
+- `F9: Quote Based Quantity: 150Kpcs/year (only for US)` (TW)
+
+業務情境:同案不同地區 / 不同 SKU 對應不同年量,需要在系統內**並存多個 scenario** 給客戶選報價。
+
+### 18.2 Schema
+
+```sql
+CREATE TABLE bom_cs_case_qty_scenario (
+  scenario_id      NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  case_factory_id  NUMBER REFERENCES bom_cs_case_factory(case_factory_id) ON DELETE CASCADE,
+  scenario_code    VARCHAR2(40) NOT NULL,            -- 'LOW' / 'HIGH' / 'CUSTOM_US'
+  scenario_label_zh VARCHAR2(100),                   -- '低批量' / '高批量' / '北美專屬'
+  scenario_label_en VARCHAR2(100),                   -- 'Low Volume' / 'High Volume'
+  target_qty       NUMBER NOT NULL,                  -- 100000 / 418000
+  region_applies   VARCHAR2(200),                    -- 'US' / 'Global' / 'EU,APAC'
+  is_baseline      NUMBER(1) DEFAULT 0,              -- 1 = 主視角的那個
+  -- 影響 MVA 計算(因 lines / capacity 變動)
+  cs_run_id        NUMBER REFERENCES bom_cs_run(run_id),  -- 對應的 cs_run
+  notes            CLOB,
+  created_at       TIMESTAMP DEFAULT SYSTIMESTAMP
+);
+
+CREATE INDEX bom_cs_qty_scenario_cf_ix ON bom_cs_case_qty_scenario (case_factory_id);
+```
+
+### 18.3 範例
+
+```sql
+INSERT INTO bom_cs_case_qty_scenario VALUES (1, 1148, 'LOW',  '低批量',  'Low Volume',  100000, 'US only',  0, ...);
+INSERT INTO bom_cs_case_qty_scenario VALUES (2, 1148, 'HIGH', '高批量',  'High Volume', 418000, 'Global',   1, ...);
+```
+
+### 18.4 Qty 影響 MVA
+
+Cleansheet 公式(對應 `cleansheet-mva-sd §7.2`):
+
+```
+weekly_demand = annual_demand / 50
+max_demand_per_week = weekly_demand × 1.2
+lines_installed = ROUNDUP(max_demand_per_week / max_output_per_line)
+weekly_output = max_output_per_line × lines_installed
+DL_cost_per_unit = DL_cost_per_week / weekly_output
+```
+
+**qty 變了 → lines 變了 → weekly_output 變了 → DL/IDL/Equipment 攤提 per unit 全部變**。所以每個 qty_scenario 都需要獨立 `cs_run` snapshot。
+
+實作:`bom_cs_case_qty_scenario.cs_run_id` FK 指向各自的 run。
+
+---
+
+## 19. ⭐ True Cost vs Quote Markup 模型(v0.4 新增 · 對齊 Excel 左右兩半結構)
+
+### 19.1 業務概念
+
+從 Excel `Unit Cost` sheet 拆出來的**雙價架構**:
+
+```
+True Cost (右半 Z~AK 欄) = 內部真實成本
+  • 來自每個 mfg / supplier 的真實採購單價
+  • RMB / VND / TWD 轉 USD
+  • 例:Box 紙盒 1.42 RMB / fx 7.10 = $0.20 USD
+
+Quote Price (左半 D~R 欄) = 給客戶報價
+  • 同一個物料,inflated 後的價格
+  • 例:同 Box 紙盒,報價 $0.30 USD
+  • 51.65% markup 藏在這
+
+Margin (自動計算 Z25~Z28 列)
+  • Material margin (Black) = (Quote_total - True_material) / Quote_total
+  • Gross margin    (Black) = (Quote_total - True_total)    / Quote_total
+  • 例:CN Black Material margin 30.5% · Gross margin 13.9%
+```
+
+**關鍵理解**:SG&A + Profit ($0.75) 兩邊都加,所謂的「利潤」其實**主要藏在每個料件的 true → quote 價差**裡。SG&A 只是個象徵性的數字。
+
+### 19.2 Schema 改動
+
+#### 19.2.1 改 `bom_item_price_snapshot` 拆出 tier 子表
+
+```sql
+-- 原 snapshot 表移除 price 欄位(改到 tier 子表)
+-- ALTER TABLE bom_item_price_snapshot DROP COLUMN price_usd;  -- 改放 tier
+
+CREATE TABLE bom_item_price_tier (
+  tier_id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  snapshot_id        NUMBER REFERENCES bom_item_price_snapshot(snapshot_id) ON DELETE CASCADE,
+  tier_seq           NUMBER,                            -- 1, 2, 3 ...
+  qty_min            NUMBER,                            -- 0
+  qty_max            NUMBER,                            -- 100000 (NULL = 無上限)
+  qty_tier_label     VARCHAR2(40),                      -- 'Low' / 'High' / 'Sample'
+  -- ⭐ 雙價:True Cost(內部)
+  source_currency    VARCHAR2(3) DEFAULT 'USD',         -- RMB / VND / TWD / USD
+  true_cost_source   NUMBER(15,6),                      -- 1.42 (原幣)
+  fx_rate            NUMBER(15,6),                      -- 7.10
+  true_cost_usd      NUMBER(15,6) GENERATED ALWAYS AS (
+    CASE WHEN source_currency = 'USD' THEN true_cost_source
+         ELSE true_cost_source / NULLIF(fx_rate, 0)
+    END
+  ) VIRTUAL,
+  -- ⭐ Quote Price(對外)
+  quote_price_usd    NUMBER(15,6),
+  -- ⭐ Markup 自動算
+  markup_pct         NUMBER(10,4) GENERATED ALWAYS AS (
+    (quote_price_usd - (CASE WHEN source_currency = 'USD' THEN true_cost_source
+                              ELSE true_cost_source / NULLIF(fx_rate, 0) END))
+    / NULLIF(quote_price_usd, 0)
+  ) VIRTUAL,
+  -- Lead time per tier
+  lead_time_days     NUMBER,
+  moq                NUMBER,                            -- Minimum Order Quantity
+  is_chosen          NUMBER(1) DEFAULT 0,               -- 該 tier 是否為此案選定
+  notes              VARCHAR2(500),
+  created_at         TIMESTAMP DEFAULT SYSTIMESTAMP
+);
+
+CREATE INDEX bom_item_price_tier_snap_ix ON bom_item_price_tier (snapshot_id, qty_min);
+```
+
+#### 19.2.2 新增 category-level markup 預設表
+
+```sql
+CREATE TABLE bom_category_markup_default (
+  category_code      VARCHAR2(40) PRIMARY KEY,          -- 'IC' / 'PCB' / 'PLASTIC' / 'PKG_PAPER' / 'METAL' / 'CONNECTOR'
+  display_name_zh    VARCHAR2(100),
+  default_markup_pct NUMBER(8,4),                       -- IC 35% / PKG 50% / Connector 25%
+  applies_from       DATE,
+  applies_to         DATE,
+  notes              CLOB
+);
+
+-- 子料填價時,UI 自動帶 category markup,user 可逐項 override
+```
+
+#### 19.2.3 `bom_cs_run_result` fact table(多維結果)
+
+```sql
+-- 原 bom_cs_run_cell 改成 result 多維 fact table
+CREATE TABLE bom_cs_run_result (
+  result_id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  run_id               NUMBER REFERENCES bom_cs_run(run_id) ON DELETE CASCADE,
+  -- 維度
+  factory_code         VARCHAR2(10),
+  variant_key          VARCHAR2(40),
+  qty_scenario_code    VARCHAR2(40),
+  pkg_code             VARCHAR2(40),
+  -- True 側
+  material_true_usd    NUMBER(15,6),
+  pkg_true_usd         NUMBER(15,6),
+  mva_usd              NUMBER(15,6),                    -- MVA 隨 qty 變
+  sga_usd              NUMBER(15,6),                    -- SGA 通常固定 $0.02 / unit
+  profit_amount_usd    NUMBER(15,6),                    -- 計算式
+  total_true_usd       NUMBER(15,6) GENERATED ALWAYS AS (
+    material_true_usd + pkg_true_usd + mva_usd + sga_usd + profit_amount_usd
+  ) VIRTUAL,
+  -- Quote 側
+  material_quote_usd   NUMBER(15,6),
+  pkg_quote_usd        NUMBER(15,6),
+  total_quote_usd      NUMBER(15,6) GENERATED ALWAYS AS (
+    material_quote_usd + pkg_quote_usd + mva_usd + sga_usd + profit_amount_usd
+  ) VIRTUAL,
+  -- Margin(自動)
+  margin_amount_usd    NUMBER(15,6) GENERATED ALWAYS AS (total_quote_usd - total_true_usd) VIRTUAL,
+  material_margin_pct  NUMBER(8,4) GENERATED ALWAYS AS (
+    (total_quote_usd - material_true_usd - pkg_true_usd) / NULLIF(total_quote_usd, 0)
+  ) VIRTUAL,
+  gross_margin_pct     NUMBER(8,4) GENERATED ALWAYS AS (
+    (total_quote_usd - total_true_usd) / NULLIF(total_quote_usd, 0)
+  ) VIRTUAL,
+  computed_at          TIMESTAMP DEFAULT SYSTIMESTAMP,
+  CONSTRAINT bcrr_uk UNIQUE (run_id, factory_code, variant_key, qty_scenario_code, pkg_code)
+);
+
+-- 索引 — 各維度 pivot 用
+CREATE INDEX bcrr_run_ix ON bom_cs_run_result (run_id);
+CREATE INDEX bcrr_pivot_ix ON bom_cs_run_result (run_id, factory_code, variant_key, qty_scenario_code, pkg_code);
+```
+
+**範例**:SteelSeries 案一次 compute 產出 = 3 廠 × 2 variant × 2 qty × 2 pkg = **24 列**。
+
+### 19.3 SQL pivot 範例
+
+```sql
+-- 客戶選 High Qty + Retail PKG · 看 3 廠 Black/White 報價
+SELECT
+  factory_code,
+  MAX(CASE WHEN variant_key='black' THEN total_quote_usd END) AS quote_black,
+  MAX(CASE WHEN variant_key='white' THEN total_quote_usd END) AS quote_white,
+  MAX(CASE WHEN variant_key='black' THEN gross_margin_pct END) AS margin_black,
+  MAX(CASE WHEN variant_key='white' THEN gross_margin_pct END) AS margin_white
+FROM bom_cs_run_result
+WHERE run_id = ?
+  AND qty_scenario_code = 'HIGH'
+  AND pkg_code = 'RETAIL'
+GROUP BY factory_code;
+
+-- 跨 scenario 報價總覽
+SELECT
+  qty_scenario_code, pkg_code,
+  AVG(total_quote_usd) AS avg_quote,
+  AVG(gross_margin_pct) AS avg_margin
+FROM bom_cs_run_result
+WHERE run_id = ?
+GROUP BY qty_scenario_code, pkg_code;
+```
+
+### 19.4 UI 設計
+
+`§factory_matrix` 加 toggle 切換:
+
+```
+┌─ 多廠成本矩陣 ────────────────────────────────────────────┐
+│  Qty: [Low] [High ★]    PKG: [商包 ★] [工包]             │
+│  [ Show True Cost ◯ ] [ Show Margin ◉ ]                  │
+│                                                          │
+│  ┌──────┬──────────┬──────────┬──────────┐               │
+│  │      │ CN       │ VN       │ TW       │               │
+│  ├──────┼──────────┼──────────┼──────────┤               │
+│  │ Black│ $11.12   │ $11.11 ⭐│ $12.59   │  ← Quote     │
+│  │      │ (T:$9.58)│ (T:$9.46)│ (T:$10.66)│  ← True     │
+│  │      │ M:13.9%  │ M:14.8%  │ M:15.3%   │  ← Margin   │
+│  │ White│ ...                                            │
+│  └──────┴──────────┴──────────┴──────────┘               │
+└──────────────────────────────────────────────────────────┘
+```
+
+新增「**Scenario Comparison**」對比表(可切到):
+
+```
+┌─ Scenario 比較(取 CN Black 為例)──────────────┐
+│              商包       工包                     │
+│ Low qty   $11.42   $10.78                       │
+│ High qty  $11.12   $10.48                       │
+│ Delta:    $0.30 (高量折扣) / $0.94 (PKG 簡化)   │
+└─────────────────────────────────────────────────┘
+```
+
+新增「**Margin Analysis**」面板:
+
+```
+┌─ Top Markup Items (CN High Retail Black)─────┐
+│  1. Gift Box        true $0.20 / quote $0.30 │
+│     markup 51.7%                             │
+│  2. USB-C Conn      true $0.62 / quote $0.85 │
+│     markup 37.1%                             │
+│  3. Sensor IC       true $2.10 / quote $2.85 │
+│     markup 35.7%                             │
+└──────────────────────────────────────────────┘
+```
+
+---
+
+## 20. ⭐ True Cost 權限擴充(v0.4 新增)
+
+### 20.1 與既有 4 層資料政策的關係
+
+Cortex 既有 `ai_data_policies` 4 層(L1 user / L2 role / L3 org / L4 ERP Multi-Org)**保留不動**,新增獨立「**True Cost 揭露權限**」layer:
+
+```sql
+-- 在 ai_data_policy_rules 表加 capability_code
+INSERT INTO ai_data_policy_rules (policy_id, layer, capability_code, applies_to)
+VALUES (?, 'COST_LAYER', 'VIEW_TRUE_COST', 'role:finance,role:procurement_director');
+```
+
+`VIEW_TRUE_COST` 權限只發給:
+- **CFO / 財務主管** — 看跨案 margin 趨勢
+- **採購主管** — 看真實單價合理性
+- **業務主管 (DPM/BPM)** — 看議價空間
+- **業務助理 / 一般 member** — ❌ 看不到 true cost,只看 quote
+
+### 20.2 機密層級
+
+| 欄位 | 機密層級 |
+|---|---|
+| `bom_item_price_tier.true_cost_source` | 🔒 High(需 view_true_cost)|
+| `bom_item_price_tier.true_cost_usd` | 🔒 High |
+| `bom_item_price_tier.fx_rate` | 🟡 Medium(露 supplier 國家) |
+| `bom_item_price_tier.quote_price_usd` | 🟢 Low(對客戶可揭露) |
+| `bom_item_price_tier.markup_pct` | 🔒🔒 Critical(超越 true cost · 揭露 markup 商業邏輯) |
+| `bom_cs_run_result.material_true_usd` | 🔒 High |
+| `bom_cs_run_result.gross_margin_pct` | 🔒🔒 Critical |
+| `bom_cs_run_result.total_quote_usd` | 🟢 Low |
+| `bom_cs_run_result.mva_usd` | 🔒 High(廠級成本秘密) |
+| `bom_cs_run_result.sga_usd` | 🟡 Medium |
+
+### 20.3 UI 中間態(沒 view_true_cost 權限的人看到的)
+
+```
+┌─ Matrix 視角(無 view_true_cost)──────────┐
+│  CN Black: $11.12   ← 只看到 quote        │
+│  ▒▒▒▒▒(True Cost)                       │
+│  ▒▒▒%(Margin)                            │
+└────────────────────────────────────────────┘
+
+┌─ Matrix 視角(有 view_true_cost)──────────┐
+│  CN Black: $11.12 / true $9.58            │
+│  Material margin 30.5% · Gross 13.9%      │
+└────────────────────────────────────────────┘
+```
+
+---
+
+— End of SD v0.4 —
+
+Cortex 規劃小組 · 2026-06-06 · 對齊 USER 三新需求(qty tier / multi-pkg / true_cost markup)· 對應 `Rival 3 Gen2 uni bom_*.xlsx` Unit Cost sheet 真實架構

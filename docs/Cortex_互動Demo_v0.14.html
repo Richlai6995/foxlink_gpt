@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cortex Demo v0.14 · 三軸 RBAC 權限投影</title>
+<style>
+  :root{
+    --ink:#0B1F3A;--text:#374755;--muted:#6B7280;--line:#E5E7EB;--ocean:#02C39A;--navy:#1C7293;
+    --bg:#F4F6F9;--bg-soft:#FAFBFC;--white:#fff;--gold:#CA8A04;--red:#DC2626;--green:#16A34A;
+    --purple:#7C3AED;--cyan:#0891B2;--sky:#0EA5E9;--amber:#F5A524;
+    --font:-apple-system,"Microsoft JhengHei","Segoe UI",sans-serif;--mono:"Consolas",monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:13px;line-height:1.5}
+  .mono{font-family:var(--mono)}
+  .topbar{height:54px;background:var(--ink);display:flex;align-items:center;gap:14px;padding:0 18px;color:#fff;position:sticky;top:0;z-index:50}
+  .logo{font-size:17px;font-weight:800}.logo .v{font-size:10px;background:var(--ocean);color:var(--ink);padding:2px 6px;border-radius:6px;margin-left:7px;font-weight:700}
+  .topbar .spacer{flex:1}
+  .mode-tog{display:flex;background:#14304e;border-radius:8px;padding:3px}
+  .mode-tog button{background:none;border:none;color:#93b4d4;padding:6px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--font)}
+  .mode-tog button.active{background:var(--ocean);color:var(--ink)}
+  .usel{display:flex;align-items:center;gap:8px}
+  .usel select{background:#14304e;color:#fff;border:1px solid #2a4f73;border-radius:8px;padding:7px 10px;font-size:12px;font-family:var(--font);font-weight:600;cursor:pointer}
+  .ucaps{display:flex;gap:4px}
+  .cap{font-size:9px;padding:2px 6px;border-radius:8px;font-weight:700}
+  .cap-on{background:#14532d;color:#bbf7d0}.cap-off{background:#3f1d1d;color:#fca5a5}
+  .roles-chip{font-size:9px;background:#1e3a5a;color:#93b4d4;padding:2px 7px;border-radius:8px}
+  .shell{display:flex;min-height:calc(100vh - 54px)}
+  .rail{width:228px;background:var(--ink);color:#cbd5e1;flex-shrink:0;padding:12px 0;position:sticky;top:54px;height:calc(100vh - 54px);overflow-y:auto}
+  .rail-h{font-size:11px;color:#5b7799;padding:0 16px 8px;text-transform:uppercase;letter-spacing:.5px}
+  .case-pick{padding:0 12px 12px;border-bottom:1px solid #1e3a5a;margin-bottom:8px}
+  .case-pick select{width:100%;background:#14304e;color:#fff;border:1px solid #2a4f73;border-radius:7px;padding:7px;font-size:11px;font-family:var(--font)}
+  .nav-item{display:flex;align-items:center;gap:9px;padding:8px 16px;cursor:pointer;font-size:12px;border-left:3px solid transparent}
+  .nav-item:hover{background:#14304e;color:#fff}
+  .nav-item.active{background:#14304e;color:#fff;border-left-color:var(--ocean);font-weight:600}
+  .nav-item .ico{width:16px;text-align:center}
+  .nav-item.locked{opacity:.65}
+  .nav-item .st{margin-left:auto;font-size:11px}
+  .nav-hidden{padding:6px 16px;font-size:10px;color:#475d77;font-style:italic}
+  .main{flex:1;padding:20px 26px;overflow-x:hidden}
+  .ph{display:flex;align-items:flex-start;gap:10px;margin-bottom:16px}
+  .ph h1{font-size:20px;color:var(--ink);font-weight:800}.ph .sub{font-size:11.5px;color:var(--muted);margin-top:3px}
+  .ph .right{margin-left:auto;display:flex;gap:8px;align-items:center}
+  .btn{border:none;border-radius:8px;padding:7px 13px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--font)}
+  .btn-primary{background:var(--ocean);color:var(--ink)}.btn-ghost{background:#fff;color:var(--navy);border:1px solid var(--line)}
+  .btn-dark{background:var(--ink);color:#fff}.btn-red{background:var(--red);color:#fff}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .banner{display:flex;align-items:center;gap:10px;padding:9px 14px;border-radius:8px;font-size:11.5px;margin-bottom:12px}
+  .banner-ro{background:#FEF3C7;border:1px solid var(--gold);color:#92400E}
+  .banner-perm{background:#E0F2FE;border:1px solid var(--sky);color:#075985}
+  .panel{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+  table.grid{width:100%;border-collapse:collapse;font-size:11.5px;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  table.grid th{background:#F3F4F6;text-align:left;padding:7px 10px;font-weight:700;color:var(--ink);border-bottom:1px solid var(--line)}
+  table.grid td{padding:6px 10px;border-bottom:1px solid var(--line)}
+  table.grid tr:last-child td{border-bottom:none}
+  .masked{color:#cbd5e1;letter-spacing:1px;background:#f1f5f9;padding:0 4px;border-radius:3px}
+  .field{margin-bottom:10px}.field label{display:block;font-size:11px;color:var(--muted);margin-bottom:3px;font-weight:600}
+  .field input{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:7px;font-size:12px;font-family:var(--font)}
+  .field input:disabled{background:var(--bg-soft);color:var(--muted)}
+  .kpis{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+  .kpi{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 14px;min-width:120px;flex:1}
+  .kpi .l{font-size:10px;color:var(--muted)}.kpi .v{font-size:20px;font-weight:800;color:var(--ink);margin-top:2px}
+  .chip{font-size:10px;padding:2px 7px;border-radius:9px;font-weight:600}
+  .chip-full{background:#E0F2FE;color:#0369A1}.chip-simp{background:#F3E8FF;color:#6B21A8}
+  .note{background:#FEF3C7;border:1px solid var(--gold);border-radius:8px;padding:9px 12px;font-size:11px;color:#92400E;line-height:1.6;margin:10px 0}
+  .note.cyan{background:#ECFEFF;border-color:var(--cyan);color:#155E75}.note.red{background:#FEE2E2;border-color:var(--red);color:#991B1B}.note.green{background:#DCFCE7;border-color:var(--green);color:#166534}
+  .sec-title{font-size:13px;font-weight:700;color:var(--ink);margin:16px 0 9px;display:flex;align-items:center;gap:8px}
+  /* admin matrix */
+  .verbcell{display:inline-flex;gap:2px;flex-wrap:wrap}
+  .vb{font-size:9px;padding:1px 5px;border-radius:4px;cursor:pointer;font-weight:600;user-select:none}
+  .vb-on{background:var(--green);color:#fff}.vb-off{background:#eef2f6;color:#9ca3af}
+  .vb-deny{background:var(--red);color:#fff}
+  .rolepill{display:inline-block;font-size:11px;padding:5px 11px;border-radius:8px;margin:3px;cursor:pointer;border:1px solid var(--line);background:#fff}
+  .rolepill.active{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .rolepill.seed{border-left:3px solid var(--ocean)}
+  .axis-box{border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--bg-soft)}
+  .axis-h{font-size:12px;font-weight:700;margin-bottom:8px}
+  .tabs{display:flex;gap:5px;border-bottom:2px solid var(--line);margin-bottom:14px}
+  .tab{padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-2px}
+  .tab.active{color:var(--navy);border-bottom-color:var(--navy)}
+  .lint{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;font-size:11px;margin-bottom:6px}
+  .lint-warn{background:#FEF3C7;border:1px solid var(--gold);color:#92400E}
+  .lint-err{background:#FEE2E2;border:1px solid var(--red);color:#991B1B}
+  .tt{position:relative;display:inline-block}
+  .tt .ttx{visibility:hidden;background:var(--ink);color:#fff;font-size:10px;border-radius:6px;padding:5px 8px;position:absolute;z-index:9;bottom:125%;left:50%;transform:translateX(-50%);white-space:nowrap}
+  .tt:hover .ttx{visibility:visible}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+/* ============================================================
+   Cortex Demo v0.14 — 三軸 function-RBAC 權限投影
+   對齊 cortex-integration-sd.md · 所有 render 查 can() 不查角色字串
+   ============================================================ */
+
+// ---- 軸③ capability ----
+// (VIEW_TRUE_COST / VIEW_MARGIN 在 user 身上 · 任一 role 有就有)
+
+// ---- Functions(對齊 14 superset section + 動作)----
+const FUNCTIONS = {
+  F_PROJECT:           { name:'案基本/開案', module:'PROJECT', verbs:['view','create','edit'] },
+  F_BOM_VARIANT_SCOPE: { name:'CMF 變體', module:'BOM', verbs:['view','edit'] },
+  F_BOM_STRUCTURE:     { name:'BOM 結構', module:'BOM', verbs:['view','create','edit','delete'] },
+  F_PACKAGING_CONFIG:  { name:'包裝 BOM', module:'PURCHASE', verbs:['view','create','edit'] },
+  F_PURCHASE_STRATEGY: { name:'採購策略/詢價', module:'PURCHASE', verbs:['view','create','edit','delete'] },
+  F_NRE_STRATEGY:      { name:'NRE/議價策略', module:'QUOTE', verbs:['view','edit'] },
+  F_CASE_PROCESS:      { name:'製程/Cleansheet', module:'CLEANSHEET', verbs:['view','create','edit'] },
+  F_COMPUTE_RUN:       { name:'Compute', module:'CLEANSHEET', verbs:['view','run'] },
+  F_FACTORY_LOCK:      { name:'廠 Lock', module:'CLEANSHEET', verbs:['view','lock','unlock'] },
+  F_COST_MATRIX:       { name:'成本矩陣', module:'COST', verbs:['view'], field:'VIEW_TRUE_COST' },
+  F_MARGIN_ANALYSIS:   { name:'Margin 分析', module:'COST', verbs:['view'], field:'VIEW_MARGIN' },
+  F_COST_REVIEW:       { name:'Cost Review', module:'COST', verbs:['view','edit'] },
+  F_BOM_FINAL_LOCK:    { name:'BOM Final Lock', module:'COST', verbs:['view','lock','unlock','propagate'] },
+  F_BASELINE_SECOND_SIGN:{ name:'Baseline 二簽', module:'COST', verbs:['view','approve'] },
+  F_STAGE_GATE:        { name:'Stage Gate', module:'PROJECT', verbs:['view','gate_confirm'] },
+  F_QUOTE_EXPORT:      { name:'報價匯出', module:'QUOTE', verbs:['view','export'] },
+  F_QUOTE_SUBMIT:      { name:'報價 Submit', module:'QUOTE', verbs:['submit'] },
+  F_QUOTE_APPROVE:     { name:'報價核准', module:'QUOTE', verbs:['view','approve'] },
+  F_REPRICE_TRIGGER:   { name:'議價 Reprice', module:'QUOTE', verbs:['reprice'] },
+  F_GAP_ANALYSIS:      { name:'Gap Analysis', module:'PROJECT', verbs:['view','edit'] },
+  F_FACTORY_BASELINE:  { name:'廠 Baseline 維護', module:'MASTER', verbs:['view','create','edit'] },
+  F_EQUIP_CATEGORY:    { name:'設備類別 Catalog', module:'MASTER', verbs:['view','create','edit','copy'] },
+  F_WAGE_MASTER:       { name:'工資 Master', module:'MASTER', verbs:['view','edit'] },
+  F_COSTING_MODEL_MASK:{ name:'Costing Model Mask', module:'MASTER', verbs:['view','edit'] },
+  F_ROLE_PERM_EDIT:    { name:'改 Role 權限', module:'ADMIN', verbs:['view','edit'] },
+  F_ROLE_ASSIGN:       { name:'指派 Role 給 user', module:'ADMIN', verbs:['view','edit'] },
+  F_DATA_POLICY:       { name:'資料權限管理', module:'ADMIN', verbs:['view','edit'] },
+  F_PORTFOLIO_BG:      { name:'BG Portfolio', module:'PORTFOLIO', verbs:['view'] },
+  F_PORTFOLIO_GLOBAL:  { name:'集團 Portfolio', module:'PORTFOLIO', verbs:['view'] },
+};
+
+// ---- 12 seed role × function × verb(可改 · live 影響 can())----
+function V(...v){ return v; }
+const ROLE_PERM = {
+  BPM:        { F_PROJECT:V('view','create','edit'), F_STAGE_GATE:V('view','gate_confirm'), F_COST_MATRIX:V('view'), F_QUOTE_EXPORT:V('view','export'), F_QUOTE_SUBMIT:V('submit'), F_BOM_FINAL_LOCK:V('view'), F_GAP_ANALYSIS:V('view') },
+  RD:         { F_PROJECT:V('view'), F_BOM_STRUCTURE:V('view','create','edit','delete'), F_BOM_VARIANT_SCOPE:V('view','edit'), F_GAP_ANALYSIS:V('view','edit') },
+  採購:        { F_PROJECT:V('view'), F_PURCHASE_STRATEGY:V('view','create','edit','delete'), F_PACKAGING_CONFIG:V('view','create','edit'), F_COST_MATRIX:V('view') },
+  採購主管:    { F_PROJECT:V('view'), F_PURCHASE_STRATEGY:V('view'), F_COST_MATRIX:V('view') /* approve via F_PURCHASE_STRATEGY? demo: separate */ },
+  EPM:        { F_PROJECT:V('view'), F_CASE_PROCESS:V('view','create','edit'), F_COMPUTE_RUN:V('view','run'), F_FACTORY_LOCK:V('view','lock','unlock'), F_COST_MATRIX:V('view'), F_FACTORY_BASELINE:V('view'), F_GAP_ANALYSIS:V('view','edit') },
+  經管:        { F_PROJECT:V('view'), F_FACTORY_BASELINE:V('view','create','edit'), F_EQUIP_CATEGORY:V('view','create','edit'), F_WAGE_MASTER:V('view','edit'), F_COST_MATRIX:V('view') },
+  DPM:        { F_PROJECT:V('view'), F_COST_MATRIX:V('view'), F_MARGIN_ANALYSIS:V('view'), F_COST_REVIEW:V('view','edit'), F_BOM_FINAL_LOCK:V('view','lock','unlock','propagate'), F_BASELINE_SECOND_SIGN:V('view','approve'), F_CASE_PROCESS:V('view'), F_GAP_ANALYSIS:V('view') },
+  業務:        { F_PROJECT:V('view'), F_COST_MATRIX:V('view'), F_MARGIN_ANALYSIS:V('view'), F_NRE_STRATEGY:V('view','edit'), F_QUOTE_EXPORT:V('view','export'), F_QUOTE_SUBMIT:V('submit'), F_REPRICE_TRIGGER:V('reprice') },
+  業助:        { F_PROJECT:V('view'), F_COST_MATRIX:V('view'), F_NRE_STRATEGY:V('view','edit'), F_QUOTE_EXPORT:V('view','export') },
+  admin:      { F_ROLE_PERM_EDIT:V('view','edit'), F_ROLE_ASSIGN:V('view','edit'), F_DATA_POLICY:V('view','edit'), F_COSTING_MODEL_MASK:V('view','edit'), F_EQUIP_CATEGORY:V('view','create','edit','copy'), F_WAGE_MASTER:V('view','edit'), F_FACTORY_BASELINE:V('view','create','edit'), F_PROJECT:V('view') },
+  GM_BG:      { F_PORTFOLIO_BG:V('view'), F_PROJECT:V('view'), F_COST_MATRIX:V('view'), F_MARGIN_ANALYSIS:V('view') },
+  董事長:      { F_PORTFOLIO_GLOBAL:V('view'), F_PROJECT:V('view'), F_COST_MATRIX:V('view'), F_MARGIN_ANALYSIS:V('view') },
+};
+const SEED_ROLES = Object.keys(ROLE_PERM);
+const ROLE_META = {
+  BPM:{zh:'BPM 業務專案經理'}, RD:{zh:'RD 研發'}, 採購:{zh:'採購 Buyer(含 PKG)'}, 採購主管:{zh:'採購主管'},
+  EPM:{zh:'EPM 廠製造工程經理'}, 經管:{zh:'經管(廠級 master 維護)'}, DPM:{zh:'DPM 開發總監'},
+  業務:{zh:'業務 Sales(兼 Finance)'}, 業助:{zh:'業助'}, admin:{zh:'admin / IT'}, GM_BG:{zh:'總經理/BG 高層'}, 董事長:{zh:'董事長'},
+};
+// approve verbs(demo)— 採購主管 approve 採購策略
+ROLE_PERM.採購主管.F_PURCHASE_STRATEGY = V('view','approve');
+
+// ---- SoD 互斥對(SELF_RECORD 預設)----
+const SOD = [
+  { a:['F_COST_REVIEW','edit'], b:['F_BOM_FINAL_LOCK','lock'], lvl:'SELF_RECORD', why:'DPM 改 cost 不能自己 final lock' },
+  { a:['F_CASE_PROCESS','edit'], b:['F_FACTORY_LOCK','lock'], lvl:'SELF_RECORD', why:'EPM 改製程不能自己鎖廠' },
+  { a:['F_PURCHASE_STRATEGY','edit'], b:['F_PURCHASE_STRATEGY','approve'], lvl:'SELF_RECORD', why:'採購不能自建策略自核准' },
+  { a:['F_QUOTE_SUBMIT','submit'], b:['F_REPRICE_TRIGGER','reprice'], lvl:'SELF_RECORD', why:'submit 者≠上輪 reprice 發起人' },
+];
+
+// ---- Gate config ----
+const GATE_CFG = {
+  F_STAGE_GATE:        { type:'flow', skip:'NEVER' },
+  F_PURCHASE_STRATEGY_APPROVE:{ type:'approval', skip:'NO_HOLDER' },
+  F_BASELINE_SECOND_SIGN:{ type:'approval', skip:'NO_HOLDER' },
+  F_QUOTE_APPROVE:     { type:'approval', skip:'NO_HOLDER' },
+};
+
+// ---- Users(可多角色 · 軸③ capability)----
+const USERS = {
+  andy:   { name:'Andy 陳', dept:'光電-CN 製造', roles:['EPM'], caps:['VIEW_TRUE_COST'] },
+  mike:   { name:'Mike 王', dept:'光電-DPM', roles:['DPM'], caps:['VIEW_TRUE_COST','VIEW_MARGIN'] },
+  john:   { name:'John 李', dept:'光電-業務', roles:['業務'], caps:['VIEW_TRUE_COST','VIEW_MARGIN'] },
+  amy:    { name:'Amy 業助', dept:'光電-業務', roles:['業助'], caps:[] },
+  david:  { name:'David(一人多役)', dept:'光電-業務', roles:['BPM','業務','業助'], caps:['VIEW_TRUE_COST','VIEW_MARGIN'] },
+  troy:   { name:'Troy 黃', dept:'光電-RD', roles:['RD'], caps:[] },
+  karen:  { name:'Karen 周', dept:'光電-採購', roles:['採購','採購主管'], caps:['VIEW_TRUE_COST'] },  // union 自審 demo
+  planning:{ name:'Lin 經管', dept:'光電-經管', roles:['經管'], caps:['VIEW_TRUE_COST'] },
+  admin:  { name:'Cortex Admin', dept:'HQ-IT', roles:['admin'], caps:['VIEW_TRUE_COST','VIEW_MARGIN'] },
+  gm:     { name:'David 總(GM)', dept:'光電 BG', roles:['GM_BG'], caps:['VIEW_TRUE_COST','VIEW_MARGIN'] },
+};
+
+// ---- Cases ----
+const CASES = {
+  'QT-2026-0148':{ id:'QT-2026-0148', title:'SteelSeries Rival 3+ Wired', model:'FULL_MVA', stage:6, cost_editor:'mike' },
+  'QT-2026-0167':{ id:'QT-2026-0167', title:'WHOOP Gen4 MP 穿戴', model:'SIMPLIFIED_WEARABLE', stage:5, cost_editor:'andy' },
+};
+
+// ---- 14 superset section → function ----
+const SECTIONS = [
+  { id:'customer', name:'客戶資料', ico:'📋', fn:'F_PROJECT' },
+  { id:'workflow', name:'操作流程', ico:'🎬', fn:'F_PROJECT' },
+  { id:'variants', name:'CMF 變體', ico:'🎨', fn:'F_BOM_VARIANT_SCOPE' },
+  { id:'bom', name:'BOM 結構', ico:'📦', fn:'F_BOM_STRUCTURE' },
+  { id:'packaging', name:'包裝 BOM', ico:'📮', fn:'F_PACKAGING_CONFIG' },
+  { id:'inquiry', name:'詢價彙總', ico:'💰', fn:'F_PURCHASE_STRATEGY' },
+  { id:'nre', name:'NRE 成本', ico:'🔧', fn:'F_NRE_STRATEGY' },
+  { id:'cost_matrix', name:'成本矩陣', ico:'🏭', fn:'F_COST_MATRIX' },
+  { id:'process_mva', name:'製程/MVA', ico:'🧮', fn:'F_CASE_PROCESS' },
+  { id:'cost_structure', name:'Cost 結構', ico:'📊', fn:'F_COST_REVIEW' },
+  { id:'margin', name:'Margin 分析', ico:'📈', fn:'F_MARGIN_ANALYSIS' },
+  { id:'strategy', name:'議價策略', ico:'🤝', fn:'F_NRE_STRATEGY' },
+  { id:'gap', name:'Gap Analysis', ico:'⚠️', fn:'F_GAP_ANALYSIS' },
+  { id:'legal', name:'法務 review', ico:'⚖️', fn:'F_PROJECT' },
+];
+
+/* ============================================================ can() 引擎(核心)============================================================ */
+function effRoles(uid){ return USERS[uid].roles; }
+function hasVerb(uid, fn, verb){
+  // ALLOW union − DENY(此 demo 用陣列 · DENY 以 '!verb' 表示)
+  let allow=false, deny=false;
+  for(const r of effRoles(uid)){
+    const fns = ROLE_PERM[r]; if(!fns) continue;
+    const vs = fns[fn]; if(!vs) continue;
+    if(vs.includes(verb)) allow=true;
+    if(vs.includes('!'+verb)) deny=true;
+  }
+  return allow && !deny;
+}
+function hasCap(uid, cap){ return USERS[uid].caps.includes(cap); }
+// distinct-actor SoD:此 user 對此案是否 maker(cost_editor)→ lock/approve 受擋
+function sodBlocked(uid, fn, verb, caseId){
+  const c = CASES[caseId]; if(!c) return false;
+  for(const s of SOD){
+    if(s.b[0]===fn && s.b[1]===verb){
+      // checker 端 · 若此 user 是 maker(該案 cost_editor / process_editor)→ 擋
+      const makerVerbHeld = hasVerb(uid, s.a[0], s.a[1]);
+      const isMaker = (c.cost_editor===uid) && makerVerbHeld;
+      if(isMaker) return s;
+    }
+  }
+  return false;
+}
+// 主 can():view 用
+function can(uid, fn, verb='view', caseId){
+  if(!hasVerb(uid, fn, verb)) return false;
+  // 軸③ field:若 function 是 field-gated 且 verb=view · 但即使無 cap 仍可 view(只是欄遮)→ view 通過,欄位另查
+  // (margin 例外:無 VIEW_MARGIN 整頁隱藏 · 見 sectionVisible)
+  if(verb!=='view'){
+    const sod = sodBlocked(uid, fn, verb, caseId);
+    if(sod) return false;  // SoD 擋
+  }
+  return true;
+}
+// section 是否顯示(view + margin 反推鎖)
+function sectionVisible(uid, sec, caseId){
+  const f = FUNCTIONS[sec.fn];
+  if(!hasVerb(uid, sec.fn, 'view')) return false;
+  // margin 反推鎖:F_MARGIN_ANALYSIS 軸①有 view 但無 VIEW_MARGIN → 整頁隱藏
+  if(f.field==='VIEW_MARGIN' && !hasCap(uid,'VIEW_MARGIN')) return false;
+  return true;
+}
+
+/* ============================================================ state + render ============================================================ */
+let state = { uid:'mike', mode:'project', caseId:'QT-2026-0148', section:'customer', adminTab:'matrix', adminRole:'DPM' };
+function setUser(u){ state.uid=u; render(); }
+function setMode(m){ state.mode=m; render(); }
+function go(s){ state.section=s; render(); }
+
+function render(){
+  document.getElementById('app').innerHTML = topBar() + (state.mode==='project' ? projectShell() : adminShell());
+}
+
+function topBar(){
+  const u=USERS[state.uid];
+  return `<div class="topbar">
+    <div class="logo">Cortex<span class="v">v0.14 三軸 RBAC</span></div>
+    <div class="mode-tog">
+      <button class="${state.mode==='project'?'active':''}" onclick="setMode('project')">📁 報價案視圖</button>
+      <button class="${state.mode==='admin'?'active':''}" onclick="setMode('admin')">🔐 IT 權限後台</button>
+    </div>
+    <div class="spacer"></div>
+    <span class="roles-chip">roles: ${u.roles.join('+')}</span>
+    <div class="ucaps">
+      <span class="cap ${u.caps.includes('VIEW_TRUE_COST')?'cap-on':'cap-off'}">TRUE_COST</span>
+      <span class="cap ${u.caps.includes('VIEW_MARGIN')?'cap-on':'cap-off'}">MARGIN</span>
+    </div>
+    <div class="usel">
+      <span style="font-size:11px;color:#7da3c9">登入身分:</span>
+      <select onchange="setUser(this.value)">
+        ${Object.keys(USERS).map(k=>`<option value="${k}" ${k===state.uid?'selected':''}>${USERS[k].name} (${USERS[k].roles.join('+')})</option>`).join('')}
+      </select>
+    </div>
+  </div>`;
+}
+
+/* ---------- Project mode ---------- */
+function projectShell(){
+  const uid=state.uid, caseId=state.caseId, c=CASES[caseId];
+  const visible = SECTIONS.filter(s=>sectionVisible(uid,s,caseId));
+  const hidden = SECTIONS.filter(s=>!sectionVisible(uid,s,caseId));
+  if(!visible.find(s=>s.id===state.section)) state.section = visible[0]?.id || 'customer';
+  const sec = SECTIONS.find(s=>s.id===state.section);
+  return `<div class="shell">
+    <div class="rail">
+      <div class="case-pick">
+        <div class="rail-h">報價案</div>
+        <select onchange="state.caseId=this.value;render()">
+          ${Object.keys(CASES).map(k=>`<option value="${k}" ${k===caseId?'selected':''}>${CASES[k].id} ${CASES[k].title}</option>`).join('')}
+        </select>
+      </div>
+      <div class="rail-h">Section(按 can() 投影)</div>
+      ${visible.map(s=>{
+        const editable=can(uid,s.fn,'edit',caseId);
+        return `<div class="nav-item ${s.id===state.section?'active':''} ${editable?'':'locked'}" onclick="go('${s.id}')">
+          <span class="ico">${s.ico}</span><span>${s.name}</span>
+          <span class="st">${editable?'✏️':'👁'}</span></div>`;
+      }).join('')}
+      ${hidden.length?`<div class="rail-h" style="margin-top:10px">隱藏(無 view 權)</div>${hidden.map(s=>`<div class="nav-hidden">🔒 ${s.name}</div>`).join('')}`:''}
+    </div>
+    <div class="main">${projectMain(sec,c)}</div>
+  </div>`;
+}
+
+function projectMain(sec,c){
+  const uid=state.uid, caseId=c.id;
+  const editable=can(uid,sec.fn,'edit',caseId);
+  const u=USERS[uid];
+  let html = `<div class="ph"><div><h1>${sec.ico} ${sec.name}</h1>
+    <div class="sub">${c.id} · ${c.title} · <span class="chip ${c.model==='FULL_MVA'?'chip-full':'chip-simp'}">${c.model}</span> · Stage ${c.stage}</div></div>
+    <div class="right">${sectionActions(sec,c)}</div></div>`;
+  // 投影 banner
+  html += `<div class="banner banner-perm">🔑 你(${u.name} · ${u.roles.join('+')})對此 section 的權限:
+    <b>view</b> ${can(uid,sec.fn,'view',caseId)?'✓':'✗'} · <b>edit</b> ${editable?'✓':'✗'}
+    ${FUNCTIONS[sec.fn].field?` · 機密欄受 <b>${FUNCTIONS[sec.fn].field}</b> ${hasCap(uid,FUNCTIONS[sec.fn].field)?'✓ 可見':'✗ 遮罩'}`:''}
+    <span style="margin-left:auto;font-family:var(--mono);font-size:10px">查 ${sec.fn} · 不查角色字串</span></div>`;
+  if(!editable) html += `<div class="banner banner-ro">👁 唯讀 — 你沒有 ${sec.fn}.edit 權限(此 section 全欄不可改)</div>`;
+  html += sectionBody(sec,c,editable);
+  return html;
+}
+
+function sectionActions(sec,c){
+  const uid=state.uid, caseId=c.id; let btns='';
+  if(sec.id==='cost_structure' || sec.id==='cost_matrix'){
+    // Final Lock 鈕 · SoD 示範
+    const sod = sodBlocked(uid,'F_BOM_FINAL_LOCK','lock',caseId);
+    const canLock = can(uid,'F_BOM_FINAL_LOCK','lock',caseId);
+    if(hasVerb(uid,'F_BOM_FINAL_LOCK','lock')){
+      if(sod) btns += `<span class="tt"><button class="btn btn-red" disabled>🔒 Final Lock</button><span class="ttx">SoD 擋:你是此案 cost editor,不能自鎖 · 需他人(${sod.why})</span></span>`;
+      else if(canLock) btns += `<button class="btn btn-dark" onclick="alert('Demo: final lock + propagate')">🔒 Final Lock</button>`;
+    }
+  }
+  if(sec.id==='process_mva' && hasVerb(uid,'F_FACTORY_LOCK','lock')){
+    const sod=sodBlocked(uid,'F_FACTORY_LOCK','lock',caseId);
+    btns += sod?`<span class="tt"><button class="btn btn-red" disabled>🔒 廠 Lock</button><span class="ttx">SoD 擋:你改了製程,不能自己鎖廠</span></span>`:`<button class="btn btn-dark">🔒 廠 Lock</button>`;
+  }
+  if(sec.id==='inquiry' && hasVerb(uid,'F_PURCHASE_STRATEGY','approve')){
+    const sod=sodBlocked(uid,'F_PURCHASE_STRATEGY','approve',caseId);
+    btns += sod?`<span class="tt"><button class="btn btn-red" disabled>✅ 核准策略</button><span class="ttx">SoD 擋:你自建的策略不能自核准</span></span>`:`<button class="btn btn-primary">✅ 核准策略</button>`;
+  }
+  if(can(uid,'F_QUOTE_EXPORT','export',caseId) && (sec.id==='cost_matrix'||sec.id==='cost_structure'))
+    btns += `<button class="btn btn-ghost">📤 報價匯出</button>`;
+  return btns;
+}
+
+function sectionBody(sec,c,editable){
+  const uid=state.uid;
+  if(sec.id==='cost_matrix') return costMatrix(c);
+  if(sec.id==='margin') return marginPanel(c);
+  if(sec.id==='customer') return `<div class="panel">
+    <div class="field"><label>客戶</label><input value="SteelSeries ApS" ${editable?'':'disabled'}></div>
+    <div class="field"><label>BPN / 案號</label><input value="${c.id}" ${editable?'':'disabled'}></div>
+    <div class="field"><label>年量</label><input value="418000" ${editable?'':'disabled'}></div></div>`;
+  if(sec.id==='bom') return `<div class="panel"><div class="sec-title">BOM 階層(${editable?'可編輯':'唯讀'})</div>
+    <table class="grid"><thead><tr><th>子料</th><th>qty</th><th>FLK 料號</th><th>variant</th></tr></thead><tbody>
+    <tr><td>PMW3360 Sensor</td><td>1</td><td class="mono">5811-...</td><td>shared</td></tr>
+    <tr><td>Main PCB</td><td>1</td><td class="mono">5811-...</td><td>shared</td></tr></tbody></table>
+    ${editable?'<button class="btn btn-ghost" style="margin-top:10px">+ 加子料</button>':''}</div>`;
+  if(sec.id==='process_mva') return `<div class="panel"><div class="sec-title">製程/MVA · ${c.model}</div>
+    <div class="note ${c.model==='FULL_MVA'?'cyan':''}">${c.model==='FULL_MVA'?'細製程 9×§A + IDL matrix + 設備類別(F_CASE_PROCESS)':'放大製程 macro + SMT 點數 + 材料耗損(同一 superset · costing_model 控制)'}</div>
+    ${editable?'<button class="btn btn-primary">⚙️ Compute</button>':'<div class="banner banner-ro">👁 唯讀 · 無 F_CASE_PROCESS.edit</div>'}</div>`;
+  // generic
+  return `<div class="panel"><div class="note">${sec.name} 內容(對 function <b>${sec.fn}</b>)· ${editable?'可編輯':'唯讀投影'}</div></div>`;
+}
+
+function costMatrix(c){
+  const uid=state.uid, showTrue=hasCap(uid,'VIEW_TRUE_COST');
+  const m=(v)=> showTrue ? v : '<span class="masked">▒▒▒</span>';
+  if(c.model==='SIMPLIFIED_WEARABLE'){
+    return `<div class="panel"><div class="sec-title">WHOOP 5 SKU pivot(同 cost_matrix function)</div>
+    <table class="grid"><thead><tr><th>SKU</th><th>BOM 小計</th><th>OH 4%</th><th>SGA 3%</th><th>TTL quote</th></tr></thead><tbody>
+    <tr><td>Retail</td><td class="mono">${m('$80.96')}</td><td class="mono">${m('$3.24')}</td><td class="mono">${m('$2.43')}</td><td class="mono">$89.55</td></tr></tbody></table>
+    ${!showTrue?'<div class="note">⛔ 無 VIEW_TRUE_COST · true cost 欄遮罩(▒)· quote 仍可見</div>':''}</div>`;
+  }
+  return `<div class="panel"><div class="sec-title">SteelSeries 24-cell 多維(廠×variant×qty×pkg)</div>
+    <table class="grid"><thead><tr><th>廠×variant</th><th>material true→quote</th><th>MVA</th><th>total quote</th></tr></thead><tbody>
+    <tr><td>CN-black</td><td class="mono">${m('$7.73')}→$8.52</td><td class="mono">${m('$1.86')}</td><td class="mono">$11.94</td></tr>
+    <tr><td>VN-black ⭐</td><td class="mono">${m('$8.09')}→$8.93</td><td class="mono">${m('$1.43')}</td><td class="mono">$11.11</td></tr></tbody></table>
+    ${!showTrue?'<div class="note">⛔ 無 VIEW_TRUE_COST(軸③)· true cost / MVA 欄遮罩 ▒ · total quote(🟢)仍可見</div>':'<div class="note green">✓ 有 VIEW_TRUE_COST · 雙價全顯</div>'}</div>`;
+}
+
+function marginPanel(c){
+  // 只有可見才會進來(sectionVisible 已擋無 VIEW_MARGIN)
+  return `<div class="panel"><div class="sec-title">Margin 分析(F_MARGIN_ANALYSIS · 受 VIEW_MARGIN)</div>
+    <div class="kpis"><div class="kpi"><div class="l">max margin</div><div class="v">7.4%</div></div>
+    <div class="kpi"><div class="l">min margin</div><div class="v">6.1%</div></div>
+    <div class="kpi"><div class="l">avg(amount 加權)</div><div class="v">6.4%</div></div></div>
+    <div class="note green">✓ 你有 VIEW_MARGIN · markup/gross_margin(🔒🔒)可見 · 每 access 寫 audit</div>
+    <div class="note">⚠ 反推鎖:無 VIEW_MARGIN 的 user 此 section <b>整頁隱藏</b>(非打▒)· 避免 quote+margin% 反算 true cost</div></div>`;
+}
+
+/* ---------- Admin mode (IT 權限後台) ---------- */
+function adminShell(){
+  const uid=state.uid;
+  if(!can(uid,'F_ROLE_PERM_EDIT','view')){
+    return `<div class="main" style="padding:40px"><div class="note red">⛔ 你(${USERS[uid].name})沒有 F_ROLE_PERM_EDIT 權限 · 切到 Cortex Admin 看後台</div></div>`;
+  }
+  return `<div class="shell"><div class="main">
+    ${ph('IT 權限後台 · 三軸 RBAC','角色不寫死 · 改格即時影響 can() · seed 可改/複製/新建',`<button class="btn btn-ghost">+ 新建 role</button>`)}
+    <div class="tabs">
+      ${[['matrix','Role × Function 矩陣'],['summary','Role 三軸彙總'],['sod','SoD 互斥對'],['gate','Gate 動態 + 被架空控制點'],['lint','Config Lint']].map(t=>`<div class="tab ${state.adminTab===t[0]?'active':''}" onclick="state.adminTab='${t[0]}';render()">${t[1]}</div>`).join('')}
+    </div>
+    ${adminTab()}
+  </div></div>`;
+}
+function adminTab(){
+  if(state.adminTab==='matrix') return adminMatrix();
+  if(state.adminTab==='summary') return adminSummary();
+  if(state.adminTab==='sod') return adminSod();
+  if(state.adminTab==='gate') return adminGate();
+  if(state.adminTab==='lint') return adminLint();
+}
+function toggleVerb(role,fn,verb){
+  if(!ROLE_PERM[role]) ROLE_PERM[role]={};
+  if(!ROLE_PERM[role][fn]) ROLE_PERM[role][fn]=[];
+  const arr=ROLE_PERM[role][fn];
+  const i=arr.indexOf(verb);
+  if(i>=0) arr.splice(i,1); else arr.push(verb);
+  render();
+}
+function adminMatrix(){
+  const roles=SEED_ROLES;
+  const fnList=Object.keys(FUNCTIONS);
+  return `<div class="panel" style="overflow-x:auto">
+    <div class="note cyan">點 verb 切換 ALLOW(綠)/ 無(灰)· 改完切「報價案視圖」看投影即時變 · seed 不可刪只可停用</div>
+    <table class="grid" style="font-size:10px"><thead><tr><th style="position:sticky;left:0;background:#F3F4F6">Function \\ Role</th>
+      ${roles.map(r=>`<th style="text-align:center">${r}</th>`).join('')}</tr></thead><tbody>
+      ${fnList.map(fn=>`<tr><td style="position:sticky;left:0;background:#fff;font-weight:600"><span class="mono" style="font-size:9px;color:var(--navy)">${fn}</span><br>${FUNCTIONS[fn].name}${FUNCTIONS[fn].field?` <span style="font-size:8px;color:var(--red)">🔒${FUNCTIONS[fn].field}</span>`:''}</td>
+        ${roles.map(r=>{ const held=(ROLE_PERM[r]&&ROLE_PERM[r][fn])||[];
+          return `<td style="text-align:center"><div class="verbcell" style="justify-content:center">${FUNCTIONS[fn].verbs.map(v=>`<span class="vb ${held.includes(v)?'vb-on':'vb-off'}" onclick="toggleVerb('${r}','${fn}','${v}')">${v[0]}</span>`).join('')}</div></td>`;
+        }).join('')}</tr>`).join('')}
+    </tbody></table>
+    <div style="margin-top:8px;font-size:10px;color:var(--muted)">verb 縮寫:v=view c=create e=edit d=delete l=lock u=unlock a=approve g=gate_confirm s=submit r=reprice p=propagate x=export 等</div>
+  </div>`;
+}
+function adminSummary(){
+  const role=state.adminRole;
+  const perm=ROLE_PERM[role]||{};
+  return `<div>
+    <div style="margin-bottom:10px">${SEED_ROLES.map(r=>`<span class="rolepill seed ${r===role?'active':''}" onclick="state.adminRole='${r}';render()">${r}</span>`).join('')}</div>
+    <div class="sec-title">${ROLE_META[role]?.zh||role} · 三軸彙總(IT 一眼看)</div>
+    <div style="display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:12px">
+      <div class="axis-box"><div class="axis-h" style="color:var(--navy)">① Function × Verb</div>
+        ${Object.keys(perm).length?Object.keys(perm).map(fn=>`<div style="font-size:11px;margin-bottom:4px"><span class="mono" style="color:var(--navy)">${fn}</span> <span class="pill-grid">${perm[fn].map(v=>`<span class="vb vb-on">${v}</span>`).join(' ')}</span></div>`).join(''):'<span style="color:var(--muted)">(空角色)</span>'}</div>
+      <div class="axis-box"><div class="axis-h" style="color:var(--cyan)">② Data Scope</div>
+        <div style="font-size:11px;line-height:1.7">走既有資料權限管理<br>政策類別「BOM 報價成本資料權限」<br>L3 部門 / L4 ERP Multi-Org<br>→ allowed_org_ids<br><span style="color:var(--muted)">(本 demo 不細演)</span></div></div>
+      <div class="axis-box"><div class="axis-h" style="color:var(--purple)">③ Field Sensitivity</div>
+        <div style="font-size:11px;line-height:1.8">VIEW_TRUE_COST:${['DPM','業務','採購','EPM','admin','GM_BG','董事長','經管'].includes(role)?'✓':'—'}<br>VIEW_MARGIN:${['DPM','業務','admin','GM_BG','董事長'].includes(role)?'✓':'—'}<br><span style="color:var(--muted)">(既有 ai_data_policy_rules)</span></div></div>
+    </div>
+    <div class="note">role 一旦 union 進 user(多角色),軸①取 ALLOW union、軸② allowed_org_ids 取 union、軸③任一 role 有就有</div>
+  </div>`;
+}
+function adminSod(){
+  return `<div class="panel"><div class="sec-title">SoD 互斥對(rbac_sod_exclusion · SELF_RECORD 預設)</div>
+    <table class="grid"><thead><tr><th>maker 端</th><th>checker/lock 端</th><th>enforce</th><th>說明</th></tr></thead><tbody>
+    ${SOD.map(s=>`<tr><td class="mono">${s.a[0]}.${s.a[1]}</td><td class="mono">${s.b[0]}.${s.b[1]}</td><td><span class="vb vb-on">${s.lvl}</span></td><td>${s.why}</td></tr>`).join('')}
+    </tbody></table>
+    <div class="note green">預設 SELF_RECORD(同 role 不同人就放行 · 適小團隊)· 高危(DPM lock/報價核准)IT 可升 HARD(同 user 不得同持)</div>
+    <div class="note">試:切到「Karen 周(採購+採購主管)」→ 進案 §詢價 → 核准鈕被 SoD 擋(自建自核)· 切「Mike 王(DPM)」進 §Cost 結構 → Final Lock 被擋(他是 cost editor)</div>
+  </div>`;
+}
+function adminGate(){
+  return `<div class="panel"><div class="sec-title">Gate 動態啟用 + 被架空控制點</div>
+    <table class="grid"><thead><tr><th>gate function</th><th>type</th><th>skip policy</th><th>當前狀態</th></tr></thead><tbody>
+    <tr><td class="mono">F_STAGE_GATE</td><td><span class="vb vb-on">flow</span></td><td>NEVER</td><td><span style="color:var(--green)">✓ 啟用(不可空 · BPM 持)</span></td></tr>
+    <tr><td class="mono">F_PURCHASE_STRATEGY_APPROVE</td><td>approval</td><td>NO_HOLDER</td><td><span style="color:var(--green)">✓ 啟用(採購主管 Karen 持)</span></td></tr>
+    <tr><td class="mono">F_QUOTE_APPROVE</td><td>approval</td><td>NO_HOLDER</td><td><span style="color:var(--red)">⚠ 跳過(no_holder · 無人持)</span></td></tr>
+    <tr><td class="mono">F_BASELINE_SECOND_SIGN</td><td>approval</td><td>NO_HOLDER</td><td><span style="color:var(--green)">✓ 啟用(DPM 持)</span></td></tr>
+    </tbody></table>
+    <div class="note red">🚨 當前被架空的控制點:<b>F_QUOTE_APPROVE</b> — 沒有任何 role 持有 → 報價核准 gate 靜默跳過 · 已留痕 audit · 此面板讓稽核一眼看到(非無痕關閉)</div>
+    <div class="note">flow gate(F_STAGE_GATE)不可全空為系統不變式 · approval gate「沒人持→跳過但留痕」</div>
+  </div>`;
+}
+function adminLint(){
+  // 掃:有 F_COST_MATRIX/F_MARGIN view 但對應 role 無 capability
+  return `<div class="panel"><div class="sec-title">Config Lint(配置健檢)</div>
+    <div class="lint lint-warn">⚠ role「業助」持 F_COST_MATRIX.view 但軸③無 VIEW_TRUE_COST → 看得到矩陣但 true cost 全遮(預期 · quote 投影)</div>
+    <div class="lint lint-err">🚨 F_QUOTE_APPROVE 無任何 role 持有 → 報價核准 gate 被架空(見 Gate 分頁)</div>
+    <div class="lint lint-warn">⚠ 「Karen 周」同持 採購 + 採購主管 → SoD 互斥對命中(自建自核)· 執行層 SELF_RECORD 擋</div>
+    <div class="lint lint-warn">⚠ admin 同持 F_ROLE_PERM_EDIT + F_ROLE_ASSIGN → 建議拆兩人 + 高敏變更二簽(self-grant guard)</div>
+    <div class="note">lint 在 IT 配置時即時提示過授/缺口 · 不阻擋但留痕</div>
+  </div>`;
+}
+
+function ph(t,s,r){ return `<div class="ph"><div><h1>${t}</h1><div class="sub">${s}</div></div><div class="right">${r||''}</div></div>`; }
+
+render();
+</script>
+</body>
+</html>

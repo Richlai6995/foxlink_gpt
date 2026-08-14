@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Cortex 通用專案管理平台 · v0.4 互動 Demo</title>
+<title>Cortex 通用專案管理平台 · v0.6 互動 Demo (Cleansheet MVA)</title>
 <style>
 /* ============================================================
    Theme — Ocean Depth + Cyan (matches v0.4 規劃稿 deck)
@@ -3681,6 +3681,172 @@ a { color: var(--ocean); text-decoration: none; }
   right: 4px;
   top: 4px;
   font-size: 12px;
+}
+
+/* ============================================================
+   🆕 v0.6 Cleansheet (MVA) Matrix Styles
+   ============================================================ */
+.cs-fact-tabs {
+  display: inline-flex;
+  gap: 4px;
+}
+.cs-fact-tab {
+  font-size: 11px;
+  padding: 4px 10px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-weight: 600;
+  font-family: inherit;
+}
+.cs-fact-tab.active { box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+.cs-fact-tab:hover { transform: translateY(-1px); }
+
+.cs-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border: 1px solid var(--line);
+  font-size: 11px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.cs-matrix th,
+.cs-matrix td {
+  border: 1px solid var(--line-2);
+  padding: 6px 8px;
+  text-align: right;
+}
+.cs-corner {
+  background: linear-gradient(180deg, #0F172A 0%, #1E293B 100%) !important;
+  color: #fff !important;
+  text-align: center !important;
+  font-weight: 700;
+  min-width: 130px;
+  font-size: 11px;
+  letter-spacing: 0.3px;
+}
+.cs-proc-head {
+  background: linear-gradient(180deg, var(--bg) 0%, #fff 100%) !important;
+  text-align: center !important;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  min-width: 78px;
+}
+.cs-proc-head.cs-group-smt    { background: linear-gradient(180deg, #EEF2FF 0%, #fff 100%) !important; }
+.cs-proc-head.cs-group-assy   { background: linear-gradient(180deg, #F0FDF4 0%, #fff 100%) !important; }
+.cs-proc-head.cs-group-common { background: linear-gradient(180deg, #FEF3C7 0%, #fff 100%) !important; }
+.cs-proc-name {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--ink);
+  font-size: 10px;
+}
+.cs-proc-sub {
+  font-size: 9px;
+  color: var(--muted);
+  font-weight: 400;
+  margin-top: 2px;
+}
+.cs-total-col {
+  background: linear-gradient(180deg, var(--cyan-bg) 0%, #fff 100%) !important;
+  color: var(--ocean) !important;
+  font-weight: 700;
+  text-align: center !important;
+  min-width: 84px;
+}
+.cs-row-label {
+  background: #fff !important;
+  text-align: left !important;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 160px;
+  padding: 8px 10px !important;
+}
+.cs-cat-labor .cs-row-label { background: #FFF7ED !important; color: #9A3412; }
+.cs-cat-equipment .cs-row-label { background: #EFF6FF !important; color: #1E40AF; }
+.cs-cat-facility .cs-row-label { background: #F0FDF4 !important; color: #166534; }
+.cs-cat-others .cs-row-label { background: #FEF3C7 !important; color: #92400E; }
+
+.cs-cell {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink);
+  background: #fff;
+  transition: background 120ms;
+}
+.cs-cell:hover { background: var(--bg); }
+.cs-cell-zero { color: #CBD5E1; }
+.cs-cell-low { background: linear-gradient(180deg, #FAFBFC 0%, #fff 100%) !important; }
+.cs-cell-high {
+  background: linear-gradient(180deg, #FEF3C7 0%, #fff 100%) !important;
+  font-weight: 700;
+  color: #92400E;
+}
+.cs-total-cell {
+  background: var(--cyan-bg) !important;
+  color: var(--ocean) !important;
+  font-weight: 700;
+  font-size: 11px;
+}
+.cs-mva-row { border-top: 3px solid var(--ocean); }
+.cs-mva-label {
+  background: linear-gradient(180deg, var(--ocean) 0%, #1B4F72 100%) !important;
+  color: #fff !important;
+  font-weight: 700;
+}
+.cs-mva-cell {
+  background: linear-gradient(180deg, var(--cyan-bg) 0%, #E0F2FE 100%) !important;
+  color: var(--ocean) !important;
+  font-weight: 700;
+  font-size: 12px;
+}
+.cs-mva-total {
+  background: linear-gradient(180deg, var(--ocean) 0%, #1B4F72 100%) !important;
+  color: #fff !important;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.cs-group-card {
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.cs-group-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+.cs-group-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  margin-bottom: 4px;
+}
+.cs-group-meta {
+  font-size: 10px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+.cs-group-bar {
+  height: 8px;
+  background: var(--line-2);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.cs-group-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 300ms;
+}
+.cs-group-pct {
+  font-size: 10px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  text-align: right;
 }
 
 /* ============================================================
@@ -7511,6 +7677,101 @@ const STEELSERIES_FM = {
   },
 };
 
+/* ============================================================
+   🆕 v0.6 Cleansheet MVA Demo Data (cleansheet-mva-sd v0.2)
+   9 製程 × 9 cost component matrix · per factory
+   CN 數值對齊 Rival 3+ Cleansheet_China-20241011-19S.xlsx (Price Summary)
+   VN/TW 用 ratio 縮放(等真實 baseline 進來再替換)
+   ============================================================ */
+const CLEANSHEET_DEMO = {
+  // 9 cost components (對應 cleansheet-mva-sd §6.1)
+  components: [
+    { code:'DL_CPU',     name_zh:'Direct Labor (CPU)',     category:'LABOR',     common_only:false },
+    { code:'IDL_CPU',    name_zh:'Indirect Labor (CPU)',   category:'LABOR',     common_only:false },
+    { code:'EQUIP_MRO',  name_zh:'Equipment MRO',          category:'EQUIPMENT', common_only:false },
+    { code:'EQUIP_DEPR', name_zh:'Equipment Depreciation', category:'EQUIPMENT', common_only:false },
+    { code:'IND_MAT',    name_zh:'Indirect Materials',     category:'EQUIPMENT', common_only:false },
+    { code:'FACILITY',   name_zh:'Facility & Utility',     category:'FACILITY',  common_only:false },
+    { code:'FREIGHT',    name_zh:'Inbound Freight',        category:'OTHERS',    common_only:true  },
+    { code:'VAT',        name_zh:'VAT',                    category:'OTHERS',    common_only:true  },
+    { code:'LOSS',       name_zh:'Loss Factor',            category:'OTHERS',    common_only:true  },
+  ],
+  // 製程 (MOUSE_STD template, Rival 3+ 案)
+  processes: [
+    { code:'COMMON',         name_zh:'Common (共用)',      group:'COMMON' },
+    { code:'SMT_MAIN',       name_zh:'SMT 主板',            group:'SMT'    },
+    { code:'WAVE_SOLDER',    name_zh:'Wave Solder 波焊',    group:'SMT'    },
+    { code:'ROUTER_OFFLINE', name_zh:'Offline Router 分板', group:'SMT'    },
+    { code:'LASER_ETCH',     name_zh:'Laser Etching 雷雕',  group:'SMT'    },
+    { code:'BB_ASSY',        name_zh:'BB Assembly 組裝',    group:'ASSY'   },
+    { code:'BB_TEST',        name_zh:'BB Testing 測試',     group:'ASSY'   },
+    { code:'MAT_MGMT',       name_zh:'Material Mgmt',       group:'ASSY'   },
+    { code:'Q_SMT',          name_zh:'Quality (SMT)',       group:'SMT'    },
+    { code:'Q_BB',           name_zh:'Quality (BB)',        group:'ASSY'   },
+  ],
+  // CN matrix: 9 components × 10 processes (從 Price Summary 還原)
+  // 數值對應 Cleansheet_China!Price Summary rows 11-19
+  cn_matrix: {
+    COMMON:         { DL_CPU:0,      IDL_CPU:0.0308, EQUIP_MRO:0,      EQUIP_DEPR:0,      IND_MAT:0,      FACILITY:0,      FREIGHT:0.0060, VAT:0.0000035, LOSS:0.0069 },
+    SMT_MAIN:       { DL_CPU:0.1482, IDL_CPU:0.0437, EQUIP_MRO:0.0046, EQUIP_DEPR:0.1363, IND_MAT:0.3633, FACILITY:0.0085, FREIGHT:0,      VAT:0,         LOSS:0      },
+    WAVE_SOLDER:    { DL_CPU:0.3493, IDL_CPU:0,      EQUIP_MRO:0,      EQUIP_DEPR:0,      IND_MAT:0,      FACILITY:0,      FREIGHT:0,      VAT:0,         LOSS:0      },
+    ROUTER_OFFLINE: { DL_CPU:0.1314, IDL_CPU:0,      EQUIP_MRO:0,      EQUIP_DEPR:0,      IND_MAT:0,      FACILITY:0,      FREIGHT:0,      VAT:0,         LOSS:0      },
+    LASER_ETCH:     { DL_CPU:0.0160, IDL_CPU:0,      EQUIP_MRO:0,      EQUIP_DEPR:0,      IND_MAT:0,      FACILITY:0,      FREIGHT:0,      VAT:0,         LOSS:0      },
+    BB_ASSY:        { DL_CPU:0.3624, IDL_CPU:0.0283, EQUIP_MRO:0.0054, EQUIP_DEPR:0.0047, IND_MAT:0.0079, FACILITY:0.0270, FREIGHT:0,      VAT:0,         LOSS:0      },
+    BB_TEST:        { DL_CPU:0.0912, IDL_CPU:0,      EQUIP_MRO:0.0035, EQUIP_DEPR:0.0165, IND_MAT:0,      FACILITY:0,      FREIGHT:0,      VAT:0,         LOSS:0      },
+    MAT_MGMT:       { DL_CPU:0.0070, IDL_CPU:0.0178, EQUIP_MRO:0,      EQUIP_DEPR:0,      IND_MAT:0,      FACILITY:0.0038, FREIGHT:0,      VAT:0,         LOSS:0      },
+    Q_SMT:          { DL_CPU:0.0070, IDL_CPU:0.0014, EQUIP_MRO:0,      EQUIP_DEPR:0,      IND_MAT:0,      FACILITY:0,      FREIGHT:0,      VAT:0,         LOSS:0      },
+    Q_BB:           { DL_CPU:0.0173, IDL_CPU:0,      EQUIP_MRO:0.0030, EQUIP_DEPR:0,      IND_MAT:0,      FACILITY:0.0030, FREIGHT:0,      VAT:0,         LOSS:0      },
+  },
+  // VN/TW factor ratio (CN base × ratio · 等真實 xlsx 進來再替換)
+  // 目標:VN MVA total ≈ 1.430,TW MVA total ≈ 3.207(對應 §factory_matrix demo data)
+  vn_ratios: { DL_CPU:0.65, IDL_CPU:0.45, EQUIP_MRO:1.10, EQUIP_DEPR:1.15, IND_MAT:1.05, FACILITY:0.55, FREIGHT:2.00, VAT:0.60, LOSS:1.80 },
+  tw_ratios: { DL_CPU:2.40, IDL_CPU:1.80, EQUIP_MRO:1.00, EQUIP_DEPR:0.40, IND_MAT:0.40, FACILITY:0.90, FREIGHT:2.50, VAT:1.50, LOSS:0.50 },
+  // Baseline metadata
+  baselines: {
+    CN: { version:'CN-2024Q4', effective_from:'2024-10-11', dl_wage_hr:4.95, sga_pct:0.02, profit_pct:0.14,
+          source_xlsx:'Rival 3+ Wired Mouse Cleansheet_China-20241011-19S.xlsx', epm:'Andy', updated_at:'2024-10-11' },
+    VN: { version:'VN-2024Q4-DEMO', effective_from:'2024-10-15', dl_wage_hr:2.85, sga_pct:0.02, profit_pct:0.14,
+          source_xlsx:'(尚未提供 · demo 用比例縮放)', epm:'Long', updated_at:'2024-10-15' },
+    TW: { version:'TW-2024Q4-DEMO', effective_from:'2024-10-01', dl_wage_hr:9.20, sga_pct:0.02, profit_pct:0.14,
+          source_xlsx:'(尚未提供 · demo 用比例縮放)', epm:'Ken',  updated_at:'2024-10-01' },
+  },
+  // Process Template
+  template: { code:'MOUSE_STD', name_zh:'滑鼠標準製程 v1.0', source:'公司預設(本案沿用)' },
+  // Cleansheet run metadata
+  runs: {
+    CN: { run_label:'v3', status:'ready', computed_at:'2026-06-01 14:23', computed_by:'Andy (CN EPM)', compute_engine:'excel_import' },
+    VN: { run_label:'v2', status:'ready', computed_at:'2026-05-28 09:11', computed_by:'Long (VN EPM)', compute_engine:'db_v1' },
+    TW: { run_label:'v3', status:'ready', computed_at:'2026-05-30 16:45', computed_by:'Ken (TW EPM)',  compute_engine:'db_v1' },
+  },
+};
+
+// 動態計算 process MVA total (一格)
+function csCellValue(factoryCode, processCode, componentCode) {
+  const cn = CLEANSHEET_DEMO.cn_matrix[processCode][componentCode];
+  if (factoryCode === 'CN') return cn;
+  const ratio = factoryCode === 'VN' ? CLEANSHEET_DEMO.vn_ratios[componentCode] : CLEANSHEET_DEMO.tw_ratios[componentCode];
+  return cn * ratio;
+}
+// 計算某廠 某製程的 MVA 小計
+function csProcessMva(factoryCode, processCode) {
+  return CLEANSHEET_DEMO.components.reduce((sum, c) => sum + csCellValue(factoryCode, processCode, c.code), 0);
+}
+// 計算某廠 某 component 的橫向 total
+function csComponentTotal(factoryCode, componentCode) {
+  return CLEANSHEET_DEMO.processes.reduce((sum, p) => sum + csCellValue(factoryCode, p.code, componentCode), 0);
+}
+// 計算某廠的 grand MVA total
+function csFactoryMvaTotal(factoryCode) {
+  return CLEANSHEET_DEMO.processes.reduce((sum, p) => sum + csProcessMva(factoryCode, p.code), 0);
+}
+// 計算 SMT group / Assy group MVA
+function csGroupMva(factoryCode, groupCode) {
+  return CLEANSHEET_DEMO.processes
+    .filter(p => p.group === groupCode)
+    .reduce((sum, p) => sum + csProcessMva(factoryCode, p.code), 0);
+}
+
 const DEFAULT_FM = {
   factories: ['CN', 'VN'],
   factory_meta: {
@@ -7604,7 +7865,27 @@ const schemas = {
         ]
       },
       {
-        id: 'cost', name: '成本核算', icon: '📊', order: 5, conf:true,
+        id: 'cleansheet', name: 'Cleansheet (MVA)', icon: '🧮', order: 5, conf:true,
+        fields: [
+          { id:'cs_factory',         label:'Factory (active tab)',  type:'select',   required:true,  hint:'CN / VN / TW · 每廠獨立 Cleansheet · spec cleansheet-mva-sd §2 + §5' },
+          { id:'cs_baseline_version',label:'Baseline 版本',          type:'text',     required:true,  linked:true,  hint:'從 bom_factory_baseline 帶入 (SCD Type 2 月度版本)' },
+          { id:'cs_template_code',   label:'Process Template',       type:'text',     required:true,  hint:'MOUSE_STD / KEYBOARD_STD / ... · spec §3 模板可 fork 修改' },
+          { id:'cs_process_list',    label:'製程清單 (9 個)',         type:'table',   required:true,  hint:'從 template 帶入,案內可改 · 對應 bom_cs_case_process' },
+          { id:'cs_equipment_alloc', label:'設備配置',                type:'table',   conf:true, required:true, hint:'廠級 master + 案級 binding (line_qty / qty_per_line) · spec §4.3 / §5.1' },
+          { id:'cs_idl_alloc',       label:'IDL Multiplier Matrix',  type:'matrix',  conf:true, required:true, hint:'17 種 IDL 角色 × 製程 · 首次 import 抄 Excel · 後續 EPM 編輯' },
+          { id:'cs_matrix',          label:'Cost Component × Process Matrix', type:'matrix', conf:true, ai:true, hint:'9 × 9 matrix · 對應 Excel Price Summary table' },
+          { id:'cs_mva_total',       label:'MVA Total ($/unit)',     type:'currency', conf:true, linked:true,  hint:'9 製程 SUM · 對應 §factory_matrix.byFactory.{F}.mva' },
+          { id:'cs_smt_mva',         label:'SMT-side MVA',           type:'currency', conf:true, linked:true,  hint:'SMT + Wave + Router + Laser + Q-SMT' },
+          { id:'cs_assy_mva',        label:'Assy-side MVA',          type:'currency', conf:true, linked:true,  hint:'Common + BB Assy + BB Test + Mat Mgmt + Q-BB' },
+          { id:'cs_sga_amount',      label:'SG&A Amount',            type:'currency', conf:true, linked:true,  hint:'baseline.sga_pct × motherboard' },
+          { id:'cs_profit_amount',   label:'Profit Amount',          type:'currency', conf:true, linked:true,  hint:'baseline.profit_pct × (MVA + motherboard)' },
+          { id:'cs_total_tc',        label:'TC per Unit',            type:'currency', conf:true, linked:true,  hint:'= Material + MVA + SG&A + Profit · 對應 §factory_matrix Total' },
+          { id:'cs_run_status',      label:'Run Status',             type:'computed', linked:true,  hint:'computing / ready / archived / failed · 對應 bom_cs_run.status' },
+          { id:'cs_propagate_state', label:'BOM lock propagate',     type:'computed', linked:true,  hint:'BOM lock → Material 自動寫入 cs_run.bom_material_*' },
+        ]
+      },
+      {
+        id: 'cost', name: '成本核算', icon: '📊', order: 6, conf:true,
         fields: [
           { id:'cost_material', label:'直接材料成本', type:'currency', required:true, conf:true },
           { id:'cost_labor',    label:'直接人工成本', type:'currency', required:true, conf:true },
@@ -7619,7 +7900,7 @@ const schemas = {
         ]
       },
       {
-        id: 'strategy', name: '議價策略', icon: '🤝', order: 6, conf:true,
+        id: 'strategy', name: '議價策略', icon: '🤝', order: 7, conf:true,
         fields: [
           { id:'min_margin',    label:'內部底線毛利率', type:'number',   required:true, conf:true },
           { id:'round_no',      label:'議價輪次',       type:'computed', linked:true },
@@ -7634,7 +7915,7 @@ const schemas = {
         ]
       },
       {
-        id: 'legal', name: '法務 review', icon: '⚖️', order: 7,
+        id: 'legal', name: '法務 review', icon: '⚖️', order: 8,
         fields: [
           { id:'contract_ver',  label:'合約版本',       type:'text',     required:true },
           { id:'penalty_terms', label:'罰則條款',       type:'textarea', required:false },
@@ -10561,12 +10842,13 @@ function renderFormTab(p) {
   const inquirySection = { id:'inquiry',  name:'詢價彙總',   icon:'💰', filled: 6,  total: 8,  status:'warn'  };
   const nreSection     = { id:'nre',      name:'NRE 成本',  icon:'🔧', filled: 7, total: 11, status:'warn', conf:true, isNew:true };
   const factoryMatrixSection = { id:'factory_matrix', name:'多廠矩陣', icon:'🏭', filled: 6, total: 6, status:'done', conf:true, isNew:true };
+  const cleansheetSection = { id:'cleansheet', name:'Cleansheet (MVA)', icon:'🧮', filled: 81, total: 81, status:'done', conf:true, isNew:true };
   const costSection    = { id:'cost',     name:'成本核算',   icon:'📊', filled: 6,  total: 10, status:'warn',  conf:true };
   const strategySection= { id:'strategy', name:'議價策略',   icon:'🤝', filled: 2,  total: 10, status:'empty', conf:true };
   const legalSection   = { id:'legal',    name:'法務 review', icon:'⚖️', filled: 0,  total: 8,  status:'empty' };
 
   const sections = p.showcase_advanced
-    ? [baseSections[0], variantSection, bomSection, pkgSection, inquirySection, nreSection, factoryMatrixSection, costSection, strategySection, legalSection]
+    ? [baseSections[0], variantSection, bomSection, pkgSection, inquirySection, nreSection, factoryMatrixSection, cleansheetSection, costSection, strategySection, legalSection]
     : [baseSections[0], bomSection, inquirySection, costSection, strategySection, legalSection];
   const totalFilled = sections.reduce((a,s) => a + s.filled, 0);
   const totalAll    = sections.reduce((a,s) => a + s.total, 0);
@@ -10605,7 +10887,7 @@ function renderFormTab(p) {
             <div class="form-nav-section ${s.status === 'done' ? 'done' : s.status === 'warn' ? 'warn' : 'empty'} ${s.id === state.formSection ? 'active' : ''}" onclick="setFormSection('${s.id}')">
               <div class="fns-ico">${s.icon}</div>
               <div class="fns-body">
-                <div class="fns-name">${s.name}${s.conf ? ' <span style="font-size:9px;color:#B45309;">🔒</span>' : ''}${s.isNew ? ' <span style="font-size:9px;background:linear-gradient(135deg,#02C39A,#1C7293);color:white;padding:1px 4px;border-radius:3px;letter-spacing:0.3px;font-weight:700;">v0.5</span>' : ''}</div>
+                <div class="fns-name">${s.name}${s.conf ? ' <span style="font-size:9px;color:#B45309;">🔒</span>' : ''}${s.isNew ? ` <span style="font-size:9px;background:linear-gradient(135deg,${s.id === 'cleansheet' ? '#6366F1,#4F46E5' : '#02C39A,#1C7293'});color:white;padding:1px 4px;border-radius:3px;letter-spacing:0.3px;font-weight:700;">${s.id === 'cleansheet' ? 'v0.6' : 'v0.5'}</span>` : ''}</div>
                 <div class="fns-prog">${s.filled}/${s.total} · ${Math.round(s.filled/s.total*100)}%</div>
               </div>
               <div class="fns-state">${s.status === 'done' ? '✓' : s.status === 'warn' ? '!' : '·'}</div>
@@ -10641,6 +10923,7 @@ function renderFormSection(section, p, editable) {
   if (section.id === 'inquiry')   return renderFormInquiry(p, editable);
   if (section.id === 'nre')       return renderFormNRE(p, editable);       // 🆕 v0.5
   if (section.id === 'factory_matrix') return renderFormFactoryMatrix(p, editable); // 🆕 v0.5
+  if (section.id === 'cleansheet')     return renderFormCleansheet(p, editable);     // 🆕 v0.6
   if (section.id === 'cost')      return renderFormCost(p, editable);
   if (section.id === 'strategy')  return renderFormStrategy(p, editable);
   if (section.id === 'legal')     return renderFormLegal(p, editable);
@@ -12030,7 +12313,7 @@ function renderFormFactoryMatrix(p, editable) {
          ? '<span class="badge-mini" style="background:#DCFCE7;color:#166534;margin-left:6px;">🔒 BOM Material propagate</span>'
          : '<span class="badge-mini badge-amber" style="margin-left:6px;">⚠ BOM 未鎖 · Material 未 propagate</span>'}`,
       `
-        <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;">📊 Cell drill-down</button>
+        <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;" onclick="setFormSection('cleansheet')">🧮 看 Cleansheet 9×9 詳</button>
         <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;">📥 匯出 RFQ Cost Excel</button>
       `
     )}
@@ -12174,6 +12457,216 @@ function openCellDrilldown(factory, kind, variant) {
   lines.push('');
   lines.push('(真實版本會展開 11 項 NRE 攤提 + 採購策略對應的 Material 細項)');
   alert(lines.join('\n'));
+}
+
+
+/* ============================================================
+   🆕 v0.6 Section: Cleansheet (MVA) — cleansheet-mva-sd v0.2
+   9 製程 × 9 cost component matrix · 對應 Excel Price Summary
+   ============================================================ */
+function renderFormCleansheet(p, editable) {
+  if (!state.cleansheet_factory) state.cleansheet_factory = 'CN';
+  const fc = state.cleansheet_factory;
+  const cs = CLEANSHEET_DEMO;
+  const conf = p.confidential;
+  const masked = conf && state.role !== 'host';
+  const baseline = cs.baselines[fc];
+  const run = cs.runs[fc];
+
+  // 計算
+  const mvaTotal = csFactoryMvaTotal(fc);
+  const smtMva = csGroupMva(fc, 'SMT');
+  const assyMva = csGroupMva(fc, 'ASSY');
+  const commonMva = csGroupMva(fc, 'COMMON');
+  const sgaAmount = (p.bom_main_part_cost || 8.683) * baseline.sga_pct;
+  const profitAmount = (mvaTotal + (p.bom_main_part_cost || 8.683)) * baseline.profit_pct;
+  const tcPerUnit = mvaTotal + sgaAmount + profitAmount;
+
+  // Status badge
+  const factoryColor = { CN:'#3730A3', VN:'#9A3412', TW:'#166534' };
+  const factoryBg    = { CN:'#E0E7FF', VN:'#FED7AA', TW:'#BBF7D0' };
+
+  return `
+    ${formSectionHead('Cleansheet (MVA 計算)', '🧮',
+      `9 製程 × 9 cost component · MVA / SGA / Profit / TC breakdown · spec cleansheet-mva-sd §6-7`,
+      `<span class="badge-mini badge-green">✓ ${run.status === 'ready' ? 'Computed' : run.status} · ${run.run_label}</span>
+       <span class="badge-mini" style="background:#F3E8FF;color:#6D28D9;margin-left:6px;">${cs.template.code}</span>
+       <span class="badge-mini" style="background:#FEF3C7;color:#92400E;margin-left:6px;">baseline: ${baseline.version}</span>`,
+      `
+        <div class="cs-fact-tabs">
+          ${['CN','VN','TW'].map(f => `
+            <button onclick="setCleansheetFactory('${f}')" class="cs-fact-tab ${f === fc ? 'active' : ''}"
+                    style="background:${f === fc ? factoryColor[f] : 'transparent'};color:${f === fc ? '#fff' : factoryColor[f]};border:1px solid ${factoryColor[f]};">
+              ${f === 'CN' ? '🇨🇳' : f === 'VN' ? '🇻🇳' : '🇹🇼'} ${f}
+            </button>
+          `).join('')}
+        </div>
+        <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;">📥 Re-import xlsx</button>
+        <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;">🔄 Compute</button>
+        ${state.role === 'host' ? `<button class="btn btn-primary" style="font-size:11px;padding:4px 10px;background:var(--ocean);color:#fff;">🔒 Lock</button>` : ''}
+      `
+    )}
+
+    <!-- Baseline + Source info -->
+    <div style="background:linear-gradient(90deg,${factoryBg[fc]} 0%,#fff 100%);border:1px solid ${factoryColor[fc]};border-left-width:4px;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:11px;color:var(--text);line-height:1.7;">
+      <div style="display:flex;gap:14px;flex-wrap:wrap;">
+        <span><strong style="color:${factoryColor[fc]};">${fc} Factory:</strong> ${cs.baselines[fc].version}</span>
+        <span><strong>Effective:</strong> ${baseline.effective_from}</span>
+        <span><strong>DL wage:</strong> $${baseline.dl_wage_hr}/hr</span>
+        <span><strong>SG&A:</strong> ${(baseline.sga_pct*100).toFixed(1)}%</span>
+        <span><strong>Profit:</strong> ${(baseline.profit_pct*100).toFixed(1)}%</span>
+        <span style="margin-left:auto;">👤 ${baseline.epm} · ${baseline.updated_at}</span>
+      </div>
+      <div style="margin-top:6px;color:var(--muted);font-size:10px;font-family:var(--font-mono);">
+        Source: ${baseline.source_xlsx}
+      </div>
+    </div>
+
+    <!-- KPI cards -->
+    <div class="ff-derived-grid" style="grid-template-columns:repeat(4,1fr);">
+      <div class="ff-derived ${conf ? 'conf' : ''}">
+        <div class="d-label">MVA Total ${conf ? '🔒' : ''}</div>
+        <div class="d-value mono" style="font-size:18px;">${masked ? '▒▒▒▒' : '$' + mvaTotal.toFixed(4)}</div>
+        <div class="d-meta">/ unit · 9 製程合計</div>
+      </div>
+      <div class="ff-derived ${conf ? 'conf' : ''}">
+        <div class="d-label">SG&A + Profit ${conf ? '🔒' : ''}</div>
+        <div class="d-value mono" style="font-size:18px;">${masked ? '▒▒▒▒' : '$' + (sgaAmount + profitAmount).toFixed(4)}</div>
+        <div class="d-meta">/ unit · ${(baseline.sga_pct*100).toFixed(0)}% + ${(baseline.profit_pct*100).toFixed(0)}%</div>
+      </div>
+      <div class="ff-derived ${conf ? 'conf' : ''}">
+        <div class="d-label">SMT MVA ${conf ? '🔒' : ''}</div>
+        <div class="d-value mono">${masked ? '▒▒▒▒' : '$' + smtMva.toFixed(4)}</div>
+        <div class="d-meta">SMT + Wave + Router + Laser + Q-SMT</div>
+      </div>
+      <div class="ff-derived ${conf ? 'conf' : ''}">
+        <div class="d-label">Assy MVA ${conf ? '🔒' : ''}</div>
+        <div class="d-value mono">${masked ? '▒▒▒▒' : '$' + (commonMva + assyMva).toFixed(4)}</div>
+        <div class="d-meta">Common + BB Assy + Test + Mat + Q-BB</div>
+      </div>
+    </div>
+
+    <!-- 主矩陣表 (9 component × 10 process) -->
+    <div style="margin-bottom:14px;">
+      <div class="ff-label-row">
+        <span class="ff-label">Cost Component × Process Matrix</span>
+        <span class="ff-help" title="對齊 Cleansheet Excel Price Summary table · 每格 = 該製程該成本項 / unit">ⓘ</span>
+        <span class="ff-tag-mono">${cs.components.length} × ${cs.processes.length} · MATRIX</span>
+        ${conf ? '<span class="ff-conf">🔒</span>' : ''}
+      </div>
+      <div style="overflow-x:auto;">
+      <table class="cs-matrix">
+        <thead>
+          <tr>
+            <th class="cs-corner">Cost Component<br><span style="font-weight:400;font-size:9px;color:var(--muted);">$ / unit</span></th>
+            ${cs.processes.map(p => `<th class="cs-proc-head cs-group-${p.group.toLowerCase()}">
+              <div class="cs-proc-name">${p.code}</div>
+              <div class="cs-proc-sub">${p.name_zh}</div>
+            </th>`).join('')}
+            <th class="cs-total-col">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${cs.components.map(c => {
+            const rowTotal = csComponentTotal(fc, c.code);
+            return `
+              <tr class="cs-row cs-cat-${c.category.toLowerCase()}">
+                <th class="cs-row-label">
+                  <div>${c.name_zh}</div>
+                  <div style="font-size:9px;color:var(--muted);font-family:var(--font-mono);">${c.code}${c.common_only ? ' · Common only' : ''}</div>
+                </th>
+                ${cs.processes.map(p => {
+                  const val = csCellValue(fc, p.code, c.code);
+                  const isCommonOnly = c.common_only;
+                  const isCommonCol = p.code === 'COMMON';
+                  const shouldShow = !isCommonOnly || isCommonCol;
+                  return `<td class="cs-cell ${val > 0.05 ? 'cs-cell-high' : val > 0 ? 'cs-cell-low' : 'cs-cell-zero'}">${
+                    shouldShow && val > 0
+                      ? (masked ? '▒▒▒' : (val < 0.001 ? val.toExponential(2) : val.toFixed(4)))
+                      : '<span style="color:#CBD5E1;">—</span>'
+                  }</td>`;
+                }).join('')}
+                <td class="cs-total-cell mono">${masked ? '▒▒▒' : '$' + rowTotal.toFixed(4)}</td>
+              </tr>
+            `;
+          }).join('')}
+          <!-- MVA subtotal row -->
+          <tr class="cs-mva-row">
+            <th class="cs-row-label cs-mva-label">MVA Subtotal</th>
+            ${cs.processes.map(p => {
+              const mva = csProcessMva(fc, p.code);
+              return `<td class="cs-mva-cell mono">${masked ? '▒▒▒' : '$' + mva.toFixed(4)}</td>`;
+            }).join('')}
+            <td class="cs-mva-total mono">${masked ? '▒▒▒▒' : '$' + mvaTotal.toFixed(4)}</td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <!-- SMT vs Assy grouping (Excel Q20/Q21) -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+      <div class="cs-group-card" style="background:linear-gradient(180deg,#EEF2FF 0%,#fff 100%);border:1px solid #C7D2FE;">
+        <div class="cs-group-label">📦 SMT-side MVA</div>
+        <div class="cs-group-value mono">${masked ? '▒▒▒▒' : '$' + smtMva.toFixed(4)}</div>
+        <div class="cs-group-meta">SMT_MAIN + WAVE + ROUTER + LASER + Q_SMT</div>
+        <div class="cs-group-bar">
+          <div class="cs-group-bar-fill" style="width:${(smtMva/mvaTotal*100).toFixed(1)}%;background:#6366F1;"></div>
+        </div>
+        <div class="cs-group-pct">${(smtMva/mvaTotal*100).toFixed(1)}% of MVA</div>
+      </div>
+      <div class="cs-group-card" style="background:linear-gradient(180deg,#F0FDF4 0%,#fff 100%);border:1px solid #86EFAC;">
+        <div class="cs-group-label">🔧 Assy-side MVA</div>
+        <div class="cs-group-value mono">${masked ? '▒▒▒▒' : '$' + (commonMva + assyMva).toFixed(4)}</div>
+        <div class="cs-group-meta">Common + BB_ASSY + BB_TEST + MAT_MGMT + Q_BB</div>
+        <div class="cs-group-bar">
+          <div class="cs-group-bar-fill" style="width:${((commonMva + assyMva)/mvaTotal*100).toFixed(1)}%;background:#16A34A;"></div>
+        </div>
+        <div class="cs-group-pct">${((commonMva + assyMva)/mvaTotal*100).toFixed(1)}% of MVA</div>
+      </div>
+    </div>
+
+    <!-- Final TC waterfall -->
+    <div style="background:#fff;border:2px solid var(--ocean);border-radius:10px;padding:14px;margin-bottom:14px;">
+      <div style="font-size:12px;font-weight:700;color:var(--ink);margin-bottom:10px;">💰 Total Cost per Unit (Ex-Factory · 計算明細)</div>
+      <table style="width:100%;font-size:12px;">
+        <tr>
+          <td style="padding:4px 8px;">Motherboard Material (from BOM)</td>
+          <td style="text-align:right;padding:4px 8px;color:var(--muted);">${masked ? '▒▒▒' : '$' + (p.bom_main_part_cost || 8.683).toFixed(4)}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 8px;">+ MVA (9 製程合計)</td>
+          <td style="text-align:right;padding:4px 8px;color:var(--ocean);font-weight:600;">${masked ? '▒▒▒' : '$' + mvaTotal.toFixed(4)}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 8px;">+ SG&A (${(baseline.sga_pct*100).toFixed(1)}%)</td>
+          <td style="text-align:right;padding:4px 8px;">${masked ? '▒▒▒' : '$' + sgaAmount.toFixed(4)}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 8px;">+ Profit (${(baseline.profit_pct*100).toFixed(1)}%)</td>
+          <td style="text-align:right;padding:4px 8px;">${masked ? '▒▒▒' : '$' + profitAmount.toFixed(4)}</td>
+        </tr>
+        <tr style="border-top:2px solid var(--ocean);background:var(--cyan-bg);font-weight:700;">
+          <td style="padding:6px 8px;">= Transformation Cost (TC)</td>
+          <td style="text-align:right;padding:6px 8px;color:var(--ocean);font-size:14px;" class="mono">${masked ? '▒▒▒▒' : '$' + tcPerUnit.toFixed(4)}</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- spec 提示 -->
+    <div style="background:var(--cyan-bg);border-left:3px solid var(--cyan);border-radius:0 8px 8px 0;padding:10px 14px;margin-bottom:14px;font-size:11px;color:var(--text);line-height:1.6;">
+      <strong style="color:var(--ocean);">spec cleansheet-mva-sd §6-7</strong> · 計算引擎對齊 Cleansheet Excel,允許 ε &lt; 0.01 浮點差異。
+      ${fc === 'CN' ? '此 CN matrix 直接從 <code style="background:#fff;padding:1px 4px;border-radius:3px;">Rival 3+ Wired Mouse Cleansheet_China-20241011-19S.xlsx</code> Price Summary 解析。' : `此 ${fc} matrix 為 demo · 用 CN baseline × 廠別 ratio 縮放(等真實 xlsx import 後替換)。`}<br>
+      <strong style="color:var(--ocean);">與 §factory_matrix 對應</strong> · ${fc} 廠 MVA $${mvaTotal.toFixed(4)} = §factory_matrix.byFactory.${fc}.mva $${(fc === 'CN' ? 1.8558 : fc === 'VN' ? 1.4300 : 3.2070).toFixed(4)}(ε &lt; 0.01 通過)
+    </div>
+
+    ${formFoot('Cleansheet MVA 為 Phase 1 引入。CN baseline 對齊客戶實際 xlsx;VN/TW 待 USER 提供。後續 EPM 編輯走 §case_process / §case_equipment / §case_idl_alloc UI(P3 規劃)。')}
+  `;
+}
+
+function setCleansheetFactory(f) {
+  state.cleansheet_factory = f;
+  if (typeof render === 'function') render();
 }
 
 

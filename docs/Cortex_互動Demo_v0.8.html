@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Cortex 通用專案管理平台 · v0.4 互動 Demo</title>
+<title>Cortex 通用專案管理平台 · v0.8 互動 Demo (WHOOP Multi-Module 整合)</title>
 <style>
 /* ============================================================
    Theme — Ocean Depth + Cyan (matches v0.4 規劃稿 deck)
@@ -3684,6 +3684,652 @@ a { color: var(--ocean); text-decoration: none; }
 }
 
 /* ============================================================
+   🆕 v0.6 Cleansheet (MVA) Matrix Styles
+   ============================================================ */
+.cs-fact-tabs {
+  display: inline-flex;
+  gap: 4px;
+}
+.cs-fact-tab {
+  font-size: 11px;
+  padding: 4px 10px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-weight: 600;
+  font-family: inherit;
+}
+.cs-fact-tab.active { box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+.cs-fact-tab:hover { transform: translateY(-1px); }
+
+.cs-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border: 1px solid var(--line);
+  font-size: 11px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.cs-matrix th,
+.cs-matrix td {
+  border: 1px solid var(--line-2);
+  padding: 6px 8px;
+  text-align: right;
+}
+.cs-corner {
+  background: linear-gradient(180deg, #0F172A 0%, #1E293B 100%) !important;
+  color: #fff !important;
+  text-align: center !important;
+  font-weight: 700;
+  min-width: 130px;
+  font-size: 11px;
+  letter-spacing: 0.3px;
+}
+.cs-proc-head {
+  background: linear-gradient(180deg, var(--bg) 0%, #fff 100%) !important;
+  text-align: center !important;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  min-width: 78px;
+}
+.cs-proc-head.cs-group-smt    { background: linear-gradient(180deg, #EEF2FF 0%, #fff 100%) !important; }
+.cs-proc-head.cs-group-assy   { background: linear-gradient(180deg, #F0FDF4 0%, #fff 100%) !important; }
+.cs-proc-head.cs-group-common { background: linear-gradient(180deg, #FEF3C7 0%, #fff 100%) !important; }
+.cs-proc-name {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--ink);
+  font-size: 10px;
+}
+.cs-proc-sub {
+  font-size: 9px;
+  color: var(--muted);
+  font-weight: 400;
+  margin-top: 2px;
+}
+.cs-total-col {
+  background: linear-gradient(180deg, var(--cyan-bg) 0%, #fff 100%) !important;
+  color: var(--ocean) !important;
+  font-weight: 700;
+  text-align: center !important;
+  min-width: 84px;
+}
+.cs-row-label {
+  background: #fff !important;
+  text-align: left !important;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 160px;
+  padding: 8px 10px !important;
+}
+.cs-cat-labor .cs-row-label { background: #FFF7ED !important; color: #9A3412; }
+.cs-cat-equipment .cs-row-label { background: #EFF6FF !important; color: #1E40AF; }
+.cs-cat-facility .cs-row-label { background: #F0FDF4 !important; color: #166534; }
+.cs-cat-others .cs-row-label { background: #FEF3C7 !important; color: #92400E; }
+
+.cs-cell {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink);
+  background: #fff;
+  transition: background 120ms;
+}
+.cs-cell:hover { background: var(--bg); }
+.cs-cell-zero { color: #CBD5E1; }
+.cs-cell-low { background: linear-gradient(180deg, #FAFBFC 0%, #fff 100%) !important; }
+.cs-cell-high {
+  background: linear-gradient(180deg, #FEF3C7 0%, #fff 100%) !important;
+  font-weight: 700;
+  color: #92400E;
+}
+.cs-total-cell {
+  background: var(--cyan-bg) !important;
+  color: var(--ocean) !important;
+  font-weight: 700;
+  font-size: 11px;
+}
+.cs-mva-row { border-top: 3px solid var(--ocean); }
+.cs-mva-label {
+  background: linear-gradient(180deg, var(--ocean) 0%, #1B4F72 100%) !important;
+  color: #fff !important;
+  font-weight: 700;
+}
+.cs-mva-cell {
+  background: linear-gradient(180deg, var(--cyan-bg) 0%, #E0F2FE 100%) !important;
+  color: var(--ocean) !important;
+  font-weight: 700;
+  font-size: 12px;
+}
+.cs-mva-total {
+  background: linear-gradient(180deg, var(--ocean) 0%, #1B4F72 100%) !important;
+  color: #fff !important;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.cs-group-card {
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.cs-group-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+.cs-group-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  margin-bottom: 4px;
+}
+.cs-group-meta {
+  font-size: 10px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+.cs-group-bar {
+  height: 8px;
+  background: var(--line-2);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.cs-group-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 300ms;
+}
+.cs-group-pct {
+  font-size: 10px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  text-align: right;
+}
+
+/* ============================================================
+   🆕 v0.7 USER 2026-06-06 三維度 UI styles
+   ============================================================ */
+
+/* v0.7 Toggle bar */
+.v07-toggle-bar {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  padding: 10px 14px;
+  background: linear-gradient(90deg, #F3E8FF 0%, #fff 100%);
+  border: 1px solid #DDD6FE;
+  border-radius: 10px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.v07-toggle-group {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.v07-toggle-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #6D28D9;
+  margin-right: 4px;
+}
+.v07-toggle {
+  padding: 5px 12px;
+  background: #fff;
+  border: 1px solid #DDD6FE;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6D28D9;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 120ms;
+}
+.v07-toggle:hover {
+  background: #EDE9FE;
+}
+.v07-toggle.active {
+  background: linear-gradient(180deg, #6D28D9 0%, #5B21B6 100%);
+  color: #fff;
+  border-color: #5B21B6;
+}
+.v07-tag-meta {
+  font-size: 9px;
+  color: var(--muted);
+  font-weight: 400;
+  margin-left: 3px;
+}
+.v07-toggle.active .v07-tag-meta { color: rgba(255,255,255,0.7); }
+.v07-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid #FCA5A5;
+  border-radius: 6px;
+  font-size: 10px;
+  cursor: pointer;
+  background: #fff;
+  color: #991B1B;
+  font-weight: 600;
+}
+.v07-checkbox.on { background: #FEE2E2; }
+.v07-no-perm {
+  font-size: 10px;
+  color: #991B1B;
+  padding: 5px 10px;
+  background: #FEE2E2;
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+/* Scenario comparison table */
+.scenario-comp-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 11px;
+}
+.scenario-comp-table th,
+.scenario-comp-table td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--line-2);
+}
+.scenario-comp-table th {
+  background: var(--bg);
+  font-weight: 700;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+.scenario-comp-table tbody tr { cursor: pointer; transition: background 120ms; }
+.scenario-comp-table tbody tr:hover { background: var(--bg); }
+.scenario-comp-table tr.scn-active {
+  background: linear-gradient(90deg, #DCFCE7 0%, #fff 100%);
+  font-weight: 700;
+}
+.scenario-comp-table tr.scn-active td:first-child {
+  border-left: 3px solid #16A34A;
+}
+
+/* True Cost / Margin row styling */
+.mt-row-true th.mt-row-label {
+  background: linear-gradient(90deg, #FEE2E2 0%, #FFF1F2 100%) !important;
+  color: #9A3412 !important;
+  font-style: italic;
+}
+.mt-row-true td.mt-data-cell {
+  background: linear-gradient(180deg, #FFF1F2 0%, #fff 100%) !important;
+  color: #9A3412;
+  font-style: italic;
+}
+.mt-cell-true .mt-value { color: #9A3412 !important; }
+.mt-row-margin th.mt-row-label {
+  background: linear-gradient(90deg, #FEF3C7 0%, #FFFBEB 100%) !important;
+  color: #92400E !important;
+}
+.mt-row-margin td.mt-data-cell {
+  background: linear-gradient(180deg, #FEF3C7 0%, #fff 100%) !important;
+  color: #92400E;
+  font-weight: 700;
+}
+.mt-cell-margin .mt-value { color: #92400E !important; }
+.mt-tag-true {
+  font-size: 8px;
+  background: #B91C1C;
+  color: #fff;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-weight: 700;
+  margin-left: 4px;
+}
+.mt-tag-margin {
+  font-size: 8px;
+  background: #92400E;
+  color: #fff;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-weight: 700;
+  margin-left: 4px;
+}
+
+/* PKG version tabs */
+.v07-pkg-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.v07-pkg-tab {
+  position: relative;
+  flex: 1;
+  min-width: 200px;
+  padding: 12px 14px;
+  background: #fff;
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: all 120ms;
+}
+.v07-pkg-tab:hover { border-color: var(--cyan); }
+.v07-pkg-tab.active {
+  border-color: #1E40AF;
+  background: linear-gradient(180deg, #E0E7FF 0%, #fff 100%);
+  box-shadow: 0 2px 6px rgba(30,64,175,0.15);
+}
+.v07-pkg-tab-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 3px;
+}
+.v07-pkg-tab-meta {
+  font-size: 10px;
+  color: var(--muted);
+}
+.v07-pkg-primary {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-size: 9px;
+  background: #FBBF24;
+  color: #78350F;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 700;
+}
+.v07-pkg-add {
+  flex: 0.5;
+  min-width: 120px;
+  border-style: dashed !important;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* Markup table */
+.markup-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.markup-table th {
+  background: var(--bg);
+  padding: 6px 8px;
+  text-align: left;
+  font-weight: 700;
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  border-bottom: 2px solid var(--line);
+}
+.markup-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line-2);
+}
+
+/* Margin heatmap (for Margin Analysis section) */
+.margin-scenario-block {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.margin-scenario-head {
+  display: flex;
+  align-items: center;
+  padding: 8px 14px;
+  background: linear-gradient(90deg, #F1F5F9 0%, #fff 100%);
+  font-size: 12px;
+  color: var(--ink);
+  border-bottom: 1px solid var(--line);
+}
+.margin-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+  padding: 8px;
+}
+.margin-cell {
+  padding: 8px 6px;
+  border-radius: 6px;
+  text-align: center;
+  transition: transform 120ms;
+  cursor: pointer;
+}
+.margin-cell:hover { transform: scale(1.05); }
+.mc-label {
+  font-size: 10px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.mc-pct {
+  font-size: 14px;
+  font-weight: 700;
+}
+.mc-amt {
+  font-size: 9px;
+  opacity: 0.8;
+}
+
+/* ============================================================
+   🆕 v0.7 Workflow Checklist Styles
+   ============================================================ */
+.wf-progress-bar {
+  height: 10px;
+  background: var(--line-2);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.wf-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #16A34A 0%, #06B6D4 100%);
+  border-radius: 5px;
+  transition: width 500ms ease;
+}
+
+.wf-stage-card {
+  background: #fff;
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 1px 3px rgba(10,37,64,0.05);
+}
+.wf-stage-num {
+  font-size: 9px;
+  color: var(--muted);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+.wf-stage-name {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 2px 0 4px 0;
+}
+.wf-stage-owner {
+  font-size: 10px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.wf-stage-prog {
+  font-size: 10px;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.wf-stage-block {
+  margin-bottom: 16px;
+  background: #fff;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(10,37,64,0.06);
+}
+.wf-stage-head {
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  gap: 10px;
+  background: var(--bg);
+}
+.wf-stage-tag {
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  padding: 3px 9px;
+  border-radius: 4px;
+  letter-spacing: 0.3px;
+  margin-right: 8px;
+}
+.wf-stage-title {
+  font-size: 14px;
+  font-weight: 700;
+  margin-right: 12px;
+}
+.wf-stage-meta {
+  font-size: 11px;
+  color: var(--muted);
+}
+.wf-stage-stats {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.wf-step-list { padding: 0; }
+.wf-step {
+  display: grid;
+  grid-template-columns: 44px 1fr 200px;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line-2);
+  transition: background 120ms;
+  align-items: center;
+}
+.wf-step:last-child { border-bottom: none; }
+.wf-step:hover { background: var(--bg); }
+.wf-step.done { background: #FAFEFB; }
+.wf-step.active { background: linear-gradient(90deg, #FEF3C7 0%, #fff 30%); }
+.wf-step.pending { opacity: 0.7; }
+
+.wf-step-num {
+  background: var(--ink);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 0;
+  text-align: center;
+  border-radius: 5px;
+  align-self: start;
+}
+.wf-step.done .wf-step-num { background: #16A34A; }
+.wf-step.active .wf-step-num { background: #B45309; }
+.wf-step.pending .wf-step-num { background: var(--gray); }
+
+.wf-step-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 3px;
+}
+.wf-step-desc {
+  font-size: 10px;
+  color: var(--muted);
+  margin-bottom: 4px;
+  line-height: 1.5;
+}
+.wf-step-meta {
+  display: flex;
+  gap: 10px;
+  font-size: 9px;
+  color: var(--muted);
+  align-items: center;
+}
+.wf-step-who, .wf-step-at {
+  font-family: var(--font-mono);
+}
+
+.wf-new-badge {
+  font-size: 8px;
+  background: linear-gradient(135deg, #B91C1C, #7F1D1D);
+  color: #fff;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.wf-status {
+  font-size: 9px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+.wf-status-done { background: #DCFCE7; color: #166534; }
+.wf-status-active { background: #FEF3C7; color: #92400E; }
+.wf-status-pending { background: var(--line-2); color: var(--muted); }
+
+.wf-step-action { text-align: right; }
+.wf-action-btn {
+  font-size: 10px;
+  padding: 5px 10px;
+  border: 1px solid var(--cyan);
+  background: var(--cyan-bg);
+  color: var(--teal);
+  border-radius: 5px;
+  cursor: pointer;
+  font-weight: 600;
+  font-family: inherit;
+  transition: all 120ms;
+}
+.wf-action-btn:hover {
+  background: var(--cyan);
+  color: #fff;
+  transform: translateY(-1px);
+}
+.wf-action-modal {
+  background: #F3E8FF;
+  border-color: var(--purple);
+  color: var(--purple);
+}
+.wf-action-modal:hover {
+  background: var(--purple);
+  color: #fff;
+}
+.wf-action-inline {
+  background: var(--ocean);
+  border-color: var(--ocean);
+  color: #fff;
+}
+.wf-action-inline:hover {
+  background: var(--navy);
+}
+.wf-action-disabled {
+  font-size: 10px;
+  color: var(--muted);
+  padding: 5px 10px;
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: 5px;
+}
+
+/* ============================================================
    🆕 BOM Lock Modal
    ============================================================ */
 .modal-mask {
@@ -5947,6 +6593,307 @@ a { color: var(--ocean); text-decoration: none; }
 }
 ::-webkit-scrollbar-thumb:hover { background: #94A3B8; background-clip: padding-box; border: 2px solid transparent; }
 
+/* ============================================================
+   🆕 v0.8 · WHOOP-specific CSS (前綴 whoop- 避免衝突)
+   ============================================================ */
+
+/* WHOOP Summary table (對齊 Excel Summary) */
+.whoop-summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+.whoop-summary-table th,
+.whoop-summary-table td {
+  border: 1px solid var(--line-2);
+  padding: 7px 10px;
+  text-align: right;
+}
+.whoop-summary-table th {
+  background: linear-gradient(180deg, var(--navy) 0%, var(--ocean) 100%);
+  color: #fff;
+  font-weight: 700;
+  text-align: center;
+  font-family: 'Microsoft JhengHei';
+  letter-spacing: 0.3px;
+}
+.whoop-summary-table th.whoop-sku-col {
+  min-width: 110px;
+  font-size: 10px;
+  line-height: 1.4;
+}
+.whoop-summary-table th.whoop-row-label {
+  background: var(--bg) !important;
+  color: var(--ink);
+  text-align: left;
+  font-weight: 600;
+  font-size: 11px;
+  min-width: 240px;
+  font-family: 'Microsoft JhengHei';
+}
+.whoop-summary-table td.whoop-sku-cost { font-weight: 600; color: var(--ink); background: #fff; }
+.whoop-summary-table td.whoop-sku-zero { color: var(--line); background: #FAFBFC; }
+.whoop-summary-table td.whoop-sku-include { color: #16A34A; font-weight: 700; background: #DCFCE7; }
+.whoop-summary-table tr.whoop-cat-row th {
+  background: var(--ocean) !important;
+  color: var(--cyan);
+  text-align: left;
+  padding: 4px 10px;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+.whoop-summary-table tr.whoop-subtotal th,
+.whoop-summary-table tr.whoop-subtotal td {
+  background: var(--cyan-bg) !important;
+  border-top: 2px solid var(--cyan);
+  font-weight: 700;
+  color: var(--ocean);
+  font-size: 12px;
+}
+.whoop-summary-table tr.whoop-total th,
+.whoop-summary-table tr.whoop-total td {
+  background: var(--navy) !important;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  border-top: 3px solid var(--cyan);
+}
+.whoop-summary-table tr.whoop-rate th,
+.whoop-summary-table tr.whoop-rate td {
+  background: #FEF3C7 !important;
+  font-size: 10px;
+  color: #92400E;
+}
+
+/* WHOOP Module browser */
+.whoop-module-grid {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.whoop-module-list {
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 10px;
+}
+.whoop-module-list h4 {
+  margin: 0 0 8px 0;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+.whoop-mod-item {
+  padding: 10px 12px;
+  background: #fff;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  border-left: 3px solid var(--line);
+  transition: all 120ms;
+}
+.whoop-mod-item:hover { border-left-color: var(--cyan); transform: translateX(2px); }
+.whoop-mod-item.active { border-left-color: var(--ocean); background: var(--cyan-bg); }
+.whoop-mod-cat {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.5px;
+}
+.whoop-mod-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 2px 0;
+}
+.whoop-mod-meta {
+  font-size: 10px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+.whoop-mod-detail {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+}
+.whoop-mod-detail h3 {
+  margin: 0 0 4px 0;
+  font-size: 16px;
+  color: var(--navy);
+}
+.whoop-mod-rev {
+  font-size: 10px;
+  color: var(--muted);
+  margin-bottom: 12px;
+  font-family: var(--font-mono);
+}
+.whoop-mod-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.whoop-stat {
+  background: var(--bg);
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+.whoop-stat-label { font-size: 9px; color: var(--muted); }
+.whoop-stat-val {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+  font-family: var(--font-mono);
+}
+
+/* WHOOP BOM table */
+.whoop-bom-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  margin-top: 8px;
+}
+.whoop-bom-table th,
+.whoop-bom-table td {
+  border: 1px solid var(--line-2);
+  padding: 5px 8px;
+  text-align: left;
+}
+.whoop-bom-table th {
+  background: var(--bg);
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.whoop-bom-table td { background: #fff; }
+.whoop-bom-table td.whoop-pn { font-family: var(--font-mono); font-size: 10px; }
+.whoop-consign-y {
+  background: #F3E8FF;
+  color: #6D28D9;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+}
+.whoop-consign-n { color: var(--muted); font-size: 9px; }
+
+/* WHOOP SKU matrix */
+.whoop-sku-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  margin-top: 10px;
+}
+.whoop-sku-matrix th,
+.whoop-sku-matrix td {
+  border: 1px solid var(--line-2);
+  padding: 8px 10px;
+  text-align: center;
+}
+.whoop-sku-matrix th {
+  background: linear-gradient(180deg, var(--navy), var(--ocean));
+  color: #fff;
+  font-weight: 700;
+}
+.whoop-sku-matrix th.whoop-mod-label {
+  background: var(--bg) !important;
+  color: var(--ink);
+  text-align: left;
+  font-weight: 600;
+  min-width: 220px;
+}
+.whoop-sku-matrix td.whoop-inc {
+  background: #DCFCE7;
+  color: #16A34A;
+  font-weight: 700;
+  font-size: 14px;
+}
+.whoop-sku-matrix td.whoop-exc {
+  background: #FAFBFC;
+  color: var(--line);
+}
+.whoop-sku-matrix tr.whoop-cat-row th {
+  background: var(--ocean) !important;
+  color: var(--cyan);
+  text-align: left;
+  font-size: 10px;
+  padding: 4px 10px;
+}
+
+/* WHOOP Gap analysis cards */
+.whoop-gap-card {
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
+  border-left: 4px solid var(--line);
+}
+.whoop-gap-card.supported { border-left-color: #16A34A; background: #F0FDF4; }
+.whoop-gap-card.partial { border-left-color: #B45309; background: #FFFBEB; }
+.whoop-gap-card.missing { border-left-color: #B91C1C; background: #FEF2F2; }
+.whoop-gap-card-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* WHOOP Cost breakdown */
+.whoop-cost-bd {
+  background: #FAFBFC;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+.whoop-cost-label { font-size: 11px; color: var(--muted); }
+.whoop-cost-val {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  margin-top: 2px;
+}
+.whoop-cost-pct {
+  font-size: 9px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* WHOOP Process grid */
+.whoop-proc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.whoop-proc-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 10px;
+}
+.whoop-proc-code {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--ocean);
+}
+.whoop-proc-name {
+  color: var(--ink);
+  margin: 2px 0;
+}
+.whoop-proc-meta {
+  color: var(--muted);
+  font-size: 9px;
+}
+
 </style>
 </head>
 <body>
@@ -6586,6 +7533,46 @@ const projects = [
     priority: 2,
     progress: 8,
     sla: 'gray',
+    members: [],
+  },
+  // 🆕 v0.8 · WHOOP Gen4 案 (showcase_whoop=true · 8 子組件 + 5 PKG SKU + 30+ FATP)
+  {
+    id: 'QT-2026-0167',
+    type: 'QUOTE', typeLabel: '業務報價',
+    title: 'WHOOP Gen4 MP 穿戴手環報價 (CSX-F102)',
+    customer: 'WHOOP Inc.',
+    customer_alias: 'W001',
+    amount: 8955373, amount_tier: 'Tier-S',  // 100K × ~$89.55
+    margin: 6.0, margin_tier: 'Tier-L',
+    qty: 100000,
+    due: '2026-10-15',
+    state: 'active',
+    confidential: true,
+    priority: 5,
+    progress: 38,
+    sla: 'yellow',
+    ai_summary: 'WHOOP Gen4 MP quotation · 8 子組件(Harvard Sensor/Main + Bird Main/NFC + Strap + Battery)· 5 個 PKG SKU(Retail/White Box 替換套裝/Strap/Battery/Strap+Battery)· 80% 客供合約價 · 對齊客戶 quotation book v2.25 · 待確認:OH+Transportation 計算',
+    showcase_whoop: true,  // 🆕 v0.8 新 flag
+    // WHOOP 特性
+    whoop_bom_rev: 'v2.25',  // BOM 版本(從 60+ rev 演進到目前)
+    whoop_pkg_skus: 5,        // 5 個 PKG SKU
+    whoop_sub_modules: 8,     // 8 個子組件 BOM
+    whoop_contract_pct: 0.80, // 80% 客戶合約價
+    whoop_consumable_items: 300,  // 300+ consumable items
+    whoop_fatp_stations: 30,  // FATP 30+ stations
+    pkg_items_count: 19,
+    currentStage: 5,
+    stages: [
+      { num:1, code:'RECEIVE_RFQ',     name:'Receive RFQ',      status:'done', sla:'4h',  gate:'sales', who:'業務 → DPM' },
+      { num:2, code:'QA_COLLECT',      name:'Q&A Collect',      status:'done', sla:'24h', gate:null,    who:'DPM + Team 收問題' },
+      { num:3, code:'TECH_FEASIBLE',   name:'Tech Feasibility', status:'done', sla:'48h', gate:'dpm',   who:'DPM 確認可行性' },
+      { num:4, code:'BOM_PROVIDE',     name:'BOM 提供',         status:'done', sla:'24-72h',gate:null,  who:'EE 子組件 BOM + ME Strap/Battery + Consumable' },
+      { num:5, code:'PARALLEL_COLLECT',name:'並行 Collect',     status:'active', sla:'parallel',gate:null,who:'採購補價 + SMT/FATP cost' },
+      { num:6, code:'BOM_COST_REVIEW', name:'BOM Cost Review',  status:'pending',sla:'12h', gate:'sales',who:'DPM + BPM + 採購 → 業務 gate' },
+      { num:7, code:'PROPOSAL_FINAL',  name:'業務報價 Submit',  status:'pending',sla:'24h', gate:'sales',who:'業務助理送出' },
+      { num:8, code:'POST_SUBMIT',     name:'Post-submit',      status:'pending',sla:'open',gate:null,  who:'客戶議價 → Reprice' },
+    ],
+    sla_banner: { level:'amber', text:'5 個 PKG SKU 對應子組件配置 · OH/Transport 欄缺(待 Phase 1 補)' },
     members: [],
   },
 ];
@@ -7475,6 +8462,126 @@ const DEFAULT_BOM_TREE = [
 ];
 
 /* ============================================================
+   🆕 v0.7 USER 2026-06-06 3 維度擴充 Demo Data
+   - Qty Scenarios (Low / High)
+   - PKG Versions (商包 RETAIL / 工包 BULK)
+   - True Cost vs Quote Price + Markup
+   對應 bom-collection-sd v0.4 §17-§19 + cleansheet-mva-sd v0.3 §5.4-5.5
+   ============================================================ */
+
+const STEELSERIES_QTY_SCENARIOS = [
+  { code:'LOW',  label_zh:'低批量',  label_en:'Low Volume',  target_qty:100000, region:'US only',  is_baseline:false },
+  { code:'HIGH', label_zh:'高批量',  label_en:'High Volume', target_qty:418000, region:'Global',   is_baseline:true  },
+];
+
+const STEELSERIES_PKG_VERSIONS = [
+  { code:'RETAIL', label_zh:'商包',  label_en:'Retail Packaging', items_count:16, total_true:0.706, total_quote:0.828, markup_avg:0.173,
+    is_primary:true,  channels:['retail','online'], source_xlsx:'PKG BOM 20241023_Amber',
+    items: [
+      { no:1,  name:'Gift Box',                  spec:'278×250mm · 300gsm SBS FSC', qty:1, true_cost:0.200, quote_price:0.303, source_currency:'RMB', source_amount:1.42, fx_rate:7.10, vendor:'富立印刷' },
+      { no:2,  name:'Inner Pad',                 spec:'296×152mm · E-flute', qty:1, true_cost:0.080, quote_price:0.120, vendor:'富立印刷' },
+      { no:3,  name:'Inner Pad Partition',       spec:'171×84mm · E-flute',  qty:1, true_cost:0.033, quote_price:0.050, vendor:'富立印刷' },
+      { no:4,  name:'Seal Sticker',              spec:'Φ25mm 透明纖維',       qty:2, true_cost:0.013, quote_price:0.020, vendor:'冠美包裝' },
+      { no:5,  name:'Bag for Product',           spec:'sustainable material', qty:1, true_cost:0.027, quote_price:0.040, vendor:'冠美包裝' },
+      { no:6,  name:'Bag for Box',               spec:'sustainable material', qty:1, true_cost:0.020, quote_price:0.030, vendor:'冠美包裝' },
+      { no:7,  name:'PIG (Product Info Guide)',  spec:'320×200.8mm 80gsm',    qty:1, true_cost:0.053, quote_price:0.080, vendor:'富立印刷' },
+      { no:8,  name:'PID Label for Product',     spec:'40×60mm 80gsm',        qty:1, true_cost:0.010, quote_price:0.015, vendor:'三泰標籤' },
+      { no:9,  name:'Box Label',                 spec:'100×13mm 80gsm',       qty:1, true_cost:0.007, quote_price:0.010, vendor:'三泰標籤' },
+      { no:10, name:'Language Label',            spec:'116×12mm 80gsm',       qty:1, true_cost:0.007, quote_price:0.010, vendor:'三泰標籤' },
+      { no:11, name:'Master Carton',             spec:'5~6 retail box/carton', qty:1, true_cost:0.300, quote_price:0.450, source_currency:'RMB', source_amount:2.13, fx_rate:7.10, vendor:'富立印刷' },
+      { no:12, name:'Master Carton Label',       spec:'89×140mm 80gsm',       qty:1, true_cost:0.013, quote_price:0.020, vendor:'三泰標籤' },
+      { no:13, name:'SN Label for Carton',       spec:'50×50mm art paper',    qty:1, true_cost:0.007, quote_price:0.010, vendor:'三泰標籤' },
+      { no:14, name:'SteelSeries Logo Tape',     spec:'OPP tape 客供印刷',     qty:1, true_cost:0.020, quote_price:0.030, vendor:'冠美包裝' },
+      { no:15, name:'Pallet Material',           spec:'V20 三規',              qty:1, true_cost:0.053, quote_price:0.080, vendor:'環球棧板' },
+      { no:16, name:'UN3481 Label',              spec:'IATA',                  qty:1, true_cost:0.007, quote_price:0.010, vendor:'三泰標籤' },
+    ],
+  },
+  { code:'BULK', label_zh:'工包',  label_en:'Bulk Packaging', items_count:4, total_true:0.182, total_quote:0.275, markup_avg:0.510,
+    is_primary:false, channels:['spare_parts','b2b'], source_xlsx:'PKG BOM 20241023_Amber (subset)',
+    items: [
+      { no:1, name:'Master Carton',         spec:'10~12 / carton (大容量)', qty:1, true_cost:0.142, quote_price:0.215, source_currency:'RMB', source_amount:1.01, fx_rate:7.10, vendor:'富立印刷' },
+      { no:2, name:'Master Carton Label',   spec:'89×140mm 80gsm',         qty:1, true_cost:0.013, quote_price:0.020, vendor:'三泰標籤' },
+      { no:3, name:'SN Label for Carton',   spec:'50×50mm art paper',      qty:1, true_cost:0.007, quote_price:0.010, vendor:'三泰標籤' },
+      { no:4, name:'Pallet Material',       spec:'V20 三規',                qty:1, true_cost:0.020, quote_price:0.030, vendor:'環球棧板' },
+    ],
+  },
+];
+
+// 24 cells: 3 廠 × 2 variants × 2 qty_scenarios × 2 pkg_versions
+const STEELSERIES_FM_FULL = {
+  cells: [
+    // ===== HIGH qty, RETAIL pkg (對齊 §factory_matrix 既有) =====
+    { factory:'CN', variant:'black', qty:'HIGH', pkg:'RETAIL', material_true:7.730, material_quote:8.517, pkg_true:0.706, pkg_quote:0.828, mva:1.8558, sga:0.020, profit:0.730 },
+    { factory:'CN', variant:'white', qty:'HIGH', pkg:'RETAIL', material_true:7.862, material_quote:8.732, pkg_true:0.706, pkg_quote:0.828, mva:1.8558, sga:0.020, profit:0.730 },
+    { factory:'VN', variant:'black', qty:'HIGH', pkg:'RETAIL', material_true:8.087, material_quote:8.926, pkg_true:0.706, pkg_quote:0.828, mva:1.4300, sga:0.020, profit:0.730 },
+    { factory:'VN', variant:'white', qty:'HIGH', pkg:'RETAIL', material_true:8.224, material_quote:9.149, pkg_true:0.706, pkg_quote:0.828, mva:1.4300, sga:0.020, profit:0.730 },
+    { factory:'TW', variant:'black', qty:'HIGH', pkg:'RETAIL', material_true:7.820, material_quote:8.633, pkg_true:0.796, pkg_quote:0.944, mva:3.2070, sga:0.020, profit:0.730 },
+    { factory:'TW', variant:'white', qty:'HIGH', pkg:'RETAIL', material_true:7.952, material_quote:8.848, pkg_true:0.796, pkg_quote:0.944, mva:3.2070, sga:0.020, profit:0.730 },
+    // ===== HIGH qty, BULK pkg =====
+    { factory:'CN', variant:'black', qty:'HIGH', pkg:'BULK',   material_true:7.730, material_quote:8.517, pkg_true:0.182, pkg_quote:0.275, mva:1.8558, sga:0.020, profit:0.730 },
+    { factory:'CN', variant:'white', qty:'HIGH', pkg:'BULK',   material_true:7.862, material_quote:8.732, pkg_true:0.182, pkg_quote:0.275, mva:1.8558, sga:0.020, profit:0.730 },
+    { factory:'VN', variant:'black', qty:'HIGH', pkg:'BULK',   material_true:8.087, material_quote:8.926, pkg_true:0.182, pkg_quote:0.275, mva:1.4300, sga:0.020, profit:0.730 },
+    { factory:'VN', variant:'white', qty:'HIGH', pkg:'BULK',   material_true:8.224, material_quote:9.149, pkg_true:0.182, pkg_quote:0.275, mva:1.4300, sga:0.020, profit:0.730 },
+    { factory:'TW', variant:'black', qty:'HIGH', pkg:'BULK',   material_true:7.820, material_quote:8.633, pkg_true:0.182, pkg_quote:0.275, mva:3.2070, sga:0.020, profit:0.730 },
+    { factory:'TW', variant:'white', qty:'HIGH', pkg:'BULK',   material_true:7.952, material_quote:8.848, pkg_true:0.182, pkg_quote:0.275, mva:3.2070, sga:0.020, profit:0.730 },
+    // ===== LOW qty, RETAIL pkg (qty 小 → mfg 報高價 + MVA 高 ~lines util 低) =====
+    { factory:'CN', variant:'black', qty:'LOW',  pkg:'RETAIL', material_true:8.118, material_quote:9.114, pkg_true:0.706, pkg_quote:0.828, mva:2.620,  sga:0.020, profit:0.730 },
+    { factory:'CN', variant:'white', qty:'LOW',  pkg:'RETAIL', material_true:8.255, material_quote:9.343, pkg_true:0.706, pkg_quote:0.828, mva:2.620,  sga:0.020, profit:0.730 },
+    { factory:'VN', variant:'black', qty:'LOW',  pkg:'RETAIL', material_true:8.491, material_quote:9.551, pkg_true:0.706, pkg_quote:0.828, mva:2.020,  sga:0.020, profit:0.730 },
+    { factory:'VN', variant:'white', qty:'LOW',  pkg:'RETAIL', material_true:8.635, material_quote:9.789, pkg_true:0.706, pkg_quote:0.828, mva:2.020,  sga:0.020, profit:0.730 },
+    { factory:'TW', variant:'black', qty:'LOW',  pkg:'RETAIL', material_true:8.211, material_quote:9.237, pkg_true:0.796, pkg_quote:0.944, mva:4.530,  sga:0.020, profit:0.730 },
+    { factory:'TW', variant:'white', qty:'LOW',  pkg:'RETAIL', material_true:8.349, material_quote:9.467, pkg_true:0.796, pkg_quote:0.944, mva:4.530,  sga:0.020, profit:0.730 },
+    // ===== LOW qty, BULK pkg =====
+    { factory:'CN', variant:'black', qty:'LOW',  pkg:'BULK',   material_true:8.118, material_quote:9.114, pkg_true:0.182, pkg_quote:0.275, mva:2.620,  sga:0.020, profit:0.730 },
+    { factory:'CN', variant:'white', qty:'LOW',  pkg:'BULK',   material_true:8.255, material_quote:9.343, pkg_true:0.182, pkg_quote:0.275, mva:2.620,  sga:0.020, profit:0.730 },
+    { factory:'VN', variant:'black', qty:'LOW',  pkg:'BULK',   material_true:8.491, material_quote:9.551, pkg_true:0.182, pkg_quote:0.275, mva:2.020,  sga:0.020, profit:0.730 },
+    { factory:'VN', variant:'white', qty:'LOW',  pkg:'BULK',   material_true:8.635, material_quote:9.789, pkg_true:0.182, pkg_quote:0.275, mva:2.020,  sga:0.020, profit:0.730 },
+    { factory:'TW', variant:'black', qty:'LOW',  pkg:'BULK',   material_true:8.211, material_quote:9.237, pkg_true:0.182, pkg_quote:0.275, mva:4.530,  sga:0.020, profit:0.730 },
+    { factory:'TW', variant:'white', qty:'LOW',  pkg:'BULK',   material_true:8.349, material_quote:9.467, pkg_true:0.182, pkg_quote:0.275, mva:4.530,  sga:0.020, profit:0.730 },
+  ],
+};
+
+function fmCell(factory, variant, qty, pkg) {
+  const c = STEELSERIES_FM_FULL.cells.find(x =>
+    x.factory === factory && x.variant === variant && x.qty === qty && x.pkg === pkg);
+  if (!c) return null;
+  const total_true  = c.material_true  + c.pkg_true  + c.mva + c.sga + c.profit;
+  const total_quote = c.material_quote + c.pkg_quote + c.mva + c.sga + c.profit;
+  return {
+    ...c,
+    total_true, total_quote,
+    margin_amount: total_quote - total_true,
+    margin_pct: (total_quote - total_true) / total_quote,
+    material_margin_pct: (total_quote - c.material_true - c.pkg_true) / total_quote,
+  };
+}
+
+function fmTopMarkupItems(pkg, n = 5) {
+  const pkgData = STEELSERIES_PKG_VERSIONS.find(p => p.code === pkg);
+  if (!pkgData) return [];
+  return [...pkgData.items]
+    .filter(i => i.true_cost > 0)
+    .map(i => ({ ...i, markup_pct: (i.quote_price - i.true_cost) / i.true_cost }))
+    .sort((a, b) => b.markup_pct - a.markup_pct)
+    .slice(0, n);
+}
+
+// Active state for v0.7 toggles (persist in state)
+function v07State() {
+  if (!state.v07) state.v07 = {
+    qty: 'HIGH',
+    pkg: 'RETAIL',
+    show_true_cost: false,
+    show_margin: false,
+  };
+  return state.v07;
+}
+function setV07(key, val) {
+  v07State()[key] = val;
+  if (typeof render === 'function') render();
+}
+
+/* ============================================================
    🆕 多廠成本矩陣 Demo Data (factory-matrix-schema-sd §2)
    factory × variant 二維 · 單一 packaging 版本 · 對齊客戶 RFQ_Cost Excel
    ============================================================ */
@@ -7511,6 +8618,101 @@ const STEELSERIES_FM = {
   },
 };
 
+/* ============================================================
+   🆕 v0.6 Cleansheet MVA Demo Data (cleansheet-mva-sd v0.2)
+   9 製程 × 9 cost component matrix · per factory
+   CN 數值對齊 Rival 3+ Cleansheet_China-20241011-19S.xlsx (Price Summary)
+   VN/TW 用 ratio 縮放(等真實 baseline 進來再替換)
+   ============================================================ */
+const CLEANSHEET_DEMO = {
+  // 9 cost components (對應 cleansheet-mva-sd §6.1)
+  components: [
+    { code:'DL_CPU',     name_zh:'Direct Labor (CPU)',     category:'LABOR',     common_only:false },
+    { code:'IDL_CPU',    name_zh:'Indirect Labor (CPU)',   category:'LABOR',     common_only:false },
+    { code:'EQUIP_MRO',  name_zh:'Equipment MRO',          category:'EQUIPMENT', common_only:false },
+    { code:'EQUIP_DEPR', name_zh:'Equipment Depreciation', category:'EQUIPMENT', common_only:false },
+    { code:'IND_MAT',    name_zh:'Indirect Materials',     category:'EQUIPMENT', common_only:false },
+    { code:'FACILITY',   name_zh:'Facility & Utility',     category:'FACILITY',  common_only:false },
+    { code:'FREIGHT',    name_zh:'Inbound Freight',        category:'OTHERS',    common_only:true  },
+    { code:'VAT',        name_zh:'VAT',                    category:'OTHERS',    common_only:true  },
+    { code:'LOSS',       name_zh:'Loss Factor',            category:'OTHERS',    common_only:true  },
+  ],
+  // 製程 (MOUSE_STD template, Rival 3+ 案)
+  processes: [
+    { code:'COMMON',         name_zh:'Common (共用)',      group:'COMMON' },
+    { code:'SMT_MAIN',       name_zh:'SMT 主板',            group:'SMT'    },
+    { code:'WAVE_SOLDER',    name_zh:'Wave Solder 波焊',    group:'SMT'    },
+    { code:'ROUTER_OFFLINE', name_zh:'Offline Router 分板', group:'SMT'    },
+    { code:'LASER_ETCH',     name_zh:'Laser Etching 雷雕',  group:'SMT'    },
+    { code:'BB_ASSY',        name_zh:'BB Assembly 組裝',    group:'ASSY'   },
+    { code:'BB_TEST',        name_zh:'BB Testing 測試',     group:'ASSY'   },
+    { code:'MAT_MGMT',       name_zh:'Material Mgmt',       group:'ASSY'   },
+    { code:'Q_SMT',          name_zh:'Quality (SMT)',       group:'SMT'    },
+    { code:'Q_BB',           name_zh:'Quality (BB)',        group:'ASSY'   },
+  ],
+  // CN matrix: 9 components × 10 processes (從 Price Summary 還原)
+  // 數值對應 Cleansheet_China!Price Summary rows 11-19
+  cn_matrix: {
+    COMMON:         { DL_CPU:0,      IDL_CPU:0.0308, EQUIP_MRO:0,      EQUIP_DEPR:0,      IND_MAT:0,      FACILITY:0,      FREIGHT:0.0060, VAT:0.0000035, LOSS:0.0069 },
+    SMT_MAIN:       { DL_CPU:0.1482, IDL_CPU:0.0437, EQUIP_MRO:0.0046, EQUIP_DEPR:0.1363, IND_MAT:0.3633, FACILITY:0.0085, FREIGHT:0,      VAT:0,         LOSS:0      },
+    WAVE_SOLDER:    { DL_CPU:0.3493, IDL_CPU:0,      EQUIP_MRO:0,      EQUIP_DEPR:0,      IND_MAT:0,      FACILITY:0,      FREIGHT:0,      VAT:0,         LOSS:0      },
+    ROUTER_OFFLINE: { DL_CPU:0.1314, IDL_CPU:0,      EQUIP_MRO:0,      EQUIP_DEPR:0,      IND_MAT:0,      FACILITY:0,      FREIGHT:0,      VAT:0,         LOSS:0      },
+    LASER_ETCH:     { DL_CPU:0.0160, IDL_CPU:0,      EQUIP_MRO:0,      EQUIP_DEPR:0,      IND_MAT:0,      FACILITY:0,      FREIGHT:0,      VAT:0,         LOSS:0      },
+    BB_ASSY:        { DL_CPU:0.3624, IDL_CPU:0.0283, EQUIP_MRO:0.0054, EQUIP_DEPR:0.0047, IND_MAT:0.0079, FACILITY:0.0270, FREIGHT:0,      VAT:0,         LOSS:0      },
+    BB_TEST:        { DL_CPU:0.0912, IDL_CPU:0,      EQUIP_MRO:0.0035, EQUIP_DEPR:0.0165, IND_MAT:0,      FACILITY:0,      FREIGHT:0,      VAT:0,         LOSS:0      },
+    MAT_MGMT:       { DL_CPU:0.0070, IDL_CPU:0.0178, EQUIP_MRO:0,      EQUIP_DEPR:0,      IND_MAT:0,      FACILITY:0.0038, FREIGHT:0,      VAT:0,         LOSS:0      },
+    Q_SMT:          { DL_CPU:0.0070, IDL_CPU:0.0014, EQUIP_MRO:0,      EQUIP_DEPR:0,      IND_MAT:0,      FACILITY:0,      FREIGHT:0,      VAT:0,         LOSS:0      },
+    Q_BB:           { DL_CPU:0.0173, IDL_CPU:0,      EQUIP_MRO:0.0030, EQUIP_DEPR:0,      IND_MAT:0,      FACILITY:0.0030, FREIGHT:0,      VAT:0,         LOSS:0      },
+  },
+  // VN/TW factor ratio (CN base × ratio · 等真實 xlsx 進來再替換)
+  // 目標:VN MVA total ≈ 1.430,TW MVA total ≈ 3.207(對應 §factory_matrix demo data)
+  vn_ratios: { DL_CPU:0.65, IDL_CPU:0.45, EQUIP_MRO:1.10, EQUIP_DEPR:1.15, IND_MAT:1.05, FACILITY:0.55, FREIGHT:2.00, VAT:0.60, LOSS:1.80 },
+  tw_ratios: { DL_CPU:2.40, IDL_CPU:1.80, EQUIP_MRO:1.00, EQUIP_DEPR:0.40, IND_MAT:0.40, FACILITY:0.90, FREIGHT:2.50, VAT:1.50, LOSS:0.50 },
+  // Baseline metadata
+  baselines: {
+    CN: { version:'CN-2024Q4', effective_from:'2024-10-11', dl_wage_hr:4.95, sga_pct:0.02, profit_pct:0.14,
+          source_xlsx:'Rival 3+ Wired Mouse Cleansheet_China-20241011-19S.xlsx', epm:'Andy', updated_at:'2024-10-11' },
+    VN: { version:'VN-2024Q4-DEMO', effective_from:'2024-10-15', dl_wage_hr:2.85, sga_pct:0.02, profit_pct:0.14,
+          source_xlsx:'(尚未提供 · demo 用比例縮放)', epm:'Long', updated_at:'2024-10-15' },
+    TW: { version:'TW-2024Q4-DEMO', effective_from:'2024-10-01', dl_wage_hr:9.20, sga_pct:0.02, profit_pct:0.14,
+          source_xlsx:'(尚未提供 · demo 用比例縮放)', epm:'Ken',  updated_at:'2024-10-01' },
+  },
+  // Process Template
+  template: { code:'MOUSE_STD', name_zh:'滑鼠標準製程 v1.0', source:'公司預設(本案沿用)' },
+  // Cleansheet run metadata
+  runs: {
+    CN: { run_label:'v3', status:'ready', computed_at:'2026-06-01 14:23', computed_by:'Andy (CN EPM)', compute_engine:'excel_import' },
+    VN: { run_label:'v2', status:'ready', computed_at:'2026-05-28 09:11', computed_by:'Long (VN EPM)', compute_engine:'db_v1' },
+    TW: { run_label:'v3', status:'ready', computed_at:'2026-05-30 16:45', computed_by:'Ken (TW EPM)',  compute_engine:'db_v1' },
+  },
+};
+
+// 動態計算 process MVA total (一格)
+function csCellValue(factoryCode, processCode, componentCode) {
+  const cn = CLEANSHEET_DEMO.cn_matrix[processCode][componentCode];
+  if (factoryCode === 'CN') return cn;
+  const ratio = factoryCode === 'VN' ? CLEANSHEET_DEMO.vn_ratios[componentCode] : CLEANSHEET_DEMO.tw_ratios[componentCode];
+  return cn * ratio;
+}
+// 計算某廠 某製程的 MVA 小計
+function csProcessMva(factoryCode, processCode) {
+  return CLEANSHEET_DEMO.components.reduce((sum, c) => sum + csCellValue(factoryCode, processCode, c.code), 0);
+}
+// 計算某廠 某 component 的橫向 total
+function csComponentTotal(factoryCode, componentCode) {
+  return CLEANSHEET_DEMO.processes.reduce((sum, p) => sum + csCellValue(factoryCode, p.code, componentCode), 0);
+}
+// 計算某廠的 grand MVA total
+function csFactoryMvaTotal(factoryCode) {
+  return CLEANSHEET_DEMO.processes.reduce((sum, p) => sum + csProcessMva(factoryCode, p.code), 0);
+}
+// 計算 SMT group / Assy group MVA
+function csGroupMva(factoryCode, groupCode) {
+  return CLEANSHEET_DEMO.processes
+    .filter(p => p.group === groupCode)
+    .reduce((sum, p) => sum + csProcessMva(factoryCode, p.code), 0);
+}
+
 const DEFAULT_FM = {
   factories: ['CN', 'VN'],
   factory_meta: {
@@ -7525,6 +8727,185 @@ const DEFAULT_FM = {
     VN: { mva: 1.20, sga: 0.75, prime_default: 5.50, total_default: 6.25, yield: 0.94, lead_time_wk: 8 },
   },
 };
+
+/* ============================================================
+   🆕 v0.8 · WHOOP Gen4 案 demo data
+   來源:WHOOP_Gen4 MP quotation book_ for AI.xlsx · 23 sheets
+   對齊 docs/whoop-bom-gap-analysis.md
+   ============================================================ */
+
+const WHOOP_SKUS = [
+  { code:'RETAIL',         name:'Retail pack',                       short:'Retail',           tag:'整套零售'         },
+  { code:'WB_BLACK_SUIT',  name:'White Box + Black Box Suit',        short:'WB+Black Suit',    tag:'替換套裝'         },
+  { code:'WB_STRAP',       name:'White Box Strap',                   short:'WB Strap',         tag:'替換 Strap 單品'   },
+  { code:'WB_BATTERY',     name:'White Box Battery Pack',            short:'WB Battery',       tag:'替換 Battery 單品' },
+  { code:'WB_STRAP_BAT',   name:'White Box Strap+Battery Box',       short:'WB Strap+Bat',     tag:'替換組合'         },
+];
+
+const WHOOP_MODULES = [
+  { code:'HARVARD_SENSOR', cat:'EE', name:'Harvard Sensor Board (G)',  rev:'G',  cost:9.754,
+    items_count:43, vendor_consigned:'Whoop contract',
+    note:'Sensor board · use Multek price $1.87/pcs',
+    items: [
+      { fpn:'0022-1004-E18200', wpn:'-', desc:'RES SMD 1M OHM 1% 1/20W 0201', qty:2, des:'R2,R12', vendor:'Future', consign:'Y', lt:14 },
+      { fpn:'0022-1002-E88000', wpn:'-', desc:'RES SMD 10K OHM 0.5% 1/20W 0201', qty:1, des:'R1', vendor:'Future', consign:'Y', lt:14 },
+      { fpn:'0022-1003-E18300', wpn:'-', desc:'RES SMD 100K OHM 1% 1/20W 0201', qty:4, des:'R4,R5,R6,R7', vendor:'Future', consign:'Y', lt:26 },
+      { fpn:'07CA-105M-438000', wpn:'-', desc:'CAP CER 1UF 10V X5R 20% 0201', qty:8, des:'C2,C5,C6,C8,C15,C16,C18,C26', vendor:'Future', consign:'Y', lt:24 },
+      { fpn:'07CA-104M-438200', wpn:'-', desc:'CAP CER 0.1UF 10V X5R 0201', qty:7, des:'C7,C9,C12,C14,C20,C24,C27', vendor:'Future', consign:'Y', lt:52 },
+      { fpn:'07CG-101F-418000', wpn:'-', desc:'C-SMD,CERAMIC,50V,100pF,±1%,0201,C0G,RoHS', qty:1, des:'C17', vendor:'Future', consign:'Y', lt:'-' },
+      { fpn:'(+ 37 more items)', wpn:'', desc:'...', qty:'', des:'', vendor:'', consign:'', lt:'' },
+    ]
+  },
+  { code:'HARVARD_MAIN', cat:'EE', name:'Harvard Main Board (F3)', rev:'F3', cost:19.82,
+    items_count:194, vendor_consigned:'Whoop contract',
+    note:'Harvard main board · use Multek price $0.44/pcs · 92 個 C/P + 56 R + ...',
+    items: [
+      { fpn:'(集中 RES/CAP/MCU/PMIC/EEPROM)', wpn:'', desc:'194 items 略 · 點 Cleansheet 看完整', qty:'-', des:'', vendor:'mixed', consign:'Y', lt:'-' },
+    ]
+  },
+  { code:'BIRD_MAIN', cat:'EE', name:'Bird Main Board (J4)', rev:'J4', cost:15.786,
+    items_count:141, vendor_consigned:'Whoop contract',
+    note:'Bird main board · use Multek price $3.9/pcs · ARM SoC + Sensor MCU + Power 等',
+    items: [
+      { fpn:'(集中 RES/CAP/MCU/Sensor)', wpn:'', desc:'141 items 略', qty:'-', des:'', vendor:'mixed', consign:'Y', lt:'-' },
+    ]
+  },
+  { code:'BIRD_NFC', cat:'EE', name:'Bird NFC Flex', rev:'-', cost:1.57,
+    items_count:6, vendor_consigned:'CCJY',
+    note:'Bird NFC board · use CCJY cost $2.307',
+    items: [
+      { fpn:'(NFC 軟板 6 items)', wpn:'', desc:'NFC ferrite + connector + ...', qty:'-', des:'', vendor:'CCJY', consign:'N', lt:'-' },
+    ]
+  },
+  { code:'HARVARD_ASSY', cat:'EE', name:'Harvard Assembly (Battery + Vibrator)', rev:'-', cost:7.84,
+    items_count:3, vendor_consigned:'HighPower / Pulse',
+    note:'Harvard Sub-Assembly · 含電池(IBW086NC HighPower) + Vibrator(SZ1796B Pulse)',
+    items: [
+      { fpn:'094A-8028-008000', wpn:'-', desc:'BATTERY 電池', qty:1, des:'BATT1', vendor:'HighPower', consign:'Y', lt:14 },
+      { fpn:'091Q-1A01-008000', wpn:'-', desc:'VIBRATOR SZ1796B', qty:1, des:'M1', vendor:'Pulse', consign:'N', lt:6 },
+    ]
+  },
+  { code:'BIRD_ASSY', cat:'EE', name:'Bird Assembly (Battery)', rev:'-', cost:5.06,
+    items_count:1, vendor_consigned:'HighPower',
+    note:'Bird Sub-Assembly · 含 Battery 626mAh / HIGHPOWER',
+    items: [
+      { fpn:'094A-8032-008000', wpn:'-', desc:'BATTERY,LITHIUM-ION POLYMER,626mAh', qty:1, des:'BATT1', vendor:'HighPower', consign:'N', lt:14 },
+    ]
+  },
+  { code:'STRAP', cat:'ME', name:'STRAP', rev:'-', cost:8.273,
+    items_count:30, vendor_consigned:'GG/Asahi 50/50',
+    note:'Clasp/Buckle 各 supplier 50% allocation · Super knit 客戶指定 GG/Asahi 之 HOOK',
+    items: [
+      { fpn:'5811-1919-358000', wpn:'421-005-XX REV E', desc:'PLASTIC, UPPER HOUSING USW, MOLDING, PC+PBT', qty:1, des:'-', vendor:'FLK', consign:'N', lt:'12W~16W' },
+      { fpn:'5811-1919-368000', wpn:'421-001-XX REV F', desc:'PLASTIC, LOWER HOUSING, IML USW, PC+PBT', qty:1, des:'-', vendor:'FLK', consign:'N', lt:'12W~16W' },
+      { fpn:'5812-1919-0N8000', wpn:'412-014-XX REV C', desc:'METAL,MINBUCKLE,MIM,SUS 304', qty:1, des:'-', vendor:'GG', consign:'Y', lt:28 },
+      { fpn:'5812-1919-0T8000', wpn:'412-014-XX REV C', desc:'同上(替代 vendor)', qty:1, des:'-', vendor:'Asahi', consign:'Y', lt:'-' },
+      { fpn:'5812-1919-048000', wpn:'419-001-XX REV D', desc:'METAL,WATCH PIN,SUS316+316L+304', qty:2, des:'-', vendor:'聯策/佳凱', consign:'N', lt:28 },
+      { fpn:'581B-1919-038000', wpn:'750-01-XXX-007-XX', desc:'BAND,Super knit with HOOK,POLYAMIDE+POLYESTER+ELASTANE', qty:1, des:'-', vendor:'Storage Pro', consign:'Y', lt:70 },
+      { fpn:'(+ 24 more items)', wpn:'', desc:'PSA/Foam/Tape/Battery shield/雙面膠 ...', qty:'', des:'', vendor:'', consign:'', lt:'' },
+    ]
+  },
+  { code:'BATTERY_PACK', cat:'ME', name:'Battery Pack (替換包)', rev:'-', cost:1.624,
+    items_count:13, vendor_consigned:'FLK / EON 意昂',
+    note:'獨立 SKU 替換用 · top/bottom housing + skeleton + screw + 雙面膠 + foam',
+    items: [
+      { fpn:'5811-1919-418000', wpn:'421-022-XX REV C', desc:'PLASTIC,UPPER HOUSING,SKELETON,PC+PBT', qty:1, des:'-', vendor:'FLK', consign:'N', lt:'12~16W' },
+      { fpn:'5811-1919-448000', wpn:'421-021-XX REV C', desc:'PLASTIC,LOWER HOUSING,USB SUPPORT,PC', qty:1, des:'-', vendor:'FLK', consign:'N', lt:'12~16W' },
+      { fpn:'5811-1919-298000', wpn:'421-016-XX REV E', desc:'PLASTIC,SKELETON,PC+PBT', qty:1, des:'-', vendor:'FLK', consign:'N', lt:'12~16W' },
+      { fpn:'0961-0001-508000', wpn:'410-001-00 REV A', desc:'SCREW,TAPPING M1.4*L3', qty:2, des:'SCR1,SCR2', vendor:'EON 意昂', consign:'N', lt:14 },
+      { fpn:'581D-1919-098000', wpn:'439-010-XX', desc:'DOUBLE SIDED TAPE, LED BOARD', qty:1, des:'-', vendor:'Fuying/SYX/Warton', consign:'N', lt:21 },
+      { fpn:'(+ 8 more)', wpn:'', desc:'Foam / Tape / Adhesive 等', qty:'', des:'', vendor:'', consign:'', lt:'' },
+    ]
+  },
+];
+
+// SKU × Module 包含矩陣 (從 Summary sheet 反推)
+const WHOOP_SKU_MODULE_MATRIX = {
+  HARVARD_SENSOR: { RETAIL:1, WB_BLACK_SUIT:0, WB_STRAP:0, WB_BATTERY:0, WB_STRAP_BAT:0 },
+  HARVARD_MAIN:   { RETAIL:1, WB_BLACK_SUIT:0, WB_STRAP:0, WB_BATTERY:0, WB_STRAP_BAT:0 },
+  BIRD_MAIN:      { RETAIL:1, WB_BLACK_SUIT:0, WB_STRAP:0, WB_BATTERY:0, WB_STRAP_BAT:0 },
+  BIRD_NFC:       { RETAIL:1, WB_BLACK_SUIT:0, WB_STRAP:0, WB_BATTERY:0, WB_STRAP_BAT:0 },
+  HARVARD_ASSY:   { RETAIL:1, WB_BLACK_SUIT:0, WB_STRAP:0, WB_BATTERY:0, WB_STRAP_BAT:0 },
+  BIRD_ASSY:      { RETAIL:1, WB_BLACK_SUIT:0, WB_STRAP:0, WB_BATTERY:0, WB_STRAP_BAT:0 },
+  STRAP:          { RETAIL:1, WB_BLACK_SUIT:0, WB_STRAP:0, WB_BATTERY:0, WB_STRAP_BAT:0 },
+  BATTERY_PACK:   { RETAIL:1, WB_BLACK_SUIT:1, WB_STRAP:0, WB_BATTERY:1, WB_STRAP_BAT:1 },
+  CONSUMABLE:     { RETAIL:1, WB_BLACK_SUIT:1, WB_STRAP:1, WB_BATTERY:1, WB_STRAP_BAT:1 },
+};
+
+// Summary table 對齊 Excel 數據 (5 PKG SKU × 子組件 cost matrix)
+const WHOOP_SUMMARY_ROWS = [
+  { cat:'子組件 EE', isCat:true },
+  { no:1, name:'Harvard Sensor Board (G)', cost:9.754, cells:[10,10,10,10,10], note:'use Multek $1.87/pcs' },
+  { no:2, name:'Harvard Main Board (F3)', cost:19.82, cells:[10,10,10,10,10], note:'use Multek $0.44/pcs' },
+  { no:3, name:'Bird Main Board (J4)', cost:15.786, cells:[10,10,10,10,10], note:'use Multek $3.9/pcs' },
+  { no:4, name:'Bird NFC Flex', cost:1.57, cells:[10,10,10,10,10], note:'use CCJY $2.307' },
+  { no:5, name:'Harvard Assembly', cost:7.84, cells:[10,10,10,10,10] },
+  { no:6, name:'Bird Assembly', cost:5.06, cells:[10,10,10,10,10] },
+  { cat:'子組件 ME', isCat:true },
+  { no:7, name:'STRAP', cost:8.273, cells:[0,0,0,0,0], note:'Clasp/buckle GG/Asahi 50/50 · super knit HOOK 客戶指定' },
+  { no:8, name:'Battery Pack', cost:1.624, cells:[1,1,0,1,1] },
+  { cat:'Consumable', isCat:true },
+  { no:9, name:'For SMT & ATE & FATP', cost:1.14, cells:[1,1,1,1,1] },
+  { cat:'Package SKU', isCat:true },
+  { no:10, name:'Retail', cost:3, cells:[1,'','','',''] },
+  { no:11, name:'White Box+Black Box Suit', cost:'-', cells:['',1,'','',''] },
+  { no:12, name:'White Box Strap', cost:'-', cells:['','',1,'',''] },
+  { no:13, name:'White Box Battery Pack', cost:'-', cells:['','','',1,''] },
+  { no:14, name:'White Box Strap+Battery Pack Box', cost:'-', cells:['','','','',1] },
+  { cat:'Process Cost', isCat:true },
+  { no:15, name:'SMT', cost:1.774, cells:[1,1,1,1,1] },
+  { no:16, name:'Board glue + ATE', cost:0.374, cells:[1,1,1,0,1], note:'動態:= SMA+BFT!I3 × (3600/300)/3600 × $3.95' },
+  { no:17, name:'FATP', cost:1.603, cells:[1,1,1,1,1] },
+  { cat:'Yield Loss', isCat:true },
+  { no:18, name:'SMT Yield loss', cost:0.227, cells:[1,1,1,0.05,1], note:'Sensor & Harvard main = 0.2% / Bird main = 0.5%' },
+  { no:19, name:'FATP Yield Loss', cost:3.114, cells:[1,1,1,1.7,1], note:'Potting 7% · other FATP 5%' },
+  { subtotal:true, name:'BOM cost subtotal', cells:[80.96, 68, 67, 66.75, 68] },
+  { cat:'Margin', isCat:true },
+  { no:20, name:'Over-head (4%)', cost:3.24, cells:[1, 2.72, 2.68, 2.67, 2.72] },
+  { no:21, name:'SG&A (3%)', cost:2.43, cells:[1, 2.04, 2.01, 2.00, 2.04] },
+  { no:22, name:'Profit (3%)', cost:2.43, cells:[1, 2.04, 2.01, 2.00, 2.04] },
+  { no:23, name:'Transportation', cost:0.5, cells:['','','','',''], note:'OIA pick up from FQ factory' },
+  { total:true, name:'TTL US$', cells:[89.55, 71, 74.8, 73.43, 74.8] },
+  { rate:true, name:'BOM cost rate %', cells:['82.5%','88.7%','84.2%','85.8%','84.2%'] },
+];
+
+// FATP 製程 (30+ stations 節錄前 15 + 後 16+ 摘要)
+const WHOOP_FATP_STATIONS = [
+  { code:'B301',   name:'支架兩側貼左/右小板膠紙',         uph:305, dl:1, sfc:'N' },
+  { code:'B302',   name:'電池貼雙面膠 + 裝入支架',         uph:321, dl:1, sfc:'N' },
+  { code:'B303',   name:'USB板鎖螺絲固定在支架',           uph:324, dl:2, sfc:'N' },
+  { code:'B304',   name:'貼LED板PSA + 貼PCBA至支架',        uph:443, dl:3, sfc:'N' },
+  { code:'B305',   name:'LED板熱熔',                       uph:322, dl:1, sfc:'N' },
+  { code:'B306',   name:'貼PSA於NFC + 散熱片 + PSA',         uph:423, dl:3, sfc:'N' },
+  { code:'B307',   name:'貼NFC板於支架背面',                uph:304, dl:1, sfc:'N' },
+  { code:'B308',   name:'插NFC連接器 + 電池連接器',         uph:322, dl:1, sfc:'N' },
+  { code:'B309',   name:'掃條碼綁定電池主板',                uph:313, dl:2, sfc:'N' },
+  { code:'B310',   name:'點膠固定連接器',                    uph:313, dl:3, sfc:'N' },
+  { code:'B310-1', name:'電池包電流測試 Dongle',            uph:302, dl:1, sfc:'N' },
+  { code:'B311',   name:'吹塵 + 裝支架至上蓋',              uph:319, dl:1, sfc:'N' },
+  { code:'B312',   name:'NFC test',                          uph:313, dl:4, sfc:'SFC' },
+  { code:'B313',   name:'Sub-assembly function test',         uph:358, dl:6, sfc:'SFC' },
+  { code:'B314+',  name:'其他 16+ stations (potting / FCT / 包裝 / ...)',  uph:'-', dl:21, sfc:'mixed' },
+];
+
+// SMT cost 結構
+const WHOOP_SMT_COST = [
+  { board:'Harvard Sensor', points:108.3,  cost:108.3 },
+  { board:'Bird Main',       points:203,     cost:203 },
+  { board:'Harvard Main',    points:364.3,   cost:364.3 },
+  { board:'Total',           points:675.7,   cost:675.7, allowance:33.78, total:709.45 },
+];
+
+// helper · 取得當前 active module (state 管理)
+function whoopActiveModule() {
+  if (!state.whoop_active_mod) state.whoop_active_mod = 'STRAP';
+  return WHOOP_MODULES.find(m => m.code === state.whoop_active_mod) || WHOOP_MODULES[0];
+}
+function setWhoopActiveMod(code) {
+  state.whoop_active_mod = code;
+  if (typeof render === 'function') render();
+}
+
 
 /* ============================================================
    SCHEMAS — Form templates per project type
@@ -7604,7 +8985,27 @@ const schemas = {
         ]
       },
       {
-        id: 'cost', name: '成本核算', icon: '📊', order: 5, conf:true,
+        id: 'cleansheet', name: 'Cleansheet (MVA)', icon: '🧮', order: 5, conf:true,
+        fields: [
+          { id:'cs_factory',         label:'Factory (active tab)',  type:'select',   required:true,  hint:'CN / VN / TW · 每廠獨立 Cleansheet · spec cleansheet-mva-sd §2 + §5' },
+          { id:'cs_baseline_version',label:'Baseline 版本',          type:'text',     required:true,  linked:true,  hint:'從 bom_factory_baseline 帶入 (SCD Type 2 月度版本)' },
+          { id:'cs_template_code',   label:'Process Template',       type:'text',     required:true,  hint:'MOUSE_STD / KEYBOARD_STD / ... · spec §3 模板可 fork 修改' },
+          { id:'cs_process_list',    label:'製程清單 (9 個)',         type:'table',   required:true,  hint:'從 template 帶入,案內可改 · 對應 bom_cs_case_process' },
+          { id:'cs_equipment_alloc', label:'設備配置',                type:'table',   conf:true, required:true, hint:'廠級 master + 案級 binding (line_qty / qty_per_line) · spec §4.3 / §5.1' },
+          { id:'cs_idl_alloc',       label:'IDL Multiplier Matrix',  type:'matrix',  conf:true, required:true, hint:'17 種 IDL 角色 × 製程 · 首次 import 抄 Excel · 後續 EPM 編輯' },
+          { id:'cs_matrix',          label:'Cost Component × Process Matrix', type:'matrix', conf:true, ai:true, hint:'9 × 9 matrix · 對應 Excel Price Summary table' },
+          { id:'cs_mva_total',       label:'MVA Total ($/unit)',     type:'currency', conf:true, linked:true,  hint:'9 製程 SUM · 對應 §factory_matrix.byFactory.{F}.mva' },
+          { id:'cs_smt_mva',         label:'SMT-side MVA',           type:'currency', conf:true, linked:true,  hint:'SMT + Wave + Router + Laser + Q-SMT' },
+          { id:'cs_assy_mva',        label:'Assy-side MVA',          type:'currency', conf:true, linked:true,  hint:'Common + BB Assy + BB Test + Mat Mgmt + Q-BB' },
+          { id:'cs_sga_amount',      label:'SG&A Amount',            type:'currency', conf:true, linked:true,  hint:'baseline.sga_pct × motherboard' },
+          { id:'cs_profit_amount',   label:'Profit Amount',          type:'currency', conf:true, linked:true,  hint:'baseline.profit_pct × (MVA + motherboard)' },
+          { id:'cs_total_tc',        label:'TC per Unit',            type:'currency', conf:true, linked:true,  hint:'= Material + MVA + SG&A + Profit · 對應 §factory_matrix Total' },
+          { id:'cs_run_status',      label:'Run Status',             type:'computed', linked:true,  hint:'computing / ready / archived / failed · 對應 bom_cs_run.status' },
+          { id:'cs_propagate_state', label:'BOM lock propagate',     type:'computed', linked:true,  hint:'BOM lock → Material 自動寫入 cs_run.bom_material_*' },
+        ]
+      },
+      {
+        id: 'cost', name: '成本核算', icon: '📊', order: 6, conf:true,
         fields: [
           { id:'cost_material', label:'直接材料成本', type:'currency', required:true, conf:true },
           { id:'cost_labor',    label:'直接人工成本', type:'currency', required:true, conf:true },
@@ -7619,7 +9020,7 @@ const schemas = {
         ]
       },
       {
-        id: 'strategy', name: '議價策略', icon: '🤝', order: 6, conf:true,
+        id: 'strategy', name: '議價策略', icon: '🤝', order: 7, conf:true,
         fields: [
           { id:'min_margin',    label:'內部底線毛利率', type:'number',   required:true, conf:true },
           { id:'round_no',      label:'議價輪次',       type:'computed', linked:true },
@@ -7634,7 +9035,7 @@ const schemas = {
         ]
       },
       {
-        id: 'legal', name: '法務 review', icon: '⚖️', order: 7,
+        id: 'legal', name: '法務 review', icon: '⚖️', order: 8,
         fields: [
           { id:'contract_ver',  label:'合約版本',       type:'text',     required:true },
           { id:'penalty_terms', label:'罰則條款',       type:'textarea', required:false },
@@ -10555,24 +11956,40 @@ function renderFormTab(p) {
   const baseSections = [
     { id:'customer', name:'客戶資料',   icon:'📋', filled: 8, total: 8,  status:'done'  },
   ];
+  const workflowSection = { id:'workflow_checklist', name:'🎬 操作流程', icon:'🎬', filled: 14, total: 22, status:'warn', isNew:true };
   const variantSection = { id:'variants', name:'CMF 變體', icon:'🎨', filled: 6, total: 6, status:'done', isNew:true };
   const bomSection     = { id:'bom',      name:'BOM 結構',   icon:'📦', filled: 14, total: 16, status:'warn', isNew:true };
   const pkgSection     = { id:'packaging',name:'包裝 BOM',  icon:'📮', filled: 14, total: 16, status:'warn', isNew:true };
   const inquirySection = { id:'inquiry',  name:'詢價彙總',   icon:'💰', filled: 6,  total: 8,  status:'warn'  };
   const nreSection     = { id:'nre',      name:'NRE 成本',  icon:'🔧', filled: 7, total: 11, status:'warn', conf:true, isNew:true };
-  const factoryMatrixSection = { id:'factory_matrix', name:'多廠矩陣', icon:'🏭', filled: 6, total: 6, status:'done', conf:true, isNew:true };
+  const factoryMatrixSection = { id:'factory_matrix', name:'多廠矩陣', icon:'🏭', filled: 24, total: 24, status:'done', conf:true, isNew:true };
+  const cleansheetSection = { id:'cleansheet', name:'Cleansheet (MVA)', icon:'🧮', filled: 81, total: 81, status:'done', conf:true, isNew:true };
+  const marginAnalysisSection = { id:'margin_analysis', name:'Margin Analysis', icon:'💰', filled: 24, total: 24, status:'done', conf:true, isNew:true };
   const costSection    = { id:'cost',     name:'成本核算',   icon:'📊', filled: 6,  total: 10, status:'warn',  conf:true };
   const strategySection= { id:'strategy', name:'議價策略',   icon:'🤝', filled: 2,  total: 10, status:'empty', conf:true };
   const legalSection   = { id:'legal',    name:'法務 review', icon:'⚖️', filled: 0,  total: 8,  status:'empty' };
 
-  const sections = p.showcase_advanced
-    ? [baseSections[0], variantSection, bomSection, pkgSection, inquirySection, nreSection, factoryMatrixSection, costSection, strategySection, legalSection]
-    : [baseSections[0], bomSection, inquirySection, costSection, strategySection, legalSection];
+  // 🆕 v0.8 · WHOOP 專案專屬 sections(取代 variant/factory_matrix/cleansheet/margin · 加 6 WHOOP 特定 section)
+  const whoopSummarySection = { id:'whoop_summary', name:'📊 Summary 主表', icon:'📊', filled:24, total:24, status:'done',  conf:true, isNew:true };
+  const whoopModulesSection = { id:'whoop_modules', name:'🧩 子組件 BOM',    icon:'🧩', filled: 8, total: 8, status:'done',  conf:true, isNew:true };
+  const whoopSkuSection     = { id:'whoop_sku',     name:'📦 PKG SKU 配置',  icon:'📦', filled: 5, total: 5, status:'done',  conf:true, isNew:true };
+  const whoopProcessSection = { id:'whoop_process', name:'🔧 FATP + SMT',    icon:'🔧', filled:15, total:30, status:'warn',  conf:true, isNew:true };
+  const whoopCostSection    = { id:'whoop_cost',    name:'💰 Cost 結構',     icon:'💰', filled: 5, total: 5, status:'done',  conf:true, isNew:true };
+  const whoopGapSection     = { id:'whoop_gap',     name:'⚠️ Gap Analysis',  icon:'⚠️', filled:22, total:22, status:'warn',           isNew:true };
+
+  const sections = p.showcase_whoop
+    ? [baseSections[0], workflowSection, whoopSummarySection, whoopModulesSection, whoopSkuSection, whoopProcessSection, whoopCostSection, whoopGapSection, legalSection]
+    : p.showcase_advanced
+    ? [baseSections[0], workflowSection, variantSection, bomSection, pkgSection, inquirySection, nreSection, factoryMatrixSection, cleansheetSection, marginAnalysisSection, costSection, strategySection, legalSection]
+    : [baseSections[0], workflowSection, bomSection, inquirySection, costSection, strategySection, legalSection];
   const totalFilled = sections.reduce((a,s) => a + s.filled, 0);
   const totalAll    = sections.reduce((a,s) => a + s.total, 0);
   const pct = Math.round(totalFilled / totalAll * 100);
 
-  if (!sections.find(s => s.id === state.formSection)) state.formSection = 'inquiry';
+  // 🆕 v0.8 fix: fallback 改成 sections[0].id (避免 WHOOP 案無 'inquiry' 時 active = undefined)
+  if (!sections.find(s => s.id === state.formSection)) {
+    state.formSection = sections.find(s => s.id === 'inquiry') ? 'inquiry' : sections[0].id;
+  }
   const active = sections.find(s => s.id === state.formSection);
 
   return `
@@ -10605,7 +12022,7 @@ function renderFormTab(p) {
             <div class="form-nav-section ${s.status === 'done' ? 'done' : s.status === 'warn' ? 'warn' : 'empty'} ${s.id === state.formSection ? 'active' : ''}" onclick="setFormSection('${s.id}')">
               <div class="fns-ico">${s.icon}</div>
               <div class="fns-body">
-                <div class="fns-name">${s.name}${s.conf ? ' <span style="font-size:9px;color:#B45309;">🔒</span>' : ''}${s.isNew ? ' <span style="font-size:9px;background:linear-gradient(135deg,#02C39A,#1C7293);color:white;padding:1px 4px;border-radius:3px;letter-spacing:0.3px;font-weight:700;">v0.5</span>' : ''}</div>
+                <div class="fns-name">${s.name}${s.conf ? ' <span style="font-size:9px;color:#B45309;">🔒</span>' : ''}${s.isNew ? ` <span style="font-size:9px;background:linear-gradient(135deg,${s.id === 'margin_analysis' || s.id === 'factory_matrix' || s.id === 'packaging' ? '#B91C1C,#7F1D1D' : s.id === 'cleansheet' ? '#6366F1,#4F46E5' : '#02C39A,#1C7293'});color:white;padding:1px 4px;border-radius:3px;letter-spacing:0.3px;font-weight:700;">${s.id === 'margin_analysis' ? 'v0.7' : s.id === 'factory_matrix' || s.id === 'packaging' ? 'v0.7' : s.id === 'cleansheet' ? 'v0.6' : 'v0.5'}</span>` : ''}</div>
                 <div class="fns-prog">${s.filled}/${s.total} · ${Math.round(s.filled/s.total*100)}%</div>
               </div>
               <div class="fns-state">${s.status === 'done' ? '✓' : s.status === 'warn' ? '!' : '·'}</div>
@@ -10634,6 +12051,7 @@ function renderFormTab(p) {
    Form section dispatcher
    ============================================================ */
 function renderFormSection(section, p, editable) {
+  if (section.id === 'workflow_checklist') return renderFormWorkflowChecklist(p, editable); // 🆕 v0.7
   if (section.id === 'customer')  return renderFormCustomer(p, editable);
   if (section.id === 'variants')  return renderFormVariants(p, editable);  // 🆕 v0.5
   if (section.id === 'bom')       return renderFormBOM(p, editable);
@@ -10641,6 +12059,15 @@ function renderFormSection(section, p, editable) {
   if (section.id === 'inquiry')   return renderFormInquiry(p, editable);
   if (section.id === 'nre')       return renderFormNRE(p, editable);       // 🆕 v0.5
   if (section.id === 'factory_matrix') return renderFormFactoryMatrix(p, editable); // 🆕 v0.5
+  if (section.id === 'cleansheet')     return renderFormCleansheet(p, editable);     // 🆕 v0.6
+  if (section.id === 'margin_analysis') return renderFormMarginAnalysis(p, editable); // 🆕 v0.7
+  // 🆕 v0.8 · WHOOP-specific sections
+  if (section.id === 'whoop_summary') return renderFormWhoopSummary(p, editable);
+  if (section.id === 'whoop_modules') return renderFormWhoopModules(p, editable);
+  if (section.id === 'whoop_sku')     return renderFormWhoopSku(p, editable);
+  if (section.id === 'whoop_process') return renderFormWhoopProcess(p, editable);
+  if (section.id === 'whoop_cost')    return renderFormWhoopCost(p, editable);
+  if (section.id === 'whoop_gap')     return renderFormWhoopGap(p, editable);
   if (section.id === 'cost')      return renderFormCost(p, editable);
   if (section.id === 'strategy')  return renderFormStrategy(p, editable);
   if (section.id === 'legal')     return renderFormLegal(p, editable);
@@ -11746,8 +13173,22 @@ function renderFormVariants(p, editable) {
 function renderFormPackaging(p, editable) {
   const conf = p.confidential;
   const masked = conf && state.role !== 'host';
-  // 16 PKG items from real RFQ_Rival_3_PKG_List
-  const pkgItems = [
+  const isSteelSeries = p.title?.includes('SteelSeries');
+  const useV07 = isSteelSeries && typeof STEELSERIES_PKG_VERSIONS !== 'undefined';
+
+  // v0.7 multi-PKG state
+  const v07 = useV07 ? v07State() : null;
+  const activePkgCode = useV07 ? v07.pkg : null;
+  const activePkg = useV07 ? STEELSERIES_PKG_VERSIONS.find(x => x.code === activePkgCode) : null;
+  const showTrue = useV07 && v07.show_true_cost && (state.role === 'host');
+
+  // v0.7 pkg items (with True / Quote) or fallback to v0.5 legacy
+  const pkgItems = activePkg ? activePkg.items.map(it => ({
+    ...it,
+    price: it.quote_price,   // legacy field
+    lt: it.lt || 5,
+    note: it.note || (it.source_currency ? `來源 ${it.source_currency} ${it.source_amount}` : ''),
+  })) : [
     { no:1,  name:'Gift Box',                  spec:'278×250mm · 350g art paper coated', qty:1, price:0.32, vendor:'富立印刷',  lt:5, note:'Dieline 2024-02' },
     { no:2,  name:'Inner Pad',                 spec:'296×152mm · E-flute corrugated',   qty:1, price:0.12, vendor:'富立印刷',  lt:5, note:'FSC certified' },
     { no:3,  name:'Inner Pad Partition',       spec:'171×84mm · E-flute corrugated',    qty:1, price:0.05, vendor:'富立印刷',  lt:5, note:'FSC certified' },
@@ -11766,29 +13207,53 @@ function renderFormPackaging(p, editable) {
     { no:16, name:'UN3481 Label',              spec:'IATA · lithium battery shipping',  qty:1, price:0.01, vendor:'三泰標籤',  lt:3, note:'(本案無電池,留欄)' },
   ];
   const total = pkgItems.reduce((a,it) => a + it.qty * it.price, 0);
+  const totalTrue = activePkg ? activePkg.total_true : null;
   const distinctVendor = [...new Set(pkgItems.map(it => it.vendor))].length;
 
   return `
-    ${formSectionHead('包裝 BOM', '📮', `14 / 16 欄位完成 · child-table · spec §11.3.7 · pallet 走 V20 三規`,
-      '<span class="badge-mini badge-amber">⚠ 待補 2 欄</span> <span class="badge-mini" style="background:#CFFAF1;color:#065A82;margin-left:6px;letter-spacing:0.3px;">v0.5 新功能</span>',
-      '<button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;">📂 載入「Mouse / Keyboard standard」範本</button> <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;">📥 匯出 PKG RFQ Excel</button>'
+    ${formSectionHead('包裝 BOM (v0.7 多版本)', '📮',
+      `${useV07 ? STEELSERIES_PKG_VERSIONS.length + ' 個 PKG 版本 · 當前: ' + activePkg.label_zh + ' (' + pkgItems.length + ' items)' : '單一版本 16 items'} · spec bom-collection-sd §17`,
+      `${useV07 ? STEELSERIES_PKG_VERSIONS.map(pv => `<span class="badge-mini" style="background:${pv.code === activePkgCode ? '#1E40AF' : '#E0E7FF'};color:${pv.code === activePkgCode ? '#fff' : '#3730A3'};margin-right:4px;">${pv.label_zh}</span>`).join('') : '<span class="badge-mini badge-amber">⚠ 待補 2 欄</span>'} <span class="badge-mini" style="background:#CFFAF1;color:#065A82;margin-left:6px;letter-spacing:0.3px;">v0.7</span>`,
+      '<button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;">📂 載入 template</button> <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;">📥 匯出 PKG RFQ Excel</button>'
     )}
+
+    ${useV07 ? `
+    <!-- v0.7 PKG version tabs -->
+    <div class="v07-pkg-tabs">
+      ${STEELSERIES_PKG_VERSIONS.map(pv => `
+        <button class="v07-pkg-tab ${pv.code === activePkgCode ? 'active' : ''}" onclick="setV07('pkg','${pv.code}')">
+          <div class="v07-pkg-tab-label">${pv.label_zh}</div>
+          <div class="v07-pkg-tab-meta">${pv.items_count} items · 適用 ${pv.channels.join(' / ')}</div>
+          ${pv.is_primary ? '<span class="v07-pkg-primary">★ Primary</span>' : ''}
+        </button>
+      `).join('')}
+      <button class="v07-pkg-tab v07-pkg-add" disabled>+ 新增 PKG 版本</button>
+    </div>
+    ` : ''}
 
     <div class="ff-derived-grid">
       <div class="ff-derived ${conf ? 'conf' : ''}">
-        <div class="d-label">包裝單件成本 ${conf ? '🔒' : ''}</div>
+        <div class="d-label">包裝單件 Quote ${conf ? '🔒' : ''}</div>
         <div class="d-value mono">${masked ? '▒▒▒▒' : '$' + total.toFixed(3)}</div>
-        <div class="d-meta">/ unit · 16 項 SUMPRODUCT</div>
+        <div class="d-meta">/ unit · ${pkgItems.length} 項 SUMPRODUCT</div>
       </div>
+      ${useV07 && showTrue ? `
+        <div class="ff-derived" style="background:linear-gradient(180deg,#FEF3C7 0%,#fff 100%);border-color:#FCD34D;">
+          <div class="d-label">🔒 True Cost</div>
+          <div class="d-value mono">${masked ? '▒▒▒▒' : '$' + totalTrue.toFixed(3)}</div>
+          <div class="d-meta">/ unit · markup avg ${(activePkg.markup_avg*100).toFixed(1)}%</div>
+        </div>
+      ` : `
+        <div class="ff-derived">
+          <div class="d-label">廠商家數</div>
+          <div class="d-value mono">${distinctVendor}</div>
+          <div class="d-meta">家 · 自動 DISTINCT</div>
+        </div>
+      `}
       <div class="ff-derived">
-        <div class="d-label">廠商家數</div>
-        <div class="d-value mono">${distinctVendor}</div>
-        <div class="d-meta">家 · 自動 DISTINCT</div>
-      </div>
-      <div class="ff-derived">
-        <div class="d-label">Pallet 規範</div>
-        <div class="d-value" style="font-size:14px;">EU + US + APAC</div>
-        <div class="d-meta">V20 三規 · ISPM 15</div>
+        <div class="d-label">${activePkg ? '適用通路' : 'Pallet 規範'}</div>
+        <div class="d-value" style="font-size:14px;">${activePkg ? activePkg.channels.join(' / ') : 'EU + US + APAC'}</div>
+        <div class="d-meta">${activePkg ? 'channels.json' : 'V20 三規 · ISPM 15'}</div>
       </div>
     </div>
 
@@ -11813,31 +13278,45 @@ function renderFormPackaging(p, editable) {
         ${conf ? '<span class="ff-conf" title="單價機密">🔒</span>' : ''}
         <span class="ff-tag-mono">CHILD-TABLE · 16 rows</span>
       </div>
-      <div class="ff-grid-table" style="grid-template-columns: 30px 1.5fr 1.8fr 50px 70px 1.2fr 60px 1.5fr 30px;font-size:11px;">
+      <div class="ff-grid-table" style="grid-template-columns: ${showTrue ? '30px 1.5fr 1.8fr 50px 70px 70px 70px 1.2fr 60px 30px' : '30px 1.5fr 1.8fr 50px 70px 1.2fr 60px 1.5fr 30px'};font-size:11px;">
         <div class="ff-grid-head">
           <div>NO</div>
           <div>Part Name</div>
           <div>Spec</div>
           <div>Qty</div>
-          <div>U/P ${conf ? '🔒' : ''}</div>
+          ${showTrue ? `
+            <div style="color:#9A3412;">True $ 🔒</div>
+            <div>Quote $${conf ? ' 🔒' : ''}</div>
+            <div style="color:#92400E;">Markup % 🔒🔒</div>
+          ` : `
+            <div>U/P ${conf ? '🔒' : ''}</div>
+          `}
           <div>Vendor</div>
           <div>LT</div>
-          <div>備註</div>
+          ${!showTrue ? '<div>備註</div>' : ''}
           <div></div>
         </div>
-        ${pkgItems.map(it => `
-          <div class="ff-grid-row" style="grid-template-columns: 30px 1.5fr 1.8fr 50px 70px 1.2fr 60px 1.5fr 30px;font-size:11px;">
+        ${pkgItems.map(it => {
+          const markup = it.true_cost ? (it.quote_price - it.true_cost) / it.true_cost : 0;
+          return `
+          <div class="ff-grid-row" style="grid-template-columns: ${showTrue ? '30px 1.5fr 1.8fr 50px 70px 70px 70px 1.2fr 60px 30px' : '30px 1.5fr 1.8fr 50px 70px 1.2fr 60px 1.5fr 30px'};font-size:11px;">
             <div class="v-meta mono">${it.no}</div>
             <div class="v-name" style="font-size:11px;">${it.name}</div>
             <div class="v-meta" style="font-size:10px;">${it.spec}</div>
             <div class="v-meta mono">${it.qty}</div>
-            <div class="v-price mono" style="font-size:11px;">${masked ? '▒▒▒' : '$' + it.price.toFixed(3)}</div>
+            ${showTrue ? `
+              <div class="v-price mono" style="font-size:11px;color:#9A3412;">${masked ? '▒▒▒' : '$' + (it.true_cost || 0).toFixed(3)}</div>
+              <div class="v-price mono" style="font-size:11px;">${masked ? '▒▒▒' : '$' + (it.quote_price || it.price).toFixed(3)}</div>
+              <div class="v-price mono" style="font-size:11px;background:${markup > 0.5 ? '#FEE2E2' : markup > 0.3 ? '#FEF3C7' : '#DCFCE7'};padding:1px 4px;border-radius:3px;font-weight:700;">${masked ? '▒▒' : (markup*100).toFixed(0) + '%'}</div>
+            ` : `
+              <div class="v-price mono" style="font-size:11px;">${masked ? '▒▒▒' : '$' + it.price.toFixed(3)}</div>
+            `}
             <div class="v-meta" style="font-size:11px;">${it.vendor}</div>
             <div class="v-meta mono">${it.lt}w</div>
-            <div class="v-meta" style="font-size:10px;">${it.note}</div>
+            ${!showTrue ? `<div class="v-meta" style="font-size:10px;">${it.note}</div>` : ''}
             <button class="v-del" ${!editable ? 'disabled' : ''}>×</button>
           </div>
-        `).join('')}
+        `;}).join('')}
         <button class="ff-grid-add" ${!editable ? 'disabled' : ''}>+ 新增包裝物料</button>
       </div>
       <div class="ff-meta-row">
@@ -11972,103 +13451,230 @@ function renderFormNRE(p, editable) {
    factory × variant 二維 · 單一 packaging · 對齊客戶 RFQ_Cost Excel 版面
    ============================================================ */
 function renderFormFactoryMatrix(p, editable) {
-  const fm = (typeof STEELSERIES_FM !== 'undefined' && p.title?.includes('SteelSeries'))
-    ? STEELSERIES_FM
-    : DEFAULT_FM;
+  const isSteelSeries = p.title?.includes('SteelSeries');
+  const fm = (typeof STEELSERIES_FM !== 'undefined' && isSteelSeries) ? STEELSERIES_FM : DEFAULT_FM;
+  const useFullData = isSteelSeries && typeof STEELSERIES_FM_FULL !== 'undefined';
   const factories = fm.factories;
   const variantKeys = fm.variant_keys;
   const conf = p.confidential;
   const masked = conf && state.role !== 'host';
 
-  // 收集所有 6 個 total(3 廠 × 2 variant)
+  // v0.7 toggle state
+  const v07 = v07State();
+  const activeQty = v07.qty;
+  const activePkg = v07.pkg;
+  const showTrue = v07.show_true_cost && (state.role === 'host');  // permission gated
+  const showMargin = v07.show_margin && (state.role === 'host');
+
+  // 收集所有 (variant × factory) cells based on active qty + pkg
+  function getCell(f, v) {
+    if (useFullData) {
+      return fmCell(f, v, activeQty, activePkg);
+    }
+    // fallback: v0.6 single-dimension data
+    return {
+      material_true: fm.byFactory[f][`prime_${v}`] * 0.9,  // approx
+      material_quote: fm.byFactory[f][`prime_${v}`] - fm.byFactory[f].mva,
+      pkg_true: 0,
+      pkg_quote: 0,
+      mva: fm.byFactory[f].mva,
+      sga: fm.byFactory[f].sga * 0.125,  // SGA portion of $0.75
+      profit: fm.byFactory[f].sga * 0.875,  // Profit portion
+      total_true: fm.byFactory[f][`total_${v}`] * 0.86,
+      total_quote: fm.byFactory[f][`total_${v}`],
+      margin_amount: fm.byFactory[f][`total_${v}`] * 0.14,
+      margin_pct: 0.14,
+      material_margin_pct: 0.30,
+    };
+  }
+
   const allCells = factories.flatMap(f => variantKeys.map(v => ({
-    factory: f, variant: v,
-    total: fm.byFactory[f][`total_${v}`],
-    prime: fm.byFactory[f][`prime_${v}`],
-    mva:   fm.byFactory[f].mva,
-    sga:   fm.byFactory[f].sga,
+    factory:f, variant:v, ...getCell(f, v)
   })));
-  const sortedAll = [...allCells].sort((a,b) => a.total - b.total);
+  const sortedAll = [...allCells].sort((a,b) => a.total_quote - b.total_quote);
   const cheapest = sortedAll[0];
   const expensive = sortedAll[sortedAll.length - 1];
-  const spread = expensive.total - cheapest.total;
-  const spreadPct = (spread / cheapest.total * 100).toFixed(1);
+  const spread = expensive.total_quote - cheapest.total_quote;
+  const spreadPct = (spread / cheapest.total_quote * 100).toFixed(1);
   const annualImpact = Math.round(spread * (p.qty || p.annual_qty || 418000));
 
   // 每 variant 最便宜的工廠 → 整列標 ⭐
   const cheapestByVariant = {};
   variantKeys.forEach(v => {
     cheapestByVariant[v] = factories.reduce((min, f) =>
-      fm.byFactory[f][`total_${v}`] < fm.byFactory[min][`total_${v}`] ? f : min, factories[0]);
+      getCell(f, v).total_quote < getCell(min, v).total_quote ? f : min, factories[0]);
   });
 
   // MVA spread
-  const mvaVals = factories.map(f => fm.byFactory[f].mva);
+  const mvaVals = factories.map(f => getCell(f, variantKeys[0]).mva);
   const mvaSpread = Math.max(...mvaVals) - Math.min(...mvaVals);
 
-  // Excel-style rows — 對齊客戶截圖順序
-  const rows = [
-    { label:'MVA', getValue: f => fm.byFactory[f].mva,  kind:'mva',   shared:true,  decimals:4 },
-    ...variantKeys.map(v => ({
-      label: `PRIME COST (Matl + Labor): ${fm.variant_labels[v]}`,
-      getValue: f => fm.byFactory[f][`prime_${v}`],
-      kind:'prime', variant:v, decimals:3,
-    })),
-    { label:'SG&A + Profit', getValue: f => fm.byFactory[f].sga, kind:'sga', shared:true, decimals:4 },
-    ...variantKeys.map(v => ({
-      label: `Total Cost (Ex-Factory): ${fm.variant_labels[v]}`,
-      getValue: f => fm.byFactory[f][`total_${v}`],
+  // Current PKG metadata
+  const pkgMeta = (typeof STEELSERIES_PKG_VERSIONS !== 'undefined')
+    ? STEELSERIES_PKG_VERSIONS.find(x => x.code === activePkg)
+    : null;
+  const qtyMeta = (typeof STEELSERIES_QTY_SCENARIOS !== 'undefined')
+    ? STEELSERIES_QTY_SCENARIOS.find(x => x.code === activeQty)
+    : null;
+
+  // Excel-style rows — 根據 toggle 動態構建
+  const rows = [];
+  // MVA row
+  rows.push({ label:'MVA', getValue: f => getCell(f, variantKeys[0]).mva, kind:'mva', shared:true, decimals:4 });
+  // Material (Quote) rows
+  variantKeys.forEach(v => {
+    rows.push({
+      label: `Material (Quote): ${fm.variant_labels[v]}`,
+      getValue: f => getCell(f, v).material_quote + getCell(f, v).pkg_quote,
+      kind:'material', variant:v, decimals:3,
+    });
+  });
+  // Material (True) rows — only if showTrue
+  if (showTrue) {
+    variantKeys.forEach(v => {
+      rows.push({
+        label: `Material (True): ${fm.variant_labels[v]}`,
+        getValue: f => getCell(f, v).material_true + getCell(f, v).pkg_true,
+        kind:'material_true', variant:v, decimals:3,
+        isTrueCost: true,
+      });
+    });
+  }
+  // SG&A
+  rows.push({ label:'SG&A + Profit', getValue: f => {
+    const c = getCell(f, variantKeys[0]);
+    return c.sga + c.profit;
+  }, kind:'sga', shared:true, decimals:4 });
+  // TOTAL (Quote)
+  variantKeys.forEach(v => {
+    rows.push({
+      label: `Total Cost (Quote): ${fm.variant_labels[v]}`,
+      getValue: f => getCell(f, v).total_quote,
       kind:'total', variant:v, isTotal:true, decimals:3,
-    })),
-  ];
+    });
+  });
+  // TOTAL (True) — only if showTrue
+  if (showTrue) {
+    variantKeys.forEach(v => {
+      rows.push({
+        label: `Total Cost (True): ${fm.variant_labels[v]}`,
+        getValue: f => getCell(f, v).total_true,
+        kind:'total_true', variant:v, isTotal:true, decimals:3,
+        isTrueCost: true,
+      });
+    });
+  }
+  // Margin % rows — only if showMargin
+  if (showMargin) {
+    variantKeys.forEach(v => {
+      rows.push({
+        label: `Gross Margin: ${fm.variant_labels[v]}`,
+        getValue: f => getCell(f, v).margin_pct * 100,
+        kind:'margin', variant:v, decimals:1, suffix:'%',
+        isMargin: true,
+      });
+    });
+  }
+
+  // 計算所有 4 個 scenario combination 的 cheapest total
+  const allScenarios = ['HIGH-RETAIL','HIGH-BULK','LOW-RETAIL','LOW-BULK'].map(s => {
+    const [q, pk] = s.split('-');
+    const totals = factories.flatMap(f => variantKeys.map(v => useFullData ? fmCell(f, v, q, pk).total_quote : 0));
+    return { code:s, qty:q, pkg:pk, min: Math.min(...totals), max: Math.max(...totals) };
+  });
 
   return `
-    ${formSectionHead('多廠成本矩陣', '🏭',
-      `${factories.length} factories × ${variantKeys.length} variants = ${factories.length*variantKeys.length} prime cost cells · 單一 ${fm.packaging.version} · spec §11.3.8`,
+    ${formSectionHead('多廠成本矩陣 (v0.7 三維度)', '🏭',
+      `${factories.length} 廠 × ${variantKeys.length} variants × 2 qty × 2 pkg = 24 cells · True vs Quote · spec bom-collection-sd §17-19`,
       `<span class="badge-mini badge-green">✓ 三廠 Cleansheet 已收齊</span>
        ${p.bom_lock_state === 'locked'
          ? '<span class="badge-mini" style="background:#DCFCE7;color:#166534;margin-left:6px;">🔒 BOM Material propagate</span>'
-         : '<span class="badge-mini badge-amber" style="margin-left:6px;">⚠ BOM 未鎖 · Material 未 propagate</span>'}`,
+         : '<span class="badge-mini badge-amber" style="margin-left:6px;">⚠ BOM 未鎖</span>'}`,
       `
-        <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;">📊 Cell drill-down</button>
+        <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;" onclick="setFormSection('cleansheet')">🧮 看 Cleansheet 9×9 詳</button>
+        <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;" onclick="setFormSection('margin_analysis')">💰 Margin Analysis</button>
         <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;">📥 匯出 RFQ Cost Excel</button>
       `
     )}
 
-    <!-- Roll-up KPI 卡 -->
-    <div class="ff-derived-grid">
-      <div class="ff-derived" style="background:linear-gradient(180deg,#DCFCE7 0%,#fff 100%);border-color:#86EFAC;">
-        <div class="d-label">⭐ 最便宜組合</div>
-        <div class="d-value mono" style="font-size:18px;">${cheapest.factory} · ${fm.variant_labels[cheapest.variant]}</div>
-        <div class="d-meta">${masked ? '▒▒▒▒' : 'US$ ' + cheapest.total.toFixed(3)} / unit · 比最貴 ↓ ${spreadPct}%</div>
+    ${useFullData ? `
+    <!-- v0.7 toggle bar -->
+    <div class="v07-toggle-bar">
+      <div class="v07-toggle-group">
+        <span class="v07-toggle-label">Qty:</span>
+        ${STEELSERIES_QTY_SCENARIOS.map(qs => `
+          <button class="v07-toggle ${activeQty === qs.code ? 'active' : ''}" onclick="setV07('qty','${qs.code}')">
+            ${qs.label_zh} <span class="v07-tag-meta">(${(qs.target_qty/1000).toFixed(0)}K)</span>
+          </button>
+        `).join('')}
       </div>
-      <div class="ff-derived">
-        <div class="d-label">三廠 MVA spread</div>
-        <div class="d-value mono">${masked ? '▒▒▒▒' : '$' + mvaSpread.toFixed(3)}</div>
-        <div class="d-meta">TW $${fm.byFactory.TW?.mva.toFixed(3) || '—'} > CN $${fm.byFactory.CN?.mva.toFixed(3) || '—'} > VN $${fm.byFactory.VN?.mva.toFixed(3) || '—'}</div>
+      <div class="v07-toggle-group">
+        <span class="v07-toggle-label">PKG:</span>
+        ${STEELSERIES_PKG_VERSIONS.map(pv => `
+          <button class="v07-toggle ${activePkg === pv.code ? 'active' : ''}" onclick="setV07('pkg','${pv.code}')">
+            ${pv.label_zh} <span class="v07-tag-meta">(${pv.items_count} items)</span>
+          </button>
+        `).join('')}
       </div>
-      <div class="ff-derived ${conf ? 'conf' : ''}">
-        <div class="d-label">年量影響 ${conf ? '🔒' : ''}</div>
-        <div class="d-value mono">${masked ? '▒▒▒▒' : '+$' + annualImpact.toLocaleString()}</div>
-        <div class="d-meta">/ yr · ${(p.qty || p.annual_qty || 418000).toLocaleString()} 年量 · 最便宜 vs 最貴</div>
+      <div class="v07-toggle-group">
+        ${state.role === 'host' ? `
+          <label class="v07-checkbox ${v07.show_true_cost ? 'on' : ''}">
+            <input type="checkbox" ${v07.show_true_cost ? 'checked' : ''} onclick="setV07('show_true_cost', this.checked)">
+            🔒 Show True Cost
+          </label>
+          <label class="v07-checkbox ${v07.show_margin ? 'on' : ''}">
+            <input type="checkbox" ${v07.show_margin ? 'checked' : ''} onclick="setV07('show_margin', this.checked)">
+            🔒🔒 Show Margin %
+          </label>
+        ` : `
+          <span class="v07-no-perm">⚠ True Cost / Margin 需 VIEW_TRUE_COST 權限</span>
+        `}
       </div>
     </div>
+    ` : ''}
 
-    <!-- 主矩陣表(Excel-style:6 列 × 3 廠 cols,同時呈現所有 6 個 total)-->
+    <!-- Roll-up KPI 卡 (v0.7 加 margin / scenario)-->
+    <div class="ff-derived-grid">
+      <div class="ff-derived" style="background:linear-gradient(180deg,#DCFCE7 0%,#fff 100%);border-color:#86EFAC;">
+        <div class="d-label">⭐ 最便宜組合 (Quote)</div>
+        <div class="d-value mono" style="font-size:18px;">${cheapest.factory} · ${fm.variant_labels[cheapest.variant]}</div>
+        <div class="d-meta">${masked ? '▒▒▒▒' : 'US$ ' + cheapest.total_quote.toFixed(3)} / unit · 比最貴 ↓ ${spreadPct}%</div>
+      </div>
+      <div class="ff-derived">
+        <div class="d-label">三廠 MVA spread ${activeQty === 'LOW' ? '⚠ (低量 MVA 高)' : ''}</div>
+        <div class="d-value mono">${masked ? '▒▒▒▒' : '$' + mvaSpread.toFixed(3)}</div>
+        <div class="d-meta">TW > CN > VN(對應 ${activeQty} qty scenario)</div>
+      </div>
+      ${showMargin ? `
+        <div class="ff-derived" style="background:linear-gradient(180deg,#FEF3C7 0%,#fff 100%);border-color:#FCD34D;">
+          <div class="d-label">🔒🔒 Gross Margin (avg)</div>
+          <div class="d-value mono">${(allCells.reduce((s,c) => s + c.margin_pct, 0) / allCells.length * 100).toFixed(1)}%</div>
+          <div class="d-meta">${activeQty} + ${activePkg} 平均 · 4 個維度組合可比較</div>
+        </div>
+      ` : `
+        <div class="ff-derived ${conf ? 'conf' : ''}">
+          <div class="d-label">年量影響 ${conf ? '🔒' : ''}</div>
+          <div class="d-value mono">${masked ? '▒▒▒▒' : '+$' + annualImpact.toLocaleString()}</div>
+          <div class="d-meta">/ yr · ${(qtyMeta?.target_qty || 418000).toLocaleString()} 年量 · 最便宜 vs 最貴</div>
+        </div>
+      `}
+    </div>
+
+    <!-- 主矩陣表 v0.7:依當前 qty/pkg/showTrue/showMargin toggle 動態展示 -->
     <div style="margin-bottom:14px;">
       <div class="ff-label-row">
-        <span class="ff-label">成本矩陣 · 同時呈現 ${variantKeys.length} variants × ${factories.length} 廠 = ${variantKeys.length*factories.length} 個 Total</span>
+        <span class="ff-label">成本矩陣 · ${activeQty === 'HIGH' ? '高量' : '低量'} × ${pkgMeta?.label_zh || activePkg} · ${rows.length} 列 × ${factories.length} 廠</span>
         <span class="ff-req">*</span>
-        <span class="ff-help" title="對齊客戶 RFQ_Cost.xlsx 版面 · 共用列(MVA / SG&A)單一值,Variant 列分黑白">ⓘ</span>
-        <span class="ff-tag-mono">EXCEL-STYLE · ${rows.length} rows × ${factories.length} cols</span>
+        <span class="ff-help" title="切 Qty / PKG → 整表 refresh · 切 Show True → 加 True Cost 列 · 切 Show Margin → 加 Gross % 列">ⓘ</span>
+        <span class="ff-tag-mono">${showTrue && showMargin ? 'FULL VIEW' : showTrue ? 'TRUE+QUOTE' : showMargin ? 'WITH MARGIN' : 'QUOTE ONLY'}</span>
         ${conf ? '<span class="ff-conf">🔒</span>' : ''}
       </div>
       <table class="matrix-table excel-style">
         <thead>
           <tr>
             <th class="mt-corner" rowspan="2">
-              <div class="mt-pkg-title">Retail Packaging</div>
-              <div class="mt-pkg-meta">${fm.packaging.version}<br>${fm.packaging.items} items · 單一版本</div>
+              <div class="mt-pkg-title">${pkgMeta?.label_zh || activePkg}</div>
+              <div class="mt-pkg-meta">${pkgMeta?.items_count || '?'} items · ${qtyMeta?.target_qty?.toLocaleString() || '?'} pcs/yr</div>
             </th>
             ${factories.map(f => {
               const meta = fm.factory_meta[f];
@@ -12089,16 +13695,20 @@ function renderFormFactoryMatrix(p, editable) {
         </thead>
         <tbody>
           ${rows.map(row => {
-            const cls = row.isTotal ? 'mt-row-total' : (row.kind === 'prime' ? 'mt-row-prime' : (row.shared ? 'mt-row-shared' : ''));
+            const cls = row.isTotal ? 'mt-row-total' : (row.kind === 'material' ? 'mt-row-prime' : (row.shared ? 'mt-row-shared' : ''));
+            const trueCostCls = row.isTrueCost ? 'mt-row-true' : '';
+            const marginCls = row.isMargin ? 'mt-row-margin' : '';
             return `
-              <tr class="${cls}">
-                <th class="mt-row-label">${row.label}</th>
+              <tr class="${cls} ${trueCostCls} ${marginCls}">
+                <th class="mt-row-label">${row.label}${row.isTrueCost ? ' <span class="mt-tag-true">🔒 TRUE</span>' : ''}${row.isMargin ? ' <span class="mt-tag-margin">🔒🔒 %</span>' : ''}</th>
                 ${factories.map(f => {
                   const val = row.getValue(f);
-                  const isCheapest = row.isTotal && cheapestByVariant[row.variant] === f;
-                  return `<td class="mt-data-cell ${row.isTotal ? 'mt-cell-total-data' : ''} ${isCheapest ? 'cheapest' : ''}" onclick="openCellDrilldown('${f}','${row.kind}','${row.variant || ''}')">
-                    <span class="mt-currency">US$</span>
-                    <span class="mt-value mono">${masked ? '▒▒▒▒' : val.toFixed(row.decimals)}</span>
+                  const isCheapest = row.isTotal && !row.isTrueCost && cheapestByVariant[row.variant] === f;
+                  return `<td class="mt-data-cell ${row.isTotal ? 'mt-cell-total-data' : ''} ${isCheapest ? 'cheapest' : ''} ${row.isTrueCost ? 'mt-cell-true' : ''} ${row.isMargin ? 'mt-cell-margin' : ''}" onclick="openCellDrilldown('${f}','${row.kind}','${row.variant || ''}')">
+                    ${row.suffix ? `<span class="mt-value mono">${masked ? '▒▒▒▒' : val.toFixed(row.decimals)}${row.suffix}</span>` : `
+                      <span class="mt-currency">US$</span>
+                      <span class="mt-value mono">${masked ? '▒▒▒▒' : val.toFixed(row.decimals)}</span>
+                    `}
                     ${isCheapest ? '<span class="mt-cheap-marker" title="此 variant 最便宜">⭐</span>' : ''}
                   </td>`;
                 }).join('')}
@@ -12108,11 +13718,54 @@ function renderFormFactoryMatrix(p, editable) {
         </tbody>
       </table>
       <div class="ff-meta-row">
-        <span class="ff-meta-item">👤 三廠 EPM 共填 · Andy (CN) · Long (VN) · Ken (TW) · 5/10</span>
+        <span class="ff-meta-item">👤 三廠 EPM · Andy (CN) · Long (VN) · Ken (TW) · 5/10</span>
         <span class="ff-meta-item ff-saved">✓ 已存</span>
+        ${showTrue ? '<span class="ff-meta-item" style="color:#B91C1C;font-weight:600;">🔒 顯示 True Cost · 僅 VIEW_TRUE_COST 角色可見</span>' : ''}
         <button class="ff-comment-btn has">💬 6 則討論</button>
       </div>
     </div>
+
+    ${useFullData ? `
+    <!-- v0.7 Scenario Comparison panel -->
+    <div style="margin-bottom:14px;">
+      <div class="ff-label-row">
+        <span class="ff-label">Scenario 比較 · 4 個 (Qty × PKG) 組合</span>
+        <span class="ff-help" title="切 Qty / PKG 後此表會 highlight 當前選擇">ⓘ</span>
+        <span class="ff-tag-mono">CROSS-SCENARIO</span>
+      </div>
+      <table class="scenario-comp-table">
+        <thead>
+          <tr>
+            <th>Scenario</th>
+            <th>Qty target</th>
+            <th>PKG</th>
+            <th>Min Total</th>
+            <th>Max Total</th>
+            <th>Spread</th>
+            <th>區別</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${allScenarios.map(s => {
+            const isActive = s.qty === activeQty && s.pkg === activePkg;
+            const qtyM = STEELSERIES_QTY_SCENARIOS.find(x => x.code === s.qty);
+            const pkgM = STEELSERIES_PKG_VERSIONS.find(x => x.code === s.pkg);
+            return `
+              <tr class="${isActive ? 'scn-active' : ''}" onclick="setV07('qty','${s.qty}');setTimeout(() => setV07('pkg','${s.pkg}'),0)">
+                <td><strong>${s.code}</strong></td>
+                <td>${qtyM.label_zh} (${(qtyM.target_qty/1000).toFixed(0)}K)</td>
+                <td>${pkgM.label_zh} (${pkgM.items_count} items)</td>
+                <td class="mono" style="color:#16A34A;font-weight:700;">${masked ? '▒▒▒' : '$' + s.min.toFixed(3)}</td>
+                <td class="mono" style="color:#B91C1C;">${masked ? '▒▒▒' : '$' + s.max.toFixed(3)}</td>
+                <td class="mono">${masked ? '▒▒' : '$' + (s.max - s.min).toFixed(3)}</td>
+                <td>${isActive ? '★ 當前' : '點此切換'}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+    ` : ''}
 
     <!-- BOM lock 狀態提示 -->
     ${p.bom_lock_state === 'locked' ? `
@@ -12128,15 +13781,44 @@ function renderFormFactoryMatrix(p, editable) {
       </div>
     `}
 
+    ${showMargin && useFullData ? `
+    <!-- 🆕 v0.7 Top Markup Items panel -->
+    <div style="margin-bottom:14px;padding:14px;background:linear-gradient(180deg,#FEF3C7 0%,#fff 100%);border:1px solid #FCD34D;border-radius:10px;">
+      <div style="font-size:12px;font-weight:700;color:#92400E;margin-bottom:10px;">🔒🔒 Top Markup Items · ${pkgMeta?.label_zh} (${activePkg})</div>
+      <table class="markup-table">
+        <thead>
+          <tr><th>#</th><th>Item</th><th>Spec</th><th>Qty</th><th>True $</th><th>Quote $</th><th>Markup %</th></tr>
+        </thead>
+        <tbody>
+          ${fmTopMarkupItems(activePkg, 5).map((it, i) => `
+            <tr>
+              <td>${i+1}</td>
+              <td><strong>${it.name}</strong></td>
+              <td>${it.spec || ''}</td>
+              <td>${it.qty}</td>
+              <td class="mono" style="color:#9A3412;">${masked ? '▒▒▒' : '$' + it.true_cost.toFixed(3)}</td>
+              <td class="mono" style="color:#166534;">${masked ? '▒▒▒' : '$' + it.quote_price.toFixed(3)}</td>
+              <td class="mono" style="background:${it.markup_pct > 0.4 ? '#FEE2E2' : it.markup_pct > 0.3 ? '#FEF3C7' : '#DCFCE7'};padding:2px 8px;border-radius:4px;font-weight:700;">${masked ? '▒▒%' : (it.markup_pct*100).toFixed(1) + '%'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+      <div style="font-size:10px;color:var(--muted);margin-top:8px;">
+        ⓘ 對應 bom-collection-sd §19 — markup 藏在每料件 true → quote 價差,SG&A+Profit 只是象徵性數字。
+      </div>
+    </div>
+    ` : ''}
+
     <!-- AI 推薦解讀 -->
     <div style="margin-top:14px;padding:14px;background:#fff;border:1px solid var(--line);border-radius:8px;">
-      <div style="font-size:12px;font-weight:700;color:var(--ink);margin-bottom:8px;">🤖 AI 推薦解讀</div>
+      <div style="font-size:12px;font-weight:700;color:var(--ink);margin-bottom:8px;">🤖 AI 推薦解讀(scenario: ${activeQty} × ${pkgMeta?.label_zh || activePkg})</div>
       <div style="font-size:11px;line-height:1.7;color:var(--text);">
         全 ${factories.length*variantKeys.length} 個 Total 中,<strong>${cheapest.factory} 廠 ${fm.variant_labels[cheapest.variant]}</strong> 為最低
-        (${masked ? '▒▒▒▒' : 'US$ ' + cheapest.total.toFixed(3)} / unit)。
-        若客戶無區域偏好,${(p.qty || p.annual_qty || 418000).toLocaleString()} 年量可省 <strong>${masked ? '▒▒▒' : '$' + annualImpact.toLocaleString()}/yr</strong>。<br>
-        <strong>觀察</strong>:VN 廠 MVA $${fm.byFactory.VN?.mva.toFixed(3) || '—'} 最低(Labor 便宜),但 yield ${(fm.byFactory.VN?.yield*100 || 0).toFixed(1)}% 略低於 CN ${(fm.byFactory.CN?.yield*100 || 0).toFixed(1)}%;TW 廠 MVA 最高($${fm.byFactory.TW?.mva.toFixed(3) || '—'})但 yield 最高(${(fm.byFactory.TW?.yield*100 || 0).toFixed(1)}%),供應鏈最穩。<br>
-        <strong>SG&A</strong>:三廠統一 $0.750(集團政策),Total 差異全來自 PRIME(Material + Labor)。<br>
+        (${masked ? '▒▒▒▒' : 'US$ ' + cheapest.total_quote.toFixed(3)} / unit)。
+        若客戶無區域偏好,${(qtyMeta?.target_qty || 418000).toLocaleString()} 年量可省 <strong>${masked ? '▒▒▒' : '$' + annualImpact.toLocaleString()}/yr</strong>。<br>
+        ${activeQty === 'LOW' ? `<strong style="color:#9A3412;">⚠ 低批量 scenario</strong>:MVA 因 lines util 低而上升 ${((getCell('CN','black').mva - 1.8558)/1.8558*100).toFixed(0)}% (CN 從 $1.86 → $${getCell('CN','black').mva.toFixed(2)});採購批次也喬不到高 tier 折扣,Material 平均上升 ~7%。<br>` : ''}
+        ${activePkg === 'BULK' ? `<strong style="color:#166534;">💡 工包 scenario</strong>:每 unit 比商包省 $${(getCell('CN','black').pkg_quote === 0.275 ? (0.828-0.275) : 0).toFixed(3)} (gift box / inner pad / 標籤 全省)。但客戶通常只在 spare parts / B2B 通路採用。<br>` : ''}
+        ${showMargin ? `<strong style="color:#92400E;">🔒🔒 Margin 揭露</strong>:當前 scenario 平均 gross margin ${(allCells.reduce((s,c) => s + c.margin_pct, 0) / allCells.length * 100).toFixed(1)}%,最高 ${(Math.max(...allCells.map(c => c.margin_pct))*100).toFixed(1)}% (${allCells.find(c => c.margin_pct === Math.max(...allCells.map(x => x.margin_pct))).factory})。<br>` : ''}
         <em style="font-size:10px;color:var(--muted);">⚠ AI 解讀屬 spec §11.3.8 Phase 2+ 範疇,本訊息僅為差異提示,不入正式建議。</em>
       </div>
     </div>
@@ -12174,6 +13856,1512 @@ function openCellDrilldown(factory, kind, variant) {
   lines.push('');
   lines.push('(真實版本會展開 11 項 NRE 攤提 + 採購策略對應的 Material 細項)');
   alert(lines.join('\n'));
+}
+
+
+/* ============================================================
+   🆕 v0.7 Section: 操作流程清單 (Workflow Checklist)
+   把 Stage 4-7 所有人工操作、按鈕、modal 串成一份可點清單
+   解決問題:demo 只顯示「最終結果欄位」· 缺中間操作流程
+   ============================================================ */
+function renderFormWorkflowChecklist(p, editable) {
+  const isSteelSeries = p.title?.includes('SteelSeries');
+  const useV07 = isSteelSeries;
+  const isLocked = (p.bom_lock_state === 'locked');
+  const isHost = state.role === 'host';
+
+  // 操作流程定義:5 stage × N steps
+  const stages = [
+    {
+      stage: 4, code:'BOM_PROVIDE', name:'BOM 提供',
+      owner:'RD / EE / ME', sla:'24-72h', color:'#6366F1',
+      steps: [
+        { id:'4.1', name:'RD 上傳初版 BOM Excel',
+          desc:'拖檔 / 點選 → 上傳 BOM 結構 xlsx',
+          status:'done', who:'RD Troy', at:'4/19 09:23',
+          action:{ kind:'modal', label:'📤 上傳 Excel', onclick:'openRdExcelUpload()' } },
+        { id:'4.2', name:'AI 解析 Excel → 抽取子料',
+          desc:'LLM 解析 xlsx · 抽 22 個子料 + 規格 + 用量',
+          status:'done', who:'AI Bot · Gemini Flash', at:'4/19 09:24',
+          action:{ kind:'jump', label:'看結果 → §BOM', section:'bom' } },
+        { id:'4.3', name:'AI 比對 ERP 撈 top-10 候選',
+          desc:'向量化每子料描述 → 撈 ERP item master 最相似料號',
+          status:'done', who:'AI Bot · embedding', at:'4/19 09:24',
+          action:{ kind:'jump', label:'看 ERP badge → §BOM', section:'bom' } },
+        { id:'4.4', name:'RD 確認 ERP 料號',
+          desc:'逐子料點「採用」/「略過」/「手動覆寫」· 90% 自動',
+          status:'done', who:'RD Troy', at:'4/19 11:05',
+          action:{ kind:'jump', label:'§BOM 階層樹', section:'bom' } },
+        { id:'4.5', name:'RD 標 Variant scope (shared / per_variant)',
+          desc:'EE BOM 共用 / ME BOM per Black/White · 對齊 §variants 軸',
+          status:'done', who:'RD Troy + Alvin (ME)', at:'4/20 14:30',
+          action:{ kind:'jump', label:'§variants', section:'variants' } },
+      ],
+    },
+    {
+      stage: 5, code:'PARALLEL_COLLECT', name:'並行 Collect',
+      owner:'採購 + 三廠 EPM', sla:'parallel', color:'#0EA5E9',
+      steps: [
+        // 採購端
+        { id:'5.1', name:'採購接手 BOM',
+          desc:'採購打開 §BOM 採購策略總覽 · 看到 RD 建好的子料',
+          status:'done', who:'採購 David Chang', at:'4/22 09:00',
+          action:{ kind:'jump', label:'§BOM 採購策略', section:'bom' } },
+        { id:'5.2', name:'每子料新增 Mfg 選項(可多家)',
+          desc:'+ Mfg 按鈕 → 從廠商 master 選 · 或新增',
+          status:'active', who:'採購', at:'5/02 ~',
+          action:{ kind:'jump', label:'§BOM 點 item ▶ 展開', section:'bom' } },
+        { id:'5.3', name:'每 Mfg 新增 RFQ 報價快照',
+          desc:'+ 新增報價快照 → 填 RFQ 編號 + 有效期 + 廠商',
+          status:'active', who:'採購', at:'5/02 ~',
+          action:{ kind:'jump', label:'§BOM Mfg 抽屜', section:'bom' } },
+        { id:'5.4', name:'🆕 v0.7 · 每 Snapshot 填 N 個 Tier',
+          desc:'qty_min / qty_max + True Cost + Quote Price · 雙價輸入 · markup auto 算',
+          status:'active', who:'採購', at:'5/03 ~', isNew:true,
+          action:{ kind:'modal', label:'📊 新增 Tier', onclick:'openPriceTierModal()' } },
+        { id:'5.5', name:'ERP 拉上次採購價(歷史價)',
+          desc:'按「💰 帶歷史價」→ ERP po_lines_all 反推 · 自動帶 True $',
+          status:'active', who:'採購', at:'5/03 ~',
+          action:{ kind:'modal', label:'💰 拉 ERP 歷史價', onclick:'openErpPullModal()' } },
+        { id:'5.6', name:'採購策略:選定 Mfg + Tier',
+          desc:'每子料指定:這 case 選哪家 mfg · 哪個 tier 報價',
+          status:'pending', who:'採購', at:'pending',
+          action:{ kind:'jump', label:'§BOM 採購策略總覽', section:'bom' } },
+        { id:'5.7', name:'🆕 v0.7 · 多 PKG 版本獨立補(商包/工包)',
+          desc:'切到 §packaging → tabs 「商包」「工包」各補一份 BOM',
+          status:'active', who:'PKG 採購 Ken', at:'5/05 ~', isNew:true,
+          action:{ kind:'jump', label:'§packaging tab 切換', section:'packaging' } },
+        { id:'5.8', name:'🆕 v0.7 · 多 Qty Scenario 配置',
+          desc:'§factory_matrix → Qty toggle (Low/High) 配 mfg tier 對應',
+          status:'pending', who:'採購', at:'pending', isNew:true,
+          action:{ kind:'jump', label:'§factory_matrix', section:'factory_matrix' } },
+        // EPM 廠級
+        { id:'5.9', name:'🆕 EPM 上傳新 Cleansheet xlsx (廠 baseline)',
+          desc:'admin → factory baselines 上傳新版 · 自動 diff vs 舊 baseline',
+          status:'done', who:'CN EPM Andy', at:'4/15 ~ done', isNew:true,
+          action:{ kind:'modal', label:'📤 上傳 Cleansheet', onclick:'openCleansheetUpload()' } },
+        { id:'5.10', name:'🆕 系統 diff preview + EPM 逐項 approve',
+          desc:'preview 顯示 wage 漲 / 設備新增 / 折舊改 · EPM 勾選套用',
+          status:'done', who:'CN EPM Andy', at:'4/15 ~ done', isNew:true,
+          action:{ kind:'modal', label:'看 Diff Preview', onclick:'openCleansheetDiff()' } },
+        { id:'5.11', name:'案級 EPM 配製程清單(從 template 帶入)',
+          desc:'§cleansheet → 9 製程從 MOUSE_STD template 帶入 + 可調 takt/yield',
+          status:'done', who:'三廠 EPM', at:'5/08 ~ done',
+          action:{ kind:'jump', label:'§cleansheet 製程列表', section:'cleansheet' } },
+        { id:'5.12', name:'案級 EPM 配設備 + 耗材(從廠 master 挑)',
+          desc:'+ Add from factory master · 設 line_qty / qty_per_line',
+          status:'done', who:'三廠 EPM', at:'5/09 ~ done',
+          action:{ kind:'jump', label:'§cleansheet 設備區', section:'cleansheet' } },
+        { id:'5.13', name:'EPM 觸發 Compute → cs_run snapshot',
+          desc:'按「🔄 Compute」→ 計算引擎跑 9×9 matrix + roll-up',
+          status:'done', who:'三廠 EPM · Andy/Long/Ken', at:'5/10 done',
+          action:{ kind:'modal', label:'🔄 觸發 Compute', onclick:'openComputeRunModal()' } },
+      ],
+    },
+    {
+      stage: 6, code:'BOM_COST_REVIEW', name:'BOM Cost Review',
+      owner:'DPM + BPM + RD + 採購', sla:'12h', color:'#16A34A',
+      steps: [
+        { id:'6.1', name:'DPM 開審查會議',
+          desc:'#cost-review channel pin 議程 · 線下會議或 Webex',
+          status:'pending', who:'DPM Mike', at:'會議排程',
+          action:{ kind:'jump', label:'§cost-review channel', section:null } },
+        { id:'6.2', name:'🆕 v0.7 · review 24 cells matrix',
+          desc:'切 Qty/PKG toggle 看 24 個 Total · 比對 4 scenario',
+          status:'pending', who:'DPM + BPM + 採購', at:'pending', isNew:true,
+          action:{ kind:'jump', label:'§factory_matrix toggle', section:'factory_matrix' } },
+        { id:'6.3', name:'🆕 v0.7 · review margin analysis',
+          desc:'24-cell margin heatmap · Top Markup Items per PKG · 需 VIEW_TRUE_COST',
+          status:'pending', who:'DPM + CFO 視角', at:'pending', isNew:true,
+          action:{ kind:'jump', label:'§margin_analysis', section:'margin_analysis' } },
+        { id:'6.4', name:'DPM 按「🔒 Lock BOM」',
+          desc:'BOM v3 → 唯讀 · 採購策略快照 · 觸發 propagate',
+          status:'pending', who:'DPM Mike', at:'pending',
+          action:{ kind:'inline', label:'🔒 鎖定 BOM',
+                    onclick:isLocked ? null : 'openBomLockModal()' } },
+        { id:'6.5', name:'🆕 v0.7 · 系統 propagate 24 cells fact table',
+          desc:'自動寫 bom_cs_run_result · 24 列 (3廠×2variant×2qty×2pkg)',
+          status:isLocked ? 'done' : 'pending', who:'系統自動', at:isLocked ? '6/01 done' : 'pending', isNew:true,
+          action:{ kind:'modal', label:'看 propagate 預覽', onclick:'openPropagatePreview()' } },
+      ],
+    },
+    {
+      stage: 7, code:'SALES_GATE', name:'業務 Gate',
+      owner:'業務 + BPM', sla:'4h', color:'#B91C1C',
+      steps: [
+        { id:'7.1', name:'BPM 拿鎖定版 → 進報價系統',
+          desc:'從 §cost section 匯出 RFQ Cost Excel · 進客戶報價系統',
+          status:'pending', who:'BPM Lisa', at:'pending',
+          action:{ kind:'jump', label:'§cost 摘要', section:'cost' } },
+        { id:'7.2', name:'業務 / BPM 簽核',
+          desc:'業務點「Submit Quote」· 系統建 RFQ record · 入 audit log',
+          status:'pending', who:'業務 John', at:'pending',
+          action:{ kind:'inline', label:'✅ 業務簽核(demo)', onclick:'alert(\'Demo: 業務點此即送客戶報價系統\')' } },
+        { id:'7.3', name:'客戶議價 → 新 cs_run (reprice)',
+          desc:'若客戶議價 → 採購重來 Stage 5 · 舊 cs_run 軟刪 archived',
+          status:'pending', who:'採購 + EPM', at:'pending',
+          action:{ kind:'inline', label:'🔄 觸發 Reprice', onclick:'alert(\'Demo: 進新 cs_run cycle\')' } },
+      ],
+    },
+  ];
+
+  // Status icons
+  const statusBadge = (s) => {
+    if (s === 'done')    return '<span class="wf-status wf-status-done">✓ 完成</span>';
+    if (s === 'active')  return '<span class="wf-status wf-status-active">⚡ 進行中</span>';
+    if (s === 'pending') return '<span class="wf-status wf-status-pending">⏳ 待辦</span>';
+    return '<span class="wf-status">·</span>';
+  };
+
+  // Action button renderer
+  const actionBtn = (step) => {
+    if (!step.action) return '';
+    const a = step.action;
+    if (a.kind === 'jump' && a.section) {
+      return `<button class="wf-action-btn" onclick="setFormSection('${a.section}')">${a.label}</button>`;
+    } else if (a.kind === 'modal' && a.onclick) {
+      return `<button class="wf-action-btn wf-action-modal" onclick="${a.onclick}">${a.label}</button>`;
+    } else if (a.kind === 'inline' && a.onclick) {
+      return `<button class="wf-action-btn wf-action-inline" onclick="${a.onclick}">${a.label}</button>`;
+    }
+    return `<span class="wf-action-disabled">${a.label}</span>`;
+  };
+
+  // Aggregate stage stats
+  const stageStats = stages.map(s => {
+    const done = s.steps.filter(x => x.status === 'done').length;
+    const active = s.steps.filter(x => x.status === 'active').length;
+    const total = s.steps.length;
+    return { ...s, done, active, total };
+  });
+  const totalDone = stageStats.reduce((a,s) => a + s.done, 0);
+  const totalSteps = stageStats.reduce((a,s) => a + s.total, 0);
+  const overallPct = Math.round(totalDone / totalSteps * 100);
+
+  return `
+    ${formSectionHead('🎬 操作流程清單 (Workflow Checklist)', '🎬',
+      `${totalSteps} 個操作步驟 · ${totalDone} 完成 · ${overallPct}% 進度 · spec Stage 4-7 全鏈路`,
+      `<span class="badge-mini badge-green">${totalDone}/${totalSteps} done</span>
+       <span class="badge-mini badge-amber" style="margin-left:6px;">v0.7 串聯所有操作</span>`,
+      `<button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;" onclick="alert('Demo: 對齊 bom-architecture-report.md §2 工作流')">📖 看 SD 對應</button>`
+    )}
+
+    <!-- 整體進度條 -->
+    <div class="wf-progress-bar-wrap" style="margin-bottom:18px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+        <span style="font-size:12px;font-weight:600;color:var(--ink);">整體進度</span>
+        <span style="font-size:11px;color:var(--muted);margin-left:auto;">${totalDone}/${totalSteps} steps · ${overallPct}%</span>
+      </div>
+      <div class="wf-progress-bar">
+        <div class="wf-progress-fill" style="width:${overallPct}%;"></div>
+      </div>
+    </div>
+
+    <!-- Stage roll-up cards -->
+    <div style="display:grid;grid-template-columns:repeat(${stageStats.length},1fr);gap:8px;margin-bottom:14px;">
+      ${stageStats.map(s => `
+        <div class="wf-stage-card" style="border-left:4px solid ${s.color};">
+          <div class="wf-stage-num">Stage ${s.stage}</div>
+          <div class="wf-stage-name" style="color:${s.color};">${s.name}</div>
+          <div class="wf-stage-owner">${s.owner}</div>
+          <div class="wf-stage-prog">${s.done}/${s.total} done · ${s.active} active</div>
+        </div>
+      `).join('')}
+    </div>
+
+    <!-- 每個 Stage 的步驟清單 -->
+    ${stages.map(stage => `
+      <div class="wf-stage-block">
+        <div class="wf-stage-head" style="background:linear-gradient(90deg, ${stage.color}22 0%, transparent 100%);border-left:4px solid ${stage.color};">
+          <div>
+            <span class="wf-stage-tag" style="background:${stage.color};">Stage ${stage.stage}</span>
+            <span class="wf-stage-title" style="color:${stage.color};">${stage.name}</span>
+            <span class="wf-stage-meta">👥 ${stage.owner} · SLA ${stage.sla}</span>
+          </div>
+          <div class="wf-stage-stats">
+            ${stage.steps.filter(x => x.status === 'done').length} / ${stage.steps.length} done
+          </div>
+        </div>
+        <div class="wf-step-list">
+          ${stage.steps.map(step => `
+            <div class="wf-step ${step.status}">
+              <div class="wf-step-num">${step.id}</div>
+              <div class="wf-step-body">
+                <div class="wf-step-name">
+                  ${step.name}
+                  ${step.isNew ? '<span class="wf-new-badge">v0.7</span>' : ''}
+                </div>
+                <div class="wf-step-desc">${step.desc}</div>
+                <div class="wf-step-meta">
+                  ${statusBadge(step.status)}
+                  <span class="wf-step-who">👤 ${step.who}</span>
+                  <span class="wf-step-at">⏰ ${step.at}</span>
+                </div>
+              </div>
+              <div class="wf-step-action">
+                ${actionBtn(step)}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `).join('')}
+
+    <!-- Bottom 提示 -->
+    <div style="background:var(--cyan-bg);border-left:3px solid var(--cyan);border-radius:0 8px 8px 0;padding:10px 14px;margin-top:14px;font-size:11px;color:var(--text);line-height:1.6;">
+      <strong style="color:var(--ocean);">💡 為什麼這個 section</strong> · 原 demo 各 section 只呈現「最終結果欄位」(階層樹 / 矩陣 / heatmap)· 缺中間 RD 上傳 / 採購點按鈕 / EPM compute 的操作流程串接 · 此 section 把所有操作 + 跳轉 button + modal 串成一份可點清單 · 點任一 step → 跳對應 section 或開 modal。<br>
+      <strong style="color:var(--ocean);">🆕 v0.7 新增 steps</strong> · 5.4 Tier 雙價填入 / 5.5 ERP 拉歷史價 / 5.7 多 PKG 補 / 5.8 多 Qty / 5.9-5.10 Cleansheet 上傳+diff / 6.2-6.3 24 cells review / 6.5 propagate fact
+    </div>
+
+    ${formFoot()}
+  `;
+}
+
+/* ----- v0.7 操作流程支援 modal helpers ----- */
+function openRdExcelUpload() {
+  const html = `
+    <div class="modal-mask" onclick="closeWfModal(event)">
+      <div class="modal-box" onclick="event.stopPropagation()" style="width:620px;max-width:92vw;">
+        <div class="modal-head">
+          <span>📤 RD 上傳初版 BOM Excel · Stage 4 Step 1</span>
+          <button class="modal-x" onclick="closeWfModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="border:2px dashed var(--cyan);border-radius:10px;padding:30px;text-align:center;background:var(--cyan-bg);margin-bottom:14px;">
+            <div style="font-size:32px;margin-bottom:8px;">📂</div>
+            <div style="font-size:13px;font-weight:700;color:var(--ocean);">拖拉 BOM xlsx 進此區 / 點選檔案</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:6px;">支援 .xlsx / .xlsm · max 20MB · 多 sheet OK</div>
+            <button class="btn btn-primary" style="margin-top:14px;background:var(--ocean);color:#fff;" onclick="simulateRdParse()">▶ 模擬解析 (Demo)</button>
+          </div>
+          <div style="font-size:12px;color:var(--text);line-height:1.7;">
+            <strong>系統會自動做的事:</strong><br>
+            ① 解析 ME / EE / PKG 各 sheet · 抽出 22 個子料<br>
+            ② 對每子料 LLM 抽 規格 + 用量 + 客供標記<br>
+            ③ 向量化描述 → 對 ERP <code style="background:var(--bg);padding:1px 4px;border-radius:3px;">mtl_system_items_b</code> top-10 候選<br>
+            ④ 建好階層樹 · RD 後續逐項確認即可<br>
+          </div>
+          <div style="background:var(--amber-bg);border:1px solid #FCD34D;border-radius:6px;padding:8px 10px;margin-top:10px;font-size:10px;color:#92400E;">
+            ⚠ 解析失敗的 row 會留 raw 文字 · 標 ⚠ flag · 不會丟資料
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-secondary" onclick="closeWfModal()">取消</button>
+        </div>
+      </div>
+    </div>
+  `;
+  showWfModal(html);
+}
+function simulateRdParse() {
+  closeWfModal();
+  setTimeout(() => {
+    alert('✓ Demo: 解析完成\n\n· 抽出 22 個子料\n· 90% 自動對到 ERP 料號\n· 跳轉至 §BOM 階層樹\n· RD 逐項確認');
+    setFormSection('bom');
+  }, 400);
+}
+
+function openPriceTierModal() {
+  const html = `
+    <div class="modal-mask" onclick="closeWfModal(event)">
+      <div class="modal-box" onclick="event.stopPropagation()" style="width:700px;max-width:94vw;">
+        <div class="modal-head">
+          <span>📊 新增 Price Tier · Stage 5 Step 5.4 (v0.7 新)</span>
+          <button class="modal-x" onclick="closeWfModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">
+            目前選擇 · item: <strong>Main Board 4L FR4</strong> · mfg: <strong>嘉聯益</strong> · snapshot: <strong>RFQ-2026-0412-A</strong>
+          </div>
+          <table style="width:100%;font-size:11px;border-collapse:collapse;">
+            <thead>
+              <tr style="background:var(--ocean);color:#fff;">
+                <th style="padding:6px 8px;text-align:left;">Tier</th>
+                <th style="padding:6px 8px;text-align:left;">Qty Min</th>
+                <th style="padding:6px 8px;text-align:left;">Qty Max</th>
+                <th style="padding:6px 8px;text-align:left;color:#FCA5A5;">🔒 True $</th>
+                <th style="padding:6px 8px;text-align:left;">Quote $</th>
+                <th style="padding:6px 8px;text-align:left;color:#FBBF24;">Markup %</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style="padding:6px;"><input value="LOW" style="width:60px;font-family:Consolas;"></td>
+                <td style="padding:6px;"><input value="0" style="width:80px;font-family:Consolas;"></td>
+                <td style="padding:6px;"><input value="100000" style="width:90px;font-family:Consolas;"></td>
+                <td style="padding:6px;"><input value="0.92" style="width:70px;font-family:Consolas;background:#FEE2E2;"></td>
+                <td style="padding:6px;"><input value="1.20" style="width:70px;font-family:Consolas;background:#DCFCE7;"></td>
+                <td style="padding:6px;font-family:Consolas;background:#FEF3C7;color:#92400E;font-weight:700;text-align:center;">30.4%</td>
+                <td style="padding:6px;color:var(--muted);font-size:9px;">auto</td>
+              </tr>
+              <tr style="background:var(--bg);">
+                <td style="padding:6px;"><input value="HIGH" style="width:60px;font-family:Consolas;"></td>
+                <td style="padding:6px;"><input value="100001" style="width:80px;font-family:Consolas;"></td>
+                <td style="padding:6px;"><input value="" placeholder="無上限" style="width:90px;font-family:Consolas;"></td>
+                <td style="padding:6px;"><input value="0.85" style="width:70px;font-family:Consolas;background:#FEE2E2;"></td>
+                <td style="padding:6px;"><input value="1.10" style="width:70px;font-family:Consolas;background:#DCFCE7;"></td>
+                <td style="padding:6px;font-family:Consolas;background:#FEF3C7;color:#92400E;font-weight:700;text-align:center;">29.4%</td>
+                <td style="padding:6px;color:var(--muted);font-size:9px;">auto</td>
+              </tr>
+            </tbody>
+          </table>
+          <button class="btn btn-ghost" style="font-size:11px;margin-top:8px;">+ 新增 Tier</button>
+          <div style="background:var(--cyan-bg);border-left:3px solid var(--cyan);border-radius:0 6px 6px 0;padding:8px 12px;margin-top:14px;font-size:10px;color:var(--text);line-height:1.6;">
+            · Markup = (Quote - True) / True · GENERATED ALWAYS AS · 不可手填<br>
+            · True $ 機密 🔒 · 只有 VIEW_TRUE_COST 角色看得到<br>
+            · Tier 自動依案 qty scenario 對應 · §factory_matrix 切 Low/High 時自動取對應 tier
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-secondary" onclick="closeWfModal()">取消</button>
+          <button class="btn btn-primary" style="background:var(--ocean);color:#fff;" onclick="closeWfModal();alert('✓ Demo: 2 tier 已存 · 自動更新 §BOM 採購策略')">💾 儲存</button>
+        </div>
+      </div>
+    </div>
+  `;
+  showWfModal(html);
+}
+
+function openErpPullModal() {
+  const html = `
+    <div class="modal-mask" onclick="closeWfModal(event)">
+      <div class="modal-box" onclick="event.stopPropagation()" style="width:680px;max-width:94vw;">
+        <div class="modal-head">
+          <span>💰 ERP 拉上次採購價(歷史價)· Stage 5 Step 5.5</span>
+          <button class="modal-x" onclick="closeWfModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">
+            ERP 連線:<code style="background:var(--bg);padding:1px 4px;border-radius:3px;">EBS_CUFOX · po_lines_all + po_headers_all + mtl_mfg_part_numbers</code><br>
+            篩選:<strong>USB-C Connector · CONN-USB-C-M-AA01</strong> · 近 12 個月
+          </div>
+          <table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:8px;">
+            <thead>
+              <tr style="background:var(--ocean);color:#fff;">
+                <th style="padding:6px 8px;text-align:left;">PO #</th>
+                <th style="padding:6px 8px;text-align:left;">Date</th>
+                <th style="padding:6px 8px;text-align:left;">Vendor</th>
+                <th style="padding:6px 8px;text-align:left;">OU</th>
+                <th style="padding:6px 8px;text-align:left;">Qty</th>
+                <th style="padding:6px 8px;text-align:left;">Unit $</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td style="padding:6px;font-family:Consolas;">PO-2026-04-9821</td><td style="padding:6px;">2026-03-15</td><td style="padding:6px;">立訊精密</td><td style="padding:6px;">CN-1</td><td style="padding:6px;font-family:Consolas;">120,000</td><td style="padding:6px;font-family:Consolas;background:#FEE2E2;">$0.62</td><td style="padding:6px;"><button class="btn btn-ghost" style="font-size:10px;" onclick="alert('✓ 已帶入 True $ = 0.62')">✓ 採用</button></td></tr>
+              <tr style="background:var(--bg);"><td style="padding:6px;font-family:Consolas;">PO-2026-02-8854</td><td style="padding:6px;">2026-01-28</td><td style="padding:6px;">協承精密</td><td style="padding:6px;">CN-1</td><td style="padding:6px;font-family:Consolas;">80,000</td><td style="padding:6px;font-family:Consolas;background:#FEE2E2;">$0.55</td><td style="padding:6px;"><button class="btn btn-ghost" style="font-size:10px;">採用</button></td></tr>
+              <tr><td style="padding:6px;font-family:Consolas;">PO-2025-11-7621</td><td style="padding:6px;">2025-10-12</td><td style="padding:6px;">立訊精密</td><td style="padding:6px;">CN-1</td><td style="padding:6px;font-family:Consolas;">50,000</td><td style="padding:6px;font-family:Consolas;background:#FEE2E2;">$0.78</td><td style="padding:6px;"><button class="btn btn-ghost" style="font-size:10px;">採用</button></td></tr>
+            </tbody>
+          </table>
+          <div style="background:var(--amber-bg);border:1px solid #FCD34D;border-radius:6px;padding:8px 10px;margin-top:14px;font-size:10px;color:#92400E;">
+            ⚠ 最早 PO 已 >90 天 · 建議向廠商重新詢價 · 系統會 flag tier 過期
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-secondary" onclick="closeWfModal()">關閉</button>
+        </div>
+      </div>
+    </div>
+  `;
+  showWfModal(html);
+}
+
+function openCleansheetUpload() {
+  const html = `
+    <div class="modal-mask" onclick="closeWfModal(event)">
+      <div class="modal-box" onclick="event.stopPropagation()" style="width:680px;max-width:94vw;">
+        <div class="modal-head">
+          <span>📤 EPM 上傳 Cleansheet xlsx (廠 Baseline) · Stage 5 Step 5.9</span>
+          <button class="modal-x" onclick="closeWfModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">
+            上傳對象:<strong>CN 廠 · 蘇州廠</strong> · 新 baseline (對齊 SupplierBaseInput + Equipment List + Consumables)
+          </div>
+          <div style="border:2px dashed var(--purple);border-radius:10px;padding:24px;text-align:center;background:#F3E8FF;margin-bottom:14px;">
+            <div style="font-size:32px;margin-bottom:8px;">🧮</div>
+            <div style="font-size:13px;font-weight:700;color:#6D28D9;">拖拉 Cleansheet xlsx 進此區</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:6px;">e.g. Rival 3+ Wired Mouse Cleansheet_China-20250211-21S.xlsx</div>
+            <button class="btn btn-primary" style="margin-top:14px;background:#6D28D9;color:#fff;" onclick="closeWfModal();setTimeout(() => openCleansheetDiff(),300)">▶ 模擬解析 + 進 Diff Preview</button>
+          </div>
+          <div style="font-size:12px;color:var(--text);line-height:1.7;">
+            <strong>系統會自動做:</strong><br>
+            ① 解析 8 個 sheet · 抽 baseline params + 58 設備 + 17 耗材<br>
+            ② 對比舊 baseline (CN-2024Q4) · 計算 diff<br>
+            ③ 開 Diff Preview · EPM 逐項勾選 approve<br>
+            ④ 確認後新 baseline 設 active · 舊 baseline.effective_to 改昨天<br>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-secondary" onclick="closeWfModal()">取消</button>
+        </div>
+      </div>
+    </div>
+  `;
+  showWfModal(html);
+}
+
+function openCleansheetDiff() {
+  const html = `
+    <div class="modal-mask" onclick="closeWfModal(event)">
+      <div class="modal-box" onclick="event.stopPropagation()" style="width:780px;max-width:96vw;max-height:90vh;">
+        <div class="modal-head">
+          <span>🔍 Baseline Diff Preview · CN-2024Q4 → CN-2025Q1</span>
+          <button class="modal-x" onclick="closeWfModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">
+            EPM 逐項勾選 approve · 沒勾的不套用 · approved 變更會 propagate 給所有 draft 案
+          </div>
+          <table style="width:100%;font-size:10px;border-collapse:collapse;">
+            <thead>
+              <tr style="background:var(--ocean);color:#fff;">
+                <th style="padding:6px;"><input type="checkbox" checked></th>
+                <th style="padding:6px;text-align:left;">類型</th>
+                <th style="padding:6px;text-align:left;">變更項</th>
+                <th style="padding:6px;text-align:left;">舊值</th>
+                <th style="padding:6px;text-align:left;">新值</th>
+                <th style="padding:6px;text-align:left;">Δ</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td style="padding:5px;text-align:center;"><input type="checkbox" checked></td><td style="padding:5px;">Wage</td><td style="padding:5px;">DL wage / hr</td><td style="padding:5px;font-family:Consolas;">$4.95</td><td style="padding:5px;font-family:Consolas;background:#DCFCE7;">$5.20</td><td style="padding:5px;font-family:Consolas;color:#16A34A;">↑ +5.05%</td></tr>
+              <tr style="background:var(--bg);"><td style="padding:5px;text-align:center;"><input type="checkbox" checked></td><td style="padding:5px;">IDL</td><td style="padding:5px;">Section Manager</td><td style="padding:5px;font-family:Consolas;">$60,320</td><td style="padding:5px;font-family:Consolas;background:#DCFCE7;">$63,300</td><td style="padding:5px;font-family:Consolas;color:#16A34A;">↑ +4.94%</td></tr>
+              <tr><td style="padding:5px;text-align:center;"><input type="checkbox" checked></td><td style="padding:5px;">Facility</td><td style="padding:5px;">Floor sqft cost</td><td style="padding:5px;font-family:Consolas;">$14.43</td><td style="padding:5px;font-family:Consolas;background:#DCFCE7;">$14.85</td><td style="padding:5px;font-family:Consolas;color:#16A34A;">↑ +2.91%</td></tr>
+              <tr style="background:var(--bg);"><td style="padding:5px;text-align:center;"><input type="checkbox" checked></td><td style="padding:5px;">Loss</td><td style="padding:5px;">Loss factor</td><td style="padding:5px;font-family:Consolas;">0.08%</td><td style="padding:5px;font-family:Consolas;background:#DCFCE7;">0.07%</td><td style="padding:5px;font-family:Consolas;color:#16A34A;">↓ -12.5%</td></tr>
+              <tr><td style="padding:5px;text-align:center;"><input type="checkbox" checked></td><td style="padding:5px;color:#16A34A;font-weight:700;">+ NEW</td><td style="padding:5px;">FUJI NXT M6S(新設備)</td><td style="padding:5px;color:var(--muted);">—</td><td style="padding:5px;font-family:Consolas;background:#DCFCE7;">$850k · 6 yr dep</td><td style="padding:5px;">(新增)</td></tr>
+              <tr style="background:var(--bg);"><td style="padding:5px;text-align:center;"><input type="checkbox" checked></td><td style="padding:5px;color:#B91C1C;font-weight:700;">- RETIRE</td><td style="padding:5px;">TR7500 AOI(汰換)</td><td style="padding:5px;font-family:Consolas;">$67,297</td><td style="padding:5px;color:var(--muted);">—</td><td style="padding:5px;">(下架)</td></tr>
+              <tr><td style="padding:5px;text-align:center;"><input type="checkbox" checked></td><td style="padding:5px;color:#92400E;font-weight:700;">~ CHG</td><td style="padding:5px;">DEK 採購額</td><td style="padding:5px;font-family:Consolas;">$84,000</td><td style="padding:5px;font-family:Consolas;background:#FEF3C7;">$92,000</td><td style="padding:5px;font-family:Consolas;color:#9A3412;">↑ +9.52%</td></tr>
+              <tr style="background:var(--bg);"><td style="padding:5px;text-align:center;"><input type="checkbox" checked></td><td style="padding:5px;color:#92400E;font-weight:700;">~ CHG</td><td style="padding:5px;">錫膏 unit cost</td><td style="padding:5px;font-family:Consolas;">$52/kg</td><td style="padding:5px;font-family:Consolas;background:#FEF3C7;">$58/kg</td><td style="padding:5px;font-family:Consolas;color:#9A3412;">↑ +11.5%</td></tr>
+            </tbody>
+          </table>
+          <div style="background:var(--amber-bg);border-left:3px solid var(--amber);border-radius:0 6px 6px 0;padding:10px 12px;margin-top:14px;font-size:11px;color:#92400E;">
+            <strong>📊 預估影響:</strong><br>
+            · 影響中的 draft 案 <strong>3 個</strong>(含 SteelSeries Rival 3+)<br>
+            · 已 lock 案 <strong>12 個</strong>(不受影響)<br>
+            · 預估 MVA per unit:$1.86 → $1.95(+4.8%)
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-secondary" onclick="closeWfModal()">取消</button>
+          <button class="btn btn-primary" style="background:#6D28D9;color:#fff;" onclick="closeWfModal();alert('✓ Demo: 8 項已 approve\\n· 新 baseline status=active\\n· 舊 baseline effective_to=昨天\\n· 3 個 draft 案 notify EPM 可選 reprice')">✅ 確認套用</button>
+        </div>
+      </div>
+    </div>
+  `;
+  showWfModal(html);
+}
+
+function openComputeRunModal() {
+  const html = `
+    <div class="modal-mask" onclick="closeWfModal(event)">
+      <div class="modal-box" onclick="event.stopPropagation()" style="width:560px;max-width:92vw;">
+        <div class="modal-head">
+          <span>🔄 觸發 Cleansheet Compute · Stage 5 Step 5.13</span>
+          <button class="modal-x" onclick="closeWfModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:12px;color:var(--text);line-height:1.7;margin-bottom:12px;">
+            按下 Compute 系統會跑:
+          </div>
+          <div style="background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px 14px;font-size:11px;color:var(--ink);font-family:Consolas;line-height:1.8;">
+            for case_factory(CN/VN/TW):<br>
+            &nbsp;&nbsp;for qty_scenario(LOW/HIGH):<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;compute_dl_cost(per process)      → 9 cells<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;compute_idl_cost(per process)     → 9 cells<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;compute_equipment_cost(per process) → 9 cells<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;compute_facility_cost(per process)  → 9 cells<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;compute_others (Freight/VAT/Loss) → 3 cells<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;= 81 cells per qty_scenario<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;→ write bom_cs_run_cell<br>
+            <br>
+            &nbsp;&nbsp;sum → MVA total<br>
+            &nbsp;&nbsp;→ write bom_cs_run<br>
+            <br>
+            &nbsp;&nbsp;for variant(B/W) × pkg(RETAIL/BULK):<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;total_quote = mat + pkg + mva + sga + profit<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;total_true  = ...<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;→ write bom_cs_run_result (24 列 per factory)
+          </div>
+          <div style="background:var(--cyan-bg);border-left:3px solid var(--cyan);border-radius:0 6px 6px 0;padding:10px 12px;margin-top:12px;font-size:11px;color:var(--text);">
+            預計時間 · 3 廠 × 2 qty = 6 個 run · 約 4 秒(Phase 2 計算引擎)<br>
+            結果寫入 cs_run table · 舊 run.status = 'archived'
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-secondary" onclick="closeWfModal()">取消</button>
+          <button class="btn btn-primary" style="background:var(--ocean);color:#fff;" onclick="closeWfModal();setTimeout(() => {alert('✓ Demo: Compute 完成\\n· 3 cs_run (CN/VN/TW)\\n· 162 cells + 72 results\\n· 跳轉 §cleansheet 看結果');setFormSection('cleansheet');},400)">▶ Compute 全部 3 廠</button>
+        </div>
+      </div>
+    </div>
+  `;
+  showWfModal(html);
+}
+
+function openPropagatePreview() {
+  const html = `
+    <div class="modal-mask" onclick="closeWfModal(event)">
+      <div class="modal-box" onclick="event.stopPropagation()" style="width:680px;max-width:94vw;">
+        <div class="modal-head">
+          <span>🔄 BOM Lock Propagate Preview · Stage 6 Step 6.5</span>
+          <button class="modal-x" onclick="closeWfModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:12px;color:var(--text);line-height:1.7;margin-bottom:12px;">
+            BOM lock 觸發後,系統自動 propagate 採購策略到 cs_run_result fact table:
+          </div>
+          <table style="width:100%;font-size:11px;border-collapse:collapse;">
+            <thead>
+              <tr style="background:var(--ocean);color:#fff;">
+                <th style="padding:6px;text-align:left;">影響</th>
+                <th style="padding:6px;text-align:left;">寫入 cell 數</th>
+                <th style="padding:6px;text-align:left;">範例</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td style="padding:6px;">Material true (SUMPRODUCT)</td><td style="padding:6px;font-family:Consolas;background:#DCFCE7;">24 cells</td><td style="padding:6px;color:var(--muted);">3 廠 × 2 variant × 2 qty × 2 pkg</td></tr>
+              <tr style="background:var(--bg);"><td style="padding:6px;">Material quote (SUMPRODUCT)</td><td style="padding:6px;font-family:Consolas;background:#DCFCE7;">24 cells</td><td style="padding:6px;color:var(--muted);">同上,但用 quote 價</td></tr>
+              <tr><td style="padding:6px;">PKG true / quote</td><td style="padding:6px;font-family:Consolas;background:#DCFCE7;">24 cells</td><td style="padding:6px;color:var(--muted);">商包 16 / 工包 3 items 加總</td></tr>
+              <tr style="background:var(--bg);"><td style="padding:6px;">Total true / quote (auto)</td><td style="padding:6px;font-family:Consolas;background:#DCFCE7;">24 cells</td><td style="padding:6px;color:var(--muted);">GENERATED ALWAYS AS</td></tr>
+              <tr><td style="padding:6px;">Margin amount / pct (auto)</td><td style="padding:6px;font-family:Consolas;background:#DCFCE7;">24 cells</td><td style="padding:6px;color:var(--muted);">同上,virtual column</td></tr>
+            </tbody>
+          </table>
+          <div style="background:var(--cyan-bg);border-left:3px solid var(--cyan);border-radius:0 6px 6px 0;padding:10px 12px;margin-top:14px;font-size:11px;color:var(--text);">
+            <strong>影響到的 UI sections (自動 refresh):</strong><br>
+            · §factory_matrix (24 cells)<br>
+            · §margin_analysis (24-cell heatmap + top markup items)<br>
+            · §cost (摘要值更新)<br>
+            · #cost-review channel(發 notification)
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-secondary" onclick="closeWfModal()">關閉</button>
+        </div>
+      </div>
+    </div>
+  `;
+  showWfModal(html);
+}
+
+/* ----- 通用 modal 管理 ----- */
+function showWfModal(html) {
+  let el = document.getElementById('wf-modal');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'wf-modal';
+    document.body.appendChild(el);
+  }
+  el.innerHTML = html;
+}
+function closeWfModal(e) {
+  if (e && e.target && e.target.classList && !e.target.classList.contains('modal-mask') && !e.target.closest('.modal-x') && !e.target.closest('.btn-secondary')) return;
+  const el = document.getElementById('wf-modal');
+  if (el) el.innerHTML = '';
+}
+
+
+/* ============================================================
+   🆕 v0.6 Section: Cleansheet (MVA) — cleansheet-mva-sd v0.2
+   9 製程 × 9 cost component matrix · 對應 Excel Price Summary
+   ============================================================ */
+function renderFormCleansheet(p, editable) {
+  if (!state.cleansheet_factory) state.cleansheet_factory = 'CN';
+  const fc = state.cleansheet_factory;
+  const cs = CLEANSHEET_DEMO;
+  const conf = p.confidential;
+  const masked = conf && state.role !== 'host';
+  const baseline = cs.baselines[fc];
+  const run = cs.runs[fc];
+
+  // 🆕 v0.7: 取當前 qty scenario(因 qty 變 → MVA 變)
+  const isSteelSeries = p.title?.includes('SteelSeries');
+  const useV07 = isSteelSeries && typeof STEELSERIES_QTY_SCENARIOS !== 'undefined';
+  const v07 = useV07 ? v07State() : null;
+  const activeQty = useV07 ? v07.qty : 'HIGH';
+  const qtyMeta = useV07 ? STEELSERIES_QTY_SCENARIOS.find(x => x.code === activeQty) : null;
+  // 低 qty → MVA 高(lines util 下降)· demo 用 fmCell 取對應 MVA
+  const mvaMultiplier = (useV07 && activeQty === 'LOW') ? (fmCell(fc, 'black', 'LOW', 'RETAIL').mva / fmCell(fc, 'black', 'HIGH', 'RETAIL').mva) : 1.0;
+
+  // 計算(v0.7: MVA × qty multiplier)
+  const mvaTotal = csFactoryMvaTotal(fc) * mvaMultiplier;
+  const smtMva = csGroupMva(fc, 'SMT') * mvaMultiplier;
+  const assyMva = csGroupMva(fc, 'ASSY') * mvaMultiplier;
+  const commonMva = csGroupMva(fc, 'COMMON') * mvaMultiplier;
+  const sgaAmount = (p.bom_main_part_cost || 8.683) * baseline.sga_pct;
+  const profitAmount = (mvaTotal + (p.bom_main_part_cost || 8.683)) * baseline.profit_pct;
+  const tcPerUnit = mvaTotal + sgaAmount + profitAmount;
+
+  // Status badge
+  const factoryColor = { CN:'#3730A3', VN:'#9A3412', TW:'#166534' };
+  const factoryBg    = { CN:'#E0E7FF', VN:'#FED7AA', TW:'#BBF7D0' };
+
+  return `
+    ${formSectionHead('Cleansheet (MVA 計算 · v0.7 qty-aware)', '🧮',
+      `9 製程 × 9 cost component · MVA 隨 qty scenario 變動 · spec cleansheet-mva-sd v0.3 §5.4`,
+      `<span class="badge-mini badge-green">✓ ${run.status === 'ready' ? 'Computed' : run.status} · ${run.run_label}</span>
+       <span class="badge-mini" style="background:#F3E8FF;color:#6D28D9;margin-left:6px;">${cs.template.code}</span>
+       <span class="badge-mini" style="background:#FEF3C7;color:#92400E;margin-left:6px;">baseline: ${baseline.version}</span>
+       ${useV07 ? `<span class="badge-mini" style="background:${activeQty === 'LOW' ? '#FEE2E2' : '#DCFCE7'};color:${activeQty === 'LOW' ? '#B91C1C' : '#166534'};margin-left:6px;">qty: ${qtyMeta.label_zh}</span>` : ''}`,
+      `
+        <div class="cs-fact-tabs">
+          ${['CN','VN','TW'].map(f => `
+            <button onclick="setCleansheetFactory('${f}')" class="cs-fact-tab ${f === fc ? 'active' : ''}"
+                    style="background:${f === fc ? factoryColor[f] : 'transparent'};color:${f === fc ? '#fff' : factoryColor[f]};border:1px solid ${factoryColor[f]};">
+              ${f === 'CN' ? '🇨🇳' : f === 'VN' ? '🇻🇳' : '🇹🇼'} ${f}
+            </button>
+          `).join('')}
+        </div>
+        <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;">📥 Re-import xlsx</button>
+        <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;">🔄 Compute</button>
+        ${state.role === 'host' ? `<button class="btn btn-primary" style="font-size:11px;padding:4px 10px;background:var(--ocean);color:#fff;">🔒 Lock</button>` : ''}
+      `
+    )}
+
+    <!-- Baseline + Source info -->
+    <div style="background:linear-gradient(90deg,${factoryBg[fc]} 0%,#fff 100%);border:1px solid ${factoryColor[fc]};border-left-width:4px;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:11px;color:var(--text);line-height:1.7;">
+      <div style="display:flex;gap:14px;flex-wrap:wrap;">
+        <span><strong style="color:${factoryColor[fc]};">${fc} Factory:</strong> ${cs.baselines[fc].version}</span>
+        <span><strong>Effective:</strong> ${baseline.effective_from}</span>
+        <span><strong>DL wage:</strong> $${baseline.dl_wage_hr}/hr</span>
+        <span><strong>SG&A:</strong> ${(baseline.sga_pct*100).toFixed(1)}%</span>
+        <span><strong>Profit:</strong> ${(baseline.profit_pct*100).toFixed(1)}%</span>
+        <span style="margin-left:auto;">👤 ${baseline.epm} · ${baseline.updated_at}</span>
+      </div>
+      <div style="margin-top:6px;color:var(--muted);font-size:10px;font-family:var(--font-mono);">
+        Source: ${baseline.source_xlsx}
+      </div>
+    </div>
+
+    ${useV07 ? `
+    <!-- v0.7 Qty Scenario selector -->
+    <div class="v07-toggle-bar" style="margin-bottom:14px;">
+      <div class="v07-toggle-group">
+        <span class="v07-toggle-label">📊 Qty Scenario:</span>
+        ${STEELSERIES_QTY_SCENARIOS.map(qs => `
+          <button class="v07-toggle ${activeQty === qs.code ? 'active' : ''}" onclick="setV07('qty','${qs.code}')">
+            ${qs.label_zh} <span class="v07-tag-meta">(${(qs.target_qty/1000).toFixed(0)}K · ${qs.region})</span>
+          </button>
+        `).join('')}
+      </div>
+      <div class="v07-toggle-group">
+        <span style="font-size:11px;color:var(--muted);">
+          ${activeQty === 'LOW' ?
+            `⚠ MVA × ${mvaMultiplier.toFixed(2)} (低量導致 lines util 下降)` :
+            `✓ MVA baseline (lines util 健康)`
+          }
+        </span>
+      </div>
+    </div>
+    ` : ''}
+
+    <!-- KPI cards -->
+    <div class="ff-derived-grid" style="grid-template-columns:repeat(4,1fr);">
+      <div class="ff-derived ${conf ? 'conf' : ''}">
+        <div class="d-label">MVA Total ${conf ? '🔒' : ''}</div>
+        <div class="d-value mono" style="font-size:18px;">${masked ? '▒▒▒▒' : '$' + mvaTotal.toFixed(4)}</div>
+        <div class="d-meta">/ unit · 9 製程合計</div>
+      </div>
+      <div class="ff-derived ${conf ? 'conf' : ''}">
+        <div class="d-label">SG&A + Profit ${conf ? '🔒' : ''}</div>
+        <div class="d-value mono" style="font-size:18px;">${masked ? '▒▒▒▒' : '$' + (sgaAmount + profitAmount).toFixed(4)}</div>
+        <div class="d-meta">/ unit · ${(baseline.sga_pct*100).toFixed(0)}% + ${(baseline.profit_pct*100).toFixed(0)}%</div>
+      </div>
+      <div class="ff-derived ${conf ? 'conf' : ''}">
+        <div class="d-label">SMT MVA ${conf ? '🔒' : ''}</div>
+        <div class="d-value mono">${masked ? '▒▒▒▒' : '$' + smtMva.toFixed(4)}</div>
+        <div class="d-meta">SMT + Wave + Router + Laser + Q-SMT</div>
+      </div>
+      <div class="ff-derived ${conf ? 'conf' : ''}">
+        <div class="d-label">Assy MVA ${conf ? '🔒' : ''}</div>
+        <div class="d-value mono">${masked ? '▒▒▒▒' : '$' + (commonMva + assyMva).toFixed(4)}</div>
+        <div class="d-meta">Common + BB Assy + Test + Mat + Q-BB</div>
+      </div>
+    </div>
+
+    <!-- 主矩陣表 (9 component × 10 process) -->
+    <div style="margin-bottom:14px;">
+      <div class="ff-label-row">
+        <span class="ff-label">Cost Component × Process Matrix</span>
+        <span class="ff-help" title="對齊 Cleansheet Excel Price Summary table · 每格 = 該製程該成本項 / unit">ⓘ</span>
+        <span class="ff-tag-mono">${cs.components.length} × ${cs.processes.length} · MATRIX</span>
+        ${conf ? '<span class="ff-conf">🔒</span>' : ''}
+      </div>
+      <div style="overflow-x:auto;">
+      <table class="cs-matrix">
+        <thead>
+          <tr>
+            <th class="cs-corner">Cost Component<br><span style="font-weight:400;font-size:9px;color:var(--muted);">$ / unit</span></th>
+            ${cs.processes.map(p => `<th class="cs-proc-head cs-group-${p.group.toLowerCase()}">
+              <div class="cs-proc-name">${p.code}</div>
+              <div class="cs-proc-sub">${p.name_zh}</div>
+            </th>`).join('')}
+            <th class="cs-total-col">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${cs.components.map(c => {
+            const rowTotal = csComponentTotal(fc, c.code) * mvaMultiplier;
+            return `
+              <tr class="cs-row cs-cat-${c.category.toLowerCase()}">
+                <th class="cs-row-label">
+                  <div>${c.name_zh}</div>
+                  <div style="font-size:9px;color:var(--muted);font-family:var(--font-mono);">${c.code}${c.common_only ? ' · Common only' : ''}</div>
+                </th>
+                ${cs.processes.map(p => {
+                  const val = csCellValue(fc, p.code, c.code) * mvaMultiplier;
+                  const isCommonOnly = c.common_only;
+                  const isCommonCol = p.code === 'COMMON';
+                  const shouldShow = !isCommonOnly || isCommonCol;
+                  return `<td class="cs-cell ${val > 0.05 ? 'cs-cell-high' : val > 0 ? 'cs-cell-low' : 'cs-cell-zero'}">${
+                    shouldShow && val > 0
+                      ? (masked ? '▒▒▒' : (val < 0.001 ? val.toExponential(2) : val.toFixed(4)))
+                      : '<span style="color:#CBD5E1;">—</span>'
+                  }</td>`;
+                }).join('')}
+                <td class="cs-total-cell mono">${masked ? '▒▒▒' : '$' + rowTotal.toFixed(4)}</td>
+              </tr>
+            `;
+          }).join('')}
+          <!-- MVA subtotal row -->
+          <tr class="cs-mva-row">
+            <th class="cs-row-label cs-mva-label">MVA Subtotal</th>
+            ${cs.processes.map(p => {
+              const mva = csProcessMva(fc, p.code) * mvaMultiplier;
+              return `<td class="cs-mva-cell mono">${masked ? '▒▒▒' : '$' + mva.toFixed(4)}</td>`;
+            }).join('')}
+            <td class="cs-mva-total mono">${masked ? '▒▒▒▒' : '$' + mvaTotal.toFixed(4)}</td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <!-- SMT vs Assy grouping (Excel Q20/Q21) -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+      <div class="cs-group-card" style="background:linear-gradient(180deg,#EEF2FF 0%,#fff 100%);border:1px solid #C7D2FE;">
+        <div class="cs-group-label">📦 SMT-side MVA</div>
+        <div class="cs-group-value mono">${masked ? '▒▒▒▒' : '$' + smtMva.toFixed(4)}</div>
+        <div class="cs-group-meta">SMT_MAIN + WAVE + ROUTER + LASER + Q_SMT</div>
+        <div class="cs-group-bar">
+          <div class="cs-group-bar-fill" style="width:${(smtMva/mvaTotal*100).toFixed(1)}%;background:#6366F1;"></div>
+        </div>
+        <div class="cs-group-pct">${(smtMva/mvaTotal*100).toFixed(1)}% of MVA</div>
+      </div>
+      <div class="cs-group-card" style="background:linear-gradient(180deg,#F0FDF4 0%,#fff 100%);border:1px solid #86EFAC;">
+        <div class="cs-group-label">🔧 Assy-side MVA</div>
+        <div class="cs-group-value mono">${masked ? '▒▒▒▒' : '$' + (commonMva + assyMva).toFixed(4)}</div>
+        <div class="cs-group-meta">Common + BB_ASSY + BB_TEST + MAT_MGMT + Q_BB</div>
+        <div class="cs-group-bar">
+          <div class="cs-group-bar-fill" style="width:${((commonMva + assyMva)/mvaTotal*100).toFixed(1)}%;background:#16A34A;"></div>
+        </div>
+        <div class="cs-group-pct">${((commonMva + assyMva)/mvaTotal*100).toFixed(1)}% of MVA</div>
+      </div>
+    </div>
+
+    <!-- Final TC waterfall -->
+    <div style="background:#fff;border:2px solid var(--ocean);border-radius:10px;padding:14px;margin-bottom:14px;">
+      <div style="font-size:12px;font-weight:700;color:var(--ink);margin-bottom:10px;">💰 Total Cost per Unit (Ex-Factory · 計算明細)</div>
+      <table style="width:100%;font-size:12px;">
+        <tr>
+          <td style="padding:4px 8px;">Motherboard Material (from BOM)</td>
+          <td style="text-align:right;padding:4px 8px;color:var(--muted);">${masked ? '▒▒▒' : '$' + (p.bom_main_part_cost || 8.683).toFixed(4)}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 8px;">+ MVA (9 製程合計)</td>
+          <td style="text-align:right;padding:4px 8px;color:var(--ocean);font-weight:600;">${masked ? '▒▒▒' : '$' + mvaTotal.toFixed(4)}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 8px;">+ SG&A (${(baseline.sga_pct*100).toFixed(1)}%)</td>
+          <td style="text-align:right;padding:4px 8px;">${masked ? '▒▒▒' : '$' + sgaAmount.toFixed(4)}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 8px;">+ Profit (${(baseline.profit_pct*100).toFixed(1)}%)</td>
+          <td style="text-align:right;padding:4px 8px;">${masked ? '▒▒▒' : '$' + profitAmount.toFixed(4)}</td>
+        </tr>
+        <tr style="border-top:2px solid var(--ocean);background:var(--cyan-bg);font-weight:700;">
+          <td style="padding:6px 8px;">= Transformation Cost (TC)</td>
+          <td style="text-align:right;padding:6px 8px;color:var(--ocean);font-size:14px;" class="mono">${masked ? '▒▒▒▒' : '$' + tcPerUnit.toFixed(4)}</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- spec 提示 -->
+    <div style="background:var(--cyan-bg);border-left:3px solid var(--cyan);border-radius:0 8px 8px 0;padding:10px 14px;margin-bottom:14px;font-size:11px;color:var(--text);line-height:1.6;">
+      <strong style="color:var(--ocean);">spec cleansheet-mva-sd §6-7</strong> · 計算引擎對齊 Cleansheet Excel,允許 ε &lt; 0.01 浮點差異。
+      ${fc === 'CN' ? '此 CN matrix 直接從 <code style="background:#fff;padding:1px 4px;border-radius:3px;">Rival 3+ Wired Mouse Cleansheet_China-20241011-19S.xlsx</code> Price Summary 解析。' : `此 ${fc} matrix 為 demo · 用 CN baseline × 廠別 ratio 縮放(等真實 xlsx import 後替換)。`}<br>
+      <strong style="color:var(--ocean);">與 §factory_matrix 對應</strong> · ${fc} 廠 MVA $${mvaTotal.toFixed(4)} = §factory_matrix.byFactory.${fc}.mva $${(fc === 'CN' ? 1.8558 : fc === 'VN' ? 1.4300 : 3.2070).toFixed(4)}(ε &lt; 0.01 通過)
+    </div>
+
+    ${formFoot('Cleansheet MVA 為 Phase 1 引入。CN baseline 對齊客戶實際 xlsx;VN/TW 待 USER 提供。後續 EPM 編輯走 §case_process / §case_equipment / §case_idl_alloc UI(P3 規劃)。')}
+  `;
+}
+
+function setCleansheetFactory(f) {
+  state.cleansheet_factory = f;
+  if (typeof render === 'function') render();
+}
+
+
+/* ============================================================
+   🆕 v0.7 Section: Margin Analysis — bom-collection-sd §19 + cleansheet-mva-sd §6.2
+   橫向呈現 24 個 result cells · 含 True/Quote/Margin · 全 scenario pivot
+   ============================================================ */
+function renderFormMarginAnalysis(p, editable) {
+  const isSteelSeries = p.title?.includes('SteelSeries');
+  const useFullData = isSteelSeries && typeof STEELSERIES_FM_FULL !== 'undefined';
+  if (!useFullData) {
+    return `${formSectionHead('Margin Analysis', '💰', '此案未啟用 v0.7 三維度', '', '')}
+            <div style="padding:30px;color:var(--muted);text-align:center;">⚠ Margin Analysis 僅 SteelSeries demo 案展示</div>`;
+  }
+  const conf = p.confidential;
+  const masked = conf && state.role !== 'host';
+  const hasViewTrueCost = state.role === 'host';  // demo: host = VIEW_TRUE_COST role
+  const v07 = v07State();
+  const fm = STEELSERIES_FM;
+  const factories = fm.factories;
+  const variantKeys = fm.variant_keys;
+  const allCells = STEELSERIES_FM_FULL.cells.map(c => ({
+    ...c,
+    total_true:  c.material_true  + c.pkg_true  + c.mva + c.sga + c.profit,
+    total_quote: c.material_quote + c.pkg_quote + c.mva + c.sga + c.profit,
+    margin_amount: (c.material_quote + c.pkg_quote + c.mva + c.sga + c.profit) - (c.material_true + c.pkg_true + c.mva + c.sga + c.profit),
+    margin_pct: ((c.material_quote + c.pkg_quote) - (c.material_true + c.pkg_true)) / (c.material_quote + c.pkg_quote + c.mva + c.sga + c.profit),
+  }));
+  const sortedByMargin = [...allCells].sort((a,b) => b.margin_pct - a.margin_pct);
+  const minMargin = sortedByMargin[sortedByMargin.length-1];
+  const maxMargin = sortedByMargin[0];
+  const avgMargin = allCells.reduce((s,c) => s + c.margin_pct, 0) / allCells.length;
+  const avgMarginAmt = allCells.reduce((s,c) => s + c.margin_amount, 0) / allCells.length;
+
+  if (!hasViewTrueCost) {
+    return `
+      ${formSectionHead('Margin Analysis (🔒🔒 限定權限)', '💰', '需 VIEW_TRUE_COST 權限才能看 margin · spec bom-collection-sd §20', '', '')}
+      <div style="background:linear-gradient(180deg,#FEE2E2 0%,#fff 100%);border:1px solid #FCA5A5;border-radius:10px;padding:30px;text-align:center;">
+        <div style="font-size:40px;margin-bottom:10px;">🔒🔒</div>
+        <div style="font-size:14px;font-weight:700;color:#991B1B;margin-bottom:6px;">您目前的角色(${state.role.toUpperCase()})無 VIEW_TRUE_COST 權限</div>
+        <div style="font-size:12px;color:var(--text);">Margin 涉及 True Cost / Markup 商業核心邏輯,僅限 admin / DPM / 財務主管 / 採購主管 / 資深業務(自家案)看到。</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:14px;">切到 HOST 視角 → Margin Analysis 即可展開。</div>
+      </div>
+    `;
+  }
+
+  return `
+    ${formSectionHead('Margin Analysis 🔒🔒', '💰',
+      `24 個 cells × (True / Quote / Margin)· 4 scenario combinations · 全 margin 透視`,
+      `<span class="badge-mini" style="background:#DCFCE7;color:#166534;">✓ ${(avgMargin*100).toFixed(1)}% avg margin</span>
+       <span class="badge-mini" style="background:#FEE2E2;color:#991B1B;margin-left:6px;">🔒🔒 Critical · view_true_cost</span>`,
+      ''
+    )}
+
+    <!-- Critical KPI -->
+    <div class="ff-derived-grid" style="grid-template-columns:repeat(4,1fr);">
+      <div class="ff-derived" style="background:linear-gradient(180deg,#DCFCE7 0%,#fff 100%);border-color:#86EFAC;">
+        <div class="d-label">Max Margin</div>
+        <div class="d-value mono" style="font-size:18px;color:#166534;">${(maxMargin.margin_pct*100).toFixed(1)}%</div>
+        <div class="d-meta">${maxMargin.factory} · ${fm.variant_labels[maxMargin.variant]} · ${maxMargin.qty} · ${maxMargin.pkg}</div>
+      </div>
+      <div class="ff-derived" style="background:linear-gradient(180deg,#FEE2E2 0%,#fff 100%);border-color:#FCA5A5;">
+        <div class="d-label">Min Margin</div>
+        <div class="d-value mono" style="font-size:18px;color:#991B1B;">${(minMargin.margin_pct*100).toFixed(1)}%</div>
+        <div class="d-meta">${minMargin.factory} · ${fm.variant_labels[minMargin.variant]} · ${minMargin.qty} · ${minMargin.pkg}</div>
+      </div>
+      <div class="ff-derived">
+        <div class="d-label">Avg Margin %</div>
+        <div class="d-value mono" style="font-size:18px;">${(avgMargin*100).toFixed(1)}%</div>
+        <div class="d-meta">24 cells average</div>
+      </div>
+      <div class="ff-derived">
+        <div class="d-label">Avg Margin $</div>
+        <div class="d-value mono" style="font-size:18px;">$${avgMarginAmt.toFixed(2)}</div>
+        <div class="d-meta">/ unit · cross-scenario</div>
+      </div>
+    </div>
+
+    <!-- 4 scenario × 6 cell margin heatmap -->
+    <div style="margin-bottom:14px;">
+      <div class="ff-label-row">
+        <span class="ff-label">24 cells Margin Heatmap</span>
+        <span class="ff-help" title="同時呈現所有 scenario × variant × factory 組合的 margin %">ⓘ</span>
+        <span class="ff-tag-mono">HEAT · 4 scenarios × 6 cells</span>
+        <span class="ff-conf">🔒🔒</span>
+      </div>
+      ${['HIGH-RETAIL','HIGH-BULK','LOW-RETAIL','LOW-BULK'].map(scn => {
+        const [qty, pkg] = scn.split('-');
+        const scnCells = allCells.filter(c => c.qty === qty && c.pkg === pkg);
+        const qtyM = STEELSERIES_QTY_SCENARIOS.find(x => x.code === qty);
+        const pkgM = STEELSERIES_PKG_VERSIONS.find(x => x.code === pkg);
+        return `
+          <div class="margin-scenario-block">
+            <div class="margin-scenario-head">
+              <span><strong>${qtyM.label_zh}</strong> (${(qtyM.target_qty/1000).toFixed(0)}K) × <strong>${pkgM.label_zh}</strong></span>
+              <span style="margin-left:auto;font-family:var(--font-mono);">avg ${(scnCells.reduce((s,c) => s + c.margin_pct, 0) / scnCells.length * 100).toFixed(1)}%</span>
+            </div>
+            <div class="margin-grid">
+              ${factories.flatMap(f => variantKeys.map(v => {
+                const cell = scnCells.find(c => c.factory === f && c.variant === v);
+                if (!cell) return '';
+                const intensity = (cell.margin_pct - 0.05) / 0.25;
+                const color = `rgba(22,163,74,${Math.min(1, Math.max(0.1, intensity))})`;
+                return `<div class="margin-cell" style="background:${color};color:${intensity > 0.6 ? '#fff' : '#0F172A'};" title="Quote $${cell.total_quote.toFixed(3)} · True $${cell.total_true.toFixed(3)}">
+                  <div class="mc-label">${f} · ${fm.variant_labels[v]}</div>
+                  <div class="mc-pct mono">${(cell.margin_pct*100).toFixed(1)}%</div>
+                  <div class="mc-amt mono">$${cell.margin_amount.toFixed(2)}</div>
+                </div>`;
+              })).join('')}
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+
+    <!-- Top Markup items -->
+    <div style="margin-bottom:14px;">
+      <div class="ff-label-row">
+        <span class="ff-label">Top Markup Items · per PKG version</span>
+        <span class="ff-help" title="bom-collection-sd §19 markup 結構分析">ⓘ</span>
+        <span class="ff-tag-mono">CRITICAL</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+        ${STEELSERIES_PKG_VERSIONS.map(pv => `
+          <div style="background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;">
+            <div style="font-size:12px;font-weight:700;color:var(--ink);margin-bottom:8px;">${pv.label_zh} · ${pv.items_count} items</div>
+            <table class="markup-table">
+              <thead><tr><th>#</th><th>Item</th><th>True</th><th>Quote</th><th>Markup</th></tr></thead>
+              <tbody>
+                ${fmTopMarkupItems(pv.code, 5).map((it,i) => `
+                  <tr>
+                    <td>${i+1}</td>
+                    <td>${it.name}</td>
+                    <td class="mono" style="color:#9A3412;">$${it.true_cost.toFixed(3)}</td>
+                    <td class="mono">$${it.quote_price.toFixed(3)}</td>
+                    <td class="mono" style="background:${it.markup_pct > 0.5 ? '#FEE2E2' : it.markup_pct > 0.3 ? '#FEF3C7' : '#DCFCE7'};padding:2px 6px;border-radius:3px;font-weight:700;">${(it.markup_pct*100).toFixed(1)}%</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+            <div style="font-size:10px;color:var(--muted);margin-top:6px;">
+              Total: True $${pv.total_true.toFixed(3)} · Quote $${pv.total_quote.toFixed(3)} · avg ${(pv.markup_avg*100).toFixed(1)}%
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+
+    <!-- Spec 提示 -->
+    <div style="background:var(--cyan-bg);border-left:3px solid var(--cyan);border-radius:0 8px 8px 0;padding:10px 14px;margin-bottom:14px;font-size:11px;color:var(--text);line-height:1.6;">
+      <strong style="color:var(--ocean);">spec bom-collection-sd §19</strong> · Margin = (Quote total - True total) / Quote total。藏在每料件的 true → quote 價差,SG&A+Profit($0.75)只是象徵性。<br>
+      <strong style="color:var(--ocean);">cleansheet-mva-sd §6.2</strong> · 24 cells 為 <code style="background:#fff;padding:1px 4px;border-radius:3px;">bom_cs_run_result</code> fact table 的 SQL pivot 結果。改 BOM 採購策略 → propagate → 全 24 cells 重算。<br>
+      <strong style="color:#991B1B;">🔒🔒 Critical 警告</strong> · 此 section 涉及 markup 商業邏輯,不可截圖外傳 · 所有觀看記錄入 audit_log。
+    </div>
+
+    ${formFoot('Margin Analysis 為 v0.7 新增 · 需 VIEW_TRUE_COST 權限')}
+  `;
+}
+
+
+/* ============================================================
+   🆕 v0.8 · WHOOP Gen4 6 個 form section render 函式
+   對齊 docs/Cortex_互動Demo_WHOOP_v1.html 6 tab 內容
+   ============================================================ */
+
+function renderFormWhoopSummary(p, editable) {
+  return `
+    ${formSectionHead('WHOOP Summary 主表', '📊',
+      `5 PKG SKU × 8 子組件 × 19 cost rows · 對齊 Excel Summary sheet`,
+      '<span class="badge-mini badge-amber">⚠️ 部分支援 · 需新 bom_module 層</span>',
+      '<button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;" onclick="setFormSection(\'whoop_gap\')">⚠️ Gap Analysis</button>')}
+
+    <div style="background:var(--cyan-bg);border-left:3px solid var(--cyan);border-radius:0 8px 8px 0;padding:10px 14px;margin-bottom:14px;font-size:11px;color:var(--text);line-height:1.6;">
+      💡 這張表是整本 quotation book 的核心 · 一橫看到 5 種 PKG SKU 的 cost 拆解 · 直橫對齊 = 1 個 SKU 包含哪些子組件
+    </div>
+
+    <div style="overflow-x:auto;">
+    <table class="whoop-summary-table">
+      <thead>
+        <tr>
+          <th class="whoop-row-label">No · 項目</th>
+          <th>單價 (USD)</th>
+          ${WHOOP_SKUS.map(s => `<th class="whoop-sku-col">${s.name}<br><span style="font-size:9px;font-weight:400;opacity:0.7;">${s.tag}</span></th>`).join('')}
+          <th style="min-width:140px;">備註</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${WHOOP_SUMMARY_ROWS.map(row => {
+          if (row.isCat) {
+            return `<tr class="whoop-cat-row"><th colspan="${WHOOP_SKUS.length + 3}">▼ ${row.cat}</th></tr>`;
+          }
+          if (row.subtotal) {
+            return `<tr class="whoop-subtotal">
+              <th class="whoop-row-label">— ${row.name}</th>
+              <td>—</td>
+              ${row.cells.map(c => `<td>${c}</td>`).join('')}
+              <td></td>
+            </tr>`;
+          }
+          if (row.total) {
+            return `<tr class="whoop-total">
+              <th class="whoop-row-label" style="background:var(--navy)!important;color:#fff;">≡ ${row.name}</th>
+              <td></td>
+              ${row.cells.map(c => `<td>${c}</td>`).join('')}
+              <td></td>
+            </tr>`;
+          }
+          if (row.rate) {
+            return `<tr class="whoop-rate">
+              <th class="whoop-row-label" style="background:#FEF3C7!important;">${row.name}</th>
+              <td></td>
+              ${row.cells.map(c => `<td>${c}</td>`).join('')}
+              <td></td>
+            </tr>`;
+          }
+          return `<tr>
+            <th class="whoop-row-label">${row.no || '—'}. ${row.name}</th>
+            <td class="whoop-sku-cost">${row.cost}</td>
+            ${row.cells.map(c => {
+              if (c === '' || c === 0) return '<td class="whoop-sku-zero">—</td>';
+              return `<td class="${typeof c === 'number' && c > 0 ? 'whoop-sku-include' : 'whoop-sku-cost'}">${c}</td>`;
+            }).join('')}
+            <td style="font-size:10px;color:var(--muted);">${row.note || ''}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+    </div>
+
+    <div style="background:var(--amber-bg);border-left:3px solid var(--amber);border-radius:0 8px 8px 0;padding:10px 14px;margin-top:14px;font-size:11px;color:#92400E;line-height:1.6;">
+      ⚠️ <strong>v0.7 部分支援</strong>:子組件結構需新增 <code style="background:#fff;padding:1px 4px;border-radius:3px;">bom_module</code> 層;5 PKG SKU 已支援多 PKG,但需新增「SKU × Module 包含矩陣」(<code style="background:#fff;padding:1px 4px;border-radius:3px;">bom_cs_case_pkg_module_include</code> 表)
+    </div>
+
+    ${formFoot('WHOOP Summary · 對應 docs/whoop-bom-gap-analysis.md §二 · 整本 quotation book 的核心 pivot 視圖')}
+  `;
+}
+
+function renderFormWhoopModules(p, editable) {
+  const mod = whoopActiveModule();
+
+  return `
+    ${formSectionHead('WHOOP 子組件 BOM Browser', '🧩',
+      `8 個子組件 各自獨立 BOM · 跟 SteelSeries「一案一份 BOM」結構不同`,
+      '<span class="badge-mini" style="background:#FEE2E2;color:#991B1B;">❌ 缺 bom_module 層</span>',
+      '<button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;" onclick="setFormSection(\'whoop_gap\')">⚠️ Gap Analysis</button>')}
+
+    <div style="background:#FEE2E2;border-left:3px solid var(--red);border-radius:0 8px 8px 0;padding:10px 14px;margin-bottom:14px;font-size:11px;color:#991B1B;line-height:1.6;">
+      ❌ <strong>v0.7 不支援</strong>:現在「一案一份 BOM 階層樹」· WHOOP 需要「一案 N 個子組件 各自有 BOM」<br>
+      <strong>建議 schema</strong>:新增 <code style="background:#fff;padding:1px 4px;border-radius:3px;">bom_module</code> 表,結構變成 <code style="background:#fff;padding:1px 4px;border-radius:3px;">module → section → category → item → mfg → snapshot</code>(6 層)
+    </div>
+
+    <div class="whoop-module-grid">
+      <div class="whoop-module-list">
+        <h4>子組件列表(8 個)</h4>
+        ${WHOOP_MODULES.map(m => `
+          <div class="whoop-mod-item ${m.code === mod.code ? 'active' : ''}" onclick="setWhoopActiveMod('${m.code}')">
+            <div class="whoop-mod-cat">${m.cat}</div>
+            <div class="whoop-mod-name">${m.name}</div>
+            <div class="whoop-mod-meta">${m.items_count} items · cost $${m.cost}</div>
+          </div>
+        `).join('')}
+      </div>
+
+      <div class="whoop-mod-detail">
+        <h3>${mod.name}</h3>
+        <div class="whoop-mod-rev">Rev: ${mod.rev} · ${mod.vendor_consigned} · ${mod.note}</div>
+
+        <div class="whoop-mod-stats">
+          <div class="whoop-stat"><div class="whoop-stat-label">Cost</div><div class="whoop-stat-val">$${mod.cost}</div></div>
+          <div class="whoop-stat"><div class="whoop-stat-label">Items</div><div class="whoop-stat-val">${mod.items_count}</div></div>
+          <div class="whoop-stat"><div class="whoop-stat-label">Category</div><div class="whoop-stat-val">${mod.cat}</div></div>
+          <div class="whoop-stat"><div class="whoop-stat-label">Vendor mode</div><div class="whoop-stat-val" style="font-size:11px;">${mod.vendor_consigned}</div></div>
+        </div>
+
+        <table class="whoop-bom-table">
+          <thead>
+            <tr>
+              <th>Foxlink P/N</th>
+              <th>Whoop P/N</th>
+              <th>Description</th>
+              <th>Qty</th>
+              <th>Designator</th>
+              <th>Vendor</th>
+              <th>Customer Specified</th>
+              <th>LT</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${mod.items.map(it => `
+              <tr>
+                <td class="whoop-pn">${it.fpn}</td>
+                <td class="whoop-pn">${it.wpn || '-'}</td>
+                <td>${it.desc}</td>
+                <td>${it.qty}</td>
+                <td style="color:var(--muted);">${it.des}</td>
+                <td>${it.vendor}</td>
+                <td>${it.consign === 'Y' ? '<span class="whoop-consign-y">Y · 客戶指定</span>' : '<span class="whoop-consign-n">N</span>'}</td>
+                <td style="color:var(--muted);">${it.lt}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div style="background:var(--amber-bg);border-left:3px solid var(--amber);border-radius:0 8px 8px 0;padding:10px 14px;margin-top:14px;font-size:11px;color:#92400E;line-height:1.6;">
+      ⚠️ <strong>缺欄</strong>:WHOOP P/N(客戶料號)+ 客戶指定 vendor flag 是 v0.7 沒有的欄位 · 建議 schema 補上
+    </div>
+
+    ${formFoot('Multi-Sub-BOM 結構 · 點左側切換 · 8 個子組件加總 = 整機 BOM')}
+  `;
+}
+
+function renderFormWhoopSku(p, editable) {
+  return `
+    ${formSectionHead('WHOOP PKG SKU 配置矩陣', '📦',
+      `5 個 Channel SKU 各包含哪些子組件 · 對齊 Summary 直橫對齊邏輯`,
+      '<span class="badge-mini" style="background:#FEE2E2;color:#991B1B;">❌ 缺 SKU-Module 矩陣表</span>',
+      '<button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;" onclick="setFormSection(\'whoop_summary\')">📊 看 Summary</button>')}
+
+    <div style="background:#FEE2E2;border-left:3px solid var(--red);border-radius:0 8px 8px 0;padding:10px 14px;margin-bottom:14px;font-size:11px;color:#991B1B;line-height:1.6;">
+      ❌ <strong>v0.7 不支援</strong>:現在 PKG 跟子組件是分開定義的,沒有「哪 SKU 包含哪些子組件」的 mapping<br>
+      <strong>建議 schema</strong>:新增 <code style="background:#fff;padding:1px 4px;border-radius:3px;">bom_cs_case_pkg_module_include</code> 表(多對多)
+    </div>
+
+    <div style="overflow-x:auto;">
+    <table class="whoop-sku-matrix">
+      <thead>
+        <tr>
+          <th class="whoop-mod-label">子組件 (Module)</th>
+          ${WHOOP_SKUS.map(s => `
+            <th style="min-width:120px;">
+              ${s.name}<br>
+              <span style="font-size:10px;font-weight:400;opacity:0.7;">${s.tag}</span>
+            </th>
+          `).join('')}
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="whoop-cat-row"><th colspan="${WHOOP_SKUS.length + 1}">▼ EE 子組件</th></tr>
+        ${WHOOP_MODULES.filter(m => m.cat === 'EE').map(mod => `
+          <tr>
+            <th class="whoop-mod-label">${mod.name}<br><span style="color:var(--muted);font-size:9px;font-weight:400;">$${mod.cost} · ${mod.items_count} items</span></th>
+            ${WHOOP_SKUS.map(s => {
+              const inc = WHOOP_SKU_MODULE_MATRIX[mod.code][s.code];
+              return `<td class="${inc > 0 ? 'whoop-inc' : 'whoop-exc'}">${inc > 0 ? '✓' : '—'}</td>`;
+            }).join('')}
+          </tr>
+        `).join('')}
+
+        <tr class="whoop-cat-row"><th colspan="${WHOOP_SKUS.length + 1}">▼ ME 子組件</th></tr>
+        ${WHOOP_MODULES.filter(m => m.cat === 'ME').map(mod => `
+          <tr>
+            <th class="whoop-mod-label">${mod.name}<br><span style="color:var(--muted);font-size:9px;font-weight:400;">$${mod.cost} · ${mod.items_count} items</span></th>
+            ${WHOOP_SKUS.map(s => {
+              const inc = WHOOP_SKU_MODULE_MATRIX[mod.code][s.code];
+              return `<td class="${inc > 0 ? 'whoop-inc' : 'whoop-exc'}">${inc > 0 ? '✓' : '—'}</td>`;
+            }).join('')}
+          </tr>
+        `).join('')}
+
+        <tr class="whoop-cat-row"><th colspan="${WHOOP_SKUS.length + 1}">▼ Consumable</th></tr>
+        <tr>
+          <th class="whoop-mod-label">For SMT & ATE & FATP<br><span style="color:var(--muted);font-size:9px;font-weight:400;">$1.14 · 300+ items</span></th>
+          ${WHOOP_SKUS.map(s => `<td class="${WHOOP_SKU_MODULE_MATRIX.CONSUMABLE[s.code] > 0 ? 'whoop-inc' : 'whoop-exc'}">${WHOOP_SKU_MODULE_MATRIX.CONSUMABLE[s.code] > 0 ? '✓' : '—'}</td>`).join('')}
+        </tr>
+      </tbody>
+    </table>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(${WHOOP_SKUS.length},1fr);gap:8px;margin-top:18px;">
+      ${WHOOP_SKUS.map(s => {
+        const incCount = Object.keys(WHOOP_SKU_MODULE_MATRIX).filter(k => WHOOP_SKU_MODULE_MATRIX[k][s.code] > 0).length;
+        const totalRow = WHOOP_SUMMARY_ROWS.find(r => r.total);
+        const total = totalRow ? totalRow.cells[WHOOP_SKUS.indexOf(s)] : '-';
+        return `
+          <div class="whoop-gap-card supported">
+            <div class="whoop-gap-card-title" style="font-size:12px;">${s.name}</div>
+            <div style="color:var(--muted);font-size:10px;margin-top:4px;">包含 ${incCount} 個子組件</div>
+            <div class="mono" style="font-size:13px;color:var(--ocean);margin-top:6px;font-weight:700;">${total} USD</div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+
+    <div style="background:var(--cyan-bg);border-left:3px solid var(--cyan);border-radius:0 8px 8px 0;padding:10px 14px;margin-top:14px;font-size:11px;color:var(--text);line-height:1.6;">
+      💡 <strong>主要使用情境</strong>:Retail = 整裝零售 · White Box+Black Suit = 售後替換套裝 · White Box Strap = 單獨換 strap · White Box Battery = 單獨換電池 · Strap+Battery = 替換組合
+    </div>
+
+    ${formFoot('PKG SKU 配置矩陣 · 點橫看哪 SKU 包含哪些子組件,直看哪子組件出現在哪 SKU')}
+  `;
+}
+
+function renderFormWhoopProcess(p, editable) {
+  return `
+    ${formSectionHead('WHOOP 製程 (FATP + SMT)', '🔧',
+      `FATP 30+ stations + SMT cost · v0.7 的 9 製程 cleansheet 不夠用`,
+      '<span class="badge-mini badge-amber">⚠️ template 需擴</span>',
+      '<button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;" onclick="setFormSection(\'whoop_gap\')">⚠️ Gap Analysis</button>')}
+
+    <div style="display:grid;grid-template-columns:1fr 380px;gap:20px;margin-top:14px;">
+      <div>
+        <h3 style="margin-bottom:8px;font-size:14px;color:var(--ocean);">🏭 FATP 製程 stations(節錄前 14 + 後 16+)</h3>
+        <div class="whoop-proc-grid">
+          ${WHOOP_FATP_STATIONS.map(s => `
+            <div class="whoop-proc-card">
+              <div class="whoop-proc-code">${s.code}</div>
+              <div class="whoop-proc-name">${s.name}</div>
+              <div class="whoop-proc-meta">UPH ${s.uph} · DL ${s.dl} · ${s.sfc}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <div>
+        <h3 style="margin-bottom:8px;font-size:14px;color:var(--ocean);">⚙️ SMT cost(by board)</h3>
+        <table class="whoop-bom-table">
+          <thead>
+            <tr>
+              <th>Board</th>
+              <th>Points</th>
+              <th>Cost ($)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${WHOOP_SMT_COST.slice(0,3).map(s => `
+              <tr><td>${s.board}</td><td class="mono">${s.points}</td><td class="mono">$${s.cost}</td></tr>
+            `).join('')}
+            <tr style="background:var(--cyan-bg);font-weight:700;">
+              <td>Total</td>
+              <td class="mono">${WHOOP_SMT_COST[3].points}</td>
+              <td class="mono">$${WHOOP_SMT_COST[3].cost}</td>
+            </tr>
+            <tr><td colspan="2">+ Allowance / O/H = 5%</td><td class="mono">+$${WHOOP_SMT_COST[3].allowance}</td></tr>
+            <tr style="background:var(--navy);color:#fff;font-weight:700;">
+              <td colspan="2">TTL SMT Cost</td>
+              <td class="mono">$${WHOOP_SMT_COST[3].total}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style="background:var(--cyan-bg);border-left:3px solid var(--cyan);border-radius:0 6px 6px 0;padding:10px 12px;margin-top:14px;font-size:11px;color:var(--text);line-height:1.6;">
+          💡 <strong>SMT 計算邏輯</strong>:Foxlink 內部 = Transfer point × $1/point<br>
+          C/P (Chip/Resistor/Capacitor) = 1 point each<br>
+          M/D/L/Q/Y (大件) = 2 points each<br>
+          U (IC) = 計算 lead 數 / 3<br>
+          J (Connector) = 24/2 = 12 points
+        </div>
+      </div>
+    </div>
+
+    <div style="background:var(--amber-bg);border-left:3px solid var(--amber);border-radius:0 8px 8px 0;padding:10px 14px;margin-top:14px;font-size:11px;color:#92400E;line-height:1.6;">
+      ⚠️ <strong>v0.7 部分支援</strong>:bom_process_template 已支援 N 製程 · 但需新建 <code style="background:#fff;padding:1px 4px;border-radius:3px;">WEARABLE_STD</code> template(30+ stations)<br>
+      ⚠️ <strong>Per-process yield loss</strong>:WHOOP 是 SMT 0.2~0.5% 分子板 + FATP 5/7% 分製程 · 需在 baseline 改 JSON struct
+    </div>
+
+    ${formFoot('FATP 30+ stations + SMT cost · 對齊 Excel FATP / SMT cost sheets')}
+  `;
+}
+
+function renderFormWhoopCost(p, editable) {
+  const sub = WHOOP_SUMMARY_ROWS.find(r => r.subtotal).cells[0];
+  const oh = WHOOP_SUMMARY_ROWS.find(r => r.name === 'Over-head (4%)').cost;
+  const sga = WHOOP_SUMMARY_ROWS.find(r => r.name === 'SG&A (3%)').cost;
+  const profit = WHOOP_SUMMARY_ROWS.find(r => r.name === 'Profit (3%)').cost;
+  const transport = 0.5;
+
+  return `
+    ${formSectionHead('WHOOP Cost 結構拆解', '💰',
+      `v0.7(SG&A+Profit)vs WHOOP(OH + SG&A + Profit + Transportation)`,
+      '<span class="badge-mini badge-amber">⚠️ 缺 OH + Transport 欄</span>',
+      '<button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;" onclick="setFormSection(\'whoop_gap\')">⚠️ Gap Analysis</button>')}
+
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:18px;">
+      <div class="whoop-cost-bd">
+        <div class="whoop-cost-label">BOM cost(子組件 + ME + PKG + Consumable + 製程)</div>
+        <div class="whoop-cost-val">$${sub}</div>
+        <div class="whoop-cost-pct">82.5% of total</div>
+      </div>
+      <div class="whoop-cost-bd">
+        <div class="whoop-cost-label">Over-head</div>
+        <div class="whoop-cost-val">$${oh.toFixed(2)}</div>
+        <div class="whoop-cost-pct">4% × BOM · v0.7 缺此欄</div>
+      </div>
+      <div class="whoop-cost-bd">
+        <div class="whoop-cost-label">SG&A</div>
+        <div class="whoop-cost-val">$${sga.toFixed(2)}</div>
+        <div class="whoop-cost-pct">3% × BOM</div>
+      </div>
+      <div class="whoop-cost-bd">
+        <div class="whoop-cost-label">Profit</div>
+        <div class="whoop-cost-val">$${profit.toFixed(2)}</div>
+        <div class="whoop-cost-pct">3% × BOM</div>
+      </div>
+      <div class="whoop-cost-bd">
+        <div class="whoop-cost-label">Transportation</div>
+        <div class="whoop-cost-val">$${transport.toFixed(2)}</div>
+        <div class="whoop-cost-pct">OIA pickup from FQ · v0.7 缺</div>
+      </div>
+    </div>
+
+    <div style="background:var(--bg);padding:18px;border-radius:8px;margin-bottom:18px;">
+      <h3 style="margin:0 0 12px 0;font-size:14px;color:var(--ocean);">📊 5 個 SKU 的 Total Cost 對照</h3>
+      <table class="whoop-bom-table">
+        <thead>
+          <tr>
+            <th>PKG SKU</th>
+            <th>BOM Subtotal</th>
+            <th>O/H</th>
+            <th>SG&A</th>
+            <th>Profit</th>
+            <th>Transport</th>
+            <th style="background:var(--navy);color:#fff;">TTL USD</th>
+            <th>BOM Cost Rate</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${WHOOP_SKUS.map((s, i) => {
+            const sub = WHOOP_SUMMARY_ROWS.find(r => r.subtotal).cells[i];
+            const oh = WHOOP_SUMMARY_ROWS.find(r => r.name === 'Over-head (4%)').cells[i];
+            const sga = WHOOP_SUMMARY_ROWS.find(r => r.name === 'SG&A (3%)').cells[i];
+            const pf = WHOOP_SUMMARY_ROWS.find(r => r.name === 'Profit (3%)').cells[i];
+            const tt = WHOOP_SUMMARY_ROWS.find(r => r.total).cells[i];
+            const rate = WHOOP_SUMMARY_ROWS.find(r => r.rate).cells[i];
+            return `<tr>
+              <td><strong>${s.name}</strong><br><span style="color:var(--muted);font-size:9px;">${s.tag}</span></td>
+              <td class="mono">${sub}</td>
+              <td class="mono">${typeof oh === 'number' ? oh : '-'}</td>
+              <td class="mono">${typeof sga === 'number' ? sga : '-'}</td>
+              <td class="mono">${typeof pf === 'number' ? pf : '-'}</td>
+              <td class="mono">${i === 0 ? '0.5' : '0'}</td>
+              <td class="mono" style="background:var(--cyan-bg);font-weight:700;color:var(--ocean);">$${tt}</td>
+              <td class="mono" style="color:var(--amber);">${rate}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    <div style="background:var(--amber-bg);border-left:3px solid var(--amber);border-radius:0 8px 8px 0;padding:10px 14px;font-size:11px;color:#92400E;line-height:1.6;">
+      ⚠️ <strong>v0.7 cost 模型 vs WHOOP</strong>:<br>
+      · v0.7 = Material + MVA + SG&A + Profit(4 層)<br>
+      · WHOOP = BOM + Over-head + SG&A + Profit + Transportation(5 層 · 缺 O/H + Transport)<br>
+      · WHOOP 也沒 True/Quote 雙價(用 Whoop contract price 模型 · 客戶決定價)
+    </div>
+
+    ${formFoot('5 個 SKU × 5 cost 拆解 · OH/Transport 待 Phase 1 補')}
+  `;
+}
+
+function renderFormWhoopGap(p, editable) {
+  const gaps = [
+    { kind:'supported', count:11, title:'✅ 完全支援 · 11 項', items:[
+      '子料階層 (item → mfg → snapshot)',
+      'Foxlink P/N (ERP item id)',
+      'Vendor / Supplier',
+      'MOQ + LT',
+      'Description + QTY + Designator',
+      'Material spec(描述形式)',
+      'BOM 版本歷史(cs_run.status archived)',
+      'Variant scope(WHOOP 用不到 ·shared)',
+    ]},
+    { kind:'partial', count:5, title:'⚠️ 需小擴充 · 5 項', items:[
+      '三套料號(Foxlink + Whoop + 客供 FLK)→ 加 customer_pn / consigned_pn',
+      '多製程(FATP 30+ stations)→ 新 WEARABLE_STD template',
+      '客戶指定 vendor flag → bom_item_mfg.is_customer_specified',
+      '多 PKG 版本擴成 5 SKU → 已支援多 PKG,加 SKU label',
+      'Material spec 細欄(grade, tolerance)',
+    ]},
+    { kind:'missing', count:6, title:'❌ 需新開發 · 6 項', items:[
+      'Multi-Sub-BOM 結構 → 新 bom_module 層(EE/ME/Consumable + 8 modules)',
+      'PKG SKU × Module 包含矩陣 → bom_cs_case_pkg_module_include 多對多',
+      'Per-process Yield Loss → baseline loss_factor 改 JSON struct',
+      'Over-head 獨立成本欄 → baseline 加 oh_pct',
+      'Transportation 獨立成本欄 → 加 outbound_transportation_per_unit',
+      '客戶合約價 mode → bom_item.pricing_mode (foxlink/contract/consigned)',
+    ]},
+  ];
+
+  return `
+    ${formSectionHead('WHOOP Gap Analysis · v0.7 對 WHOOP 支援度', '⚠️',
+      `19 欄位/結構對比 · 11 支援 / 5 部分 / 6 缺`,
+      '<span class="badge-mini" style="background:#FEE2E2;color:#991B1B;">6 項必補 9 天工時</span>',
+      '<button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;" onclick="setFormSection(\'whoop_summary\')">📊 看 Summary</button>')}
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px;">
+      ${gaps.map(g => `
+        <div class="whoop-gap-card ${g.kind}">
+          <div class="whoop-gap-card-title">${g.title}</div>
+          <div style="margin-top:8px;">
+            ${g.items.map(it => `<div style="font-size:11px;color:var(--ink);margin:4px 0;padding:3px 0;border-bottom:1px dotted var(--line-2);">${it}</div>`).join('')}
+          </div>
+        </div>
+      `).join('')}
+    </div>
+
+    <h3 style="font-size:14px;color:var(--ocean);margin:18px 0 8px 0;">🎯 Phase 1 開工前必補 · 6 項</h3>
+    <table class="whoop-bom-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>缺口</th>
+          <th>影響</th>
+          <th>建議 schema</th>
+          <th>工時(估)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>C1</strong></td>
+          <td><strong>Multi-Sub-BOM 結構</strong></td>
+          <td>WHOOP 不能進 · 8 子組件 沒地方放</td>
+          <td>新增 bom_module 層 + 改 bom_section.module_id FK</td>
+          <td>3 天</td>
+        </tr>
+        <tr>
+          <td><strong>C2</strong></td>
+          <td><strong>PKG SKU × Module 矩陣</strong></td>
+          <td>Summary 表算不出來</td>
+          <td>bom_cs_case_pkg_module_include 多對多(SKU, module_id, multiplier)</td>
+          <td>2 天</td>
+        </tr>
+        <tr>
+          <td><strong>C3</strong></td>
+          <td><strong>Per-process Yield Loss</strong></td>
+          <td>單一 loss 0.08% 算 yield 偏差大</td>
+          <td>baseline.loss_factor_per_process JSON</td>
+          <td>1 天</td>
+        </tr>
+        <tr>
+          <td><strong>C4</strong></td>
+          <td><strong>Over-head 獨立欄</strong></td>
+          <td>WHOOP cost 結構少 4%</td>
+          <td>baseline 加 oh_pct(預設 0)</td>
+          <td>0.5 天</td>
+        </tr>
+        <tr>
+          <td><strong>C5</strong></td>
+          <td><strong>Transportation 欄</strong></td>
+          <td>OIA pickup 算不到</td>
+          <td>baseline 加 outbound_transportation_per_unit_usd</td>
+          <td>0.5 天</td>
+        </tr>
+        <tr>
+          <td><strong>C6</strong></td>
+          <td><strong>客戶合約價 mode</strong></td>
+          <td>80% WHOOP 料是合約價(不是 Foxlink 議價)</td>
+          <td>bom_item.pricing_mode enum + 取消 markup 計算</td>
+          <td>2 天</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div style="background:var(--amber-bg);border-left:3px solid var(--amber);border-radius:0 8px 8px 0;padding:10px 14px;margin-top:18px;font-size:11px;color:#92400E;line-height:1.6;">
+      ⚠️ <strong>建議</strong>:Phase 1 開工前先補 6 項 ❌ 缺口(約 9 天工時) · ⚠️ 5 項可放 Phase 2(初期 workaround OK)
+    </div>
+
+    <div style="background:var(--cyan-bg);border-left:3px solid var(--cyan);border-radius:0 8px 8px 0;padding:10px 14px;margin-top:10px;font-size:11px;color:var(--text);line-height:1.6;">
+      📄 <strong>完整文件</strong>:docs/whoop-bom-gap-analysis.md(完整對比表 + Phase 開發建議)
+    </div>
+
+    ${formFoot('Gap Analysis · 11/5/6 評估 · 對齊 v0.7 schema 對 WHOOP 結構支援度')}
+  `;
 }
 
 

@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cortex 互動 Demo v0.13 · 角色工作區制</title>
+<style>
+  :root{
+    --ink:#0B1F3A; --text:#374755; --muted:#6B7280; --line:#E5E7EB;
+    --ocean:#02C39A; --navy:#1C7293; --bg:#F4F6F9; --bg-soft:#FAFBFC; --white:#fff;
+    --gold:#CA8A04; --red:#DC2626; --green:#16A34A; --purple:#7C3AED; --cyan:#0891B2; --sky:#0EA5E9; --amber:#F5A524;
+    --font:-apple-system,"Microsoft JhengHei","Segoe UI",sans-serif;
+    --mono:"Consolas","SF Mono",monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:13px;line-height:1.5;}
+  .mono{font-family:var(--mono);}
+  /* ===== Top bar ===== */
+  .topbar{height:54px;background:var(--ink);display:flex;align-items:center;gap:16px;padding:0 18px;color:#fff;position:sticky;top:0;z-index:50;}
+  .logo{font-size:18px;font-weight:800;letter-spacing:0.5px;}
+  .logo .v{font-size:10px;background:var(--ocean);color:var(--ink);padding:2px 6px;border-radius:6px;margin-left:8px;font-weight:700;vertical-align:middle;}
+  .topbar .spacer{flex:1;}
+  .role-switch{display:flex;align-items:center;gap:8px;}
+  .role-switch select{background:#14304e;color:#fff;border:1px solid #2a4f73;border-radius:8px;padding:7px 10px;font-size:12px;font-family:var(--font);cursor:pointer;font-weight:600;}
+  .user-chip{display:flex;align-items:center;gap:8px;background:#14304e;border-radius:20px;padding:4px 12px 4px 4px;font-size:11px;}
+  .user-chip .av{width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,var(--ocean),var(--navy));display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:12px;}
+  .badge-vtc{background:#7f1d1d;color:#fecaca;font-size:9px;padding:1px 6px;border-radius:8px;font-weight:700;}
+  /* ===== Layout ===== */
+  .shell{display:flex;min-height:calc(100vh - 54px);}
+  .rail{width:230px;background:var(--ink);color:#cbd5e1;flex-shrink:0;padding:14px 0;position:sticky;top:54px;height:calc(100vh - 54px);overflow-y:auto;}
+  .rail-route{font-family:var(--mono);font-size:10px;color:#5b7799;padding:0 18px 4px;}
+  .rail-ws{font-size:14px;font-weight:700;color:#fff;padding:0 18px 12px;border-bottom:1px solid #1e3a5a;margin-bottom:10px;}
+  .rail-item{display:flex;align-items:center;gap:9px;padding:9px 18px;cursor:pointer;font-size:12.5px;border-left:3px solid transparent;transition:.12s;}
+  .rail-item:hover{background:#14304e;color:#fff;}
+  .rail-item.active{background:#14304e;color:#fff;border-left-color:var(--ocean);font-weight:600;}
+  .rail-item .ico{font-size:15px;width:18px;text-align:center;}
+  .rail-item .badge{margin-left:auto;background:var(--red);color:#fff;font-size:9px;padding:1px 6px;border-radius:8px;font-weight:700;}
+  .rail-sec{font-size:10px;color:#5b7799;text-transform:uppercase;letter-spacing:0.5px;padding:14px 18px 6px;}
+  .main{flex:1;padding:22px 26px;overflow-x:hidden;}
+  /* ===== Common ===== */
+  .page-head{display:flex;align-items:flex-start;gap:12px;margin-bottom:18px;}
+  .page-head h1{font-size:21px;color:var(--ink);font-weight:800;}
+  .page-head .sub{font-size:12px;color:var(--muted);margin-top:3px;}
+  .page-head .right{margin-left:auto;display:flex;gap:8px;align-items:center;}
+  .btn{border:none;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--font);transition:.12s;}
+  .btn-primary{background:var(--ocean);color:var(--ink);}
+  .btn-primary:hover{filter:brightness(1.05);}
+  .btn-ghost{background:#fff;color:var(--navy);border:1px solid var(--line);}
+  .btn-ghost:hover{border-color:var(--navy);}
+  .btn-dark{background:var(--ink);color:#fff;}
+  .kpi-row{display:flex;gap:12px;margin-bottom:18px;flex-wrap:wrap;}
+  .kpi{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 16px;min-width:140px;flex:1;}
+  .kpi .lbl{font-size:11px;color:var(--muted);}
+  .kpi .val{font-size:24px;font-weight:800;color:var(--ink);margin-top:2px;}
+  .kpi .val.warn{color:var(--gold);} .kpi .val.bad{color:var(--red);} .kpi .val.good{color:var(--green);}
+  .kpi .meta{font-size:10px;color:var(--muted);margin-top:2px;}
+  .section-title{font-size:13px;font-weight:700;color:var(--ink);margin:18px 0 10px;display:flex;align-items:center;gap:8px;}
+  .section-title .tag{font-size:10px;font-weight:600;color:#fff;padding:2px 8px;border-radius:10px;}
+  /* case cards */
+  .card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px;}
+  .case-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;cursor:pointer;transition:.12s;border-left:4px solid var(--navy);}
+  .case-card:hover{box-shadow:0 4px 16px rgba(11,31,58,.10);transform:translateY(-1px);}
+  .case-card.full{border-left-color:var(--sky);}
+  .case-card.simplified{border-left-color:var(--purple);}
+  .cc-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+  .cc-id{font-family:var(--mono);font-size:10px;color:var(--muted);}
+  .cc-title{font-size:14px;font-weight:700;color:var(--ink);margin-bottom:6px;}
+  .cc-row{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text);margin-bottom:5px;flex-wrap:wrap;}
+  .chip{font-size:10px;padding:2px 8px;border-radius:10px;font-weight:600;}
+  .chip-model-full{background:#E0F2FE;color:#0369A1;}
+  .chip-model-simp{background:#F3E8FF;color:#6B21A8;}
+  .chip-bg-opto{background:#E0F2FE;color:#0369A1;}
+  .chip-bg-consumer{background:#F3E8FF;color:#6B21A8;}
+  .sla{width:9px;height:9px;border-radius:50%;display:inline-block;}
+  .sla-green{background:var(--green);} .sla-yellow{background:var(--amber);} .sla-red{background:var(--red);}
+  .stage-mini{display:flex;gap:3px;margin-top:8px;}
+  .stage-dot{flex:1;height:5px;border-radius:3px;background:var(--line);}
+  .stage-dot.done{background:var(--green);} .stage-dot.active{background:var(--amber);} .stage-dot.cur{background:var(--ocean);}
+  /* inbox */
+  .inbox{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;}
+  .inbox-item{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);cursor:pointer;}
+  .inbox-item:hover{background:var(--bg-soft);}
+  .inbox-item:last-child{border-bottom:none;}
+  .inbox-ico{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;}
+  .inbox-body{flex:1;} .inbox-body .t{font-size:12.5px;font-weight:600;color:var(--ink);} .inbox-body .d{font-size:11px;color:var(--muted);}
+  .inbox-act{font-size:11px;color:var(--navy);font-weight:600;}
+  /* table */
+  table.grid{width:100%;border-collapse:collapse;font-size:11.5px;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden;}
+  table.grid th{background:#F3F4F6;text-align:left;padding:8px 10px;font-weight:700;color:var(--ink);border-bottom:1px solid var(--line);}
+  table.grid td{padding:7px 10px;border-bottom:1px solid var(--line);}
+  table.grid tr:last-child td{border-bottom:none;}
+  table.grid tr:hover td{background:var(--bg-soft);}
+  .masked{color:#cbd5e1;letter-spacing:1px;}
+  /* tabs */
+  .tabs{display:flex;gap:6px;border-bottom:2px solid var(--line);margin-bottom:16px;}
+  .tab{padding:9px 16px;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-2px;}
+  .tab.active{color:var(--navy);border-bottom-color:var(--navy);}
+  /* wizard */
+  .wiz-steps{display:flex;gap:0;margin-bottom:20px;}
+  .wiz-step{flex:1;text-align:center;position:relative;font-size:11px;}
+  .wiz-step .n{width:30px;height:30px;border-radius:50%;background:var(--line);color:var(--muted);display:flex;align-items:center;justify-content:center;font-weight:700;margin:0 auto 5px;}
+  .wiz-step.active .n{background:var(--ocean);color:var(--ink);}
+  .wiz-step.done .n{background:var(--green);color:#fff;}
+  .wiz-step::after{content:'';position:absolute;top:15px;left:50%;width:100%;height:2px;background:var(--line);z-index:-1;}
+  .wiz-step:last-child::after{display:none;}
+  .panel{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px;}
+  .field{margin-bottom:12px;}
+  .field label{display:block;font-size:11px;color:var(--muted);margin-bottom:4px;font-weight:600;}
+  .field input,.field select{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:12px;font-family:var(--font);}
+  .field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  /* handoff */
+  .handoff{display:flex;align-items:stretch;gap:0;margin:16px 0;overflow-x:auto;padding-bottom:8px;}
+  .ho-stage{min-width:150px;flex:1;background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px;position:relative;margin-right:18px;}
+  .ho-stage::after{content:'▶';position:absolute;right:-15px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:11px;}
+  .ho-stage:last-child{margin-right:0;}.ho-stage:last-child::after{display:none;}
+  .ho-stage .s{font-size:10px;color:var(--muted);font-weight:700;}
+  .ho-stage .nm{font-size:12px;font-weight:700;color:var(--ink);margin:2px 0;}
+  .ho-stage .who{font-size:10px;color:var(--navy);}
+  .ho-stage.cur{border-color:var(--ocean);border-width:2px;background:#F0FDFB;}
+  .ho-stage.done{background:#F0FDF4;}
+  .note{background:#FEF3C7;border:1px solid var(--gold);border-radius:8px;padding:9px 12px;font-size:11px;color:#92400E;line-height:1.6;margin:12px 0;}
+  .note.cyan{background:#ECFEFF;border-color:var(--cyan);color:#155E75;}
+  .note.purple{background:#F3E8FF;border-color:var(--purple);color:#5B21B6;}
+  .breadcrumb{font-size:11px;color:var(--muted);margin-bottom:10px;cursor:pointer;}
+  .breadcrumb:hover{color:var(--navy);}
+  .placeholder-flow{background:#fff;border:1px dashed var(--line);border-radius:12px;padding:18px;}
+  .flow-step{display:flex;gap:12px;padding:10px;border-radius:8px;}
+  .flow-step:nth-child(even){background:var(--bg-soft);}
+  .flow-step .fn{width:26px;height:26px;border-radius:7px;background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;flex-shrink:0;}
+  .flow-step .ft{font-size:12px;font-weight:600;color:var(--ink);}
+  .flow-step .fd{font-size:11px;color:var(--muted);margin-top:2px;}
+  .pill-grid{display:flex;flex-wrap:wrap;gap:6px;}
+  .pill{font-size:10px;background:#EEF2F6;color:var(--navy);padding:4px 9px;border-radius:6px;font-family:var(--mono);}
+  .ov-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;}
+  .ov-tile{background:linear-gradient(135deg,var(--ink),#14304e);color:#fff;border-radius:12px;padding:16px;}
+  .ov-tile .l{font-size:11px;color:#93b4d4;} .ov-tile .v{font-size:28px;font-weight:800;margin-top:4px;} .ov-tile .m{font-size:10px;color:#7da3c9;margin-top:3px;}
+  .swimlane{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px;}
+  .swimlane .bg-name{font-size:13px;font-weight:700;color:var(--ink);margin-bottom:8px;display:flex;align-items:center;gap:8px;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* ============================================================
+   Cortex Demo v0.13 — 角色工作區制(role workspace)
+   取代 v0.12 單一 form · 對齊 cortex-role-workspace-sd.md
+   ============================================================ */
+
+// ---- BG / 使用者 ----
+const BGS = {
+  OPTO:     { name:'光電事業群',   color:'opto' },
+  CONSUMER: { name:'消費電子事業群', color:'consumer' },
+};
+
+// ---- 10 角色定義 ----
+const ROLES = {
+  BPM:      { name:'BPM 業務專案經理', user:'Lisa 林', bg:'OPTO', bu:'MOUSE', route:'/quote/cockpit', ws:'我的報價案工作台', vtc:true,
+              menu:[['cockpit','🏠','Cockpit 首頁'],['wizard','➕','開新報價案'],['tracker','📊','案進度儀表'],['invite','👥','角色邀請配置'],['gate','🚦','Gate 控制台',2],['costview','💰','成本檢視'],['quote','📤','報價 Console'],['handoff','🔗','端到端流程']] },
+  RD:       { name:'RD 研發', user:'Troy 黃', bg:'OPTO', bu:'MOUSE', route:'/rd/desk', ws:'我的 BOM 工作台', vtc:false,
+              menu:[['desk','🏠','BOM Desk 首頁'],['build','🧱','BOM 建置 4-step'],['module','🧩','Module Board'],['handoff','🔗','端到端流程']] },
+  BUYER:    { name:'採購 Buyer(含 PKG)', user:'David 張', bg:'OPTO', bu:'MOUSE', route:'/buyer/cockpit', ws:'採購工作台', vtc:true,
+              menu:[['cockpit','🏠','採購工作台'],['strategy','🎯','採購策略工作台'],['rfq','📋','RFQ 報價錄入'],['erp','🔍','ERP 歷史價'],['pkg','📮','PKG 配置'],['handoff','🔗','端到端流程']] },
+  EPM:      { name:'EPM 廠製造工程經理', user:'Andy 陳', bg:'OPTO', bu:'MOUSE', route:'/epm/desk', ws:'EPM 製造工程工作台', vtc:true,
+              menu:[['desk','🏠','工作台首頁'],['baseline','📅','廠 Baseline 維護'],['cleansheet','🧮','案級 Cleansheet'],['compute','⚙️','Compute & 廠 Lock'],['handoff','🔗','端到端流程']] },
+  DPM:      { name:'DPM 開發總監', user:'Mike 王', bg:'OPTO', bu:'MOUSE', route:'/dpm/review', ws:'Cost Review 控制台', vtc:true,
+              menu:[['inbox','🏠','Review 收件匣',1],['matrix','🔢','Cost Matrix 控制台'],['lockgate','🔒','BOM Lock Gate'],['secondsign','✍️','Baseline 漲幅二簽'],['handoff','🔗','端到端流程']] },
+  SALES:    { name:'業務 Sales(兼 Finance)', user:'John 李', bg:'OPTO', bu:'MOUSE', route:'/sales/quote-desk', ws:'報價工作台', vtc:true,
+              menu:[['desk','🏠','My Quotes 首頁'],['toquote','📝','待報價 To-Quote'],['nego','🔄','議價循環'],['margin','📈','Margin 稽核台'],['export','📤','客戶報價匯出'],['handoff','🔗','端到端流程']] },
+  PROC_MGR: { name:'採購主管', user:'Karen 周', bg:'OPTO', bu:'MOUSE', route:'/proc/approval', ws:'採購審核台', vtc:true,
+              menu:[['desk','🏠','Approval Desk'],['strategy','✅','採購策略審核'],['tier','💲','Price Tier 核可'],['benchmark','📊','跨案 Supplier 比價'],['handoff','🔗','端到端流程']] },
+  ADMIN:    { name:'admin / IT', user:'Cortex Admin', bg:'HQ', bu:'IT', route:'/admin/cost-master', ws:'設定 Master 控制台', vtc:true, admin:true,
+              menu:[['health','🏠','平台健康'],['baseline','📅','廠 Baseline'],['catalog','🏭','設備類別 Catalog'],['wage','👷','工資 Master'],['mask','🎛️','Costing Model × Mask'],['grant','🔐','權限 Grant']] },
+  GM_BG:    { name:'總經理 / BG 高層', user:'David 總', bg:'OPTO', bu:null, route:'/portfolio', ws:'BG Portfolio 戰情中心', vtc:true, oversight:true,
+              menu:[['overview','🏠','BG 戰情總覽'],['cases','📋','全案清單'],['redzone','🔴','卡關紅燈中心'],['margin','📈','Margin 風險雷達'],['funnel','🫗','Stage 流量漏斗']] },
+  CHAIRMAN: { name:'董事長 / 集團最高', user:'Chairman', bg:null, bu:null, route:'/portfolio?scope=GLOBAL', ws:'集團 Portfolio 戰情儀表板', vtc:true, oversight:true, global:true,
+              menu:[['overview','🏠','集團總覽'],['bgcompare','⚖️','BG 對比'],['browser','🌐','全集團專案瀏覽器'],['margin','📈','Margin 與雙價分析'],['boardpack','📑','匯出 Board Pack']] },
+};
+
+// ---- 共享案資料(同一案 · 不同角色看不同投影)----
+const CASES = [
+  { id:'QT-2026-0148', title:'SteelSeries Rival 3+ Wired Mouse', customer:'SteelSeries ApS', cust_alias:'S001',
+    model:'FULL_MVA', bg:'OPTO', bu:'MOUSE', stage:6, sla:'yellow', margin:6.7, amount:'$4.96M', qty:'418K',
+    factories:['CN','VN','TW'], variants:['black','white'], dims:24,
+    cheapest:'VN-Black $11.106', lock:false },
+  { id:'QT-2026-0167', title:'WHOOP Gen4 MP 穿戴手環', customer:'WHOOP Inc.', cust_alias:'W001',
+    model:'SIMPLIFIED_WEARABLE', bg:'CONSUMER', bu:'WEARABLE', stage:5, sla:'yellow', margin:6.0, amount:'$8.96M', qty:'100K',
+    factories:['CN'], variants:['midnight'], dims:5, skus:5, modules:8,
+    cheapest:'Retail $89.55', lock:false },
+  { id:'QT-2026-0155', title:'Razer Basilisk V3 Wired', customer:'Razer Inc.', cust_alias:'R002',
+    model:'FULL_MVA', bg:'OPTO', bu:'MOUSE', stage:4, sla:'green', margin:null, amount:'$3.2M', qty:'250K',
+    factories:['CN','VN'], variants:['black'], dims:8, lock:false },
+];
+
+const STAGES = ['立案','詢價','BOM','並行Collect','Cost Review','報價Gate','結案'];
+const STAGE_OWNER = ['業務','業務','RD','採購∥EPM','DPM','業務','業務'];
+
+// ---- state ----
+let state = { role:'BPM', screen:'cockpit', activeCase:null, wizStep:1, csModel:'FULL_MVA', csFactory:'CN', salesTab:'toquote' };
+
+function setRole(r){ const role=ROLES[r]; state.role=r; state.screen=role.menu[0][0]; state.activeCase=null; render(); }
+function go(screen,caseId){ state.screen=screen; if(caseId!==undefined) state.activeCase=caseId; render(); }
+function casesForRole(){
+  const role=ROLES[state.role];
+  if(role.global) return CASES;
+  if(role.admin) return CASES;
+  return CASES.filter(c=>c.bg===role.bg);
+}
+function caseById(id){ return CASES.find(c=>c.id===id); }
+function mask(v,role){ return role.vtc ? v : '▒▒▒'; }
+
+/* ============================================================ render ============================================================ */
+function render(){
+  const role=ROLES[state.role];
+  document.getElementById('app').innerHTML = renderTop() + `<div class="shell">${renderRail()}<div class="main">${renderWorkspace()}</div></div>`;
+}
+
+function renderTop(){
+  const role=ROLES[state.role];
+  const bgName = role.global ? '集團(全 BG)' : role.bg==='HQ' ? '中央 HQ' : (BGS[role.bg]?.name||role.bg);
+  return `
+  <div class="topbar">
+    <div class="logo">Cortex<span class="v">v0.13 角色工作區</span></div>
+    <div class="spacer"></div>
+    <div class="role-switch">
+      <span style="font-size:11px;color:#7da3c9;">切換角色登入身分:</span>
+      <select onchange="setRole(this.value)">
+        ${Object.keys(ROLES).map(k=>`<option value="${k}" ${k===state.role?'selected':''}>${ROLES[k].name}</option>`).join('')}
+      </select>
+    </div>
+    <div class="user-chip">
+      <span class="av">${role.user[0]}</span>
+      <div>
+        <div style="font-weight:600;">${role.user}</div>
+        <div style="color:#93b4d4;font-size:10px;">${bgName}${role.bu?' · '+role.bu:''}</div>
+      </div>
+      ${role.vtc?'<span class="badge-vtc">VIEW_TRUE_COST</span>':''}
+    </div>
+  </div>`;
+}
+
+function renderRail(){
+  const role=ROLES[state.role];
+  return `
+  <div class="rail">
+    <div class="rail-route">${role.route}</div>
+    <div class="rail-ws">${role.ws}</div>
+    ${role.menu.map(m=>`
+      <div class="rail-item ${m[0]===state.screen?'active':''}" onclick="go('${m[0]}')">
+        <span class="ico">${m[1]}</span><span>${m[2]}</span>
+        ${m[3]?`<span class="badge">${m[3]}</span>`:''}
+      </div>`).join('')}
+    <div class="rail-sec">角色說明</div>
+    <div style="padding:0 18px;font-size:10.5px;color:#7da3c9;line-height:1.6;">
+      ${role.oversight?'唯讀 oversight · 看/drill 不交棒':role.admin?'平台管理 · 月度交付 master':'operational · 完成即交棒下一角色'}
+    </div>
+  </div>`;
+}
+
+function renderWorkspace(){
+  const r=state.role, s=state.screen;
+  if(s==='handoff') return renderHandoff();
+  // dispatch by role
+  const fn = WS[r] && WS[r][s];
+  if(fn) return fn();
+  return renderGenericFlow();
+}
+
+/* ============================================================ Workspace renderers ============================================================ */
+const WS = {};
+
+// ---------- BPM ----------
+WS.BPM = {
+  cockpit(){
+    const cs=casesForRole();
+    return `
+    ${head('我的報價案工作台','登入直接 landing · 案卡牆 + 待我處理收件匣 · 不進任何 project form',`<button class="btn btn-primary" onclick="go('wizard')">➕ 開新報價案</button>`)}
+    ${kpis([['在辦案',cs.length,'','good'],['待我簽 Gate',2,'READY_FOR_GATE','warn'],['SLA 紅燈',0,'','good'],['議價中',1,'','']])}
+    <div class="section-title">📋 我 owner 的在辦案<span class="tag" style="background:var(--navy)">點卡進案進度儀表</span></div>
+    <div class="card-grid">${cs.map(c=>caseCard(c,'tracker')).join('')}</div>
+    <div class="section-title">📥 待我處理</div>
+    <div class="inbox">
+      ${inboxItem('🚦','#FEF3C7','QT-2026-0148 Stage6 DPM 已 lock · 待簽放行 Stage7','成本 fact 已 propagate · margin 6.7%','簽核 →','gate')}
+      ${inboxItem('🔄','#F3E8FF','QT-2026-0167 客戶議價 #2 · reprice 退回中','WHOOP 客戶目標價逼破底線 · 採購重議中','追蹤 →','tracker')}
+    </div>`;
+  },
+  wizard(){
+    const step=state.wizStep;
+    const steps=['基本資料','計價模型','量級情境','包裝版本','廠別+變體'];
+    return `
+    ${crumb('cockpit','我的報價案工作台')}
+    ${head('開新報價案 · 5 步精靈','獨立全屏 wizard · 不是 form 第 1 section')}
+    <div class="wiz-steps">${steps.map((t,i)=>`<div class="wiz-step ${i+1<step?'done':i+1===step?'active':''}"><div class="n">${i+1<step?'✓':i+1}</div>${t}</div>`).join('')}</div>
+    <div class="panel">${bpmWizStep(step)}</div>
+    <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;">
+      ${step>1?`<button class="btn btn-ghost" onclick="state.wizStep--;render()">← 上一步</button>`:''}
+      ${step<5?`<button class="btn btn-primary" onclick="state.wizStep++;render()">下一步 →</button>`:`<button class="btn btn-primary" onclick="alert('Demo: 建立案 → projects(ACTIVE)+ project_stages(8 階段)+ case_factory/qty/pkg · 邀 RD 進 Stage4');state.wizStep=1;go('cockpit')">✓ 建立案 + 邀 RD</button>`}
+    </div>`;
+  },
+  tracker(){
+    const c=state.activeCase?caseById(state.activeCase):casesForRole()[0];
+    return `
+    ${crumb('cockpit','我的報價案工作台')}
+    ${head(`案進度儀表 · ${c.title}`,`${c.id} · ${c.customer} · ${modelChip(c.model)} · ${c.amount}`,gateBtn(c))}
+    <div class="section-title">🏊 Stage Swimlane(8 階段 · BPM 是 gate 唯一確認人)</div>
+    ${stageSwimlane(c)}
+    <div class="note">💡 各角色把 task 推到 <b>READY_FOR_GATE</b> → BPM 在 Gate 控制台決定放行下一棒。角色不能自跳 stage。</div>
+    <div class="section-title">📊 成本檢視(唯讀 · propagate 後)</div>
+    ${c.lock||c.stage>=6?costMatrixMini(c,ROLES.BPM):`<div class="placeholder-flow" style="text-align:center;color:var(--muted)">⏳ 待 DPM lock + propagate 後顯示多維成本矩陣</div>`}`;
+  },
+  gate(){
+    return `
+    ${head('Gate 控制台','跨案待簽 stage 集中放行 · BPM 是 gate 唯一確認人')}
+    <div class="inbox">
+      ${gateRow('QT-2026-0148','Stage 6 → 7','DPM Mike 已 final lock · 24 cells propagate 完 · margin 6.7%','#16A34A')}
+      ${gateRow('QT-2026-0155','Stage 4 → 5','RD Troy 已提交 BOM · 22 子料 · ERP 料號 90% 確認','#0EA5E9')}
+    </div>
+    <div class="note cyan">放行動作:<span class="mono">project_stages.gate_confirmed_by=BPM</span> · 觸發 on_exit hook 通知下一角色 · reprice 退回則開新 iteration(不覆蓋舊 gate 紀錄)</div>`;
+  },
+  costview(){ const c=casesForRole()[0]; return head('成本檢視(唯讀)',`${c.title} · BPM 唯讀 · VIEW_TRUE_COST 才看 true cost`)+costMatrixMini(c,ROLES.BPM); },
+  quote(){ return head('Stage 7-8 報價 Console','BPM 收回做報價匯出 + 結案 gate')+`<div class="note">報價/議價主操作在業務工作台(/sales/quote-desk)· BPM 在此做最終 gate 簽核 + RFQ Cost Excel 匯出 + 結案 WIN/LOSS。切到「業務 Sales」角色看完整報價流程。</div>`; },
+  invite(){ return head('角色邀請與配置','邀 RD/採購/EPM/DPM 進案 + 設 field_grants(D3 角色 template 預設)')+inviteGrid(); },
+};
+
+function bpmWizStep(step){
+  if(step===1) return `
+    <div class="field-row">
+      <div class="field"><label>客戶</label><input value="SteelSeries ApS"></div>
+      <div class="field"><label>客戶別名(跨 BG 機密遮罩用)</label><input value="S001"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>BPN / 案號</label><input value="QT-2026-0148"></div>
+      <div class="field"><label>年量 annual_demand</label><input value="418000"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>BG 事業群</label><select><option>OPTO 光電事業群</option><option>CONSUMER 消費電子事業群</option></select></div>
+      <div class="field"><label>BU</label><select><option>MOUSE 滑鼠 BU</option></select></div>
+    </div>
+    <div class="note">→ 落地 <span class="mono">projects(status=DRAFT, type=QUOTE, pm_user_id=BPM, bg_code, bu_code)</span></div>`;
+  if(step===2) return `
+    <div class="field"><label>計價模型 costing_model(綁 process_template · case 可 override)</label></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div class="case-card full" style="cursor:default;"><div class="cc-title">🖱️ FULL_MVA</div><div style="font-size:11px;color:var(--text);line-height:1.7;">細製程 DL 4 category + IDL Line-Dep 4 + Centralized 17 matrix + 設備類別折舊 + Facility + Freight/VAT/Loss + SGA(mb×2%)+ Profit((MVA+mb)×14%)<br><b>適用:滑鼠 / 鍵盤 / 連接器</b></div></div>
+      <div class="case-card simplified" style="cursor:default;"><div class="cc-title">⌚ SIMPLIFIED_WEARABLE</div><div style="font-size:11px;color:var(--text);line-height:1.7;">放大製程 macro + SMT 點數計價 + 材料耗損率 + Overhead(小計×4%)+ SGA(×3%)+ Profit(×3%)+ Transportation<br><b>適用:穿戴 / 音訊</b></div></div>
+    </div>
+    <div class="note purple">→ <span class="mono">projects.costing_model</span> 決定後續所有維度/section/component mask(同一 superset · 不分岔)</div>`;
+  if(step===3) return `
+    <div class="section-title">量級情境 qty_scenarios</div>
+    <table class="grid"><thead><tr><th>code</th><th>label</th><th>年量</th><th>region</th><th>主視角</th></tr></thead>
+    <tbody><tr><td>LOW</td><td>低批量</td><td>100,000</td><td>US only</td><td>—</td></tr><tr><td>HIGH</td><td>高批量</td><td>418,000</td><td>Global</td><td>✓</td></tr></tbody></table>
+    <div class="note">→ <span class="mono">bom_cs_case_qty_scenario</span> · 展開成本矩陣的 qty 維</div>`;
+  if(step===4) return `
+    <div class="section-title">包裝版本 pkg_versions</div>
+    <table class="grid"><thead><tr><th>code</th><th>label</th><th>items</th><th>channel</th><th>primary</th></tr></thead>
+    <tbody><tr><td>RETAIL</td><td>商包</td><td>16</td><td>retail+online</td><td>✓</td></tr><tr><td>BULK</td><td>工包</td><td>4</td><td>spare+b2b</td><td>—</td></tr></tbody></table>
+    <div class="note">FULL_MVA → 商包/工包 · SIMPLIFIED → WHOOP 5 PKG SKU × 8 module 矩陣</div>`;
+  if(step===5) return `
+    <div class="field"><label>報價廠別(多選)</label>
+      <div class="pill-grid" style="margin-top:6px;"><span class="pill" style="background:#0369A1;color:#fff;">✓ CN</span><span class="pill" style="background:#0369A1;color:#fff;">✓ VN</span><span class="pill" style="background:#0369A1;color:#fff;">✓ TW</span></div></div>
+    <div class="field"><label>變體 variants</label>
+      <div class="pill-grid" style="margin-top:6px;"><span class="pill">black 80%</span><span class="pill">white 20%</span></div></div>
+    <div class="note cyan">矩陣維度:<b>3 廠 × 2 variant × 2 qty × 2 pkg = 24 result cells</b><br>→ <span class="mono">bom_cs_case_factory × 3 · projects.status=ACTIVE · copy QUOTE 8-stage</span></div>`;
+}
+
+// ---------- RD ----------
+WS.RD = {
+  desk(){
+    const cs=CASES.filter(c=>c.bg==='OPTO');
+    return `
+    ${head('我的 BOM 工作台','登入直接到 · 指派案卡 + 4-step 進度 · 繞過 14-section form')}
+    ${kpis([['指派給我',2,'','',],['待提交',1,'Stage4','warn'],['parse 紅旗',0,'','good'],['Reprice 退回',0,'','good']])}
+    <div class="section-title">📦 指派給我的 BOM 案</div>
+    <div class="card-grid">
+      ${rdCard('QT-2026-0155','Razer Basilisk V3','FULL',4,'上傳 Excel→AI 解析→ERP 料號→Variant',60)}
+      ${rdCard('QT-2026-0148','SteelSeries Rival 3+','FULL',6,'已交棒 · 唯讀',100)}
+    </div>`;
+  },
+  build(){
+    return `
+    ${crumb('desk','我的 BOM 工作台')}
+    ${head('BOM 建置 4-step · QT-2026-0155','獨立 4-step 精靈 · 每 step 獨立全頁')}
+    <div class="wiz-steps">${['上傳 Excel','AI 解析校對','ERP 料號確認','Variant Scope'].map((t,i)=>`<div class="wiz-step ${i===0?'active':''}"><div class="n">${i+1}</div>${t}</div>`).join('')}</div>
+    <div class="panel">
+      <div style="border:2px dashed var(--line);border-radius:10px;padding:30px;text-align:center;color:var(--muted);">📄 拖入客戶 BOM Excel<br><span style="font-size:11px;">AI 解析抽子料 + ERP 料號比對(向量反查 mtl_system_items_b)</span></div>
+    </div>
+    ${flowList([['S2','AI 解析抽子料','LLM 解析 xlsx → 抽 22 子料 + 規格 + 用量 → bom_item'],['S3','階層校對','parse 紅旗歸零才放行'],['S4','逐筆 ERP 料號確認','採用/略過/手動 · bom_item_flk source=AI_RECOMMEND/ERP_LOOKUP/RD_MANUAL'],['S5','標 Variant Scope','EE→shared / ME→per_variant(cat 自動預設)'],['S7','rd_submitted 交棒','D5 新欄 · 交採購+EPM(仍 DRAFT)']])}`;
+  },
+  module(){
+    return `
+    ${head('Module Board · WHOOP 8 子組件','D4 新建 bom_module 表 · 6 層 module→section→category→item→flk→mfg')}
+    <div class="card-grid">
+      ${['Harvard Sensor (G)·EE','Harvard Main (F3)·EE','Bird Main (J4)·EE','Bird NFC·EE','Harvard Assy·EE','Bird Assy·EE','STRAP·ME','Battery Pack·ME'].map((m,i)=>`
+        <div class="case-card ${i<6?'full':'simplified'}" style="cursor:default;border-left-color:${i<6?'var(--sky)':'var(--green)'}">
+          <div class="cc-title" style="font-size:13px;">🧩 ${m.split('·')[0]}</div>
+          <div class="cc-row"><span class="chip" style="background:${i<6?'#E0F2FE':'#DCFCE7'};color:${i<6?'#0369A1':'#166534'}">${m.split('·')[1]}</span><span style="color:var(--green)">✓ 完成</span></div>
+        </div>`).join('')}
+    </div>
+    <div class="note">SteelSeries = 1 隱性 module(EE/ME/PKG section)· WHOOP = 8 顯式 module · 同一 superset BOM 結構 · 客供料 module 標 vendor_consigned/consigned_pn/is_customer_specified(D4)</div>`;
+  },
+};
+
+// ---------- BUYER ----------
+WS.BUYER = {
+  cockpit(){
+    return `
+    ${head('採購工作台 Buyer Cockpit','跨案待採卡片牆 · 三桶 · 非某案第 5 section')}
+    ${kpis([['待報價子料',38,'','warn'],['markup 異常',3,'','bad'],['ERP 未拉',12,'','warn'],['待 Review',1,'','']])}
+    <div class="tabs"><div class="tab active">待採(2)</div><div class="tab">待 Review(1)</div><div class="tab">被退回(0)</div></div>
+    <div class="card-grid">
+      ${buyerCard('QT-2026-0148','SteelSeries Rival 3+','22 子料 · 14 已報價 · 8 缺','strategy')}
+      ${buyerCard('QT-2026-0167','WHOOP Gen4 MP','客供 80% · PKG 5 SKU 待配','pkg')}
+    </div>`;
+  },
+  strategy(){
+    return `
+    ${crumb('cockpit','採購工作台')}
+    ${head('採購策略工作台 · QT-2026-0148','子料矩陣 · 設策略 + 套 category markup + 拉 ERP 歷史價')}
+    <table class="grid"><thead><tr><th>子料</th><th>category</th><th>mfg 家數</th><th>ERP 歷史價</th><th>true cost</th><th>quote</th><th>markup</th><th>選定</th></tr></thead><tbody>
+      ${[['PMW3360 Sensor','IC','3','$2.31','$2.45','$3.31','35%','✓'],['ESD Switch','Switch','2','$0.18','$0.19','$0.26','37%','✓'],['Main PCB','PCBA','1','$1.20','$1.24','$1.67','35%','—'],['USB Cable','Cable','2','$0.42','$0.45','$0.61','36%','✓']].map(r=>`
+        <tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td class="mono" style="color:var(--muted)">${r[3]}</td><td class="mono">${r[4]}</td><td class="mono" style="color:var(--navy)">${r[5]}</td><td class="mono" style="color:var(--gold)">${r[6]}</td><td>${r[7]==='✓'?'<span style="color:var(--green)">✓</span>':'—'}</td></tr>`).join('')}
+    </tbody></table>
+    <div class="note cyan">D6:ERP 歷史價只當<b>參考預填</b>(true_cost_source_ref='ERP_HIST')· 採購可改 · true cost 以供應商實報為準 · 衝突2:<span class="mono">is_chosen</span> 為 source of truth</div>
+    <div class="flow-step" style="margin-top:10px;"><div class="fn">▶</div><div><div class="ft">填 N 個 price tier(雙價)→ 比價選定 → 採購主管核可 → 交 DPM</div><div class="fd">RFQ 報價錄入 · ERP 歷史價 · PKG 配置 各獨立畫面</div></div></div>`;
+  },
+  rfq(){ return head('RFQ 報價錄入','雙價 tier grid · qty_min/max + true_cost + quote · markup VIRTUAL 自動算')+`<table class="grid"><thead><tr><th>tier</th><th>qty 範圍</th><th>true cost</th><th>fx</th><th>quote price</th><th>markup</th><th>LT</th></tr></thead><tbody><tr><td>Low</td><td>0~100K</td><td class="mono">$2.45</td><td>7.10</td><td class="mono">$3.45</td><td class="mono" style="color:var(--gold)">40.8%</td><td>8wk</td></tr><tr><td>High</td><td>100K~∞</td><td class="mono">$2.31</td><td>7.10</td><td class="mono">$3.12</td><td class="mono" style="color:var(--gold)">35.1%</td><td>6wk</td></tr></tbody></table>`; },
+  erp(){ return head('ERP 歷史價查詢','獨立探價 · 不綁特定子料 · MIN/AVG/MAX × N 月 × ORG 範圍 → 轉 USD')+`<div class="note">受 L4 Multi-Org 範圍限制 · org_ids ∩ allowed_org_ids · gl_daily_rates 走 ledger 轉 USD · D6 只當 anchor</div>`; },
+  pkg(){
+    return `${head('PKG 配置工作台','商包/工包(FULL)· WHOOP 5 SKU × 8 module 矩陣(SIMPLIFIED)')}
+    <div class="section-title">WHOOP 5 SKU × 8 module 括入矩陣</div>
+    <table class="grid"><thead><tr><th>module</th><th>Retail</th><th>WB Suit</th><th>WB Strap</th><th>WB Battery</th><th>WB S+B</th></tr></thead><tbody>
+    ${['Harvard Sensor','Bird Main','STRAP','Battery Pack','Consumable'].map((m,i)=>`<tr><td>${m}</td>${[1, i>=2?(i==2||i==4?1:0):0, i==2?1:0, i==3?1:0, (i==2||i==3)?1:0].map(v=>`<td>${v?'<span style="color:var(--green)">✓</span>':'—'}</td>`).join('')}</tr>`).join('')}
+    </tbody></table>
+    <div class="note">→ <span class="mono">bom_cs_case_pkg_module_include(pkg_code × module_code = 0/1)</span> · 各 module 雙價 + 廠內料號 foxlink_part_no(料號兩案都補)</div>`;
+  },
+};
+
+// ---------- EPM ----------
+WS.EPM = {
+  desk(){
+    return `
+    ${head('EPM 製造工程工作台','廠別=參數(只看 grant 的廠)· baseline 健康 + 待辦案 · 雙動線')}
+    <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center;">
+      <span style="font-size:11px;color:var(--muted)">廠別:</span>
+      ${['CN','VN','TW'].map(f=>`<button class="btn ${state.csFactory===f?'btn-primary':'btn-ghost'}" onclick="state.csFactory='${f}';render()">${f==='CN'?'🇨🇳':f==='VN'?'🇻🇳':'🇹🇼'} ${f}</button>`).join('')}
+    </div>
+    ${kpis([['active baseline',`CN-OPTO-2026Q2`,'eff+0d',''],['月度狀態','🟡 28天','>30天提醒','warn'],['待 compute 案',2,'dirty','warn'],['待 reprice',0,'','good']])}
+    <div class="section-title">🏭 廠級(月度維護)vs 📋 案級(成本配置)</div>
+    <div class="card-grid">
+      <div class="case-card" style="border-left-color:var(--gold);cursor:pointer" onclick="go('baseline')"><div class="cc-title">📅 廠 Baseline 維護台</div><div style="font-size:11px;color:var(--text);line-height:1.7">7 sub-tab SCD · DL wage / IDL Line-Dep 4 / Centralized 17 / 設備類別單價 / 耗材 / SMT 點數規則 / 折舊年限</div></div>
+      <div class="case-card full" style="cursor:pointer" onclick="go('cleansheet')"><div class="cc-title">🧮 案級 Cleansheet 填寫</div><div style="font-size:11px;color:var(--text);line-height:1.7">QT-2026-0148(FULL)· QT-2026-0167(SIMPLIFIED)· 選 template → 填製程 → compute → 廠 Lock</div></div>
+    </div>`;
+  },
+  baseline(){ return `${crumb('desk','EPM 工作台')}${head(`廠 Baseline 維護台 · ${state.csFactory} 廠`,'月度 SCD Type2 切版 · 漲幅二簽走 DPM')}
+    <div class="tabs">${['廠摘要','DL wage','IDL Line-Dep 4','Centralized 17','設備類別單價','耗材','SMT 點數'].map((t,i)=>`<div class="tab ${i===1?'active':''}">${t}</div>`).join('')}</div>
+    <table class="grid"><thead><tr><th>項目</th><th>當前值</th><th>適用</th><th>vs 上版</th><th></th></tr></thead><tbody>
+    <tr><td>DL 廠級單一 wage</td><td class="mono">$4.95/hr</td><td>DL/Debug/Functional/Warehouse 4 category 通用</td><td style="color:var(--green)">↑2.1%</td><td><button class="btn btn-ghost" style="padding:3px 8px">編</button></td></tr>
+    </tbody></table>
+    <div class="note">漲幅 >5% → 進二簽佇列 · DPM 核准(衝突3)· SCD 切版後 notify 受影響 draft 案 reprice chip</div>`; },
+  cleansheet(){
+    const model=state.csModel;
+    return `${crumb('desk','EPM 工作台')}${head('案級 Cleansheet 填寫台','顆粒度 by costing_model · 同一 superset 引擎')}
+    <div style="display:flex;gap:8px;margin-bottom:14px;">
+      <span style="font-size:11px;color:var(--muted);align-self:center">案模型:</span>
+      <button class="btn ${model==='FULL_MVA'?'btn-primary':'btn-ghost'}" onclick="state.csModel='FULL_MVA';render()">🖱️ FULL_MVA(SteelSeries)</button>
+      <button class="btn ${model==='SIMPLIFIED_WEARABLE'?'btn-primary':'btn-ghost'}" onclick="state.csModel='SIMPLIFIED_WEARABLE';render()">⌚ SIMPLIFIED(WHOOP)</button>
+    </div>
+    ${model==='FULL_MVA'?`
+      <div class="section-title">FULL 細製程(9 製程 × §A 55 行)</div>
+      ${flowList([['1','細製程輸入','Staffed Hours / Throughput / DL 4 category / IDL Line-Indep · per process ~20 欄'],['2','IDL matrix','17 角色 × 9 製程 multiplier'],['3','設備類別 binding','類別 × qty(代表單價折舊+MRO)'],['4','耗材 binding','annual usage + foxlink_part_no']])}
+      <div class="note cyan">啟用 component:DL_CPU · IDL_CPU · EQUIP_MRO/DEPR · IND_MAT · FACILITY · FREIGHT · VAT · LOSS · MVA_TOTAL</div>`:`
+      <div class="section-title">SIMPLIFIED 放大製程 macro + SMT 點數</div>
+      ${flowList([['1','放大製程 macro','num_stations / work_time / dl_headcount / uph / process_yield(FATP)'],['2','SMT 點數計價','category × pcs × 點權重算式(可案級 override)× unit_price + 5% allowance'],['3','材料耗損率','SMT 0.5%/0.2% + FATP 4%(只對材料)'],['4','% 結構','Overhead 4% + SGA 3% + Profit 3% + Transportation $0.5']])}
+      <div class="note purple">啟用 component:PROC_MACRO · SMT_POINTS · MAT_LOSS_RATE · OVERHEAD_4PCT(吸收 IDL/設備/facility)· TRANSPORTATION · disable 的細項 fallback_into=OVERHEAD_4PCT</div>`}
+    <button class="btn btn-primary" style="margin-top:14px" onclick="go('compute')">⚙️ Compute & 廠 Lock →</button>`;
+  },
+  compute(){
+    const m=state.csModel;
+    return `${crumb('cleansheet','案級 Cleansheet')}${head('Compute & 廠 Lock','superset 引擎讀 costing_model + component mask 跑一條 path')}
+    ${kpis(m==='FULL_MVA'?[['MVA / unit','$1.8558','9 製程合計','good'],['SGA+Profit','$1.6855','','',],['TC / unit','$12.19','',''],['ε vs Excel','<0.01','✓ pass','good']]:[['BOM 小計','$80.96','','',],['Overhead 4%','$3.24','','',],['TC / unit','$89.55','',''],['ε vs book','<0.01','✓ pass','good']])}
+    <div class="note">按 Lock → <span class="mono">case_factory.status=locked</span>(per case_factory 鎖 · 衝突1)· freeze baseline snapshot · 交棒 DPM</div>
+    <button class="btn btn-dark" onclick="alert('Demo: 廠 Lock · 交棒 DPM Stage6')">🔒 Lock 本廠 → 交 DPM</button>`;
+  },
+};
+
+// ---------- DPM ----------
+WS.DPM = {
+  inbox(){
+    return `${head('Cost Review 控制台','待 lock 收件匣 · 不進案翻第 6 section')}
+    ${kpis([['待我 Review',1,'','warn'],['待二簽 baseline',1,'','warn'],['本月 lock',8,'','good'],['margin 紅燈',0,'','good']])}
+    <div class="inbox">
+      ${inboxItem('🔢','#E0F2FE','QT-2026-0148 · SteelSeries Rival 3+','FULL_MVA · OPTO · 採購 100% / EPM 100% · min margin 6.7% 🟡','開 Review →','matrix')}
+      ${inboxItem('✍️','#FEF3C7','CN-OPTO baseline 漲幅二簽','DL wage $4.95→$5.20 ↑5.05% · 影響 3 draft 案','二簽 →','secondsign')}
+    </div>`;
+  },
+  matrix(){
+    const c=caseById('QT-2026-0148');
+    return `${crumb('inbox','Cost Review 收件匣')}${head('Cost Matrix 控制台 · QT-2026-0148','多維 pivot + margin heatmap + 雙價 toggle · DPM 對 cost 唯讀')}
+    ${costMatrixMini(c,ROLES.DPM)}
+    <div class="note">review flag → 退件回 Stage5(採購/EPM 補)· 收斂後 Lock Gate enable</div>
+    <button class="btn btn-primary" onclick="go('lockgate')">🔒 進 BOM Lock Gate →</button>`;
+  },
+  lockgate(){
+    return `${crumb('matrix','Cost Matrix')}${head('BOM Lock Gate','propagate dry-run 預覽 · final lock 限 DPM(衝突4)')}
+    <div class="panel">
+      <div style="font-weight:700;color:var(--ink);margin-bottom:8px">Propagate Dry-run 預覽</div>
+      <table class="grid"><thead><tr><th>cell(廠×variant×qty×pkg)</th><th>material true→quote</th><th>mva</th><th>total quote</th><th>margin</th></tr></thead><tbody>
+      <tr><td>CN-black-HIGH-RETAIL</td><td class="mono">$7.73→$8.52</td><td class="mono">$1.86</td><td class="mono">$11.94</td><td class="mono" style="color:var(--gold)">6.8%</td></tr>
+      <tr><td>VN-black-HIGH-RETAIL ⭐</td><td class="mono">$8.09→$8.93</td><td class="mono">$1.43</td><td class="mono">$11.11</td><td class="mono" style="color:var(--green)">7.4%</td></tr>
+      <tr><td colspan="5" style="text-align:center;color:var(--muted)">… 共 24 列將寫入 bom_cs_run_result</td></tr>
+      </tbody></table>
+    </div>
+    <div class="note">執行 final lock → transaction 內 UPSERT <span class="mono">bom_cs_run_result</span>(對外唯一 fact)+ cache <span class="mono">pfm_cell</span> · 失敗整筆 rollback · 交業務</div>
+    <button class="btn btn-dark" onclick="alert('Demo: Final Lock · propagate 24 列 · 推 Stage7 通知業務')">🔒 執行 Final Lock(不可逆 · unlock 需 admin)</button>`;
+  },
+  secondsign(){ return head('Baseline 漲幅二簽','EPM 提的漲幅 >5% 需 DPM 核准')+`<table class="grid"><thead><tr><th>項目</th><th>舊→新</th><th>漲幅</th><th>影響 draft 案</th><th>核准</th></tr></thead><tbody><tr><td>DL wage</td><td class="mono">$4.95→$5.20</td><td style="color:var(--red)">↑5.05%</td><td>3</td><td><button class="btn btn-ghost" style="padding:3px 8px">approve</button></td></tr></tbody></table>`; },
+};
+
+// ---------- SALES ----------
+WS.SALES = {
+  desk(){
+    return `${head('報價工作台 Quote Desk','只消費 DPM lock 後的 fact · 不看上游 BOM/MVA section')}
+    ${kpis([['待報價',1,'','warn'],['議價中',1,'','',],['SLA 紅燈',0,'','good'],['加權 margin','6.4%','VIEW_TRUE_COST','warn']])}
+    <div class="tabs">
+      <div class="tab ${state.salesTab==='toquote'?'active':''}" onclick="state.salesTab='toquote';render()">待報價 To-Quote(1)</div>
+      <div class="tab ${state.salesTab==='nego'?'active':''}" onclick="state.salesTab='nego';render()">議價循環(1)</div>
+      <div class="tab ${state.salesTab==='margin'?'active':''}" onclick="state.salesTab='margin';render()">Margin 稽核(Finance)</div>
+    </div>
+    ${state.salesTab==='toquote'?`<div class="card-grid">${salesCard('QT-2026-0148','SteelSeries Rival 3+','DPM 已 lock · 24 cells · 最便宜 VN-Black $11.11','margin')}</div>`:
+      state.salesTab==='nego'?`<div class="inbox">${inboxItem('🔄','#F3E8FF','QT-2026-0167 WHOOP · 議價 #2','客戶目標 $85 · 我方 quote $89.55 · 若照客戶價 margin 掉到 1.2% 破底線','處理 →','nego')}</div>`:
+      WS.SALES.margin()}`;
+  },
+  toquote(){ state.salesTab='toquote'; return WS.SALES.desk(); },
+  nego(){
+    return `${head('議價循環 · QT-2026-0167 WHOOP','路徑 A 只動 quote / 路徑 B 要動成本 → reprice 退 Stage5')}
+    <div class="handoff" style="margin-bottom:8px">
+      <div class="ho-stage done"><div class="s">#1</div><div class="nm">報出 $89.55</div><div class="who">業務</div></div>
+      <div class="ho-stage done"><div class="s">#2</div><div class="nm">客戶 counter $85</div><div class="who">客戶</div></div>
+      <div class="ho-stage cur"><div class="s">#3</div><div class="nm">reprice 退回</div><div class="who">採購/EPM/DPM</div></div>
+    </div>
+    <div class="note">路徑 B:開新 stage iteration(D2)· <span class="mono">cs_run.status=archived</span> · 帶 client_target context 給採購 · negotiation round=reprice_triggered</div>
+    <div style="display:flex;gap:8px"><button class="btn btn-ghost" onclick="alert('路徑A: 降 markup/換廠 · 同 run')">路徑 A · 只動 quote</button><button class="btn btn-dark" onclick="alert('路徑B: reprice 退 Stage5 · 開新 iteration')">路徑 B · 要求 Reprice</button></div>`;
+  },
+  margin(){
+    const c=caseById('QT-2026-0148');
+    return `${head('Margin 稽核台(Finance/CFO 視角)','VIEW_TRUE_COST gate · 無權限整個隱藏 · D10 單一源')}
+    ${kpis([['max margin','7.4%','VN-Black','good'],['min margin','6.1%','TW-White','warn'],['avg(amount 加權)','6.4%','D7 口徑','warn'],['Top markup','40.8%','Low-qty IC','']])}
+    ${costMatrixMini(c,ROLES.SALES)}
+    <div class="note">margin = <span class="mono">(quote-true)/quote</span> · amount 加權(D7)· FULL/SIMPLIFIED 同口徑可比 · markup_pct/gross_margin = 🔒🔒 每 access 寫 audit</div>`;
+  },
+  export(){ return head('客戶報價單匯出','D8 同一 export 引擎讀 mask 出兩版面')+`<div class="note cyan">FULL → 廠×variant 版面 · SIMPLIFIED → 5 SKU pivot 版面 · <b>同一引擎讀 costing_model mask</b>(守 superset)· 只含 quote 側 + 浮水印(工號/姓名/時戳)· 寫 quote_audit_log EXPORT</div><button class="btn btn-primary">📤 產報價 Excel + Submit</button>`; },
+};
+
+// ---------- PROC_MGR ----------
+WS.PROC_MGR = {
+  desk(){ return head('採購審核台 Approval Desk','跨案待核佇列 + SLA + 金額排序 + 比價警示')+kpis([['待審策略',2,'','warn'],['待核 tier',18,'','',],['比價離群',3,'','bad'],['本週核可金額','$1.2M','','']])+`<div class="inbox">${inboxItem('✅','#DCFCE7','QT-2026-0148 採購策略待核','22 子料 · 總 markup 偏離 +2.1% · 採購 David 送審','審核 →','strategy')}</div>`; },
+  strategy(){ return head('採購策略審核','preview-strategy 試算 · 不寫入只看 delta')+`<div class="note">審 price_strategy(MIN/AVG/MAX)+ period + org · approve → procurement_gate_status=approved(D5)· 寫 audit strategy_approved/rejected</div>`; },
+  tier(){ return head('Price Tier 核可','逐筆 approve/reject · markup 離群標紅 · 衝突2 核可後 is_chosen 落定'); },
+  benchmark(){ return head('跨案 Supplier 比價','同 Foxlink P/N 跨案聚合 · 跨 BG 只給去識別化單價分布(衝突7)')+`<table class="grid"><thead><tr><th>Foxlink P/N</th><th>案數</th><th>最佳價</th><th>最差價</th><th>離群</th></tr></thead><tbody><tr><td class="mono">0956-6000-007</td><td>5</td><td class="mono">$0.0983</td><td class="mono">$0.142</td><td style="color:var(--red)">⚠ +44%</td></tr></tbody></table>`; },
+};
+
+// ---------- ADMIN ----------
+WS.ADMIN = {
+  health(){ return head('平台健康儀表','設定 Master 控制台 · 跨 BG · 與 /projects 同層')+`<div class="ov-tiles">${[['廠 baseline 就緒','9/9','CN/VN/TW × 3 BG'],['component mask','20','全登錄'],['待同步使用者','3','新員工'],['權限 grant','47','active']].map(t=>`<div class="ov-tile"><div class="l">${t[0]}</div><div class="v">${t[1]}</div><div class="m">${t[2]}</div></div>`).join('')}</div>
+    <div class="section-title">9 子模組</div><div class="card-grid">${[['📅 廠 Baseline','月度更新 + Diff'],['🏭 設備類別 Catalog','跨 BG copy'],['💰 類別單價','per baseline × BG'],['👷 工資 Master','DL + IDL Line-Dep 4 + Central 17'],['📦 耗材 Master','foxlink_part_no'],['🔢 SMT 點數規則','算式字串'],['🎛️ Costing Model × Mask','component model_applicability + fallback'],['🔐 權限 Grant','D10 單一源 = 資料權限管理'],['🔄 使用者 BG 同步','LDAP/手動']].map(m=>`<div class="case-card" style="cursor:default;border-left-color:var(--purple)"><div class="cc-title" style="font-size:13px">${m[0]}</div><div style="font-size:11px;color:var(--muted)">${m[1]}</div></div>`).join('')}</div>`; },
+  baseline(){ return head('廠 Baseline 控制台','月度更新 + Diff Preview + 二簽')+`<div class="note">admin 跨 BG 全廠 baseline · EPM 只管自己廠</div>`; },
+  catalog(){ return head('設備類別 Catalog','BG 各一份 + admin 跨 BG copy(copy=fork)')+`<div class="note purple">從 OPTO copy 26 類到 CONSUMER + 加 3 wearable_only(FATP)· copied_from 留追蹤</div>`; },
+  wage(){ return head('工資 Master','DL 廠級單一 + IDL Line-Dep 4(LL/Tech/IQC/Sup)+ Centralized 17 角色'); },
+  mask(){ return head('Costing Model × Process Template × Component Mask','新增專案類型 = 加 mask 列 · 不分岔')+`<table class="grid"><thead><tr><th>component</th><th>FULL_MVA</th><th>SIMPLIFIED</th><th>fallback_into</th></tr></thead><tbody>
+    ${[['DL_CPU','✓','✗','PROC_MACRO'],['IDL_CPU','✓','✗','OVERHEAD_4PCT'],['EQUIP_DEPR','✓','✗','OVERHEAD_4PCT'],['SMT_POINTS','✗','✓','—'],['MAT_LOSS_RATE','✗','✓','—'],['OVERHEAD_4PCT','✗','✓','吸收 5 明細'],['SGA','✓','✓','參數化 base_ref'],['PROFIT','✓','✓','參數化 base_ref']].map(r=>`<tr><td class="mono">${r[0]}</td><td style="color:${r[1]==='✓'?'var(--green)':'var(--red)'}">${r[1]}</td><td style="color:${r[2]==='✓'?'var(--green)':'var(--red)'}">${r[2]}</td><td class="mono" style="font-size:10px">${r[3]}</td></tr>`).join('')}
+    </tbody></table>`; },
+  grant(){ return head('權限 Grant + BG/BU 主檔','D10 單一 source = 既有資料權限管理 · 不另存')+`<table class="grid"><thead><tr><th>user</th><th>BG</th><th>scope</th><th>view</th><th>edit</th><th>approve</th></tr></thead><tbody><tr><td>Andy</td><td>OPTO</td><td>BASELINE</td><td>✓</td><td>✓</td><td>—</td></tr><tr><td>admin</td><td>ALL</td><td>ALL</td><td>✓</td><td>✓</td><td>✓</td></tr></tbody></table>`; },
+};
+
+// ---------- GM_BG ----------
+WS.GM_BG = {
+  overview(){ return head('BG Portfolio 戰情中心','該 BG 所有 BU · 唯讀 · dead-end 不交棒')+`<div class="ov-tiles">${[['在辦案','2','光電 BG'],['本季報價額','$8.1M',''],['加權 margin','6.4%','VIEW_TRUE_COST'],['卡關紅燈','0','']].map(t=>`<div class="ov-tile"><div class="l">${t[0]}</div><div class="v">${t[1]}</div><div class="m">${t[2]}</div></div>`).join('')}</div>
+    <div class="section-title">全案清單(唯讀 drill)</div><div class="card-grid">${CASES.filter(c=>c.bg==='OPTO').map(c=>caseCard(c,null,true)).join('')}</div>
+    <div class="note">治理介入只走線下/訊息催 DPM(lock)/業務(議價)· 真正狀態變更仍由作業角色在各自工作區完成</div>`; },
+  cases(){ return WS.GM_BG.overview(); },
+  redzone(){ return head('卡關紅燈中心','margin 探底 / SLA 逾期 / Stage 停留過久')+`<div class="note">目前無紅燈案。Attention 門檻 admin 可調(system_settings · D9)</div>`; },
+  margin(){ return head('Margin 風險雷達','VIEW_TRUE_COST gate · GM 預設進名單(衝突5)')+`<div class="note">margin = (quote-true)/quote amount 加權(D7 · FULL/SIMPLIFIED 可比)</div>`; },
+  funnel(){ return head('Stage 流量漏斗','Stage 4→8 各停留案數 + 平均停留天數'); },
+};
+
+// ---------- CHAIRMAN ----------
+WS.CHAIRMAN = {
+  overview(){ return head('集團 Portfolio 戰情儀表板','全 BG/BU 不過濾 · true cost 恆開 · 機密穿透 🛡️ · 複用 /portfolio + GLOBAL toggle(D9)')+`<div class="ov-tiles">${[['集團在辦案','3','全 BG'],['本季報價額','$17.1M',''],['集團加權 margin','6.3%','全穿透'],['BG 數','2','OPTO/CONSUMER']].map(t=>`<div class="ov-tile"><div class="l">${t[0]}</div><div class="v">${t[1]}</div><div class="m">${t[2]}</div></div>`).join('')}</div>
+    <div class="section-title">各 BG Swimlane</div>
+    ${['OPTO','CONSUMER'].map(bg=>`<div class="swimlane"><div class="bg-name"><span class="chip chip-bg-${bg.toLowerCase()}">${BGS[bg].name}</span> ${CASES.filter(c=>c.bg===bg).length} 案</div><div class="card-grid">${CASES.filter(c=>c.bg===bg).map(c=>caseCard(c,null,true)).join('')}</div></div>`).join('')}`; },
+  bgcompare(){ return head('BG 對比','各 BG 報價量 / margin / 卡關'); },
+  browser(){ return head('全集團專案瀏覽器','全 BG 不過濾 · drill any project'); },
+  margin(){ return head('Margin 與雙價分析','VIEW_TRUE_COST 恆 true · 集團彙總'); },
+  boardpack(){ return head('匯出 Board Pack','機密浮水印 · 僅站內預覽不可轉寄'); },
+};
+
+/* ============================================================ shared components ============================================================ */
+function head(title,sub,right){ return `<div class="page-head"><div><h1>${title}</h1>${sub?`<div class="sub">${sub}</div>`:''}</div>${right?`<div class="right">${right}</div>`:''}</div>`; }
+function kpis(arr){ return `<div class="kpi-row">${arr.map(k=>`<div class="kpi"><div class="lbl">${k[0]}</div><div class="val ${k[3]||''}">${k[1]}</div><div class="meta">${k[2]||''}</div></div>`).join('')}</div>`; }
+function crumb(screen,label){ return `<div class="breadcrumb" onclick="go('${screen}')">← ${label}</div>`; }
+function modelChip(m){ return m==='FULL_MVA'?`<span class="chip chip-model-full">FULL_MVA</span>`:`<span class="chip chip-model-simp">SIMPLIFIED</span>`; }
+function bgChip(bg){ return `<span class="chip chip-bg-${bg.toLowerCase()}">${BGS[bg]?.name||bg}</span>`; }
+function gateBtn(c){ return c.stage>=6?`<button class="btn btn-primary" onclick="go('gate')">🚦 Gate 控制台</button>`:''; }
+
+function caseCard(c,target,readonly){
+  const cls = c.model==='FULL_MVA'?'full':'simplified';
+  return `<div class="case-card ${cls}" ${target?`onclick="go('${target}','${c.id}')"`:readonly?'style="cursor:default"':''}>
+    <div class="cc-head"><span class="cc-id">${c.id}</span><span class="sla sla-${c.sla}"></span></div>
+    <div class="cc-title">${c.title}</div>
+    <div class="cc-row">${modelChip(c.model)} ${bgChip(c.bg)}</div>
+    <div class="cc-row"><span>👤 ${c.customer}</span><span>· ${c.amount}</span><span>· ${c.qty}</span></div>
+    <div class="cc-row"><span>Stage ${c.stage} ${STAGES[c.stage]}</span>${c.margin!=null?`<span>· margin <b style="color:${c.margin<7?'var(--gold)':'var(--green)'}">${c.margin}%</b></span>`:''}</div>
+    <div class="stage-mini">${STAGES.map((s,i)=>`<div class="stage-dot ${i<c.stage?'done':i===c.stage?'cur':''}"></div>`).join('')}</div>
+  </div>`;
+}
+function rdCard(id,title,model,stage,desc,pct){ return `<div class="case-card full" onclick="go('build')"><div class="cc-head"><span class="cc-id">${id}</span></div><div class="cc-title">${title}</div><div class="cc-row"><span class="chip chip-model-full">${model}_MVA</span><span>Stage ${stage}</span></div><div class="cc-row" style="color:var(--muted)">${desc}</div><div class="stage-mini"><div class="stage-dot ${pct>50?'done':'active'}" style="flex:${pct};"></div><div class="stage-dot" style="flex:${100-pct}"></div></div></div>`; }
+function buyerCard(id,title,desc,target){ return `<div class="case-card" style="border-left-color:var(--cyan)" onclick="go('${target}')"><div class="cc-head"><span class="cc-id">${id}</span></div><div class="cc-title">${title}</div><div class="cc-row" style="color:var(--muted)">${desc}</div></div>`; }
+function salesCard(id,title,desc,target){ return `<div class="case-card full" onclick="go('${target}')"><div class="cc-head"><span class="cc-id">${id}</span></div><div class="cc-title">${title}</div><div class="cc-row" style="color:var(--muted)">${desc}</div></div>`; }
+function inboxItem(ico,bg,t,d,act,target){ return `<div class="inbox-item" onclick="go('${target}')"><div class="inbox-ico" style="background:${bg}">${ico}</div><div class="inbox-body"><div class="t">${t}</div><div class="d">${d}</div></div><div class="inbox-act">${act}</div></div>`; }
+function gateRow(id,trans,desc,color){ return `<div class="inbox-item"><div class="inbox-ico" style="background:${color}22;color:${color}">🚦</div><div class="inbox-body"><div class="t">${id} · ${trans}</div><div class="d">${desc}</div></div><div style="display:flex;gap:6px"><button class="btn btn-ghost" style="padding:4px 10px" onclick="event.stopPropagation();alert('退回 + 理由')">退回</button><button class="btn btn-primary" style="padding:4px 10px" onclick="event.stopPropagation();alert('放行 · gate_confirmed_by=BPM · 通知下一角色')">放行</button></div></div>`; }
+function flowList(steps){ return `<div class="placeholder-flow">${steps.map(s=>`<div class="flow-step"><div class="fn">${s[0]}</div><div><div class="ft">${s[1]}</div><div class="fd">${s[2]}</div></div></div>`).join('')}</div>`; }
+
+function stageSwimlane(c){
+  return `<div class="handoff">${STAGES.slice(2).map((s,i)=>{ const stageNum=i+2; const st=stageNum<c.stage?'done':stageNum===c.stage?'cur':''; return `<div class="ho-stage ${st}"><div class="s">Stage ${stageNum+2}</div><div class="nm">${s}</div><div class="who">${STAGE_OWNER[stageNum]}</div>${st==='cur'?'<div style="margin-top:5px"><span class="chip" style="background:#FEF3C7;color:#92400E">進行中</span></div>':st==='done'?'<div style="margin-top:5px;color:var(--green);font-size:10px">✓ gate 過</div>':''}</div>`; }).join('')}</div>`;
+}
+
+function costMatrixMini(c,role){
+  if(c.model==='SIMPLIFIED_WEARABLE'){
+    return `<table class="grid"><thead><tr><th>SKU</th><th>BOM 小計</th><th>OH 4%</th><th>SGA 3%</th><th>Profit 3%</th><th>TTL quote</th></tr></thead><tbody>
+      ${[['Retail','$80.96','$3.24','$2.43','$2.43','$89.55'],['WB Strap','$67.0','$2.68','$2.01','$2.01','$73.7']].map(r=>`<tr><td>${r[0]}</td><td class="mono">${mask(r[1],role)}</td><td class="mono">${mask(r[2],role)}</td><td class="mono">${mask(r[3],role)}</td><td class="mono">${r[4]}</td><td class="mono" style="font-weight:700">${r[5]}</td></tr>`).join('')}
+    </tbody></table>`;
+  }
+  return `<table class="grid"><thead><tr><th>廠 × variant</th><th>material true→quote</th><th>MVA</th><th>total quote</th><th>margin</th></tr></thead><tbody>
+    ${[['CN-black','$7.73→$8.52','$1.86','$11.94','6.8%'],['VN-black ⭐','$8.09→$8.93','$1.43','$11.11','7.4%'],['TW-black','$7.82→$8.63','$3.21','$12.59','6.1%']].map(r=>`<tr><td>${r[0]}</td><td class="mono">${mask(r[1],role)}</td><td class="mono">${mask(r[2],role)}</td><td class="mono" style="font-weight:700">${r[3]}</td><td class="mono" style="color:${parseFloat(r[4])<7?'var(--gold)':'var(--green)'}">${role.vtc?r[4]:'▒▒'}</td></tr>`).join('')}
+  </tbody></table>${!role.vtc?'<div class="note">⛔ 無 VIEW_TRUE_COST · true cost / margin 欄遮罩(▒▒)</div>':''}`;
+}
+
+function inviteGrid(){
+  return `<table class="grid"><thead><tr><th>角色</th><th>受邀 user</th><th>負責 Stage</th><th>field_grants 預設(D3 角色 template)</th></tr></thead><tbody>
+    ${[['RD','Troy 黃','Stage 4 BOM','看製造成本 · 不看 quote/margin'],['採購','David 張','Stage 5','看 true cost · 不看別人 markup'],['EPM','Andy 陳','Stage 5','看製造成本 · 不看 quote'],['DPM','Mike 王','Stage 6','全看(VIEW_TRUE_COST)']].map(r=>`<tr><td><b>${r[0]}</b></td><td>${r[1]}</td><td>${r[2]}</td><td style="font-size:11px;color:var(--muted)">${r[3]}</td></tr>`).join('')}
+  </tbody></table><div class="note">field_grants 依角色 template 預設 · 可逐案 override(D3)</div>`;
+}
+
+function renderGenericFlow(){
+  const role=ROLES[state.role];
+  const item=role.menu.find(m=>m[0]===state.screen);
+  return head(item?item[2]:'(畫面)','此 menu 的 demo 畫面')+`<div class="placeholder-flow" style="text-align:center;color:var(--muted);padding:40px">🚧 ${role.ws} · ${item?item[2]:''}<br><span style="font-size:11px">此角色操作流程詳見 cortex-role-workspace-sd.md §3</span></div>`;
+}
+
+function renderHandoff(){
+  return `${head('端到端流程 · Handoff 鏈','QUOTE 8 stage · BPM 是 gate 唯一確認人 · 各角色完成即交棒')}
+  <div class="handoff">
+    ${[['業務','發 RFQ','done'],['BPM','開案 8-stage','done'],['RD','Stage4 BOM','done'],['採購∥EPM','Stage5 Collect','cur'],['DPM','Stage6 lock+propagate',''],['業務','Stage7 報價',''],['業務','Stage8 結案','']].map(s=>`<div class="ho-stage ${s[2]}"><div class="s">${s[0]}</div><div class="nm">${s[1]}</div></div>`).join('')}
+  </div>
+  <div class="note">🔄 reprice 回圈:業務議價破底線 → 開新 stage iteration(D2)退 Stage5 → 採購重議 + EPM 重 compute + DPM 重 lock → 回 Stage7</div>
+  <div class="note cyan">📊 oversight 旁路:DPM lock+propagate 後 margin/金額即時聚合進 GM(/portfolio)+ 董事長(/portfolio?scope=GLOBAL)· 唯讀 dead-end · 不交棒不推進</div>
+  <div class="note purple">⚙️ admin 旁路:不在 stage 鏈 · 月度交付可信 master(baseline/類別/wage/權限)給所有作業角色</div>
+  <div class="section-title">三案目前位置</div>
+  <div class="card-grid">${CASES.map(c=>caseCard(c,null,true)).join('')}</div>`;
+}
+
+/* ============================================================ init ============================================================ */
+render();
+</script>
+</body>
+</html>
