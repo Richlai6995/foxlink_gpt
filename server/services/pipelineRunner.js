@@ -367,6 +367,36 @@ async function execGenerateFile(node, vars, db, context) {
   return { text, file };
 }
 
+// ── PM 週報 PDF node(含每金屬 6 個月走勢圖 + 月均/月漲跌表)────────────────────
+// input = 排程主 LLM 回應(markdown 報告 + JSON 落地段);走勢圖與月表數字由 SQL 算。
+async function execPmReportPdf(node, vars, db, context) {
+  const input = interpolate(node.input || '{{ai_output}}', vars);
+  const filename = node.filename
+    ? interpolate(node.filename, vars)
+    : `金屬市場週報_${interpolate('{{date}}', vars)}.pdf`;
+  const { buildWeeklyPdf } = require('./pmWeeklyPdfService');
+  const file = await buildWeeklyPdf({ db, aiOutput: input, filename, context });
+  return { text: `[已生成 PDF 週報(含走勢圖): ${file.filename}]`, file };
+}
+
+// ── PM 週報 Word(docx)node:保留原可編輯 Word 格式 + 附加月均/月漲跌表 ─────────
+// docx 沿用現有 markdown→docx 轉換器(materializeFile),把 SQL 算好的月表以 markdown
+// 附加到報告本文末尾 → 轉出的 Word 會多出對應表格,格式與原本一致,方便重新出資料。
+async function execPmReportDocx(node, vars, db, context) {
+  const input = interpolate(node.input || '{{ai_output}}', vars);
+  const filename = node.filename
+    ? interpolate(node.filename, vars)
+    : `金屬市場週報_${interpolate('{{date}}', vars)}.docx`;
+  const { extractReport, buildMonthlyTablesMarkdown } = require('./pmWeeklyPdfService');
+  const { md, asOf } = extractReport(input);
+  let monthlyMd = '';
+  try { monthlyMd = await buildMonthlyTablesMarkdown(db, asOf); }
+  catch (e) { console.warn('[pm_report_docx] 月表產生失敗,只出報告本文:', e.message); }
+  const finalMd = monthlyMd ? `${md}\n\n${monthlyMd}` : md;
+  const file = await materializeFile('docx', filename, finalMd, vars, context);
+  return { text: `[已生成 Word 週報(含月均/月漲跌表): ${file.filename}]`, file };
+}
+
 // ── Dashboard (AI 戰情) node ─────────────────────────────────────────────────
 // 把 AI 戰情查詢當成 pipeline 節點呼叫:
 //   • design_id    — 要呼叫的 ai_select_designs.id
@@ -712,6 +742,16 @@ async function runNode(node, vars, db, context, log) {
       }
       case 'generate_file': {
         const r = await execGenerateFile(node, vars, db, context);
+        output = r.text; file = r.file;
+        break;
+      }
+      case 'pm_report_pdf': {
+        const r = await execPmReportPdf(node, vars, db, context);
+        output = r.text; file = r.file;
+        break;
+      }
+      case 'pm_report_docx': {
+        const r = await execPmReportDocx(node, vars, db, context);
         output = r.text; file = r.file;
         break;
       }

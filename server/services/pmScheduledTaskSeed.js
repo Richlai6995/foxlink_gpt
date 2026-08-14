@@ -736,7 +736,8 @@ B. **JSON 落地段**(供 db_write 解析,放在 markdown 末尾的 \`\`\`json �
 function buildWeeklyReportTask(kbMap, models = {}) {
   const proModel = models.pro || 'pro';
   const dbReportId = newNodeId('dbw');
-  const generateId = newNodeId('gen');
+  const generateId = newNodeId('gen');   // PDF(含走勢圖)
+  const docxId     = newNodeId('gen');   // Word(可編輯,含月均/月漲跌表)
   const kbWriteId  = newNodeId('kbw');
 
   const prompt = `今天是 {{date}}({{weekday}}),撰寫「金屬市場週報」(回顧過去 7 天)。
@@ -846,9 +847,15 @@ function buildWeeklyReportTask(kbMap, models = {}) {
     },
     {
       id: generateId,
-      type: 'generate_file',
-      label: '產出 DOCX 週報',
-      output_file: 'docx',
+      type: 'pm_report_pdf',
+      label: '產出 PDF 週報(含走勢圖)',
+      filename: '金屬市場週報_{{date}}.pdf',
+      input: '{{ai_output}}',
+    },
+    {
+      id: docxId,
+      type: 'pm_report_docx',
+      label: '產出 Word 週報(可編輯,含月均/月漲跌表)',
       filename: '金屬市場週報_{{date}}.docx',
       input: '{{ai_output}}',
     },
@@ -887,7 +894,7 @@ function buildWeeklyReportTask(kbMap, models = {}) {
     filename_template: null,
     recipients_json: '[]',
     email_subject: '[PM] 金屬市場週報 — {{date}}',
-    email_body: '本週金屬市場週報如下(附件 docx 為可編輯版本):\n\n{{ai_response}}',
+    email_body: '本週金屬市場週報如下(附件 PDF 含各金屬近 6 個月走勢圖 + 月均價 / 月漲跌幅;Word 為可編輯版,同附月均 / 月漲跌表):\n\n{{ai_response}}',
     status: 'paused',
     pipeline_json: JSON.stringify(pipeline),
   };
@@ -2310,6 +2317,89 @@ Rhodium 備援: {{scrape:https://www.kitco.com/charts/liverhodium.html}}
   }
 }
 
+// ── Patch 既有 [PM] 金屬市場週報:附件出 PDF(走勢圖)+ Word(可編輯,月均/月漲跌表)──
+// 2026-08-14:週報附件同時產 PDF(每金屬 6 個月走勢圖 + 月均/月漲跌表)與 Word(保留原可編輯
+// 格式 + 附加月均/月漲跌表,方便重新出資料)。reconcile 到最終狀態:pipeline 同時含
+// pm_report_pdf 與 pm_report_docx。marker = 兩者都在就跳過。
+async function patchExistingWeeklyReportFiles(db) {
+  let row;
+  try {
+    row = await db.prepare(`SELECT id, pipeline_json FROM scheduled_tasks WHERE name='[PM] 金屬市場週報'`).get();
+  } catch (e) {
+    console.warn('[PMScheduledTaskSeed] patch weekly files select failed:', e.message);
+    return;
+  }
+  if (!row) return;
+  const id = row.id || row.ID;
+  let raw = row.pipeline_json || row.PIPELINE_JSON;
+  if (raw && typeof raw !== 'string' && raw.toString) raw = raw.toString();
+  if (!raw) return;
+
+  let nodes;
+  try { nodes = JSON.parse(raw); } catch (_) { return; }
+  if (!Array.isArray(nodes)) return;
+
+  const hasPdf  = () => nodes.some(n => n && n.type === 'pm_report_pdf');
+  const hasDocx = () => nodes.some(n => n && n.type === 'pm_report_docx');
+  if (hasPdf() && hasDocx()) return; // 已是最終狀態
+
+  let changed = false;
+
+  // 1) 既有 generate_file(docx)節點 → 轉成 pm_report_docx(保留 node id 不動下游)
+  for (const n of nodes) {
+    if (n && n.type === 'generate_file' && /docx/i.test(String(n.output_file || n.file_type || '') + String(n.filename || ''))) {
+      n.type = 'pm_report_docx';
+      n.label = '產出 Word 週報(可編輯,含月均/月漲跌表)';
+      n.filename = '金屬市場週報_{{date}}.docx';
+      delete n.output_file;
+      delete n.file_type;
+      n.input = n.input || '{{ai_output}}';
+      changed = true;
+    }
+  }
+
+  // 2) 缺 pm_report_docx(例如更早的 patch 已把 docx 換成 pdf)→ 補一個
+  if (!hasDocx()) {
+    const insertAt = Math.max(0, nodes.findIndex(n => n && n.type === 'kb_write'));
+    const docxNode = {
+      id: `gen_docx_${id}`,
+      type: 'pm_report_docx',
+      label: '產出 Word 週報(可編輯,含月均/月漲跌表)',
+      filename: '金屬市場週報_{{date}}.docx',
+      input: '{{ai_output}}',
+    };
+    if (insertAt >= 0 && insertAt < nodes.length) nodes.splice(insertAt, 0, docxNode);
+    else nodes.push(docxNode);
+    changed = true;
+  }
+
+  // 3) 缺 pm_report_pdf → 補一個(插在第一個 file/kb 節點之前)
+  if (!hasPdf()) {
+    const insertAt = nodes.findIndex(n => n && (n.type === 'pm_report_docx' || n.type === 'kb_write'));
+    const pdfNode = {
+      id: `gen_pdf_${id}`,
+      type: 'pm_report_pdf',
+      label: '產出 PDF 週報(含走勢圖)',
+      filename: '金屬市場週報_{{date}}.pdf',
+      input: '{{ai_output}}',
+    };
+    if (insertAt >= 0) nodes.splice(insertAt, 0, pdfNode);
+    else nodes.push(pdfNode);
+    changed = true;
+  }
+
+  if (!changed) return;
+
+  const newBody = '本週金屬市場週報如下(附件 PDF 含各金屬近 6 個月走勢圖 + 月均價 / 月漲跌幅;Word 為可編輯版,同附月均 / 月漲跌表):\n\n{{ai_response}}';
+  try {
+    await db.prepare(`UPDATE scheduled_tasks SET pipeline_json=?, email_body=?, updated_at=SYSTIMESTAMP WHERE id=?`)
+      .run(JSON.stringify(nodes), newBody, id);
+    console.log(`[PMScheduledTaskSeed] Upgraded "[PM] 金屬市場週報" #${id}: 附件 = PDF(走勢圖) + Word(月均/月漲跌表)`);
+  } catch (e) {
+    console.warn(`[PMScheduledTaskSeed] patch weekly files update #${id} failed:`, e.message);
+  }
+}
+
 // ── 主 seed 入口 ────────────────────────────────────────────────────────────
 async function autoSeedPmScheduledTasks(db, kbMap) {
   if (!db) {
@@ -2494,6 +2584,9 @@ async function autoSeedPmScheduledTasks(db, kbMap) {
   // Patch 既有任務:[PM] 總體經濟指標日抓 拿掉 is_estimated(prompt + mapping)
   // pm_macro_history schema 沒這欄,LLM 別再浪費 token 輸出(2026-04-28)
   await patchExistingMacroDropIsEstimated(db);
+
+  // 2026-08-14:[PM] 金屬市場週報 附件 = PDF(走勢圖 + 月表)+ Word(可編輯,月表);reconcile 兩節點
+  await patchExistingWeeklyReportFiles(db);
 }
 
 // ── 把既有 PM 任務的 model 從舊 alias('pro'/'flash')patch 到 pickModelKey 的結果 ───
