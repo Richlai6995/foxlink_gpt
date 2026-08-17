@@ -152,6 +152,17 @@ export default function WizardModal({ open, onClose }: Props) {
           })
         } catch (e: any) { warns.push(`成員 ${iv.label}:${e.message}`) }
       }
+      // Step 3 選配拉的組員 → 啟動即加入(去重;失敗不擋)
+      for (const tm of (data.teamMembers || [])) {
+        if (!tm.userId || invitedIds.has(tm.userId)) continue
+        invitedIds.add(tm.userId)
+        try {
+          await api.post(token, `/projects/${pid}/members`, {
+            user_id: tm.userId, role: tm.role, sub_role: null,
+            invited_by_pm_user_id: data.dpmUserId || undefined,
+          })
+        } catch (e: any) { warns.push(`組員 ${tm.name}:${e.message}`) }
+      }
       for (const tid of selTpl) {
         try { await api.post(token, '/bom/provision-case', { projectId: pid, sourceCaseFactoryId: tid }) }
         catch (e: any) { warns.push(`廠別範本 #${tid}:${e.message}`) }

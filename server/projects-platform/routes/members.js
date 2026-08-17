@@ -12,7 +12,7 @@
 
 const express = require('express');
 const { asyncHandler } = require('../middleware/errorBoundary');
-const { loadProject, requirePmOrAdmin } = require('../middleware/projectAclMiddleware');
+const { loadProject, requireCanManageMembers, canManageMembers } = require('../middleware/projectAclMiddleware');
 
 const router = express.Router({ mergeParams: true });
 
@@ -82,11 +82,11 @@ router.get('/', asyncHandler(async (req, res) => {
       WHERE pm.project_id = ?
       ORDER BY pm.invited_at`,
   ).all(req.project.id);
-  res.json({ members });
+  res.json({ members, canManage: canManageMembers(req.projectAcl) });
 }));
 
 // ─── POST / invite ──────────────────────────────────────────────────
-router.post('/', requirePmOrAdmin, asyncHandler(async (req, res) => {
+router.post('/', requireCanManageMembers, asyncHandler(async (req, res) => {
   const db = getDb();
   const { user_id, role, sub_role, invited_by_pm_user_id } = req.body || {};
   if (!user_id) return res.status(400).json({ error: 'user_id required' });
@@ -157,7 +157,7 @@ router.post('/', requirePmOrAdmin, asyncHandler(async (req, res) => {
 }));
 
 // ─── DELETE /:memberId remove ───────────────────────────────────────
-router.delete('/:memberId', requirePmOrAdmin, asyncHandler(async (req, res) => {
+router.delete('/:memberId', requireCanManageMembers, asyncHandler(async (req, res) => {
   const db = getDb();
   const memberId = Number(req.params.memberId);
 

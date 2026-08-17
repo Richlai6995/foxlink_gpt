@@ -138,9 +138,25 @@ function requirePmOrAdmin(req, res, next) {
   next();
 }
 
+// 可管理成員(邀請/移除)= 業務 HOST + 各 PM(含 member role='PM' 的 BPM/MPM/EPM)+ 業務(sales)+ admin
+//   對齊「4 種 PM 各帶自己 team」設計;與 stagesService gate 權限一致(不只認主表 pm_user_id)
+function canManageMembers(acl) {
+  return !!acl && (acl.is_admin || acl.is_pm || acl.is_creator || acl.is_sales || acl.member_role === 'PM');
+}
+function requireCanManageMembers(req, res, next) {
+  const acl = req.projectAcl;
+  if (!acl) return res.status(500).json({ error: 'projectAcl not loaded' });
+  if (!canManageMembers(acl)) {
+    return res.status(403).json({ error: '只有 業務 / PM(含 BPM/MPM/EPM)/ admin 能管理成員' });
+  }
+  next();
+}
+
 module.exports = {
   setDb,
   loadProject,
   requireProjectMember,
   requirePmOrAdmin,
+  requireCanManageMembers,
+  canManageMembers,
 };

@@ -669,8 +669,24 @@ function UserPicker({ token, value, userId, onPick, placeholder }: {
   )
 }
 
+const TEAM_ROLES = [
+  { key: 'engineering', label: 'Engineering(工程)' },
+  { key: 'sourcing', label: 'Sourcing(採購)' },
+  { key: 'factory', label: 'Factory(工廠)' },
+  { key: 'observer', label: 'Observer(觀察者)' },
+]
 export function Step4PmTeam({ data, onChange }: StepProps) {
   const { token } = useAuth() as any
+  const [tmName, setTmName] = useState('')
+  const [tmId, setTmId] = useState<number | null>(null)
+  const [tmRole, setTmRole] = useState('engineering')
+  const addTeamMember = () => {
+    if (!tmId) return
+    if ((data.teamMembers || []).some((m) => m.userId === tmId)) { setTmName(''); setTmId(null); return }
+    onChange({ teamMembers: [...(data.teamMembers || []), { userId: tmId, name: tmName, role: tmRole }] })
+    setTmName(''); setTmId(null)
+  }
+  const removeTeamMember = (uid: number) => onChange({ teamMembers: (data.teamMembers || []).filter((m) => m.userId !== uid) })
   return (
     <div className="grid grid-cols-[1.4fr_1fr] gap-5">
       <div>
@@ -743,6 +759,33 @@ export function Step4PmTeam({ data, onChange }: StepProps) {
               </div>
             )
           })}
+        </div>
+
+        {/* 拉組員(選配)· 啟動時直接加入成員 · 非 PM 骨架 */}
+        <div className="bg-white border border-cortex-line rounded-lg p-3.5 mt-3">
+          <div className="text-[11px] font-bold text-cortex-muted tracking-widest mb-1">組員(選配)</div>
+          <div className="text-[10px] text-cortex-muted mb-2.5">開案時可先拉幾位組員;之後各 PM 也能進 WarRoom「成員」分頁再邀。</div>
+          <div className="flex items-center gap-1.5 mb-2">
+            <div className="flex-1"><UserPicker token={token} value={tmName} userId={tmId} placeholder="搜尋姓名 / 工號 加組員"
+              onPick={(p) => { setTmName(p.name); setTmId(p.id) }} /></div>
+            <select value={tmRole} onChange={(e) => setTmRole(e.target.value)}
+              className="text-[11px] border border-cortex-line rounded px-1 py-1 bg-white text-cortex-ink">
+              {TEAM_ROLES.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+            </select>
+            <button onClick={addTeamMember} disabled={!tmId}
+              className="text-[11px] px-2 py-1 rounded bg-cortex-teal text-white disabled:opacity-40">＋ 加</button>
+          </div>
+          {(data.teamMembers || []).length > 0 ? (
+            <div className="space-y-1">
+              {(data.teamMembers || []).map((m) => (
+                <div key={m.userId} className="flex items-center gap-2 text-[11px] bg-cortex-bg/50 rounded px-2 py-1">
+                  <span className="font-semibold text-cortex-ink flex-1">{m.name}</span>
+                  <span className="text-[9px] bg-cortex-line-2 text-cortex-muted px-1.5 py-0.5 rounded">{TEAM_ROLES.find((r) => r.key === m.role)?.label || m.role}</span>
+                  <button onClick={() => removeTeamMember(m.userId)} className="text-cortex-muted hover:text-red-600">×</button>
+                </div>
+              ))}
+            </div>
+          ) : <div className="text-[10px] text-cortex-muted italic">尚未加組員(可留空)</div>}
         </div>
       </div>
 

@@ -68,6 +68,8 @@ export type WizardData = {
   mpmUserId: number | null
   epmName: string
   epmUserId: number | null
+  // 開案時預先拉的組員(選配 · 啟動時加入專案成員;非 PM 骨架)
+  teamMembers: { userId: number; name: string; role: string }[]
 
   // Step 5 — 模板就是 step 2 選的 workflowTemplateCode
 
@@ -126,6 +128,7 @@ export const INITIAL_WIZARD: WizardData = {
   mpmUserId: null,
   epmName: '',
   epmUserId: null,
+  teamMembers: [],
 
   // 優先序(自動 = 系統建議;手動調過才固定)
   priorityScore: 6,

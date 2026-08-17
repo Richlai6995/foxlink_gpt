@@ -15,7 +15,7 @@
  * Sprint A 砸 data_payload 進的 pms 結構(從 Wizard)— 此處讀來建分組
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Crown, ShieldCheck, Wrench, Factory, Building2, ShoppingCart, UserPlus, X as XIcon } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
 import { api, type ProjectDetail, type Member } from '../api'
@@ -36,12 +36,16 @@ export default function MembersTab({ project }: { project: ProjectDetail }) {
   const [members, setMembers] = useState<Member[]>(project.members)
   const [showInvite, setShowInvite] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [canManage, setCanManage] = useState(false)   // 後端 SoT:業務/PM(含BPM/MPM/EPM)/admin 才能邀
+
+  useEffect(() => { reloadMembers() }, [])   // eslint-disable-line
 
   const reloadMembers = async () => {
     setBusy(true)
     try {
-      const r = await api.get<{ members: Member[] }>(token, `/projects/${project.id}/members`)
+      const r = await api.get<{ members: Member[]; canManage?: boolean }>(token, `/projects/${project.id}/members`)
       setMembers(r.members || [])
+      setCanManage(!!r.canManage)
     } catch (e: any) {
       console.error('reload members:', e.message)
     } finally {
@@ -134,14 +138,16 @@ export default function MembersTab({ project }: { project: ProjectDetail }) {
             對齊 OIBG flow:業務 HOST + 4 種 PM 各帶自己 team(invited_by_pm_user_id 自然涌現)
           </p>
         </div>
-        <button
-          onClick={() => setShowInvite(true)}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-bold rounded transition hover:brightness-110"
-          style={{ background: TOKENS.cyan, color: TOKENS.navy }}
-          disabled={busy}
-        >
-          <UserPlus size={12} /> 邀請成員
-        </button>
+        {canManage && (
+          <button
+            onClick={() => setShowInvite(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-bold rounded transition hover:brightness-110"
+            style={{ background: TOKENS.cyan, color: TOKENS.navy }}
+            disabled={busy}
+          >
+            <UserPlus size={12} /> 邀請成員
+          </button>
+        )}
       </div>
 
       {showInvite && (
