@@ -127,7 +127,7 @@ async function create(db, input) {
   if (!projectId) throw new Error('failed to get project id after insert');
 
   // 5. Auto-create PM membership(creator + pm if 不同人)
-  await _addMember(db, projectId, finalPmId, 'PM', creator_id);
+  await _addMember(db, projectId, finalPmId, 'PM', creator_id, 'DPM');   // 主 PM = DPM(Design 主導)· 分組認得出
   if (sales_user_id && sales_user_id !== finalPmId) {
     await _addMember(db, projectId, sales_user_id, 'sales', creator_id);
   }
@@ -240,13 +240,13 @@ function _summarizeFormPayload(payload, projectCode) {
   return lines.join('\n');
 }
 
-async function _addMember(db, projectId, userId, role, invitedBy) {
+async function _addMember(db, projectId, userId, role, invitedBy, subRole = null) {
   try {
     await db.prepare(
       `INSERT INTO project_members
-         (project_id, user_id, role, invited_by)
-       VALUES (?, ?, ?, ?)`,
-    ).run(projectId, userId, role, invitedBy);
+         (project_id, user_id, role, sub_role, invited_by)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(projectId, userId, role, subRole, invitedBy);
   } catch (e) {
     if (!/UNIQUE constraint failed/.test(e.message)) {
       log.warn(`addMember p=${projectId} u=${userId}:`, e.message);

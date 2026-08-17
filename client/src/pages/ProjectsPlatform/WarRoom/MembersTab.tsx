@@ -66,60 +66,29 @@ export default function MembersTab({ project }: { project: ProjectDetail }) {
   // 從 data_payload.pms 拿 wizard 填的 PM 名字(若無則顯示「待邀」)
   const pms = (project.data_payload as any)?.pms || {}
 
+  // 單一歸屬:每個成員只落一個 group(優先序);業務 HOST 只放 sales,主 DPM(pm_user_id)歸 DPM Team
+  const mainPmId = Number((project as any).pm_user_id) || 0
+  const bucket: Record<string, Member[]> = { host: [], dpm: [], bpm: [], mpm: [], epm: [], sourcing: [], misc: [] }
+  for (const m of members) {
+    let k = 'misc'
+    if (m.role === 'sales') k = 'host'
+    else if (m.sub_role === 'DPM' || m.role === 'engineering' || (m.role === 'PM' && Number(m.user_id) === mainPmId)) k = 'dpm'
+    else if (m.sub_role === 'BPM') k = 'bpm'
+    else if (m.sub_role === 'MPM' || m.role === 'factory') k = 'mpm'
+    else if (m.sub_role === 'EPM') k = 'epm'
+    else if (m.role === 'sourcing' || m.role === 'procurement') k = 'sourcing'
+    bucket[k].push(m)
+  }
   const groups: TeamGroup[] = [
-    {
-      key: 'host',
-      label: '業務 HOST',
-      Icon: Crown,
-      color: 'text-red-700',
-      bg: 'bg-red-50 border-red-200',
-      members: members.filter((m) => m.role === 'PM' || m.role === 'sales' || m.role === 'observer'),
-    },
-    {
-      key: 'dpm',
-      label: 'DPM Team(Design)',
-      Icon: Wrench,
-      color: 'text-purple-700',
-      bg: 'bg-purple-50 border-purple-200',
-      members: members.filter((m) => m.sub_role === 'DPM' || m.role === 'engineering'),
-    },
-    {
-      key: 'bpm',
-      label: 'BPM Team(Business)',
-      Icon: Building2,
-      color: 'text-cortex-ocean',
-      bg: 'bg-cortex-ocean-bg border-blue-200',
-      members: members.filter((m) => m.sub_role === 'BPM'),
-    },
-    {
-      key: 'mpm',
-      label: 'MPM Team(Manufacturing)',
-      Icon: Factory,
-      color: 'text-cortex-teal',
-      bg: 'bg-cortex-cyan-bg border-cortex-cyan/30',
-      members: members.filter((m) => m.sub_role === 'MPM' || m.role === 'factory'),
-    },
-    {
-      key: 'epm',
-      label: 'EPM(NPI Engineering)',
-      Icon: ShieldCheck,
-      color: 'text-cortex-green',
-      bg: 'bg-cortex-green-bg border-cortex-green/30',
-      members: members.filter((m) => m.sub_role === 'EPM'),
-    },
-    {
-      key: 'sourcing',
-      label: '採購跨 team',
-      Icon: ShoppingCart,
-      color: 'text-amber-700',
-      bg: 'bg-cortex-amber-bg border-amber-300',
-      members: members.filter((m) => m.role === 'sourcing' || m.role === 'procurement'),
-    },
+    { key: 'host', label: '業務 HOST',              Icon: Crown,       color: 'text-red-700',      bg: 'bg-red-50 border-red-200',                     members: bucket.host },
+    { key: 'dpm',  label: 'DPM Team(Design)',       Icon: Wrench,      color: 'text-purple-700',   bg: 'bg-purple-50 border-purple-200',               members: bucket.dpm },
+    { key: 'bpm',  label: 'BPM Team(Business)',     Icon: Building2,   color: 'text-cortex-ocean', bg: 'bg-cortex-ocean-bg border-blue-200',           members: bucket.bpm },
+    { key: 'mpm',  label: 'MPM Team(Manufacturing)', Icon: Factory,    color: 'text-cortex-teal',  bg: 'bg-cortex-cyan-bg border-cortex-cyan/30',      members: bucket.mpm },
+    { key: 'epm',  label: 'EPM(NPI Engineering)',   Icon: ShieldCheck, color: 'text-cortex-green', bg: 'bg-cortex-green-bg border-cortex-green/30',    members: bucket.epm },
+    { key: 'sourcing', label: '採購跨 team',        Icon: ShoppingCart, color: 'text-amber-700',   bg: 'bg-cortex-amber-bg border-amber-300',          members: bucket.sourcing },
   ]
 
-  // 沒分到 group 的丟到 misc
-  const grouped = new Set(groups.flatMap((g) => g.members.map((m) => m.id)))
-  const misc = members.filter((m) => !grouped.has(m.id))
+  const misc = bucket.misc
   if (misc.length > 0) {
     groups.push({
       key: 'misc', label: '其他成員', Icon: Crown, color: 'text-cortex-muted', bg: 'bg-cortex-line-2 border-cortex-line', members: misc,
