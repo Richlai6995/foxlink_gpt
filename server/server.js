@@ -317,6 +317,11 @@ app.get('/api/version', (req, res) => {
       }));
       app.get('*', (req, res, next) => {
         if (req.path.startsWith('/api')) return next();
+        // 缺檔的 /uploads 請求不要 fallback 成 index.html(否則點附件會「開一個 CORTEX 頁」)→ 回真 404
+        if (req.path.startsWith('/uploads')) {
+          res.set('Cache-Control', 'no-store');
+          return res.status(404).send('File not found');
+        }
         // SPA fallback 也是 index.html → 同樣 no-store
         res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
         res.sendFile(path.join(staticPath, 'index.html'));
@@ -827,14 +832,41 @@ app.get('/api/version', (req, res) => {
     const GENERATED_DIR = path.join(UPLOAD_DIR, 'generated');
     const WEBEX_TMP_DIR = path.join(UPLOAD_DIR, 'webex_tmp');
     const MULTER_TMP_DIR = path.join(UPLOAD_DIR, 'tmp');
-    const cleanupStaleTmpFiles = () => {
+    const cleanupStaleTmpFiles = async () => {
       const ttlMs = 24 * 60 * 60 * 1000; // 24 hours
       const now = Date.now();
+      // 排程任務附件也落在 generated/,但 run history 保留 90 天、附件也要跟著在(不能 24h 就刪)。
+      // 收集 scheduled_task_runs 仍引用的檔名 → 保護不刪,附件生命週期對齊 run history retention。
+      const protectedNames = new Set();
+      let protectReadFailed = false;
+      try {
+        const db = require('./database-oracle').db;
+        const rows = await db.prepare(
+          `SELECT generated_files_json FROM scheduled_task_runs WHERE generated_files_json IS NOT NULL`
+        ).all();
+        for (const r of rows || []) {
+          let raw = r.generated_files_json ?? r.GENERATED_FILES_JSON;
+          if (raw && typeof raw !== 'string' && raw.toString) raw = raw.toString();
+          if (!raw) continue;
+          try {
+            for (const item of JSON.parse(raw)) {
+              if (item && item.publicUrl) protectedNames.add(path.basename(item.publicUrl));
+              if (item && item.filename) protectedNames.add(item.filename);
+            }
+          } catch (_) {}
+        }
+      } catch (e) {
+        // 讀不到保護清單 → 保守起見這輪整個跳過 generated/,寧可不刪也別誤刪排程附件
+        protectReadFailed = true;
+        console.warn('[TmpCleanup] 讀 scheduled_task_runs 保護清單失敗,本輪略過 generated/:', e.message);
+      }
       for (const dir of [GENERATED_DIR, WEBEX_TMP_DIR, MULTER_TMP_DIR]) {
         if (!fs.existsSync(dir)) continue;
+        if (dir === GENERATED_DIR && protectReadFailed) continue; // 保護清單讀失敗 → 不動 generated/
         try {
           let cleaned = 0;
           for (const f of fs.readdirSync(dir)) {
+            if (dir === GENERATED_DIR && protectedNames.has(f)) continue; // 排程附件保護
             const fp = path.join(dir, f);
             try {
               const stat = fs.statSync(fp);

@@ -586,10 +586,14 @@ function buildDailyReportTask(kbMap, models = {}) {
    - 每篇格式:**標題**(來源,published_at)— 50-100 字繁中濃縮 + 對哪個金屬影響(代碼)
    - 排序:供應重大事件 / 政策 > 產業趨勢 > 公司動態 > 市場評論
    - 採購最在意「會不會缺貨」「會不會漲價」,選新聞時偏供應 / 政策面
-3. 11 種金屬(CU 銅 / AL 鋁 / NI 鎳 / SN 錫 / ZN 鋅 / PB 鉛 / AU 金 / AG 銀 / PT 鉑 / PD 鈀 / RH 銠)逐一講當日表現 + 主要驅動
+3. 11 種金屬(銅 Cu / 鋁 Al / 鎳 Ni / 錫 Sn / 鋅 Zn / 鉛 Pb / 金 Au / 銀 Ag / 鉑 Pt / 鈀 Pd / 銠 Rh)逐一講當日表現 + 主要驅動
 4. 連結最近新聞與宏觀指標(DXY / VIX / UST10Y / 原油)的影響
 5. 對未來 7 天的展望(每金屬 1-2 句)
 6. 給採購單位的具體建議(進貨節奏 / 避險策略)
+
+═══ 金屬代碼大小寫(重要,跟畫面一致)═══
+報告內文提到金屬代碼一律用**第二字小寫**格式:Cu / Al / Ni / Zn / Pb / Sn / Au / Ag / Pt / Pd / Rh(不要全大寫 CU/AL…)。
+⚠️ 但下方 JSON 落地段的 entity_code / metal_code 仍必須維持**全大寫**(CU/AL/…),那是寫進資料庫的識別碼,不可小寫。
 
 ═══ 輸出格式(雙段)═══
 A. **報告全文**(繁體中文 markdown,給人看 + 給 generate_file 寫 DOCX 用)
@@ -757,8 +761,8 @@ function buildWeeklyReportTask(kbMap, models = {}) {
      - **領跌板塊**:後 3 名(跌幅最大的 3 個金屬)
 
    接著用以下 markdown 表格格式 — **按固定順序排列,跟採購情報精簡版對齊,不要按漲跌幅排序**:
-     1. 基本金屬 LME 6 個:**CU / AL / NI / ZN / PB / SN**
-     2. 貴金屬 5 個:**AU / AG / PT / PD / RH**
+     1. 基本金屬 LME 6 個:**Cu / Al / Ni / Zn / Pb / Sn**
+     2. 貴金屬 5 個:**Au / Ag / Pt / Pd / Rh**
 
    \`\`\`
    | 燈號 | 金屬品種 | 上週報價 | 本週最新報價 | 週漲跌幅 | 主要驅動因素與市場現況 |
@@ -784,8 +788,10 @@ function buildWeeklyReportTask(kbMap, models = {}) {
      - 週漲跌幅 — \`**+5.2%**\` 或 \`**-2.8%**\`(粗體含正負號),必須用 \`{{pm_weekly_changes}}\` 提供的實際數字(7 天前價 vs 最新價)
      - 主要驅動因素 — 一句話 30-60 字說明該金屬本週主漲/跌動能(地緣 / 政策 / 庫存 / 供需 / 終端需求)
 
-   **11 個金屬必須按上面固定順序齊全**:CU → AL → NI → ZN → PB → SN → AU → AG → PT → PD → RH
+   **11 個金屬必須按上面固定順序齊全**:Cu → Al → Ni → Zn → Pb → Sn → Au → Ag → Pt → Pd → Rh
    ❌ 不要按漲跌幅排序、不要加排名欄、不要省略某金屬
+
+   ⚠️ **金屬代碼一律第二字小寫**(Cu/Al/…,跟畫面一致),不要全大寫;但下方 JSON 落地段的 metal_code / entity_code 仍維持全大寫(識別碼,寫 DB)。
 
 3. 本週重大事件回顧(政策 / 庫存 / 地緣)
 4. 下週展望 + 關鍵觀察點
@@ -924,8 +930,8 @@ function buildMonthlyReportTask(kbMap, models = {}) {
      - **Top 3 跌幅**(月跌幅最大的 3 個)
 
    接著用以下 markdown 表格格式 — **按固定順序排列,跟採購情報精簡版對齊,不要按月漲跌幅排序**:
-     1. 基本金屬 LME 6 個:**CU / AL / NI / ZN / PB / SN**
-     2. 貴金屬 5 個:**AU / AG / PT / PD / RH**
+     1. 基本金屬 LME 6 個:**Cu / Al / Ni / Zn / Pb / Sn**
+     2. 貴金屬 5 個:**Au / Ag / Pt / Pd / Rh**
 
    \`\`\`
    | 燈號 | 金屬品種 | 上月報價 | 本月最新報價 | 月漲跌幅 | 主要驅動因素與市場現況 |
@@ -951,8 +957,10 @@ function buildMonthlyReportTask(kbMap, models = {}) {
      - 月漲跌幅 — \`**+18.5%**\` 或 \`**-5.2%**\`(粗體含正負號),必須用 \`{{pm_monthly_changes}}\` 提供的實際數字(30 天前價 vs 最新價)
      - 主要驅動因素 — 30-60 字說明該金屬本月主驅動(著重結構性、整月貫穿的因素,非單日事件)
 
-   **11 個金屬必須按上面固定順序齊全**:CU → AL → NI → ZN → PB → SN → AU → AG → PT → PD → RH
+   **11 個金屬必須按上面固定順序齊全**:Cu → Al → Ni → Zn → Pb → Sn → Au → Ag → Pt → Pd → Rh
    ❌ 不要按月漲跌幅排序、不要加排名欄、不要省略某金屬
+
+   ⚠️ **金屬代碼一律第二字小寫**(Cu/Al/…,跟畫面一致),不要全大寫;但下方 JSON 落地段的 metal_code / entity_code 仍維持全大寫(識別碼,寫 DB)。
 
 3. 上月重大政策 / 地緣 / 供需事件回顧
 4. 本月展望(主要事件日曆 + 關鍵觀察)
@@ -2400,6 +2408,41 @@ async function patchExistingWeeklyReportFiles(db) {
   }
 }
 
+// ── Patch 既有日/週/月報:金屬代碼「顯示」改第二字小寫(2026-08-18,跟畫面一致)──
+// 只改 prompt 內文顯示規則(Cu/Al…);JSON 落地段 metal_code/entity_code 仍全大寫(seed 本來
+// 就是,不影響入庫)。marker = prompt 含「第二字小寫」字串,沒有就用最新 seed force-update prompt。
+async function patchExistingReportsMetalCasing(db) {
+  const targets = [
+    { name: '[PM] 每日金屬日報', builder: buildDailyReportTask },
+    { name: '[PM] 金屬市場週報', builder: buildWeeklyReportTask },
+    { name: '[PM] 金屬市場月報', builder: buildMonthlyReportTask },
+  ];
+  let patched = 0;
+  for (const t of targets) {
+    let row;
+    try {
+      row = await db.prepare(`SELECT id, prompt FROM scheduled_tasks WHERE name=?`).get(t.name);
+    } catch (e) {
+      console.warn(`[PMScheduledTaskSeed] patch casing ${t.name} select failed:`, e.message);
+      continue;
+    }
+    if (!row) continue;
+    const id = row.id || row.ID;
+    let promptStr = row.prompt || row.PROMPT;
+    if (promptStr && typeof promptStr !== 'string' && promptStr.toString) promptStr = promptStr.toString();
+    if (!!promptStr && /第二字小寫/.test(promptStr)) continue; // 已升級
+    try {
+      const newSeed = t.builder(undefined, {});
+      await db.prepare(`UPDATE scheduled_tasks SET prompt=?, updated_at=SYSTIMESTAMP WHERE id=?`).run(newSeed.prompt, id);
+      patched++;
+      console.log(`[PMScheduledTaskSeed] Upgraded "${t.name}" #${id}: 金屬代碼顯示改第二字小寫`);
+    } catch (e) {
+      console.warn(`[PMScheduledTaskSeed] patch casing ${t.name} #${id} update failed:`, e.message);
+    }
+  }
+  if (patched > 0) console.log(`[PMScheduledTaskSeed] patched metal-casing prompt on ${patched} report task(s)`);
+}
+
 // ── 主 seed 入口 ────────────────────────────────────────────────────────────
 async function autoSeedPmScheduledTasks(db, kbMap) {
   if (!db) {
@@ -2587,6 +2630,9 @@ async function autoSeedPmScheduledTasks(db, kbMap) {
 
   // 2026-08-14:[PM] 金屬市場週報 附件 = PDF(走勢圖 + 月表)+ Word(可編輯,月表);reconcile 兩節點
   await patchExistingWeeklyReportFiles(db);
+
+  // 2026-08-18:日/週/月報 prompt 金屬代碼顯示改第二字小寫(Cu/Al…),跟畫面一致
+  await patchExistingReportsMetalCasing(db);
 }
 
 // ── 把既有 PM 任務的 model 從舊 alias('pro'/'flash')patch 到 pickModelKey 的結果 ───
