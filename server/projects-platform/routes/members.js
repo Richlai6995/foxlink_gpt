@@ -12,7 +12,7 @@
 
 const express = require('express');
 const { asyncHandler } = require('../middleware/errorBoundary');
-const { loadProject, requireCanManageMembers, canManageMembers } = require('../middleware/projectAclMiddleware');
+const { loadProject, requireCanManageMembers, canManageMembers, canGrantDeputy } = require('../middleware/projectAclMiddleware');
 
 const router = express.Router({ mergeParams: true });
 
@@ -74,7 +74,7 @@ router.get('/search', asyncHandler(async (req, res) => {
 router.get('/', asyncHandler(async (req, res) => {
   const db = getDb();
   const members = await db.prepare(
-    `SELECT pm.id, pm.user_id, pm.role, pm.sub_role,
+    `SELECT pm.id, pm.user_id, pm.role, pm.sub_role, pm.is_pm_deputy,
             pm.invited_by, pm.invited_by_pm_user_id, pm.invited_at,
             u.username, u.name, u.email, u.dept_name
        FROM project_members pm
@@ -82,7 +82,11 @@ router.get('/', asyncHandler(async (req, res) => {
       WHERE pm.project_id = ?
       ORDER BY pm.invited_at`,
   ).all(req.project.id);
-  res.json({ members, canManage: canManageMembers(req.projectAcl) });
+  res.json({
+    members,
+    canManage: canManageMembers(req.projectAcl),
+    canGrantDeputy: canGrantDeputy(req.projectAcl),
+  });
 }));
 
 // ─── POST / invite ──────────────────────────────────────────────────
@@ -154,6 +158,34 @@ router.post('/', requireCanManageMembers, asyncHandler(async (req, res) => {
     }
     throw e;
   }
+}));
+
+// ─── PUT /:memberId/deputy — 指定 / 取消 PM 代理人(主 PM / 開案人 / admin)──────
+router.put('/:memberId/deputy', asyncHandler(async (req, res) => {
+  if (!canGrantDeputy(req.projectAcl)) return res.status(403).json({ error: '只有主 PM / 開案人 / admin 能指定 PM 代理人' });
+  const db = getDb();
+  const memberId = Number(req.params.memberId);
+  const isDeputy = req.body.isDeputy ? 1 : 0;
+  const m = await db.prepare(`SELECT user_id, role FROM project_members WHERE id = ? AND project_id = ?`).get(memberId, req.project.id);
+  if (!m) return res.status(404).json({ error: 'member not found' });
+  if (Number(m.user_id) === Number(req.project.pm_user_id)) {
+    return res.status(400).json({ error: '主 PM 本人不需設代理' });
+  }
+  await db.prepare(`UPDATE project_members SET is_pm_deputy = ? WHERE id = ?`).run(isDeputy, memberId);
+  // 通知被指定的人
+  if (isDeputy && Number(m.user_id) !== Number(req.user.id)) {
+    try {
+      const userNotif = require('../../services/userNotificationService');
+      await userNotif.create(db, {
+        userId: Number(m.user_id), type: 'project_pm_deputy',
+        title: `你被指定為 ${req.project.project_code} 的 PM 代理人`,
+        message: `${req.user.name || req.user.username} 授權你代行 PM 工作(Stage Gate 推進 / 成員管理)`,
+        linkUrl: `/projects-platform/projects/${req.project.id}`,
+        payload: { projectId: req.project.id },
+      });
+    } catch (e) { console.warn('[members/deputy] notify failed:', e.message); }
+  }
+  res.json({ ok: true, isDeputy });
 }));
 
 // ─── DELETE /:memberId remove ───────────────────────────────────────

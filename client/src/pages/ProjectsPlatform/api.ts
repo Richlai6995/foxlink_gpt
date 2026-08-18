@@ -124,6 +124,7 @@ export type Member = {
   user_id: number
   role: string
   sub_role?: string | null
+  is_pm_deputy?: number | null
   invited_by: number
   invited_by_pm_user_id?: number | null
   invited_at: string

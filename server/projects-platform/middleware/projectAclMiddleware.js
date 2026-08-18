@@ -59,7 +59,7 @@ function loadProject(opts = {}) {
       let memberRow = null;
       if (!isAdmin && !isPm && !isSales && !isCreator) {
         memberRow = await db.prepare(
-          `SELECT role, sub_role, field_grants
+          `SELECT role, sub_role, field_grants, is_pm_deputy
              FROM project_members
             WHERE project_id = ? AND user_id = ?`,
         ).get(projectId, req.user.id);
@@ -113,6 +113,7 @@ function loadProject(opts = {}) {
         is_director: isDirector,
         member_role: memberRow?.role || null,
         sub_role: memberRow?.sub_role || null,
+        is_pm_deputy: !!(memberRow && Number(memberRow.is_pm_deputy) === 1),
       };
       next();
     } catch (e) {
@@ -141,7 +142,11 @@ function requirePmOrAdmin(req, res, next) {
 // 可管理成員(邀請/移除)= 業務 HOST + 各 PM(含 member role='PM' 的 BPM/MPM/EPM)+ 業務(sales)+ admin
 //   對齊「4 種 PM 各帶自己 team」設計;與 stagesService gate 權限一致(不只認主表 pm_user_id)
 function canManageMembers(acl) {
-  return !!acl && (acl.is_admin || acl.is_pm || acl.is_creator || acl.is_sales || acl.member_role === 'PM');
+  return !!acl && (acl.is_admin || acl.is_pm || acl.is_creator || acl.is_sales || acl.member_role === 'PM' || acl.is_pm_deputy);
+}
+// 指定 / 取消 PM 代理人:只有專案擁有者層(主 PM / 開案人 / admin)可授權
+function canGrantDeputy(acl) {
+  return !!acl && (acl.is_admin || acl.is_pm || acl.is_creator);
 }
 function requireCanManageMembers(req, res, next) {
   const acl = req.projectAcl;
@@ -159,4 +164,5 @@ module.exports = {
   requirePmOrAdmin,
   requireCanManageMembers,
   canManageMembers,
+  canGrantDeputy,
 };

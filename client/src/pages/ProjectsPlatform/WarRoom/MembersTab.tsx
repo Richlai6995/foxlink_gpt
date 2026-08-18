@@ -37,20 +37,30 @@ export default function MembersTab({ project }: { project: ProjectDetail }) {
   const [showInvite, setShowInvite] = useState(false)
   const [busy, setBusy] = useState(false)
   const [canManage, setCanManage] = useState(false)   // 後端 SoT:業務/PM(含BPM/MPM/EPM)/admin 才能邀
+  const [canGrantDeputy, setCanGrantDeputy] = useState(false)   // 主 PM / 開案人 / admin 才能指定代理
 
   useEffect(() => { reloadMembers() }, [])   // eslint-disable-line
 
   const reloadMembers = async () => {
     setBusy(true)
     try {
-      const r = await api.get<{ members: Member[]; canManage?: boolean }>(token, `/projects/${project.id}/members`)
+      const r = await api.get<{ members: Member[]; canManage?: boolean; canGrantDeputy?: boolean }>(token, `/projects/${project.id}/members`)
       setMembers(r.members || [])
       setCanManage(!!r.canManage)
+      setCanGrantDeputy(!!r.canGrantDeputy)
     } catch (e: any) {
       console.error('reload members:', e.message)
     } finally {
       setBusy(false)
     }
+  }
+
+  const toggleDeputy = async (m: Member) => {
+    const next = (m as any).is_pm_deputy ? 0 : 1
+    try {
+      await api.put(token, `/projects/${project.id}/members/${m.id}/deputy`, { isDeputy: next })
+      reloadMembers()
+    } catch (e: any) { alert('設定代理失敗:' + e.message) }
   }
 
   const removeMember = async (m: Member) => {
@@ -166,10 +176,22 @@ export default function MembersTab({ project }: { project: ProjectDetail }) {
                         {m.username && m.name ? `@${m.username} · ` : ''}{m.role}{m.sub_role && ` · ${m.sub_role}`}
                       </div>
                     </div>
+                    {(m as any).is_pm_deputy ? (
+                      <span className="text-[9px] font-bold text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded whitespace-nowrap" title="可代行 PM 工作(Stage Gate / 成員管理)">⭐ PM 代理</span>
+                    ) : null}
                     {m.invited_by_pm_user_id && (
                       <span className="text-[9px] text-cortex-muted" title="由此 PM 邀請">
                         ← #{m.invited_by_pm_user_id}
                       </span>
+                    )}
+                    {canGrantDeputy && Number(m.user_id) !== Number((project as any).pm_user_id) && m.role !== 'sales' && (
+                      <button
+                        onClick={() => toggleDeputy(m)}
+                        className="opacity-0 group-hover:opacity-100 transition text-[9px] px-1.5 py-0.5 rounded border border-purple-300 text-purple-700 hover:bg-purple-50 whitespace-nowrap"
+                        title={(m as any).is_pm_deputy ? '取消 PM 代理' : '指定為 PM 代理人(代行 PM 工作)'}
+                      >
+                        {(m as any).is_pm_deputy ? '取消代理' : '設代理'}
+                      </button>
                     )}
                     <button
                       onClick={() => removeMember(m)}

@@ -25,14 +25,15 @@ type UserRow = {
   already_member: boolean
 }
 
+// 組員為主(DPM 邀 EE/ME/RD、MPM 邀 SMT/工廠採購…);PM 需刻意選(避免被邀的人都變成另一個 PM)
 const ROLES = [
-  { key: 'PM',           label: 'PM(專案經理)',         needsSub: true },
-  { key: 'sales',        label: 'Sales(業務)',          needsSub: false },
-  { key: 'engineering',  label: 'Engineering',            needsSub: false },
+  { key: 'engineering',  label: 'Engineering(EE/ME/RD)', needsSub: false },
   { key: 'sourcing',     label: 'Sourcing(採購)',       needsSub: false },
   { key: 'factory',      label: 'Factory(工廠)',        needsSub: false },
+  { key: 'sales',        label: 'Sales(業務)',          needsSub: false },
   { key: 'observer',     label: 'Observer(觀察者)',     needsSub: false },
   { key: 'chat_guest',   label: 'Chat Guest(臨時)',     needsSub: false },
+  { key: 'PM',           label: 'PM(另一位 PM)',        needsSub: true },
 ]
 
 const SUB_ROLES = ['DPM', 'BPM', 'MPM', 'EPM']
@@ -49,7 +50,7 @@ export default function InviteMemberModal({ projectId, onClose, onInvited }: Pro
   const [users, setUsers] = useState<UserRow[]>([])
   const [searching, setSearching] = useState(false)
   const [selected, setSelected] = useState<UserRow | null>(null)
-  const [role, setRole] = useState('PM')
+  const [role, setRole] = useState('engineering')   // 預設拉組員(工程);要邀 PM 需刻意切
   const [subRole, setSubRole] = useState('DPM')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)

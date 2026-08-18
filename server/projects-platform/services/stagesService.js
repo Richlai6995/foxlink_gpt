@@ -61,7 +61,7 @@ async function advance(db, stageId, user, { notes } = {}) {
   let isTeamGate = false;
   if (Number(stage.gate_required) === 1 && !isAdmin && !isPm && !isSales && !isCreator) {
     const m = await db.prepare(
-      `SELECT id FROM project_members WHERE project_id = ? AND user_id = ? AND role IN ('PM', 'sales')`,
+      `SELECT id FROM project_members WHERE project_id = ? AND user_id = ? AND (role IN ('PM', 'sales') OR is_pm_deputy = 1)`,
     ).get(stage.project_id, Number(user.id)).catch(() => null);
     isTeamGate = !!m;
   }

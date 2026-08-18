@@ -179,6 +179,7 @@ async function runMigrations(db) {
       await require('./migrations/013ac_smt_price_precision')(db);   // SMT 點數單價精度 4→6 位
       await require('./migrations/013ad_region_price')(db);          // per-廠別/區域 料價(SOT §2.3 泛化)
       await require('./migrations/013ae_effectivity_multi')(db);     // effectivity 一料多值(PK 擴三欄)
+      await require('./migrations/013af_pm_deputy')(db);            // PM 代理人(project_members.is_pm_deputy)
       console.log('[projects-platform] Cortex BOM/RBAC migrations (S0) ✓');
     } else {
       console.log('[projects-platform] Cortex BOM/RBAC migrations skipped (ENABLE_CORTEX_BOM != true)');
