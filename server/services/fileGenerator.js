@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const { Worker, isMainThread } = require('worker_threads');
+const { resolveCjkFontPath } = require('./cjkFont');
 
 /**
  * Strip inline markdown symbols from a text line.
@@ -414,8 +415,10 @@ async function generatePdf(content, outputPath) {
   return new Promise((resolve, reject) => {
     doc.pipe(stream);
 
-    // CJK font search order: bundled → Windows system → Linux system
+    // CJK font search order: 驗證過的 glyf(避 CID-CFF 複製亂碼,見 cjkFont.js)→ bundled → system
     const fontPaths = [
+      // 只挑 glyf 的解析器結果排第一(baked 進 image、volume 蓋不到)
+      resolveCjkFontPath(),
       // Bundled fonts (place in server/fonts/ or project root fonts/)
       path.join(__dirname, '../fonts/NotoSansTC-Regular.ttf'),
       path.join(__dirname, '../fonts/NotoSansTC-Regular.otf'),

@@ -17,6 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const PDFDocument = require('pdfkit');
 const { metalDisplay } = require('./metalDisplay');
+const { resolveCjkFontPath } = require('./cjkFont');
 
 // ── 金屬定義(固定順序,對齊精簡版 / 週報表格)──────────────────────────────
 const BASE_METALS = [
@@ -348,65 +349,105 @@ function drawLineChart(doc, x, y, w, h, points, unit) {
   doc.restore();
 }
 
-function drawMonthlyTable(doc, x, y, w, months) {
+// 月表:左側標籤欄(Y/M / MAP / Change(%))+ 各月一欄,對齊使用者提供之附圖格式。
+// rowH 可調(compact grid 用較矮列高塞 3 金屬/頁)。回傳底部 y。
+function drawMonthlyTable(doc, x, y, w, months, rowH = 15) {
   const n = months.length;
   if (n === 0) return y;
-  const colW = w / n;
-  const rowH = 15;
+  const labelW = Math.min(72, Math.max(56, w * 0.16));
+  const colW = (w - labelW) / n;
   // 安全網:月表 3 列不可跨頁(正常已由 block 前置檢查保證同頁)
   if (y + rowH * 3 + 4 > pageBottom(doc)) { doc.addPage(); doc.x = MARGIN; doc.y = MARGIN; y = MARGIN; }
-  doc.font(FONT).fontSize(8);
-  // Row 1:月份(淺底)
-  for (let i = 0; i < n; i++) {
-    doc.rect(x + i * colW, y, colW, rowH).fill(C.headBg);
-    doc.rect(x + i * colW, y, colW, rowH).lineWidth(0.5).strokeColor(C.line).stroke();
-    doc.fillColor(C.text);
-    const label = months[i].ym.replace('-', '/');
-    const tw = doc.widthOfString(label);
-    drawText(doc, label, x + i * colW + (colW - tw) / 2, y + 4, {}, true);
-  }
-  // Row 2:月均價
-  const y2 = y + rowH;
-  for (let i = 0; i < n; i++) {
-    doc.rect(x + i * colW, y2, colW, rowH).lineWidth(0.5).strokeColor(C.line).stroke();
-    doc.fillColor(C.text);
-    const v = fmtPrice(months[i].avg);
-    const tw = doc.widthOfString(v);
-    drawText(doc, v, x + i * colW + (colW - tw) / 2, y2 + 4, {}, false);
-  }
-  // Row 3:月漲跌幅
-  const y3 = y + rowH * 2;
-  for (let i = 0; i < n; i++) {
-    doc.rect(x + i * colW, y3, colW, rowH).lineWidth(0.5).strokeColor(C.line).stroke();
-    const v = months[i].chg == null ? '—' : fmtPct(months[i].chg);
-    doc.fillColor(months[i].chg == null ? C.muted : pctColor(months[i].chg));
-    const tw = doc.widthOfString(v);
-    drawText(doc, v, x + i * colW + (colW - tw) / 2, y3 + 4, {}, true);
+  const fontSz = rowH <= 13 ? 7.2 : 8;
+  doc.font(FONT).fontSize(fontSz);
+  const cellText = (str, cx, cw, cy, color, bold) => {
+    doc.fillColor(color);
+    const tw = doc.widthOfString(str);
+    const tx = cx + Math.max(2, (cw - tw) / 2);
+    drawText(doc, str, tx, cy, {}, bold);
+  };
+  const rows = [
+    { label: 'Y/M',       fill: C.headBg, cells: months.map(m => m.ym.replace('-', '/')), bold: true,
+      color: () => C.text, headRow: true },
+    { label: 'MAP',       fill: null,     cells: months.map(m => fmtPrice(m.avg)), bold: false,
+      color: () => C.text },
+    { label: 'Change(%)', fill: null,     cells: months.map(m => (m.chg == null ? '—' : fmtPct(m.chg))), bold: true,
+      color: (i) => (months[i].chg == null ? C.muted : pctColor(months[i].chg)) },
+  ];
+  for (let r = 0; r < rows.length; r++) {
+    const ry = y + r * rowH;
+    const row = rows[r];
+    // 左側標籤格(淺底)
+    doc.rect(x, ry, labelW, rowH).fill(C.headBg);
+    doc.rect(x, ry, labelW, rowH).lineWidth(0.5).strokeColor(C.line).stroke();
+    cellText(row.label, x, labelW, ry + (rowH - fontSz) / 2 - 1, C.text, true);
+    // 月份資料格
+    for (let i = 0; i < n; i++) {
+      const cx = x + labelW + i * colW;
+      if (row.fill) doc.rect(cx, ry, colW, rowH).fill(row.fill);
+      doc.rect(cx, ry, colW, rowH).lineWidth(0.5).strokeColor(C.line).stroke();
+      cellText(row.cells[i], cx, colW, ry + (rowH - fontSz) / 2 - 1, row.color(i), row.bold);
+    }
   }
   return y + rowH * 3;
 }
 
-async function drawMetalChartBlock(doc, db, metal, asOf) {
+// 分組標題橫幅(海軍藍底,每組首頁一條)
+function drawGroupTitle(doc, title, sub) {
   const cw = contentWidth(doc);
-  const chartH = 124;
-  // 前置保證整塊(子標題 + 圖 + 月表)同頁不被切
-  const blockH = 20 + chartH + 8 + 15 * 3 + 20;
-  ensureSpace(doc, blockH);
-  const disp = metalDisplay(metal.code);
-  // 子標題
-  doc.fillColor(C.navy).font(FONT).fontSize(11);
-  drawText(doc, `${metal.zh} ${disp}(${unitOf(metal.code)})`, MARGIN, doc.y, {}, true);
-  doc.y += 20;
+  const h = 26;
+  const y = doc.y;
+  doc.rect(MARGIN, y, cw, h).fill(C.navy);
+  doc.fillColor('#FFFFFF').font(FONT).fontSize(13);
+  drawText(doc, title, MARGIN + 8, y + 6, {}, true);
+  if (sub) {
+    doc.fontSize(8.5).fillColor('#CFE0F5');
+    const tw = doc.widthOfString(sub);
+    drawText(doc, sub, MARGIN + cw - tw - 8, y + 9, {}, false);
+  }
+  doc.y = y + h + 8;
+  doc.x = MARGIN;
+}
 
+// 單一金屬「緊湊塊」:在給定矩形 (x,y,w,h) 內畫 子標題 + 走勢圖 + 月表(Y/M/MAP/Change)
+async function drawCompactMetalBlock(doc, db, metal, asOf, x, y, w, h) {
+  const unit = unitOf(metal.code);
+  const disp = metalDisplay(metal.code);
+  const titleH = 15, tRowH = 13, tableH = tRowH * 3, gap1 = 2, gap2 = 6, botPad = 8;
+  const chartH = Math.max(90, h - titleH - gap1 - gap2 - tableH - botPad);
+  // 子標題
+  doc.fillColor(C.navy).font(FONT).fontSize(10.5);
+  drawText(doc, `${metal.zh} ${disp}(${unit})`, x, y, {}, true);
+  // 資料
   const [daily, monthly] = await Promise.all([
     getDailySeries(db, metal.code, asOf),
     getMonthlySeries(db, metal.code, asOf),
   ]);
-  drawLineChart(doc, MARGIN, doc.y, cw, chartH, daily, unitOf(metal.code));
-  doc.y += chartH + 8;
-  const endY = drawMonthlyTable(doc, MARGIN, doc.y, cw, monthly);
-  doc.y = endY + 12;
-  doc.x = MARGIN;
+  drawLineChart(doc, x, y + titleH + gap1, w, chartH, daily, unit);
+  drawMonthlyTable(doc, x, y + titleH + gap1 + chartH + gap2, w, monthly, tRowH);
+}
+
+// 一組金屬(基本 / 貴金屬):自成頁,3 金屬/頁緊湊排,避免頁數過多
+async function drawMetalGroupGrid(doc, db, metals, asOf, title, sub) {
+  const perPage = 3;
+  const cw = contentWidth(doc);
+  doc.addPage(); doc.x = MARGIN; doc.y = MARGIN;   // 每組從新頁開始
+  drawGroupTitle(doc, title, sub);
+  let idx = 0;
+  let pageTopY = doc.y;
+  while (idx < metals.length) {
+    const blockH = (pageBottom(doc) - pageTopY) / perPage;
+    const cnt = Math.min(perPage, metals.length - idx);
+    for (let b = 0; b < cnt; b++) {
+      await drawCompactMetalBlock(doc, db, metals[idx], asOf, MARGIN, pageTopY + b * blockH, cw, blockH);
+      idx++;
+    }
+    if (idx < metals.length) {
+      doc.addPage(); doc.x = MARGIN; doc.y = MARGIN;
+      pageTopY = MARGIN;   // 續頁無標題,整頁平分 3 塊
+    }
+  }
+  doc.y = pageBottom(doc);
 }
 
 // ── markdown 報告本文渲染 ─────────────────────────────────────────────────────
@@ -620,7 +661,9 @@ function lastNMonths(asOf, n) {
 
 async function buildMonthlyTablesMarkdown(db, asOf) {
   const months = lastNMonths(asOf, 6);
-  const headRow = `| 金屬 | ${months.join(' | ')} |`;
+  const ymHead = months.map(ym => ym.replace('-', '/'));   // 2026-03 → 2026/03
+  // 表頭依使用者附圖:第一欄 Y/M,列 MAP / Change(%)
+  const headRow = `| Y/M | ${ymHead.join(' | ')} |`;
   const sepRow = `| :--- | ${months.map(() => '---:').join(' | ')} |`;
 
   // 先撈全部金屬的月資料
@@ -630,46 +673,39 @@ async function buildMonthlyTablesMarkdown(db, asOf) {
     data[m.code] = new Map(series.map(s => [s.ym, s]));
   }
 
-  const avgTable = (metals) => {
-    const rows = metals.map(m => {
-      const map = data[m.code];
-      const cells = months.map(ym => {
-        const s = map.get(ym);
-        return s && Number.isFinite(s.avg) ? fmtPrice(s.avg) : '—';
-      });
-      return `| ${m.zh} (${metalDisplay(m.code)}) | ${cells.join(' | ')} |`;
+  // 每金屬一張 3 列表(Y/M / MAP / Change(%)),對齊附圖格式
+  const metalTables = (metals) => metals.flatMap(m => {
+    const map = data[m.code];
+    const mapRow = months.map(ym => {
+      const s = map.get(ym);
+      return s && Number.isFinite(s.avg) ? fmtPrice(s.avg) : '—';
     });
-    return [headRow, sepRow, ...rows].join('\n');
-  };
-  const chgTable = (metals) => {
-    const rows = metals.map(m => {
-      const map = data[m.code];
-      const cells = months.map(ym => {
-        const s = map.get(ym);
-        return s && s.chg != null ? fmtPct(s.chg) : '—';
-      });
-      return `| ${m.zh} (${metalDisplay(m.code)}) | ${cells.join(' | ')} |`;
+    const chgRow = months.map(ym => {
+      const s = map.get(ym);
+      return s && s.chg != null ? fmtPct(s.chg) : '—';
     });
-    return [headRow, sepRow, ...rows].join('\n');
-  };
+    return [
+      `**${m.zh}(${metalDisplay(m.code)})— ${unitOf(m.code)}**`,
+      '',
+      headRow,
+      sepRow,
+      `| MAP | ${mapRow.join(' | ')} |`,
+      `| Change(%) | ${chgRow.join(' | ')} |`,
+      '',
+    ];
+  });
 
   return [
-    '## 各金屬月均價與月漲跌幅(近 6 個月)',
+    '## 各金屬近 6 個月 MAP(月均價)與 Change(%)',
     '',
-    '> 數字由 PM 價格庫 SQL 統計(各月日均價 + 相鄰月漲跌幅),供重新出資料 / 追溯用。',
+    '> Y/M=年月;MAP=各月日均價;Change(%)=相鄰月漲跌幅。數字由 PM 價格庫 SQL 統計,供重新出資料 / 追溯用。',
     '',
-    '### 基本金屬 — 月均價(USD/Ton)',
-    avgTable(BASE_METALS),
+    '### 基本金屬(USD/Ton)',
     '',
-    '### 基本金屬 — 月漲跌幅(%)',
-    chgTable(BASE_METALS),
+    ...metalTables(BASE_METALS),
+    '### 貴金屬(USD/Troy Oz)',
     '',
-    '### 貴金屬 — 月均價(USD/Troy Oz)',
-    avgTable(PRECIOUS_METALS),
-    '',
-    '### 貴金屬 — 月漲跌幅(%)',
-    chgTable(PRECIOUS_METALS),
-    '',
+    ...metalTables(PRECIOUS_METALS),
   ].join('\n');
 }
 
@@ -686,11 +722,10 @@ async function buildWeeklyPdf({ db, aiOutput, filename, asOfDate, context }) {
   const filePath = path.join(outDir, safeName);
 
   const doc = new PDFDocument({ size: 'A4', margin: MARGIN, bufferPages: true });
-  const fontPath = path.join(__dirname, '../fonts/NotoSansTC-Regular.ttf');
-  const altFont = '/app/fonts/NotoSansTC-Regular.ttf';
-  if (fs.existsSync(fontPath)) doc.registerFont(FONT, fontPath);
-  else if (fs.existsSync(altFont)) doc.registerFont(FONT, altFont);
-  else { doc.registerFont(FONT, 'Helvetica'); }
+  // 只挑 glyf 字型:避開 CID-CFF(Noto CJK .otf)造成 PDF 複製貼上變 PUA 亂碼(見 cjkFont.js)
+  const fontPath = resolveCjkFontPath();
+  if (fontPath) doc.registerFont(FONT, fontPath);
+  else doc.registerFont(FONT, 'Helvetica');
 
   const stream = fs.createWriteStream(filePath);
   doc.pipe(stream);
@@ -701,13 +736,18 @@ async function buildWeeklyPdf({ db, aiOutput, filename, asOfDate, context }) {
   // 報告本文(市場主軸 / 漲跌表 / 重大事件 / 下週展望 / 採購策略)
   renderReportBody(doc, md);
 
-  // 新增段落:各金屬近 6 個月走勢 + 月均價 / 月漲跌幅
-  drawSectionTitle(doc, '各金屬近 6 個月走勢與月均價');
-  doc.fillColor(C.muted).font(FONT).fontSize(9);
-  drawParagraph(doc, '走勢圖為近 6 個月每日收盤價;下方月表為各月「日均價」及相鄰月漲跌幅(資料源:PM 價格庫,SQL 統計)。');
-  for (const metal of ALL_METALS) {
-    await drawMetalChartBlock(doc, db, metal, asOf);
-  }
+  // 新增段落:各金屬近 6 個月走勢圖 + 月表(Y/M / MAP / Change(%))。
+  // 與報告本文(前兩頁)分開,自第 3 頁起;基本金屬、貴金屬各縮排成 2 頁(3 金屬/頁),避免頁數過多。
+  await drawMetalGroupGrid(
+    doc, db, BASE_METALS, asOf,
+    '基本金屬 — 近 6 個月走勢與 MAP / 漲跌幅',
+    'USD/Ton｜MAP=月均價,Change=相鄰月漲跌幅(PM 價格庫 SQL 統計)',
+  );
+  await drawMetalGroupGrid(
+    doc, db, PRECIOUS_METALS, asOf,
+    '貴金屬 — 近 6 個月走勢與 MAP / 漲跌幅',
+    'USD/Troy Oz｜MAP=月均價,Change=相鄰月漲跌幅(PM 價格庫 SQL 統計)',
+  );
 
   // 頁尾(所有頁)
   const range = doc.bufferedPageRange();

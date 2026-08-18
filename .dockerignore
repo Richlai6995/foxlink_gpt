@@ -26,6 +26,9 @@ uploads/
 logs/
 backups/
 fonts/
+# 但 baked 進 image 的 CJK glyf 字型必須進 build context(修 PDF 複製亂碼,見 server/services/cjkFont.js)
+!server/assets/fonts/
+!server/assets/fonts/**
 server/uploads/
 server/system.db
 server/system.db.tmp

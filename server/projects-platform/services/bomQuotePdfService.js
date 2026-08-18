@@ -8,12 +8,14 @@
 const path = require('path');
 const PDFDocument = require('pdfkit');
 const engine = require('./bomCostEngine');
+const { resolveCjkFontPath } = require('../../services/cjkFont');
 
 const num = (v) => (typeof v === 'number' ? v : (v == null || v === '' ? 0 : Number(v) || 0));
 const pick = (row, name) => { if (!row) return undefined; const lc = String(name).toLowerCase(); for (const k of Object.keys(row)) if (k.toLowerCase() === lc) return row[k]; return undefined; };
 const money = (v) => (v == null ? '—' : `$${num(v).toFixed(4)}`);
 const money2 = (v) => (v == null ? '—' : `$${num(v).toLocaleString('en-US', { maximumFractionDigits: 2 })}`);
-const FONT = path.join(__dirname, '../../fonts/NotoSansTC-Regular.ttf');
+// 驗證過的 glyf 字型(避 CID-CFF 造成 PDF 複製貼上亂碼,見 services/cjkFont.js)
+const FONT = resolveCjkFontPath() || path.join(__dirname, '../../fonts/NotoSansTC-Regular.ttf');
 
 // 雙語 labels(zh / en)
 const L = {

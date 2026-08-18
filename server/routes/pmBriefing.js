@@ -766,10 +766,10 @@ router.get('/news/export.pdf', verifyToken, verifyPmUser, async (req, res) => {
     `).all(...params);
 
     const PDFDocument = require('pdfkit');
-    const path = require('path');
-    const fs = require('fs');
-    const fontPath = path.join(__dirname, '..', 'fonts', 'NotoSansTC-Regular.ttf');
-    const hasCJKFont = fs.existsSync(fontPath);
+    const { resolveCjkFontPath } = require('../services/cjkFont');
+    // 驗證過的 glyf 字型(避 CID-CFF 造成 PDF 複製貼上亂碼,見 services/cjkFont.js)
+    const fontPath = resolveCjkFontPath();
+    const hasCJKFont = !!fontPath;
 
     const doc = new PDFDocument({ size: 'A4', margin: 40 });
     const fname = `PM_新聞_${req.query.from || 'all'}_${req.query.to || 'all'}.pdf`;

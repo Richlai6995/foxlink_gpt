@@ -38,8 +38,8 @@ server/fonts/*.otf
 server/fonts/*.ttc
 server/fonts/*.woff
 server/fonts/*.woff2
-# Docker host-mounted fonts dir
-fonts/
+# Docker host-mounted fonts dir（頂層 only；勿用未錨定 fonts/ 以免誤擋 server/assets/fonts/ 之類）
+/fonts/
 
 # ─── Reference Project (read-only, do not commit) ────────────────────────────
 refrence_project/
