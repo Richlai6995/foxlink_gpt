@@ -747,13 +747,13 @@ async function buildWeeklyPdf({ db, aiOutput, filename, asOfDate, context }) {
   // 與報告本文(前兩頁)分開,自第 3 頁起;基本金屬、貴金屬各縮排成 2 頁(3 金屬/頁),避免頁數過多。
   await drawMetalGroupGrid(
     doc, db, BASE_METALS, asOf,
-    '基本金屬 — 近 6 個月走勢與 MAP / 漲跌幅',
-    'USD/Ton｜MAP=月均價,Change=相鄰月漲跌幅',
+    '基本金屬 — 近 6 個月走勢與 Monthly Avg. Price / 漲跌幅',
+    'USD/Ton｜Change = 相鄰月漲跌幅',
   );
   await drawMetalGroupGrid(
     doc, db, PRECIOUS_METALS, asOf,
-    '貴金屬 — 近 6 個月走勢與 MAP / 漲跌幅',
-    'USD/Troy Oz｜MAP=月均價,Change=相鄰月漲跌幅',
+    '貴金屬 — 近 6 個月走勢與 Monthly Avg. Price / 漲跌幅',
+    'USD/Troy Oz｜Change = 相鄰月漲跌幅',
   );
 
   // 頁尾(所有頁)
