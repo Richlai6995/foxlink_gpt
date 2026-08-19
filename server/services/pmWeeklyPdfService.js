@@ -354,26 +354,28 @@ function drawLineChart(doc, x, y, w, h, points, unit) {
 function drawMonthlyTable(doc, x, y, w, months, rowH = 15) {
   const n = months.length;
   if (n === 0) return y;
-  const labelW = Math.min(72, Math.max(56, w * 0.16));
+  const fontSz = rowH <= 13 ? 7.2 : 8;
+  doc.font(FONT).fontSize(fontSz);
+  const rows = [
+    { label: 'Year/Month',         fill: C.headBg, cells: months.map(m => m.ym.replace('-', '/')), bold: true,
+      color: () => C.text, headRow: true },
+    { label: 'Monthly Avg. Price', fill: null,     cells: months.map(m => fmtPrice(m.avg)), bold: false,
+      color: () => C.text },
+    { label: 'Change(%)',          fill: null,     cells: months.map(m => (m.chg == null ? '—' : fmtPct(m.chg))), bold: true,
+      color: (i) => (months[i].chg == null ? C.muted : pctColor(months[i].chg)) },
+  ];
+  // 標籤欄寬依最長標籤(Monthly Avg. Price)自適應,保持單行不換行、不動 rowH
+  const maxLabelW = Math.max(...rows.map(r => doc.widthOfString(r.label)));
+  const labelW = Math.min(118, Math.max(58, maxLabelW + 10));
   const colW = (w - labelW) / n;
   // 安全網:月表 3 列不可跨頁(正常已由 block 前置檢查保證同頁)
   if (y + rowH * 3 + 4 > pageBottom(doc)) { doc.addPage(); doc.x = MARGIN; doc.y = MARGIN; y = MARGIN; }
-  const fontSz = rowH <= 13 ? 7.2 : 8;
-  doc.font(FONT).fontSize(fontSz);
   const cellText = (str, cx, cw, cy, color, bold) => {
     doc.fillColor(color);
     const tw = doc.widthOfString(str);
     const tx = cx + Math.max(2, (cw - tw) / 2);
     drawText(doc, str, tx, cy, {}, bold);
   };
-  const rows = [
-    { label: 'Y/M',       fill: C.headBg, cells: months.map(m => m.ym.replace('-', '/')), bold: true,
-      color: () => C.text, headRow: true },
-    { label: 'MAP',       fill: null,     cells: months.map(m => fmtPrice(m.avg)), bold: false,
-      color: () => C.text },
-    { label: 'Change(%)', fill: null,     cells: months.map(m => (m.chg == null ? '—' : fmtPct(m.chg))), bold: true,
-      color: (i) => (months[i].chg == null ? C.muted : pctColor(months[i].chg)) },
-  ];
   for (let r = 0; r < rows.length; r++) {
     const ry = y + r * rowH;
     const row = rows[r];
@@ -667,8 +669,8 @@ function lastNMonths(asOf, n) {
 async function buildMonthlyTablesMarkdown(db, asOf) {
   const months = lastNMonths(asOf, 6);
   const ymHead = months.map(ym => ym.replace('-', '/'));   // 2026-03 → 2026/03
-  // 表頭依使用者附圖:第一欄 Y/M,列 MAP / Change(%)
-  const headRow = `| Y/M | ${ymHead.join(' | ')} |`;
+  // 表頭依使用者附圖:第一欄 Year/Month,列 Monthly Avg. Price / Change(%)
+  const headRow = `| Year/Month | ${ymHead.join(' | ')} |`;
   const sepRow = `| :--- | ${months.map(() => '---:').join(' | ')} |`;
 
   // 先撈全部金屬的月資料
@@ -694,7 +696,7 @@ async function buildMonthlyTablesMarkdown(db, asOf) {
       '',
       headRow,
       sepRow,
-      `| MAP | ${mapRow.join(' | ')} |`,
+      `| Monthly Avg. Price | ${mapRow.join(' | ')} |`,
       `| Change(%) | ${chgRow.join(' | ')} |`,
       '',
     ];
