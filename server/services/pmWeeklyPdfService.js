@@ -399,11 +399,16 @@ function drawGroupTitle(doc, title, sub) {
   const y = doc.y;
   doc.rect(MARGIN, y, cw, h).fill(C.navy);
   doc.fillColor('#FFFFFF').font(FONT).fontSize(13);
-  drawText(doc, title, MARGIN + 8, y + 6, {}, true);
+  const titleX = MARGIN + 8;
+  drawText(doc, title, titleX, y + 6, {}, true);
+  const titleRight = titleX + doc.widthOfString(title) + 0.35;  // +0.35 = faux-bold 疊印寬
   if (sub) {
     doc.fontSize(8.5).fillColor('#CFE0F5');
     const tw = doc.widthOfString(sub);
-    drawText(doc, sub, MARGIN + cw - tw - 8, y + 9, {}, false);
+    const rightX = MARGIN + cw - tw - 8;             // 預設右對齊
+    let subX = Math.max(rightX, titleRight + 16);    // 與大標題至少留 16pt,避免 USD 疊到標題
+    if (subX + tw > MARGIN + cw - 6) subX = rightX;  // 放不下才回右對齊(此字串不會發生)
+    drawText(doc, sub, subX, y + 9, {}, false);
   }
   doc.y = y + h + 8;
   doc.x = MARGIN;
@@ -741,12 +746,12 @@ async function buildWeeklyPdf({ db, aiOutput, filename, asOfDate, context }) {
   await drawMetalGroupGrid(
     doc, db, BASE_METALS, asOf,
     '基本金屬 — 近 6 個月走勢與 MAP / 漲跌幅',
-    'USD/Ton｜MAP=月均價,Change=相鄰月漲跌幅(PM 價格庫 SQL 統計)',
+    'USD/Ton｜MAP=月均價,Change=相鄰月漲跌幅',
   );
   await drawMetalGroupGrid(
     doc, db, PRECIOUS_METALS, asOf,
     '貴金屬 — 近 6 個月走勢與 MAP / 漲跌幅',
-    'USD/Troy Oz｜MAP=月均價,Change=相鄰月漲跌幅(PM 價格庫 SQL 統計)',
+    'USD/Troy Oz｜MAP=月均價,Change=相鄰月漲跌幅',
   );
 
   // 頁尾(所有頁)
