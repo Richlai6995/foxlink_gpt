@@ -2329,6 +2329,8 @@ async function runMigrations(db) {
   await addCol('DIFY_KNOWLEDGE_BASES', 'EMAIL_DOMAIN_FALLBACK',  'NUMBER(1) DEFAULT 0');
   // 回應模式：inject=結果餵回 LLM 整理 / answer=直接回答使用者 (與 mcp_servers.response_mode 對齊)
   await addCol('DIFY_KNOWLEDGE_BASES', 'RESPONSE_MODE',          "VARCHAR2(16) DEFAULT 'inject'");
+  // 呼叫逾時 (ms)。未設 → service 端 fallback 120000。service 端會再夾 [5000, 600000]
+  await addCol('DIFY_KNOWLEDGE_BASES', 'TIMEOUT_MS',            'NUMBER DEFAULT 120000');
 
   // ── MCP / DIFY 共享存取表（取代 role_mcp_servers / role_dify_kbs）────────────
   await createTable('MCP_ACCESS', `CREATE TABLE mcp_access (

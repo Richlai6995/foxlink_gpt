@@ -9,6 +9,29 @@
  * - 回應處理: JSON 提取 / Text / XML / 格式化模板
  */
 
+// ── Timeout 設定 ────────────────────────────────────────────────────────────
+const DEFAULT_TIMEOUT_MS = 120000; // 未設定時的預設 (2 分)
+const MIN_TIMEOUT_MS = 5000;       // 下限 5 秒
+const MAX_TIMEOUT_MS = 600000;     // 上限 10 分 (別把連線池卡死)
+const TEST_TIMEOUT_CAP_MS = 60000; // admin 面板「測試」再夾 60 秒上限
+
+/**
+ * 夾 connector.timeout_ms 到合法範圍。非數字 / <=0 → fallback。
+ * @param {*} val - connector.timeout_ms
+ * @param {number} [fallback=DEFAULT_TIMEOUT_MS]
+ * @returns {number} ms
+ */
+function clampTimeout(val, fallback = DEFAULT_TIMEOUT_MS) {
+  const n = Number(val);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.min(Math.max(n, MIN_TIMEOUT_MS), MAX_TIMEOUT_MS);
+}
+
+/** 測試模式：尊重設定但再夾 60 秒上限，避免面板卡太久 */
+function clampTestTimeout(val) {
+  return Math.min(clampTimeout(val, 30000), TEST_TIMEOUT_CAP_MS);
+}
+
 // ── OAuth2 Token Cache ──────────────────────────────────────────────────────
 const oauth2Cache = new Map(); // key: connector_id → { token, expiresAt }
 
@@ -425,7 +448,7 @@ async function executeDifyWithParams(connector, query, resolvedParams, options =
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(120000),
+      signal: AbortSignal.timeout(clampTimeout(connector.timeout_ms)),
     });
 
     const duration = Date.now() - t0;
@@ -482,7 +505,7 @@ async function executeConnector(connector, aiArgs = {}, userCtx = {}, options = 
       const query = aiArgs.query || '';
       return executeDifyWithParams(connector, query, params, { ...options, userId: userCtx.id });
     } else {
-      return executeRestApi(connector, params, { ...options, userId: userCtx.id, timeout: 120000 });
+      return executeRestApi(connector, params, { ...options, userId: userCtx.id, timeout: clampTimeout(connector.timeout_ms) });
     }
   };
 
@@ -628,7 +651,7 @@ async function testConnector(connector, testParams = {}, userCtx = {}) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(30000),
+        signal: AbortSignal.timeout(clampTestTimeout(connector.timeout_ms)),
       });
 
       const duration = Date.now() - t0;
@@ -654,7 +677,7 @@ async function testConnector(connector, testParams = {}, userCtx = {}) {
         return { success: false, duration_ms: Date.now() - t0, error: `缺少必要參數: ${missing.join(', ')}` };
       }
 
-      const result = await executeRestApi(connector, resolved, { timeout: 30000 });
+      const result = await executeRestApi(connector, resolved, { timeout: clampTestTimeout(connector.timeout_ms) });
       // Email domain fallback retry for test
       if (connector.email_domain_fallback && result.status === 'ok' && isEmptyResult(result.answer, connector)) {
         const emailKey = findEmailParamKey(inputParams);
@@ -663,7 +686,7 @@ async function testConnector(connector, testParams = {}, userCtx = {}) {
           if (altEmail) {
             console.log(`[API:test] "${connector.name}" empty result, retrying with alt email: ${resolved[emailKey]} → ${altEmail}`);
             const retryParams = { ...resolved, [emailKey]: altEmail };
-            const retryResult = await executeRestApi(connector, retryParams, { timeout: 30000 });
+            const retryResult = await executeRestApi(connector, retryParams, { timeout: clampTestTimeout(connector.timeout_ms) });
             if (!isEmptyResult(retryResult.answer, connector)) {
               return { success: true, answer: `[自動重試 ${altEmail}]\n${retryResult.answer}`, duration_ms: Date.now() - t0 };
             }

@@ -40,18 +40,23 @@ function normIds(val) {
 }
 
 /**
- * ERP 執行 heartbeat wrapper:長任務每 20 秒送一次狀態 + 經過時間,
- * 防止前端 SSE 閒置斷線,也讓使用者知道還在跑。
- * @param {Function} sendEvent chat.js 的 SSE 送出函式
- * @param {string} toolName 顯示用
+ * 執行 heartbeat wrapper:長任務每隔一段時間送一次狀態 + 經過時間,
+ * status 事件本身就是 SSE 流量,能防中間層(Akamai WAF / nginx / 瀏覽器)在
+ * 「等後端回應、沒有任何 byte 流動」那段把連線判為閒置而斷掉,也讓使用者知道還在跑。
+ * @param {Function} sendEvent chat.js 的 SSE 送出函式(已含 clientDisconnected 保護)
+ * @param {string} toolName 顯示用(工具 / 連接器名稱)
  * @param {Promise} execPromise 實際執行的 promise
+ * @param {object} [opts]
+ * @param {string} [opts.label='查詢 ERP'] 訊息前綴
+ * @param {number} [opts.intervalMs=20000] 心跳間隔(ms)。連接器路徑用 15s,穩在多數 WAF 閒置窗內
  */
-async function execWithHeartbeat(sendEvent, toolName, execPromise) {
+async function execWithHeartbeat(sendEvent, toolName, execPromise, opts = {}) {
+  const { label = '查詢 ERP', intervalMs = 20000 } = opts;
   const startedAt = Date.now();
   const heartbeat = setInterval(() => {
     const elapsed = Math.floor((Date.now() - startedAt) / 1000);
-    try { sendEvent({ type: 'status', message: `查詢 ERP：${toolName}…（已 ${elapsed} 秒）` }); } catch (_) {}
-  }, 20000);
+    try { sendEvent({ type: 'status', message: `${label}：${toolName}…（已 ${elapsed} 秒）` }); } catch (_) {}
+  }, intervalMs);
   try {
     return await execPromise;
   } finally {
@@ -441,7 +446,7 @@ async function getDifyFunctionDeclarations(db, userCtx) {
       d.auth_type, d.auth_header_name, d.auth_query_param_name, d.auth_config,
       d.request_headers, d.request_body_template, d.input_params,
       d.response_type, d.response_extract, d.response_template, d.empty_message, d.error_mapping,
-      d.email_domain_fallback, d.response_mode`;
+      d.email_domain_fallback, d.response_mode, d.timeout_ms`;
 
     if (!userCtx) {
       kbs = await db.prepare(
@@ -3928,22 +3933,27 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
             return kb && kb.response_mode === 'answer';
           });
           if (allAreAnswerMode) {
-            const answerParts = await Promise.all(
-              allDeclarations.map(async (decl) => {
-                const kb = kbMap[decl.name];
-                if (!kb) return null;
-                const t1 = Date.now();
-                try {
-                  const answer = await execConn(kb, { query: combinedUserText }, apiUserCtx, {
-                    sessionId, db, getDifyConvId, setDifyConvId,
-                  });
-                  console.log(`[API] Answer-mode "${kb.name}" ok in ${Date.now() - t1}ms`);
-                  return answer || '';
-                } catch (e) {
-                  console.warn(`[API] Answer-mode "${kb.name}" failed:`, e.message);
-                  return `[${kb.name}: 查詢失敗 — ${e.message}]`;
-                }
-              })
+            const answerParts = await execWithHeartbeat(
+              sendEvent,
+              allDeclarations.map((d) => kbMap[d.name]?.name).filter(Boolean).join('、') || 'API',
+              Promise.all(
+                allDeclarations.map(async (decl) => {
+                  const kb = kbMap[decl.name];
+                  if (!kb) return null;
+                  const t1 = Date.now();
+                  try {
+                    const answer = await execConn(kb, { query: combinedUserText }, apiUserCtx, {
+                      sessionId, db, getDifyConvId, setDifyConvId,
+                    });
+                    console.log(`[API] Answer-mode "${kb.name}" ok in ${Date.now() - t1}ms`);
+                    return answer || '';
+                  } catch (e) {
+                    console.warn(`[API] Answer-mode "${kb.name}" failed:`, e.message);
+                    return `[${kb.name}: 查詢失敗 — ${e.message}]`;
+                  }
+                })
+              ),
+              { label: '查詢 API 連接器', intervalMs: 15000 }
             );
             const joined = answerParts.filter(s => s && String(s).trim()).join('\n\n---\n\n');
             const finalText = joined || '查無資料';
@@ -3955,23 +3965,28 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
             _timing.llmEnd = Date.now();
             console.log(`[Chat] DIFY answer-mode done in ${Date.now() - t0}ms, kbs=${allDeclarations.length} (no LLM)`);
           } else {
-          const difyContextParts = await Promise.all(
-            allDeclarations.map(async (decl) => {
-              const kb = kbMap[decl.name];
-              if (!kb) return null;
-              const t1 = Date.now();
-              try {
-                const answer = await execConn(kb, { query: combinedUserText }, apiUserCtx, {
-                  sessionId, db, getDifyConvId, setDifyConvId,
-                });
-                console.log(`[API] Fast-path "${kb.name}" ok in ${Date.now() - t1}ms answer="${(answer || '').slice(0, 150)}"`);
-                if (!answer || !answer.trim() || answer.startsWith(`[${kb.name}: 查詢失敗`)) return null;
-                return `## 知識庫：${kb.name}\n\n${answer}`;
-              } catch (e) {
-                console.warn(`[API] Fast-path "${kb.name}" failed:`, e.message);
-                return null;
-              }
-            })
+          const difyContextParts = await execWithHeartbeat(
+            sendEvent,
+            allDeclarations.map((d) => kbMap[d.name]?.name).filter(Boolean).join('、') || 'API',
+            Promise.all(
+              allDeclarations.map(async (decl) => {
+                const kb = kbMap[decl.name];
+                if (!kb) return null;
+                const t1 = Date.now();
+                try {
+                  const answer = await execConn(kb, { query: combinedUserText }, apiUserCtx, {
+                    sessionId, db, getDifyConvId, setDifyConvId,
+                  });
+                  console.log(`[API] Fast-path "${kb.name}" ok in ${Date.now() - t1}ms answer="${(answer || '').slice(0, 150)}"`);
+                  if (!answer || !answer.trim() || answer.startsWith(`[${kb.name}: 查詢失敗`)) return null;
+                  return `## 知識庫：${kb.name}\n\n${answer}`;
+                } catch (e) {
+                  console.warn(`[API] Fast-path "${kb.name}" failed:`, e.message);
+                  return null;
+                }
+              })
+            ),
+            { label: '查詢 API 連接器', intervalMs: 15000 }
           );
           const difyContext = difyContextParts.filter(Boolean).join('\n\n---\n\n');
 
@@ -4306,7 +4321,12 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
               const connType = kb.connector_type || 'dify';
               sendEvent({ type: 'status', message: connType === 'dify' ? `查詢知識庫：${kb.name}` : `呼叫 API：${kb.name}` });
               const { query: _q, ...restArgs } = args || {};
-              return await executeDifyQuery(db, kb, _q || combinedUserText, sessionId, req.user.id, req.user, restArgs);
+              return await execWithHeartbeat(
+                sendEvent,
+                kb.name,
+                executeDifyQuery(db, kb, _q || combinedUserText, sessionId, req.user.id, req.user, restArgs),
+                { label: connType === 'dify' ? '查詢知識庫' : '呼叫 API', intervalMs: 15000 }
+              );
             }
             const entry = serverMap[toolName];
             if (!entry) return `[未知工具: ${toolName}]`;
@@ -4323,9 +4343,19 @@ ${hasPreserve ? '- 標記【★保留原文】的欄位：必須完整複製原�
             const srv = entry.server || {};
             const ptEnabled = Number(srv.passthrough_enabled ?? srv.PASSTHROUGH_ENABLED) === 1;
             if (!ptEnabled) {
-              return await mcpClient.callTool(db, srv, sessionId, req.user.id, entry.originalName, args, mcpUserCtx);
+              return await execWithHeartbeat(
+                sendEvent,
+                toolName,
+                mcpClient.callTool(db, srv, sessionId, req.user.id, entry.originalName, args, mcpUserCtx),
+                { label: '呼叫工具', intervalMs: 15000 }
+              );
             }
-            const raw = await mcpClient.callTool(db, srv, sessionId, req.user.id, entry.originalName, args, mcpUserCtx, { returnRaw: true });
+            const raw = await execWithHeartbeat(
+              sendEvent,
+              toolName,
+              mcpClient.callTool(db, srv, sessionId, req.user.id, entry.originalName, args, mcpUserCtx, { returnRaw: true }),
+              { label: '呼叫工具', intervalMs: 15000 }
+            );
             // raw = { text, parts, isError }
             const ptResult = tryPassthrough({
               result: raw,

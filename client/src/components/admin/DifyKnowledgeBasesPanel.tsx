@@ -40,6 +40,7 @@ interface ApiConnector {
   error_mapping: string | null
   email_domain_fallback: number
   response_mode: 'inject' | 'answer' | null
+  timeout_ms: number | null
   created_at: string
   updated_at: string
 }
@@ -135,6 +136,7 @@ export default function DifyKnowledgeBasesPanel() {
     empty_message: '', error_mapping: '',
     email_domain_fallback: false,
     response_mode: 'inject' as 'inject' | 'answer',
+    timeout_seconds: 120,
   })
   const [inputParams, setInputParams] = useState<InputParam[]>([])
   const [editingParamIdx, setEditingParamIdx] = useState<number | null>(null)
@@ -170,6 +172,7 @@ export default function DifyKnowledgeBasesPanel() {
       empty_message: '', error_mapping: '',
       email_domain_fallback: false,
       response_mode: 'inject',
+      timeout_seconds: 120,
     })
     setInputParams([])
     setTags([])
@@ -202,6 +205,7 @@ export default function DifyKnowledgeBasesPanel() {
       error_mapping: typeof kb.error_mapping === 'object' ? JSON.stringify(kb.error_mapping, null, 2) : (kb.error_mapping || ''),
       email_domain_fallback: !!kb.email_domain_fallback,
       response_mode: (kb.response_mode === 'answer' ? 'answer' : 'inject') as 'inject' | 'answer',
+      timeout_seconds: kb.timeout_ms ? Math.round(kb.timeout_ms / 1000) : 120,
     })
     setInputParams(Array.isArray(ip) ? ip : [])
     setTags((() => {
@@ -250,6 +254,7 @@ export default function DifyKnowledgeBasesPanel() {
         error_mapping: form.error_mapping ? tryParseJson(form.error_mapping) : null,
         email_domain_fallback: form.email_domain_fallback,
         response_mode: form.response_mode,
+        timeout_ms: Math.round((Number(form.timeout_seconds) || 120) * 1000),
       }
       if (form.api_key.trim()) payload.api_key = form.api_key.trim()
       if (editing) {
@@ -633,6 +638,14 @@ export default function DifyKnowledgeBasesPanel() {
                         </select>
                       </div>
                     )}
+                    <div className="w-24">
+                      <label className="block text-xs font-medium text-slate-600 mb-1">逾時(秒)</label>
+                      <input type="number" min={5} max={600} value={form.timeout_seconds}
+                        onChange={e => setForm(p => ({ ...p, timeout_seconds: parseInt(e.target.value) || 0 }))}
+                        onBlur={e => { const v = parseInt(e.target.value) || 120; setForm(p => ({ ...p, timeout_seconds: Math.min(Math.max(v, 5), 600) })) }}
+                        title="API 呼叫逾時，範圍 5~600 秒（預設 120）"
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
                   </div>
 
                   {form.connector_type === 'rest_api' && (

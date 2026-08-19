@@ -33,8 +33,15 @@ const CONNECTOR_FIELDS = [
   'auth_type', 'auth_header_name', 'auth_query_param_name', 'auth_config',
   'request_headers', 'request_body_template', 'input_params',
   'response_type', 'response_extract', 'response_template', 'empty_message', 'error_mapping',
-  'email_domain_fallback', 'response_mode',
+  'email_domain_fallback', 'response_mode', 'timeout_ms',
 ];
+
+// 逾時 (ms) 落庫前夾範圍：非數字 → 120000；否則 [5000, 600000]。與 apiConnectorService.clampTimeout 一致
+function sanitizeTimeoutMs(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return 120000;
+  return Math.min(Math.max(Math.round(n), 5000), 600000);
+}
 
 function maskApiKey(kb) {
   return {
@@ -65,7 +72,7 @@ router.get('/active', async (req, res) => {
               auth_type, auth_header_name, auth_query_param_name, auth_config,
               request_headers, request_body_template, input_params,
               response_type, response_extract, response_template, empty_message, error_mapping,
-              response_mode
+              response_mode, timeout_ms
        FROM dify_knowledge_bases WHERE is_active=1 ORDER BY sort_order ASC`
     ).all();
     res.json(kbs);
@@ -280,7 +287,7 @@ router.post('/', async (req, res) => {
             auth_type, auth_header_name, auth_query_param_name, auth_config,
             request_headers, request_body_template, input_params,
             response_type, response_extract, response_template, empty_message, error_mapping,
-            email_domain_fallback, response_mode,
+            email_domain_fallback, response_mode, timeout_ms,
     } = req.body;
 
     const connType = connector_type || 'dify';
@@ -300,8 +307,8 @@ router.post('/', async (req, res) => {
         auth_type, auth_header_name, auth_query_param_name, auth_config,
         request_headers, request_body_template, input_params,
         response_type, response_extract, response_template, empty_message, error_mapping,
-        email_domain_fallback, response_mode
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+        email_domain_fallback, response_mode, timeout_ms
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
     ).run(
       name,
       api_server.replace(/\/$/, ''),
@@ -327,6 +334,7 @@ router.post('/', async (req, res) => {
       typeof error_mapping === 'object' ? JSON.stringify(error_mapping) : (error_mapping || null),
       email_domain_fallback ? 1 : 0,
       response_mode === 'answer' ? 'answer' : 'inject',
+      sanitizeTimeoutMs(timeout_ms),
     );
 
     const newId = result.lastInsertRowid;
@@ -359,7 +367,7 @@ router.put('/:id', async (req, res) => {
             auth_type, auth_header_name, auth_query_param_name, auth_config,
             request_headers, request_body_template, input_params,
             response_type, response_extract, response_template, empty_message, error_mapping,
-            email_domain_fallback, response_mode,
+            email_domain_fallback, response_mode, timeout_ms,
     } = req.body;
 
     const finalName = name ?? kb.name;
@@ -401,6 +409,7 @@ router.put('/:id', async (req, res) => {
     if (error_mapping !== undefined) addSet('error_mapping', typeof error_mapping === 'object' ? JSON.stringify(error_mapping) : (error_mapping || null));
     if (email_domain_fallback !== undefined) addSet('email_domain_fallback', email_domain_fallback ? 1 : 0);
     if (response_mode !== undefined) addSet('response_mode', response_mode === 'answer' ? 'answer' : 'inject');
+    if (timeout_ms !== undefined) addSet('timeout_ms', sanitizeTimeoutMs(timeout_ms));
 
     sets.push('updated_at=SYSTIMESTAMP');
     params.push(req.params.id);
